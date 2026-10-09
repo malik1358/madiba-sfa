@@ -204,7 +204,7 @@ export function buildModuleAccess(context = {}) {
       workingHours: hasManagementReportAccess || isCollector,
       businessDashboard: hasManagementReportAccess,
       salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
-      promoterCoverage: isProductPromoter,
+      promoterCoverage: true,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: hasManagementReportAccess,
       customerGpsHistory: isAdmin || isManager,

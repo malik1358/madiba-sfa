@@ -83,7 +83,7 @@ export function monthWindow(reportDate) {
 export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) {
-    return { officeSupplies: 0, localItemSales: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [] };
+    return { officeSupplies: 0, localItemSales: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [], salesRows: [] };
   }
 
   const { from, to } = monthWindow(reportDate);
@@ -103,7 +103,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "transaction_date,customer_code,customer_name,sales_amount,local_import,voucher_type,voucher_number,reference,quantity",
+      "transaction_date,customer_code,customer_name,sales_amount,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
@@ -195,122 +195,6 @@ export function paceSharesForSalesman(pace, salesmanCode) {
   return pickSalesmanPaceShares(pace, salesmanCode);
 }
 
-function performanceKpiCacheKey(reportDate) {
-  return `${PERFORMANCE_KPI_CACHE_KEY_PREFIX}${monthWindow(reportDate).from}`;
-}
-
-async function readPerformanceKpiCache(admin, reportDate, batchId) {
-  const { data, error } = await admin
-    .from("system_settings")
-    .select("setting_value")
-    .eq("setting_key", performanceKpiCacheKey(reportDate))
-    .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error) || isMissingColumnError(error)) return null;
-    throw error;
-  }
-  if (!data?.setting_value) return null;
-
-  try {
-    const cache = JSON.parse(String(data.setting_value));
-    if (
-      cache?.version !== PERFORMANCE_KPI_CACHE_VERSION
-      || String(cache.batchId || "") !== batchId
-      || !cache.actualsBySalesman
-      || typeof cache.actualsBySalesman !== "object"
-    ) return null;
-    return cache;
-  } catch {
-    return null;
-  }
-}
-
-async function writePerformanceKpiCache(admin, reportDate, cache) {
-  const { error } = await admin.from("system_settings").upsert({
-    setting_key: performanceKpiCacheKey(reportDate),
-    setting_value: JSON.stringify(cache),
-  }, { onConflict: "setting_key" });
-  if (error && !isMissingTableError(error) && !isMissingColumnError(error)) throw error;
-}
-
-async function activeSalesBatchId(admin) {
-  const { data, error } = await admin
-    .from("system_settings")
-    .select("setting_value")
-    .eq("setting_key", "active_sales_batch_id")
-    .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error) || isMissingColumnError(error)) return "";
-    throw error;
-  }
-  return String(data?.setting_value || "").trim();
-}
-
-function cacheActualsForSalesman(salesActuals, collectionActuals) {
-  const classified = classifyBuyingCustomers(
-    salesActuals.monthCustomerCodes,
-    salesActuals.priorCustomerCodes,
-  );
-  return {
-    ...emptyPerformanceActuals(),
-    officeSupplies: salesActuals.officeSupplies,
-    localItemSales: salesActuals.localItemSales,
-    otherSales: salesActuals.otherSales,
-    collection: collectionActuals.collection,
-    cashCollection: collectionActuals.cashCollection,
-    newCustomers: classified.newCustomers,
-    repeatCustomers: classified.repeatCustomers,
-  };
-}
-
-async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, batchId }) {
-  const pace = await loadSalesPaceShares(admin, { reportDate });
-  const entries = await Promise.all((salesmen || []).map(async (salesman) => {
-    const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
-    if (!code) return null;
-    const [salesActuals, collectionActuals] = await Promise.all([
-      loadSalesActuals(admin, { salesmanCode: code, reportDate }),
-      loadCollectionActual(admin, { salesmanCode: code, reportDate }),
-    ]);
-    return [code, cacheActualsForSalesman(salesActuals, collectionActuals)];
-  }));
-  const actualsBySalesman = Object.fromEntries(entries.filter(Boolean));
-  const paceBySalesman = Object.fromEntries(
-    [...pace.bySalesman.entries()].map(([code, shares]) => [code, shares]),
-  );
-  const cache = {
-    version: PERFORMANCE_KPI_CACHE_VERSION,
-    reportMonth: monthWindow(reportDate).from,
-    batchId,
-    builtAt: new Date().toISOString(),
-    actualsBySalesman,
-    paceBySalesman,
-  };
-  return cache;
-}
-
-export async function rebuildPerformanceKpiCache(admin, {
-  salesmen = null,
-  reportDate = getKsaDateString(),
-} = {}) {
-  let roster = salesmen;
-  if (!roster) {
-    const { data, error } = await admin
-      .from("profiles")
-      .select("salesman_code,salesman_name,role,is_active")
-      .eq("is_active", true);
-    if (error) throw error;
-    roster = (data || []).filter(isKpiTargetProfile).map((profile) => ({
-      salesmanCode: normalizeSalesmanCode(profile.salesman_code),
-      salesmanName: String(profile.salesman_name || "").trim(),
-    }));
-  }
-  const batchId = await activeSalesBatchId(admin);
-  const cache = await buildPerformanceKpiSourceCache(admin, { salesmen: roster, reportDate, batchId });
-  await writePerformanceKpiCache(admin, reportDate, cache);
-  return cache;
-}
-
 export async function loadCollectionActual(admin, { salesmanCode, reportDate, includeDetails = false }) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) return { collection: 0, cashCollection: 0 };
@@ -387,30 +271,6 @@ export async function loadCollectionActual(admin, { salesmanCode, reportDate, in
   };
 }
 
-export async function loadPerformanceKpiActualDetails(admin, { salesmanCode, reportDate, kpiKey }) {
-  const code = normalizeSalesmanCode(salesmanCode);
-  if (!code) return { rows: [], actual: 0 };
-  const { from, to } = monthWindow(reportDate);
-  if (["collection", "cashCollection"].includes(kpiKey)) {
-    const collectionData = await loadCollectionActual(admin, { salesmanCode: code, reportDate, includeDetails: true });
-    return buildKpiActualDetails({
-      kpiKey,
-      salesmanCode: code,
-      collectionVisits: collectionData.collectionVisits,
-      collectionSalesRows: collectionData.salesRows,
-      fromDate: from,
-      toDate: to,
-    });
-  }
-  const salesData = await loadSalesActuals(admin, { salesmanCode: code, reportDate });
-  return buildKpiActualDetails({
-    kpiKey,
-    salesmanCode: code,
-    salesRows: salesData.salesRows,
-    priorCustomerCodes: salesData.priorCustomerCodes,
-  });
-}
-
 export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDate }) {
   const codes = [...new Set((salesmanCodes || []).map(normalizeSalesmanCode).filter(Boolean))];
   const empty = new Map();
@@ -481,6 +341,7 @@ export async function loadPerformanceSnapshot(admin, {
   const actuals = {
     ...emptyPerformanceActuals(),
     officeSupplies: salesActuals.officeSupplies,
+    localItemSales: salesActuals.localItemSales,
     otherSales: salesActuals.otherSales,
     collection: collectionActuals.collection,
     cashCollection: collectionActuals.cashCollection,
@@ -505,6 +366,140 @@ export async function loadPerformanceSnapshot(admin, {
     updatedByName: resolvedTarget?.updatedByName || "",
     todayIso,
     paceShares: paceSharesForSalesman(resolvedPace, code),
+  });
+}
+
+function performanceKpiCacheKey(reportDate) {
+  return `${PERFORMANCE_KPI_CACHE_KEY_PREFIX}${monthWindow(reportDate).from}`;
+}
+
+async function activeSalesBatchId(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", "active_sales_batch_id")
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) return "";
+    throw error;
+  }
+  return String(data?.setting_value || "").trim();
+}
+
+async function readPerformanceKpiCache(admin, reportDate, batchId) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", performanceKpiCacheKey(reportDate))
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) return null;
+    throw error;
+  }
+  if (!data?.setting_value) return null;
+  try {
+    const cache = JSON.parse(String(data.setting_value));
+    if (
+      cache?.version !== PERFORMANCE_KPI_CACHE_VERSION
+      || String(cache.batchId || "") !== batchId
+      || !cache.actualsBySalesman
+      || typeof cache.actualsBySalesman !== "object"
+    ) return null;
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+async function writePerformanceKpiCache(admin, reportDate, cache) {
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: performanceKpiCacheKey(reportDate),
+    setting_value: JSON.stringify(cache),
+  }, { onConflict: "setting_key" });
+  if (error && !isMissingTableError(error) && !isMissingColumnError(error)) throw error;
+}
+
+function cacheActualsForSalesman(salesActuals, collectionActuals) {
+  const classified = classifyBuyingCustomers(
+    salesActuals.monthCustomerCodes,
+    salesActuals.priorCustomerCodes,
+  );
+  return {
+    ...emptyPerformanceActuals(),
+    officeSupplies: salesActuals.officeSupplies,
+    localItemSales: salesActuals.localItemSales,
+    otherSales: salesActuals.otherSales,
+    collection: collectionActuals.collection,
+    cashCollection: collectionActuals.cashCollection,
+    newCustomers: classified.newCustomers,
+    repeatCustomers: classified.repeatCustomers,
+  };
+}
+
+async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, batchId }) {
+  const pace = await loadSalesPaceShares(admin, { reportDate });
+  const entries = await Promise.all((salesmen || []).map(async (salesman) => {
+    const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
+    if (!code) return null;
+    const [salesActuals, collectionActuals] = await Promise.all([
+      loadSalesActuals(admin, { salesmanCode: code, reportDate }),
+      loadCollectionActual(admin, { salesmanCode: code, reportDate }),
+    ]);
+    return [code, cacheActualsForSalesman(salesActuals, collectionActuals)];
+  }));
+  return {
+    version: PERFORMANCE_KPI_CACHE_VERSION,
+    reportMonth: monthWindow(reportDate).from,
+    batchId,
+    builtAt: new Date().toISOString(),
+    actualsBySalesman: Object.fromEntries(entries.filter(Boolean)),
+    paceBySalesman: Object.fromEntries([...pace.bySalesman.entries()]),
+  };
+}
+
+export async function rebuildPerformanceKpiCache(admin, {
+  salesmen = null,
+  reportDate = getKsaDateString(),
+} = {}) {
+  let roster = salesmen;
+  if (!roster) {
+    const { data, error } = await admin
+      .from("profiles")
+      .select("salesman_code,salesman_name,role,is_active")
+      .eq("is_active", true);
+    if (error) throw error;
+    roster = (data || []).filter(isKpiTargetProfile).map((profile) => ({
+      salesmanCode: normalizeSalesmanCode(profile.salesman_code),
+      salesmanName: String(profile.salesman_name || "").trim(),
+    }));
+  }
+  const batchId = await activeSalesBatchId(admin);
+  const cache = await buildPerformanceKpiSourceCache(admin, { salesmen: roster, reportDate, batchId });
+  await writePerformanceKpiCache(admin, reportDate, cache);
+  return cache;
+}
+
+export async function loadPerformanceKpiActualDetails(admin, { salesmanCode, reportDate, kpiKey }) {
+  const code = normalizeSalesmanCode(salesmanCode);
+  if (!code) return { rows: [], actual: 0 };
+  const { from, to } = monthWindow(reportDate);
+  if (["collection", "cashCollection"].includes(kpiKey)) {
+    const collectionData = await loadCollectionActual(admin, { salesmanCode: code, reportDate, includeDetails: true });
+    return buildKpiActualDetails({
+      kpiKey,
+      salesmanCode: code,
+      collectionVisits: collectionData.collectionVisits,
+      collectionSalesRows: collectionData.salesRows,
+      fromDate: from,
+      toDate: to,
+    });
+  }
+  const salesData = await loadSalesActuals(admin, { salesmanCode: code, reportDate });
+  return buildKpiActualDetails({
+    kpiKey,
+    salesmanCode: code,
+    salesRows: salesData.salesRows,
+    priorCustomerCodes: salesData.priorCustomerCodes,
   });
 }
 

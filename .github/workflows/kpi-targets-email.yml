@@ -1,0 +1,32 @@
+name: KPI Targets Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "KPI month to email (YYYY-MM)"
+        required: true
+        default: "2026-10"
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send current monthly KPI snapshots
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_MONTH: ${{ inputs.month }}
+        run: |
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+          if [[ ! "$INPUT_MONTH" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]]; then
+            echo "Month must use YYYY-MM format"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 180 \
+            -X POST "https://madiba-sfa.vercel.app/api/cron/kpi-targets-email" \
+            -H "x-cron-secret: $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --data "{\"month\":\"$INPUT_MONTH\"}"

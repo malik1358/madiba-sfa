@@ -39,6 +39,7 @@ export default function UploadSalesPage() {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [partialDates, setPartialDates] = useState(null);
   const [outstandingFile, setOutstandingFile] = useState(null);
   const [outstandingUploading, setOutstandingUploading] = useState(false);
   const [outstandingResult, setOutstandingResult] = useState(null);
@@ -262,7 +263,7 @@ export default function UploadSalesPage() {
     );
   }
 
-  async function uploadFile() {
+  async function uploadFile({ confirmPartialDates = false } = {}) {
     if (!file) {
       setError("Please select an Excel file first.");
       return;
@@ -271,6 +272,7 @@ export default function UploadSalesPage() {
     setUploading(true);
     setError("");
     setResult(null);
+    if (confirmPartialDates) setPartialDates(null);
 
     try {
       const supabase = getSupabaseClient();
@@ -291,6 +293,9 @@ export default function UploadSalesPage() {
 
       const formData = new FormData();
       formData.append("file", file);
+      if (confirmPartialDates) {
+        formData.append("confirmPartialDates", "1");
+      }
 
       const response = await fetch("/api/import-sales", {
         method: "POST",
@@ -302,12 +307,21 @@ export default function UploadSalesPage() {
 
       const data = await response.json().catch(() => ({}));
 
+      if (response.status === 409 && data?.requiresConfirmation) {
+        setPartialDates({
+          message: data.error || "",
+          dates: Array.isArray(data.partialDates) ? data.partialDates : [],
+        });
+        return;
+      }
+
       if (!response.ok || !data.success) {
         throw new Error(
           data.error || "Sales data upload failed."
         );
       }
 
+      setPartialDates(null);
       setResult(data);
       await invalidateOutstandingCache();
       await invalidateCustomerHistoryCache();
@@ -562,6 +576,7 @@ export default function UploadSalesPage() {
                 setFile(e.target.files?.[0] || null);
                 setResult(null);
                 setError("");
+                setPartialDates(null);
               }}
             />
 
@@ -569,13 +584,70 @@ export default function UploadSalesPage() {
 
           <button
             className="replaceButton"
-            onClick={uploadFile}
+            onClick={() => uploadFile()}
             disabled={!file || uploading}
           >
             {uploading
               ? "Processing Sales Data..."
               : "Validate & Update Sales Data"}
           </button>
+
+          {partialDates && (
+            <div className="partialDatesBox">
+              <strong>This file looks like a partial export</strong>
+              <p>
+                An upload replaces every stored sales row for the dates found in
+                the file. These dates would lose data:
+              </p>
+
+              <table className="partialDatesTable">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Stored lines</th>
+                    <th>In file</th>
+                    <th>Salesmen that would be deleted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {partialDates.dates.map((day) => (
+                    <tr key={day.date}>
+                      <td>{day.date}</td>
+                      <td>{day.stored_lines}</td>
+                      <td>{day.incoming_lines}</td>
+                      <td>
+                        {day.missing_salesmen?.length
+                          ? day.missing_salesmen.join(", ")
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <p>
+                Upload a full export for these dates instead, or continue if the
+                file really is complete.
+              </p>
+
+              <div className="partialDatesActions">
+                <button
+                  className="replaceButton"
+                  onClick={() => setPartialDates(null)}
+                  disabled={uploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="partialDatesForce"
+                  onClick={() => uploadFile({ confirmPartialDates: true })}
+                  disabled={uploading}
+                >
+                  Upload anyway
+                </button>
+              </div>
+            </div>
+          )}
 
           {uploading && (
             <div className="processingBox">

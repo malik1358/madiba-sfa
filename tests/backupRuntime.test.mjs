@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup } from "../scripts/backup/run-backup.mjs";
+import { databaseCommand, execute, exportStorage, fetchJson, runBackup } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -178,30 +178,4 @@ test("offline recovery verifier detects tampered database archives", async () =>
     await writeFile(path.join(root, "database.dump"), "corrupt");
     await assert.rejects(verifyBackup(root), /Integrity/);
   } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("database diagnostics classify failures without copying identifiers or credentials", async () => {
-  const cases = [
-    ["password authentication failed for user private-user secret-password", /authentication rejected/],
-    ["pg_dump: error: permission denied for table private-table", /permission denied/],
-    ["pg_dump: error: aborting because of server version mismatch", /newer than/],
-    ["could not translate host name private-host", /hostname/],
-    ["connection timed out private-host", /unavailable/],
-    ["Tenant or user not found private-user", /identify/],
-    ["cannot execute private-query in a read-only transaction", /read-only/],
-  ];
-  for (const [stderr, expected] of cases) {
-    const message = classifyCommandFailure(stderr);
-    assert.match(message, expected);
-    assert.ok(!message.includes("private-"));
-    assert.ok(!message.includes("secret-password"));
-  }
-  await assert.rejects(databaseStage("roles export (pg_dumpall)", async () => {
-    throw new BackupDiagnosticError(classifyCommandFailure("permission denied private-table"));
-  }), /roles export.*permission denied/);
-  await assert.rejects(databaseStage("database archive (pg_dump)", async () => {
-    throw new Error("private-password");
-  }), (error) => !error.message.includes("private-password") && error.message.includes("database archive"));
-  await assert.rejects(execute(process.execPath, ["-e", "console.error('password authentication failed private-password');process.exit(1)"]),
-    (error) => error instanceof BackupDiagnosticError && /authentication rejected/.test(error.message) && !error.message.includes("private-password"));
 });

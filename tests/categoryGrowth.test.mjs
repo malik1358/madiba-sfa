@@ -173,7 +173,6 @@ test("salesman report dimensions merge Thamer's imported identity variants", () 
   assert.equal(report.groups.length, 1);
   assert.equal(report.groups[0].label, "Thamer · SM002");
   assert.equal(report.groups[0].lifetime, 600);
-
   assert.deepEqual(
     [...new Set(rows.flatMap((row) => [dimensionValue(row, "salesman_code"), dimensionValue(row, "salesman_name")]))],
     ["SM002", "Thamer"],

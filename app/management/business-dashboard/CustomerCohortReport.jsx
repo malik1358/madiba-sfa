@@ -3,21 +3,32 @@
 import { useState } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import { translate } from "../../lib/appLanguage";
-import { formatCustomerCohortCell } from "../../lib/customerCohorts";
+import { customerCohortPeriodSummary, formatCustomerCohortCell } from "../../lib/customerCohorts";
 import styles from "./CustomerCohortReport.module.css";
 
 const TEXT = {
   title: { en: "Quarterly customer retention", ar: "احتفاظ العملاء حسب الربع" },
   monthlyTitle: { en: "Monthly customer retention", ar: "احتفاظ العملاء حسب الشهر" },
+  bimonthlyTitle: { en: "Bimonthly customer retention", ar: "احتفاظ العملاء كل شهرين" },
   quarter: { en: "Quarter", ar: "الربع" },
   month: { en: "Month", ar: "الشهر" },
+  bimonth: { en: "Bimonthly", ar: "كل شهرين" },
   period: { en: "Cohort period", ar: "فترة اكتساب العملاء" },
   firstInvoiceMonth: { en: "First invoice month", ar: "شهر أول فاتورة" },
+  firstInvoiceBimonth: { en: "First invoice bimonth", ar: "فترة أول فاتورة لشهرين" },
+  twoMonthPeriod: { en: "2-month period", ar: "فترة شهرين" },
   firstInvoice: { en: "First invoice quarter", ar: "ربع أول فاتورة" },
   cohortSize: { en: "Customers acquired", ar: "العملاء المكتسبون" },
   total: { en: "Total customers", ar: "إجمالي العملاء" },
   count: { en: "Customer count", ar: "عدد العملاء" },
   retention: { en: "Count + retention %", ar: "العدد + نسبة الاحتفاظ" },
+  values: { en: "Count + sales value", ar: "العدد + قيمة المبيعات" },
+  retainedCustomers: { en: "Retained customers", ar: "العملاء المستمرون" },
+  totalCustomers: { en: "Total customers", ar: "إجمالي العملاء" },
+  customersAndSalesValue: { en: "Customers / sales value", ar: "العملاء / قيمة المبيعات" },
+  new: { en: "New", ar: "جديد" },
+  acquiredInPeriod: { en: "Customers acquired in this period", ar: "العملاء المكتسبون في هذه الفترة" },
+  toDate: { en: "to date", ar: "حتى تاريخه" },
   loading: { en: "Loading customer retention...", ar: "جاري تحميل احتفاظ العملاء..." },
   empty: { en: "No customer purchases match these filters.", ar: "لا توجد مشتريات للعملاء تطابق هذه التصفية." },
   unavailable: { en: "Customer retention is unavailable.", ar: "تقرير احتفاظ العملاء غير متاح." },
@@ -33,7 +44,8 @@ export default function CustomerCohortReport({ report, loading, language }) {
   const [period, setPeriod] = useState("quarter");
   const t = translate(language, TEXT);
   const monthly = period === "month";
-  const model = monthly ? report?.customerMonthlyCohorts : report?.customerCohorts;
+  const bimonthly = period === "bimonth";
+  const model = monthly ? report?.customerMonthlyCohorts : bimonthly ? report?.customerBimonthlyCohorts : report?.customerCohorts;
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
   if (!model) return <div className="moduleHint">{t("unavailable")}</div>;
   if (!model.rows.length || !model.quarters.length) return <div className="moduleHint">{t("empty")}</div>;
@@ -42,7 +54,20 @@ export default function CustomerCohortReport({ report, loading, language }) {
     return formatCustomerCohortCell(count, size, mode);
   }
 
+  function valueDisplay(count, value) {
+    const customers = Number(count || 0).toLocaleString("en-SA");
+    const amount = Number(value || 0).toLocaleString(language === "ar" ? "ar-SA" : "en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${customers} · ${amount} ﷼`;
+  }
+
   function periodLabel(value, current = "") {
+    if (bimonthly) {
+      const match = value.match(/^(\d{4})-B([1-6])$/);
+      if (!match) return value;
+      const startMonth = (Number(match[2]) - 1) * 2 + 1;
+      const formatMonth = (month) => new Date(Date.UTC(Number(match[1]), month - 1, 1)).toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", calendar: "gregory", timeZone: "Asia/Riyadh" });
+      return `${formatMonth(startMonth)}-${formatMonth(startMonth + 1)} ${match[1]} (${t("twoMonthPeriod")}${value === current ? `, ${t("toDate")}` : ""})`;
+    }
     if (!monthly) return quarterLabel(value, current);
     const label = new Date(`${value}-01T00:00:00Z`).toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", year: "numeric", calendar: "gregory", timeZone: "Asia/Riyadh" });
     return `${label}${value === current ? " MTD" : ""}`;
@@ -51,19 +76,19 @@ export default function CustomerCohortReport({ report, loading, language }) {
   return (
     <section id="bi-customer-cohorts" className="moduleSection">
       <div className={`moduleSectionHeader ${styles.header}`}>
-        <h2>{t(monthly ? "monthlyTitle" : "title")}</h2>
+        <h2>{t(monthly ? "monthlyTitle" : bimonthly ? "bimonthlyTitle" : "title")}</h2>
         <div className="moduleBiTabs" role="group" aria-label={t("period")}>
-          {["quarter", "month"].map((value) => (
+          {["quarter", "bimonth", "month"].map((value) => (
             <button key={value} type="button" className={`moduleBiTab${period === value ? " isActive" : ""}`} aria-pressed={period === value} onClick={() => setPeriod(value)}>{t(value)}</button>
           ))}
         </div>
         <div className="moduleBiTabs" role="group" aria-label={t("title")}>
-          {["count", "retention"].map((value) => (
+          {["count", "retention", "values"].map((value) => (
             <button key={value} type="button" className={`moduleBiTab${mode === value ? " isActive" : ""}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{t(value)}</button>
           ))}
         </div>
       </div>
-      <ExportableTable filename={`customer-${period}-${mode}`} sheetName={monthly ? "Monthly retention" : "Quarterly retention"} className="moduleTableWrap moduleBiTableWrap" enableColumnFilters={false}>
+      <ExportableTable filename={`customer-${period}-${mode}`} sheetName={monthly ? "Monthly retention" : bimonthly ? "Bimonthly retention" : "Quarterly retention"} className="moduleTableWrap moduleBiTableWrap" enableColumnFilters={false}>
         <table className={`moduleTable moduleBiTable ${styles.table}`} style={{ minWidth: 260 + model.quarters.length * 104 }}>
           <colgroup>
             <col style={{ width: 140 }} />
@@ -72,7 +97,7 @@ export default function CustomerCohortReport({ report, loading, language }) {
           </colgroup>
           <thead>
             <tr>
-              <th scope="col">{t(monthly ? "firstInvoiceMonth" : "firstInvoice")}</th>
+              <th scope="col">{t(monthly ? "firstInvoiceMonth" : bimonthly ? "firstInvoiceBimonth" : "firstInvoice")}</th>
               {model.quarters.map((quarter) => <th scope="col" key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthHead--current" : ""}>{periodLabel(quarter, model.currentQuarter)}</th>)}
               <th scope="col" className="moduleBiTotalCol">{t("cohortSize")}</th>
             </tr>
@@ -85,7 +110,12 @@ export default function CustomerCohortReport({ report, loading, language }) {
                   const count = row.counts[quarter];
                   const previous = index > 0 ? row.counts[model.quarters[index - 1]] : null;
                   const tone = count == null ? "" : count === 0 ? "moduleBiMonthCell--down" : previous == null || count >= previous ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
-                  return <td key={quarter} className={`${tone}${quarter === model.currentQuarter ? " moduleBiMonthCell--current" : ""}`} title={count == null ? undefined : `${count} / ${row.customerCount} (${(count / row.customerCount * 100).toFixed(1)}%)`}>{display(count, row.customerCount)}</td>;
+                  const isNew = quarter === row.quarter;
+                  const cellValue = mode === "values"
+                    ? count == null ? "-" : `${Number(count || 0).toLocaleString("en-SA")} · ${Number(row.salesValues[quarter] || 0).toLocaleString(language === "ar" ? "ar-SA" : "en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ﷼`
+                    : formatCustomerCohortCell(count, row.customerCount, mode, { isNew, newLabel: t("new") });
+                  const cellTitle = count == null ? undefined : isNew ? t("acquiredInPeriod") : `${count} / ${row.customerCount} (${(count / row.customerCount * 100).toFixed(1)}%)`;
+                  return <td key={quarter} className={`${tone}${quarter === model.currentQuarter ? " moduleBiMonthCell--current" : ""}`} title={cellTitle}>{cellValue}</td>;
                 })}
                 <td className="moduleBiTotalCol">{row.customerCount.toLocaleString("en-SA")}</td>
               </tr>
@@ -93,11 +123,21 @@ export default function CustomerCohortReport({ report, loading, language }) {
           </tbody>
           <tfoot>
             <tr className="moduleBiTotalRow">
-              <th scope="row">{t("total")}</th>
+              <th scope="row">{t(mode === "values" ? "customersAndSalesValue" : "retainedCustomers")}</th>
               {model.quarters.map((quarter) => {
-                const eligible = model.rows.filter((row) => row.quarter <= quarter).reduce((sum, row) => sum + row.customerCount, 0);
-                return <td key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthCell--current" : ""}>{display(model.totals[quarter], eligible)}</td>;
+                const summary = customerCohortPeriodSummary(model.rows, quarter);
+                const cellValue = mode === "values"
+                  ? valueDisplay(model.totals[quarter], model.valueTotals[quarter])
+                  : display(summary.retained, summary.retainedEligible);
+                return <td key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthCell--current" : ""}>{cellValue}</td>;
               })}
+              <td className="moduleBiTotalCol">{mode === "values" ? valueDisplay(model.customerCount, Object.values(model.valueTotals).reduce((sum, value) => sum + Number(value || 0), 0)) : "-"}</td>
+            </tr>
+            <tr className="moduleBiTotalRow">
+              <th scope="row">{t("totalCustomers")}</th>
+              {model.quarters.map((quarter) => (
+                <td key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthCell--current" : ""}>{customerCohortPeriodSummary(model.rows, quarter).total.toLocaleString("en-SA")}</td>
+              ))}
               <td className="moduleBiTotalCol">{model.customerCount.toLocaleString("en-SA")}</td>
             </tr>
           </tfoot>

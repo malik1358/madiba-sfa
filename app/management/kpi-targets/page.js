@@ -449,6 +449,9 @@ export default function KpiTargetsPage() {
                             || Number(row.totalSales || 0),
                           )
                           : (isInformationOnly ? "" : row[key]);
+                        const detailSalesmen = row.isTeam
+                          ? teamMemberRows(liveRows, row.bossCode).map((member) => member.salesmanCode)
+                          : [row.salesmanCode];
                         const liveKpi = buildPerformanceKpi(key, {
                           actual: kpi?.actual || 0,
                           target: Number(targetValue || 0),
@@ -460,9 +463,6 @@ export default function KpiTargetsPage() {
                         const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
                           ? ""
                           : `${t("expectedByToday")} ${formatAchievementPercent(liveKpi.expected)}`;
-                        const detailSalesmen = row.isTeam
-                          ? teamMemberRows(liveRows, row.bossCode).map((member) => member.salesmanCode)
-                          : [row.salesmanCode];
                         return (
                           <KpiTargetCells
                             key={key}

@@ -1,14 +1,15 @@
 import { loadReceiptRowsByCustomer } from "./collectionAvgDays.js";
-import { customerAccountCodesMatch, resolveCustomerAccountCode } from "./outstanding.js";
-import { normalizeSalesmanCode } from "./performanceKpis.js";
+import { customerAccountCodesMatch, resolveCustomerAccountCode, toNumber } from "./outstanding.js";
+import { salesBiCubeFacts } from "./salesBiCube.js";
+import { loadSalesBiCube } from "./salesBiCubeServer.js";
 import {
   normalizeReportSalesmanCode,
   normalizeReportSalesmanName,
   reportSalesmanCodeAliases,
 } from "./salesmanReportIdentity.js";
 import {
+  buildMonthlyNetSalesBySalesman,
   buildSalesmanIncentiveReport,
-  incentiveHistoryStartDate,
   incentiveMonthRange,
   parseIncentiveMonth,
   shiftIncentiveMonth,
@@ -64,22 +65,20 @@ async function pageThrough(buildQuery) {
   return all;
 }
 
-/** Customer codes billed by the requested salesmen inside the loaded history window. */
-async function loadCustomerCodesForSalesmen(admin, salesmanCodes, historyStart) {
+/** Customer codes billed by the requested salesmen, across the whole ledger. */
+async function loadCustomerCodesForSalesmen(admin, salesmanCodes) {
   const rows = await pageThrough(() => admin
     .from("active_sales")
     .select("transaction_date,customer_code")
-    .gte("transaction_date", historyStart)
     .in("salesman_code", salesmanCodes.flatMap(reportSalesmanCodeAliases)));
   return [...new Set(rows.map((row) => String(row.customer_code || "").trim()).filter(Boolean))];
 }
 
-async function loadSalesRows(admin, { historyStart, customerCodes = null }) {
+async function loadSalesRows(admin, { customerCodes = null } = {}) {
   if (!customerCodes) {
     return pageThrough(() => admin
       .from("active_sales")
-      .select(SALES_SELECT)
-      .gte("transaction_date", historyStart));
+      .select(SALES_SELECT));
   }
 
   const rows = [];
@@ -89,7 +88,6 @@ async function loadSalesRows(admin, { historyStart, customerCodes = null }) {
     const page = await pageThrough(() => admin
       .from("active_sales")
       .select(SALES_SELECT)
-      .gte("transaction_date", historyStart)
       .in("customer_code", chunk));
     rows.push(...page);
   }
@@ -97,36 +95,73 @@ async function loadSalesRows(admin, { historyStart, customerCodes = null }) {
 }
 
 /**
+ * Historical `salesman -> month -> net sales` from the BI cube, with the
+ * selected report month refreshed from active_sales so it matches KPI actuals.
+ */
+export async function loadMonthlyNetSalesBySalesman(admin, { month, salesmanCodes = [] } = {}) {
+  const byCode = new Map();
+  try {
+    const cube = await loadSalesBiCube(admin, { allowStale: true });
+    salesBiCubeFacts(cube).forEach((fact) => {
+      const code = normalizeReportSalesmanCode(fact?.salesman_code);
+      const month = String(fact?.month || "").slice(0, 7);
+      if (!code || !/^\d{4}-\d{2}$/.test(month)) return;
+      const byMonth = byCode.get(code) || new Map();
+      byMonth.set(month, toNumber(byMonth.get(month)) + toNumber(fact?.sales_amount));
+      byCode.set(code, byMonth);
+    });
+  } catch (error) {
+    console.error("Unable to load sales BI cube for incentive growth:", error);
+  }
+
+  if (!month) return byCode;
+
+  const monthKey = parseIncentiveMonth(month);
+  const range = incentiveMonthRange(monthKey);
+  const requested = [...new Set((salesmanCodes || [])
+    .map((code) => normalizeReportSalesmanCode(code))
+    .filter(Boolean))];
+  const rows = await pageThrough(() => {
+    let query = admin.from("active_sales")
+      .select(SALES_SELECT)
+      .gte("transaction_date", range.from)
+      .lte("transaction_date", range.to);
+    if (requested.length) {
+      query = query.in("salesman_code", requested.flatMap(reportSalesmanCodeAliases));
+    }
+    return query;
+  });
+
+  const scopedCodes = new Set(requested);
+  byCode.forEach((byMonth, code) => {
+    if (!scopedCodes.size || scopedCodes.has(normalizeReportSalesmanCode(code))) {
+      byMonth.delete(monthKey);
+    }
+  });
+  buildMonthlyNetSalesBySalesman(rows, byCode);
+  return byCode;
+}
+
+/**
  * Build the salesman incentive report straight from Supabase.
- * Sales and receipts are truncated at the same history start so FIFO settlement
- * is not distorted by invoices whose matching receipts were cut off.
+ * Sales and receipts both load the full ledger from day 1, so a receipt in the
+ * report month settles its real invoice no matter how old the bill is.
  */
 export async function buildSalesmanIncentiveReportFromDb(admin, {
   month,
   salesmanCodes = [],
-  historyMonths,
 } = {}) {
   const monthKey = parseIncentiveMonth(month);
-  const historyStart = incentiveHistoryStartDate(monthKey, historyMonths);
-  const requested = [...new Set((salesmanCodes || []).map((code) => normalizeSalesmanCode(code)).filter(Boolean))];
+  const requested = [...new Set((salesmanCodes || []).map((code) => normalizeReportSalesmanCode(code)).filter(Boolean))];
 
   const customerCodes = requested.length
-    ? await loadCustomerCodesForSalesmen(admin, requested, historyStart)
+    ? await loadCustomerCodesForSalesmen(admin, requested)
     : null;
 
-  const previousRange = incentiveMonthRange(shiftIncentiveMonth(monthKey, -1));
-  const range = incentiveMonthRange(monthKey);
-  const [salesRows, receiptsByCustomer, salesTransactions] = await Promise.all([
-    loadSalesRows(admin, { historyStart, customerCodes }),
+  const [salesRows, receiptsByCustomer, monthlySalesBySalesman] = await Promise.all([
+    loadSalesRows(admin, { customerCodes }),
     loadReceiptRowsByCustomer(admin),
-    pageThrough(() => {
-      let query = admin.from("active_sales")
-        .select(SALES_SELECT)
-        .gte("transaction_date", previousRange.from)
-        .lte("transaction_date", range.to);
-      if (requested.length) query = query.in("salesman_code", requested.flatMap(reportSalesmanCodeAliases));
-      return query;
-    }),
+    loadMonthlyNetSalesBySalesman(admin, { month: monthKey, salesmanCodes: requested }),
   ]);
 
   const salesByCustomer = new Map();
@@ -145,20 +180,19 @@ export async function buildSalesmanIncentiveReportFromDb(admin, {
     customerCode: key,
     customerName: customerNames.get(key) || "",
     transactions,
-    receipts: lookupByCustomerCode(receiptsByCustomer, key)
-      .filter((receipt) => String(receipt?.receipt_date || "") >= historyStart),
+    receipts: lookupByCustomerCode(receiptsByCustomer, key),
   }));
 
   const report = buildSalesmanIncentiveReport({
     month: monthKey,
     customers,
     salesmanCodes: requested.length ? requested : null,
-    salesTransactions,
+    monthlySalesBySalesman,
   });
 
+  const range = incentiveMonthRange(monthKey);
   return {
     ...report,
-    historyStart,
     monthStart: range.from,
     monthEnd: range.to,
     customerCount: customers.length,
@@ -180,7 +214,8 @@ export async function listIncentiveSalesmen(admin, { month } = {}) {
   rows.forEach((row) => {
     const code = normalizeReportSalesmanCode(row.salesman_code);
     if (!code) return;
-    const name = normalizeReportSalesmanName(row.salesman_name);
+    const name = normalizeReportSalesmanName(row.salesman_name)
+      || normalizeReportSalesmanName(row.salesman_code);
     if (!names.has(code) || (!names.get(code) && name)) names.set(code, name);
   });
 

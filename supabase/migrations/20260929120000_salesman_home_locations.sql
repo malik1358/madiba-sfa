@@ -9,8 +9,7 @@ ALTER TABLE public.profiles
     OR (
       home_latitude IS NOT NULL
       AND home_longitude IS NOT NULL
-      AND
-      home_latitude BETWEEN -90 AND 90
+      AND home_latitude BETWEEN -90 AND 90
       AND home_longitude BETWEEN -180 AND 180
     )
   );
@@ -81,11 +80,7 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
-  IF event_latitude IS NOT NULL
-    AND event_longitude IS NOT NULL
-    AND home_latitude IS NOT NULL
-    AND home_longitude IS NOT NULL
-    AND public.distance_meters(event_latitude, event_longitude, home_latitude, home_longitude) <= 500
+  IF public.distance_meters(event_latitude, event_longitude, home_latitude, home_longitude) <= 500
   THEN
     RAISE EXCEPTION 'Login or logout cannot be recorded within 500 m of your saved home location.'
       USING ERRCODE = '23514';

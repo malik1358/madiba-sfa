@@ -1,14 +1,82 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildPromoterCoverageReport, promoterCoverageSalesmanMatches } from "../app/lib/promoterCoverage.js";
+import {
+  buildPromoterCoverageReport,
+  filterPromoterCoverageSalesRows,
+  promoterCoverageCustomerCodeVariants,
+  promoterCoverageMonthKeys,
+  promoterCoverageSalesmanMatches,
+} from "../app/lib/promoterCoverage.js";
 
 const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
 
-test("salesman identity matching ignores case and repeated whitespace", () => {
-  assert.equal(promoterCoverageSalesmanMatches(" sm001 ", ["SM001"]), true);
-  assert.equal(promoterCoverageSalesmanMatches("Team   Sales", ["team sales"]), true);
-  assert.equal(promoterCoverageSalesmanMatches("SM002", ["SM001"]), false);
+test("month range is inclusive and rejects invalid ranges", () => {
+  assert.deepEqual(promoterCoverageMonthKeys("2026-09", "2026-11"), ["2026-09", "2026-10", "2026-11"]);
+  assert.deepEqual(promoterCoverageMonthKeys("2026-12", "2027-02"), ["2026-12", "2027-01", "2027-02"]);
+  assert.deepEqual(promoterCoverageMonthKeys("2026-13", "2027-02"), []);
+  assert.deepEqual(promoterCoverageMonthKeys("2026-10", "2026-09"), []);
+});
+
+test("team customer trend includes September invoice sales credited outside the team", () => {
+  const salesRows = filterPromoterCoverageSalesRows([
+    {
+      customer_code: "1273c",
+      salesman_code: "OUTSIDE_TEAM",
+      transaction_date: "2026-09-29",
+      sales_amount: 9141,
+      item_code: "SKU-1",
+    },
+    {
+      customer_code: "OTHER",
+      salesman_code: "OUTSIDE_TEAM",
+      transaction_date: "2026-09-29",
+      sales_amount: 4000,
+      item_code: "SKU-2",
+    },
+  ], ["1273C"]);
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "1273C", customer_name: "Tawfeer" }],
+    salesRows,
+    monthKeys: ["2026-09"],
+  });
+
+  assert.equal(report.rows[0].monthSales["2026-09"], 9141);
+  assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
+});
+
+test("credit notes reduce sales without adding a sold SKU", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "C1" }],
+    salesRows: [
+      { customer_code: "C1", transaction_date: "2026-09-01", sales_amount: 500, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-09-15", sales_amount: -100, net_sales_amount: -100, item_code: "B", is_credit_note: true },
+    ],
+    monthKeys: ["2026-09"],
+  });
+
+  assert.equal(report.rows[0].monthSales["2026-09"], 400);
+  assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
+});
+
+test("current and future months stay neutral in monthly and aggregate trends", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "C1" }],
+    salesRows: [
+      { customer_code: "C1", transaction_date: "2026-08-10", sales_amount: 100, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-09-10", sales_amount: 200, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-10-01", sales_amount: 300, item_code: "B" },
+    ],
+    monthKeys: ["2026-08", "2026-09", "2026-10", "2026-11"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].monthSalesChange["2026-09"].trend, "increasing");
+  assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "stable");
+  assert.equal(report.rows[0].monthSalesChange["2026-10"], null);
+  assert.equal(report.rows[0].monthSkuChange["2026-11"], null);
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 100);
 });
 
 test("coverage includes unvisited team customers and separates repeat visits", () => {
@@ -64,4 +132,66 @@ test("trend treats zero-base sales as new and negative sales as decreasing", () 
   assert.equal(report.rows.find((row) => row.customerCode === "NEW").trend, "new_sales");
   assert.equal(report.rows.find((row) => row.customerCode === "DOWN").trend, "decreasing");
   assert.equal(report.decreasingCustomerCount, 1);
+});
+
+test("team salesman matching ignores imported casing and repeated spaces", () => {
+  assert.equal(promoterCoverageSalesmanMatches(" team   seller ", ["TEAM SELLER"]), true);
+  assert.equal(promoterCoverageSalesmanMatches("OTHER", ["TEAM SELLER"]), false);
+});
+
+test("team customer 1553 matches active-sales account-code variants", () => {
+  const variants = promoterCoverageCustomerCodeVariants("1553");
+  assert.ok(variants.includes("1553C"));
+  assert.ok(variants.includes("01553C"));
+
+  const salesRows = filterPromoterCoverageSalesRows([
+    { customer_code: "01553C", transaction_date: "2026-09-23", sales_amount: 500, item_code: "SKU-1553" },
+    { customer_code: "OTHER", transaction_date: "2026-09-23", sales_amount: 900, item_code: "SKU-OTHER" },
+  ], ["1553"]);
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "1553", customer_name: "Ahla Al Tawfeer Company" }],
+    salesRows,
+    monthKeys: ["2026-09"],
+  });
+
+  assert.equal(report.rows[0].monthSales["2026-09"], 500);
+  assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
+});
+
+test("aggregate trend uses the selected completed months when fewer than six are selected", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "SHORT", customer_name: "Short range" }],
+    salesRows: [
+      { customer_code: "SHORT", transaction_date: "2026-07-10", sales_amount: 100, item_code: "A" },
+      { customer_code: "SHORT", transaction_date: "2026-08-10", sales_amount: 200, item_code: "A" },
+      { customer_code: "SHORT", transaction_date: "2026-09-10", sales_amount: 600, item_code: "B" },
+      { customer_code: "SHORT", transaction_date: "2026-09-15", sales_amount: 100, item_code: "C" },
+      { customer_code: "SHORT", transaction_date: "2026-10-10", sales_amount: 10000, item_code: "C" },
+    ],
+    monthKeys: ["2026-07", "2026-08", "2026-09", "2026-10"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 350);
+  assert.equal(report.rows[0].skuTrend, "increasing");
+  assert.equal(report.rows[0].skuChangePercent, 50);
+});
+
+test("odd selected ranges compare average monthly values between range halves", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "ODD" }],
+    salesRows: [
+      { customer_code: "ODD", transaction_date: "2026-06-01", sales_amount: 100 },
+      { customer_code: "ODD", transaction_date: "2026-07-01", sales_amount: 100 },
+      { customer_code: "ODD", transaction_date: "2026-08-01", sales_amount: 400 },
+      { customer_code: "ODD", transaction_date: "2026-09-01", sales_amount: 400 },
+      { customer_code: "ODD", transaction_date: "2026-10-01", sales_amount: 9999 },
+    ],
+    monthKeys: ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 300);
 });

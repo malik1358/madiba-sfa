@@ -9,44 +9,6 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { backupName, listStorageFiles, readBackupConfig, retentionCandidates } from "./backup-policy.mjs";
 
-export class BackupDiagnosticError extends Error {}
-
-export function classifyCommandFailure(stderr) {
-  if (/password authentication failed|authentication failed|SASL authentication/i.test(stderr)) {
-    return "Database authentication rejected. Check the existing database password and its URL encoding in BACKUP_DATABASE_URL.";
-  }
-  if (/server version mismatch|server version:.*pg_dump version:|aborting because of server version/i.test(stderr)) {
-    return "PostgreSQL server is newer than the backup tools. Update the PostgreSQL backup image to a compatible version.";
-  }
-  if (/permission denied|must be superuser|insufficient privilege/i.test(stderr)) {
-    return "Database export permission denied. Review managed-schema or role-export privileges; do not silently exclude business or Auth data.";
-  }
-  if (/read-only transaction/i.test(stderr)) {
-    return "Database tool attempted an operation blocked by the read-only connection. Review the export command; do not disable the safety guard blindly.";
-  }
-  if (/could not translate host|name or service not known|no such host/i.test(stderr)) {
-    return "Database hostname could not be resolved. Check the session-pooler hostname and provider availability.";
-  }
-  if (/connection timed out|timeout expired|network is unreachable|connection refused/i.test(stderr)) {
-    return "Database connection unavailable. Check pooler availability, network restrictions and port 5432.";
-  }
-  if (/tenant or user not found/i.test(stderr)) {
-    return "Pooler could not identify the project user. Check the session-pooler username and selected project.";
-  }
-  if (/no space left on device/i.test(stderr)) return "Backup runner ran out of disk space.";
-  return "Unclassified command failure. Raw output remains suppressed; no backup was uploaded.";
-}
-
-export async function databaseStage(label, operation) {
-  console.log(`Database stage: ${label}`);
-  try {
-    return await operation();
-  } catch (error) {
-    const detail = error instanceof BackupDiagnosticError ? error.message : "Unexpected command failure; raw details suppressed.";
-    throw new BackupDiagnosticError(`Database stage failed: ${label}. ${detail}`);
-  }
-}
-
 export async function execute(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -60,14 +22,11 @@ export async function execute(command, args, options = {}) {
       if (length > 32 * 1024 * 1024) child.kill();
       else output.push(chunk);
     });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      stderr = (stderr + chunk.toString("utf8")).slice(-65536);
-    });
-    child.on("error", () => reject(new BackupDiagnosticError("Backup command could not start; verify tool installation.")));
+    child.stderr.resume();
+    child.on("error", () => reject(new Error(`${command} could not start; verify tool installation`)));
     child.on("close", (code) => code === 0
       ? resolve(Buffer.concat(output).toString("utf8"))
-      : reject(new BackupDiagnosticError(`Backup command failed (exit ${code}). ${classifyCommandFailure(stderr)}`)));
+      : reject(new Error(`${command} failed (exit ${code}); raw output suppressed to protect credentials`)));
   });
 }
 
@@ -225,14 +184,14 @@ export async function runBackup(config, options = {}) {
     }
     console.log("Exporting database and checking Auth/Storage coverage.");
     const pgOptions = { env: { ...process.env, ...config.pgEnv } };
-    await databaseStage("database archive (pg_dump)", () => run("docker", databaseCommand(workspace, config.pgEnv, "pg_dump", [
+    await run("docker", databaseCommand(workspace, config.pgEnv, "pg_dump", [
       "--format=custom", "--file=/backup/payload/database.dump", "--lock-wait-timeout=30s",
-    ]), pgOptions));
-    await databaseStage("roles export (pg_dumpall)", () => run("docker", databaseCommand(workspace, config.pgEnv, "pg_dumpall", [
+    ]), pgOptions);
+    await run("docker", databaseCommand(workspace, config.pgEnv, "pg_dumpall", [
       "--roles-only", "--no-role-passwords", "--file=/backup/payload/roles.sql",
-    ]), pgOptions));
-    const toc = await databaseStage("archive validation (pg_restore)", () => run("docker", ["run", "--rm", "--volume", `${workspace}:/backup:ro`,
-      "postgres:17", "pg_restore", "--list", "/backup/payload/database.dump"]));
+    ]), pgOptions);
+    const toc = await run("docker", ["run", "--rm", "--volume", `${workspace}:/backup:ro`,
+      "postgres:17", "pg_restore", "--list", "/backup/payload/database.dump"]);
     for (const marker of ["TABLE DATA public", "TABLE DATA auth users", "TABLE DATA storage"]) {
       if (!toc.includes(marker)) throw new Error("Database archive lacks required business/Auth/Storage data");
     }
@@ -301,8 +260,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((error) => {
-    console.error(error instanceof BackupDiagnosticError || error.message.startsWith("Missing required setting:")
-      ? error.message : "Backup failed. Review setup and tool/API permissions; sensitive error details are suppressed.");
+    console.error(error.message.startsWith("Missing required setting:") ? error.message : "Backup failed. Review setup and tool/API permissions; sensitive error details are suppressed.");
     process.exitCode = 1;
   });
 }

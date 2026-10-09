@@ -135,8 +135,8 @@ export async function loadLatestVisitDatesByCustomer(admin, {
   const pageSize = 1000;
   let from = 0;
   const maxRows = Math.max(pageSize, Number(maxFieldVisitRows) || 3000);
-  const activityLogs = [];
 
+  const activityLogs = [];
   while (from < maxRows) {
     const end = Math.min(from + pageSize, maxRows) - 1;
     const { data, error } = await admin
@@ -163,10 +163,7 @@ export async function loadLatestVisitDatesByCustomer(admin, {
   }
 
   const latestNearVisitDates = await loadLatestNearVisitDatesByCustomer(admin, customers);
-  return {
-    latestVisitByCustomer: latestNearVisitDates,
-    nextVisitByCustomer,
-  };
+  return { latestVisitByCustomer: latestNearVisitDates, nextVisitByCustomer };
 }
 
 export async function readVisitPlanRebuildStatus(admin) {
@@ -241,7 +238,7 @@ export function mergeVisitPlanCustomerCandidates(
   (visibleCustomers || []).forEach((customer) => {
     const code = normalizeCode(customer?.customer_code);
     if (!code) return;
-    const lastVisitDate = visitMap.get(code) || null;
+    const lastVisitDate = visitMap.get(code) || customer.last_visit_date || null;
     byCode.set(code, {
       ...customer,
       customer_code: code,

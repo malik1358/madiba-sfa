@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
-import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
+import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode, PERFORMANCE_KPI_LABELS } from "../../../lib/performanceKpis.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
 import { isKpiTargetProfile, isTeamTargetSalesmanCode, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
+import { changedKpiTargetKeys } from "../../../lib/kpiTargetsEmail.js";
+import { runKpiTargetsEmailCycle } from "../../../lib/kpiTargetsEmailServer.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -209,6 +211,19 @@ export async function PUT(request) {
       };
     });
 
+    const previousTargets = await loadKpiTargetsBySalesman(admin, {
+      salesmanCodes: rows.map((row) => row.salesman_code),
+      reportDate,
+    });
+    const changedRows = rows.map((row) => {
+      const previous = previousTargets.get(row.salesman_code)?.targets || {};
+      const next = normalizePerformanceTargets(row);
+      return {
+        salesmanCode: row.salesman_code,
+        changedKeys: changedKpiTargetKeys(previous, next),
+      };
+    }).filter((row) => row.changedKeys.length);
+
     const payloads = [
       rows,
       rows.map(({ collection_target, updated_by, ...rest }) => rest),
@@ -235,10 +250,40 @@ export async function PUT(request) {
       );
     }
 
+    let email = { sentCount: 0, failedCount: 0, skippedCount: 0, results: [] };
+    const changedSalesmanRows = changedRows.filter((row) => !isTeamTargetSalesmanCode(row.salesmanCode));
+    if (changedSalesmanRows.length) {
+      try {
+        email = await runKpiTargetsEmailCycle(admin, {
+          month: targetMonth.slice(0, 7),
+          salesmanCodes: changedSalesmanRows.map((row) => row.salesmanCode),
+          changedLabelsBySalesman: Object.fromEntries(changedSalesmanRows.map((row) => [
+            row.salesmanCode,
+            row.changedKeys.map((key) => PERFORMANCE_KPI_LABELS[key] || key),
+          ])),
+          trigger: "target_update",
+        });
+        email.changedTargets = changedSalesmanRows.map((row) => ({
+          salesmanCode: row.salesmanCode,
+          labels: row.changedKeys.map((key) => PERFORMANCE_KPI_LABELS[key] || key),
+        }));
+      } catch (error) {
+        email = {
+          sentCount: 0,
+          failedCount: 1,
+          skippedCount: 0,
+          error: error.message || "KPI targets were saved, but email notification failed.",
+          results: [],
+        };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       month: targetMonth,
       savedCount: rows.length,
+      changedCount: changedRows.length,
+      email,
     });
   } catch (error) {
     return NextResponse.json(

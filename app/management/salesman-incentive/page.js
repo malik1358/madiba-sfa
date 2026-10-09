@@ -32,8 +32,8 @@ const TEXT = {
     ar: "هذه الشاشة متاحة فقط للأدمن أو المدير أو المندوب لعرض أرقامه.",
   },
   rules: {
-    en: "Scheme: office supplies 0.25% when the invoice is collected within 35 days. Electronics 0.40% within 35 days and 0.20% within 60 days. Other categories 1% within 35 days and 0.5% within 60 days. Nothing after 60 days. Cash deals (RC / DC / JC invoice numbers) are excluded from the category rates and earn only 0.20%, and only when the cash is received within 3 days. Plus 0.5% on the positive difference between this month's and last month's net sales. Collections are matched to invoices by cash FIFO per customer, then split by category using the invoice's own item mix. The incentive base is the net (ex-VAT) value collected.",
-    ar: "النظام: القرطاسية 0.25% عند التحصيل خلال 35 يوماً. الإلكترونيات 0.40% خلال 35 يوماً و0.20% خلال 60 يوماً. الفئات الأخرى 1% خلال 35 يوماً و0.5% خلال 60 يوماً. لا يوجد حافز بعد 60 يوماً. الصفقات النقدية (أرقام الفواتير RC / DC / JC) مستثناة من نسب الفئات وتستحق 0.20% فقط، وذلك فقط إذا تم استلام النقد خلال 3 أيام. بالإضافة إلى 0.5% على الفرق الموجب بين صافي مبيعات هذا الشهر والشهر الماضي. تتم مطابقة التحصيلات بالفواتير بنظام الأقدم أولاً لكل عميل، ثم تقسم حسب أصناف الفاتورة. أساس الحافز هو الصافي بدون ضريبة.",
+    en: "Scheme: office supplies 0.25% when the invoice is collected within 35 days. Electronics 0.40% within 35 days and 0.20% within 60 days. Other categories 1% within 35 days and 0.5% within 60 days. Nothing after 60 days. Cash deals (RC / DC / JC invoice numbers) are excluded from the category rates and earn only 0.20%, and only when the cash is received within 3 days. Plus 0.5% on the amount this month's net sales exceed the salesman's best month ever. Every receipt dated in the selected month counts, no matter how old the invoice it settles: collections are matched to invoices by cash FIFO per customer over the full ledger, then split by category using the invoice's own item mix. The incentive base is the net (ex-VAT) value collected. TRENDYOL and NOON are ecom channels and are not shown.",
+    ar: "النظام: القرطاسية 0.25% عند التحصيل خلال 35 يوماً. الإلكترونيات 0.40% خلال 35 يوماً و0.20% خلال 60 يوماً. الفئات الأخرى 1% خلال 35 يوماً و0.5% خلال 60 يوماً. لا يوجد حافز بعد 60 يوماً. الصفقات النقدية (RC / DC / JC) تستحق 0.20% فقط وإذا تم استلام النقد خلال 3 أيام. بالإضافة إلى 0.5% على ما تتجاوزه مبيعات هذا الشهر عن أفضل شهر للمندوب على الإطلاق. تُحتسب كل الإيصالات المؤرخة في الشهر المحدد مهما كان تاريخ الفاتورة. أساس الحافز هو الصافي بدون ضريبة. TRENDYOL وNOON قنوات إلكترونية ولا تُعرض.",
   },
   totalIncentive: { en: "Total incentive", ar: "إجمالي الحوافز" },
   collectionIncentive: { en: "Collection incentive", ar: "حافز التحصيل" },
@@ -50,7 +50,7 @@ const TEXT = {
   cashDeal: { en: "Cash deal", ar: "صفقة نقدية" },
   yes: { en: "Yes", ar: "نعم" },
   thisMonthSales: { en: "This month sales", ar: "مبيعات هذا الشهر" },
-  lastMonthSales: { en: "Last month sales", ar: "مبيعات الشهر الماضي" },
+  bestMonthSales: { en: "Best month ever", ar: "أفضل شهر على الإطلاق" },
   delta: { en: "Delta", ar: "الفرق" },
   customer: { en: "Customer", ar: "العميل" },
   invoice: { en: "Invoice", ar: "الفاتورة" },
@@ -70,6 +70,13 @@ const TEXT = {
   },
   noSalesmen: { en: "No salesman qualified in this month.", ar: "لا يوجد مندوب مستحق في هذا الشهر." },
   detailLimit: { en: "Showing the largest 500 settled rows.", ar: "يتم عرض أكبر 500 صف مسوى." },
+  drillHint: {
+    en: "Click any amount to see the exact invoices and receipts behind it.",
+    ar: "اضغط على أي مبلغ لعرض الفواتير والإيصالات التي يتكون منها.",
+  },
+  showingFor: { en: "Showing", ar: "عرض" },
+  clearDrill: { en: "Show all rows", ar: "عرض كل الصفوف" },
+  firstMonth: { en: "First month — no growth incentive", ar: "الشهر الأول — لا يوجد حافز نمو" },
 };
 
 const DETAIL_ROW_LIMIT = 500;
@@ -86,6 +93,12 @@ const TIER_LABELS = {
 };
 
 const FALLBACK_TIER_KEYS = Object.keys(TIER_LABELS);
+
+function formatRate(rate) {
+  const value = Number(rate || 0) * 100;
+  if (!value) return "";
+  return `${Number(value.toFixed(2))}%`;
+}
 
 function currentMonthKey() {
   return getKsaDateString().slice(0, 7);
@@ -111,6 +124,33 @@ function deltaCellClass(value) {
   return "";
 }
 
+/** A detail row belongs to a tier when any of its category portions landed there. */
+function rowMatchesTier(row, tierKey) {
+  return (row.cash_tier === tierKey && row.cash_base > 0)
+    || (row.office_tier === tierKey && row.office_base > 0)
+    || (row.electronics_tier === tierKey && row.electronics_base > 0)
+    || (row.other_tier === tierKey && row.other_base > 0);
+}
+
+function DrillCell({ amount, onOpen, title, children }) {
+  if (!onOpen) {
+    return (
+      <>
+        {formatAmount(amount)}
+        {children}
+      </>
+    );
+  }
+  return (
+    <>
+      <button type="button" className="moduleIncentiveDrill" onClick={onOpen} title={title}>
+        {formatAmount(amount)}
+      </button>
+      {children}
+    </>
+  );
+}
+
 export default function SalesmanIncentivePage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -122,6 +162,7 @@ export default function SalesmanIncentivePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState(null);
+  const [drill, setDrill] = useState(null);
 
   usePopupMessages({ error });
 
@@ -134,10 +175,37 @@ export default function SalesmanIncentivePage() {
 
   const detailRows = useMemo(() => {
     const rows = Array.isArray(report?.rows) ? report.rows : [];
-    return [...rows]
+    const filtered = rows.filter((row) => {
+      if (!drill) return true;
+      if (drill.salesmanCode && row.salesman_code !== drill.salesmanCode) return false;
+      if (drill.tierKey && !rowMatchesTier(row, drill.tierKey)) return false;
+      return true;
+    });
+    return filtered
       .sort((left, right) => Number(right.incentive || 0) - Number(left.incentive || 0))
       .slice(0, DETAIL_ROW_LIMIT);
-  }, [report]);
+  }, [report, drill]);
+
+  const totalDetailRows = useMemo(() => {
+    const rows = Array.isArray(report?.rows) ? report.rows : [];
+    if (!drill) return rows.length;
+    return rows.filter((row) => {
+      if (drill.salesmanCode && row.salesman_code !== drill.salesmanCode) return false;
+      if (drill.tierKey && !rowMatchesTier(row, drill.tierKey)) return false;
+      return true;
+    }).length;
+  }, [report, drill]);
+
+  const openDrill = useCallback((salesmanCode, tierKey) => {
+    setDrill({ salesmanCode, tierKey: tierKey || "" });
+    if (typeof document !== "undefined") {
+      document.getElementById("incentive-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
+
+  useEffect(() => {
+    setDrill(null);
+  }, [month, salesman]);
 
   const loadReport = useCallback(async ({ cancelledRef } = {}) => {
     const supabase = getSupabaseClient();
@@ -356,11 +424,16 @@ export default function SalesmanIncentivePage() {
                         <th>{t("code")}</th>
                         <th>{t("name")}</th>
                         {tierKeys.map((key) => (
-                          <th key={key}>{tierLabel(key)}</th>
+                          <th key={key}>
+                            {tierLabel(key)}
+                            {formatRate(report.rates?.[key]) ? (
+                              <div className="moduleCode">{formatRate(report.rates?.[key])}</div>
+                            ) : null}
+                          </th>
                         ))}
                         <th>{t("collectionIncentive")}</th>
                         <th>{t("thisMonthSales")}</th>
-                        <th>{t("lastMonthSales")}</th>
+                        <th>{t("bestMonthSales")}</th>
                         <th>{t("delta")}</th>
                         <th>{t("growthIncentive")}</th>
                         <th className="moduleBiTotalCol">{t("totalIncentive")}</th>
@@ -372,14 +445,48 @@ export default function SalesmanIncentivePage() {
                           <td>{row.salesman_code}</td>
                           <td>{row.salesman_name || "-"}</td>
                           {tierKeys.map((key) => (
-                            <td key={key}>{formatAmount(row.tier_base?.[key])}</td>
+                            <td key={key}>
+                              <DrillCell
+                                amount={row.tier_base?.[key]}
+                                title={t("drillHint")}
+                                onOpen={Number(row.tier_base?.[key] || 0) > 0
+                                  ? () => openDrill(row.salesman_code, key)
+                                  : null}
+                              >
+                                {key !== "late" ? (
+                                  <div className="moduleCode">
+                                    {t("incentive")}: {formatAmount(row.tier_incentive?.[key])}
+                                  </div>
+                                ) : null}
+                              </DrillCell>
+                            </td>
                           ))}
-                          <td>{formatAmount(row.collection_incentive)}</td>
+                          <td>
+                            <DrillCell
+                              amount={row.collection_incentive}
+                              title={t("drillHint")}
+                              onOpen={row.receipt_count ? () => openDrill(row.salesman_code, "") : null}
+                            />
+                          </td>
                           <td>{formatAmount(row.current_month_sales)}</td>
-                          <td>{formatAmount(row.previous_month_sales)}</td>
+                          <td>
+                            {formatAmount(row.peak_month_sales)}
+                            {row.peak_month ? <div className="moduleCode">{row.peak_month}</div> : null}
+                            {!row.has_sales_history ? (
+                              <div className="moduleCode">{t("firstMonth")}</div>
+                            ) : null}
+                          </td>
                           <td className={deltaCellClass(row.sales_delta)}>{formatAmount(row.sales_delta)}</td>
                           <td>{formatAmount(row.growth_incentive)}</td>
-                          <td className="moduleBiTotalCol"><strong>{formatAmount(row.total_incentive)}</strong></td>
+                          <td className="moduleBiTotalCol">
+                            <strong>
+                              <DrillCell
+                                amount={row.total_incentive}
+                                title={t("drillHint")}
+                                onOpen={row.receipt_count ? () => openDrill(row.salesman_code, "") : null}
+                              />
+                            </strong>
+                          </td>
                         </tr>
                       ))}
                       {salesmen.length === 0 && (
@@ -393,11 +500,26 @@ export default function SalesmanIncentivePage() {
                         <tr>
                           <td colSpan={2}><strong>{t("total")}</strong></td>
                           {tierKeys.map((key) => (
-                            <td key={key}><strong>{formatAmount(totals.tier_base?.[key])}</strong></td>
+                            <td key={key}>
+                              <strong>
+                                <DrillCell
+                                  amount={totals.tier_base?.[key]}
+                                  title={t("drillHint")}
+                                  onOpen={Number(totals.tier_base?.[key] || 0) > 0
+                                    ? () => openDrill("", key)
+                                    : null}
+                                />
+                              </strong>
+                              {key !== "late" ? (
+                                <div className="moduleCode">
+                                  {t("incentive")}: {formatAmount(totals.tier_incentive?.[key])}
+                                </div>
+                              ) : null}
+                            </td>
                           ))}
                           <td><strong>{formatAmount(totals.collection_incentive)}</strong></td>
                           <td><strong>{formatAmount(totals.current_month_sales)}</strong></td>
-                          <td><strong>{formatAmount(totals.previous_month_sales)}</strong></td>
+                          <td><strong>{formatAmount(totals.peak_month_sales)}</strong></td>
                           <td className={deltaCellClass(totals.sales_delta)}><strong>{formatAmount(totals.sales_delta)}</strong></td>
                           <td><strong>{formatAmount(totals.growth_incentive)}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(totals.total_incentive)}</strong></td>
@@ -408,14 +530,28 @@ export default function SalesmanIncentivePage() {
                 </ExportableTable>
               </section>
 
-              <section className="moduleSection">
+              <section className="moduleSection" id="incentive-detail">
                 <div className="moduleSectionHeader">
                   <h2>{t("detail")}</h2>
                   <span>
-                    {detailRows.length} / {report.rows?.length || 0}
-                    {(report.rows?.length || 0) > DETAIL_ROW_LIMIT ? ` · ${t("detailLimit")}` : ""}
+                    {detailRows.length} / {totalDetailRows}
+                    {totalDetailRows > DETAIL_ROW_LIMIT ? ` · ${t("detailLimit")}` : ""}
                   </span>
                 </div>
+
+                {drill ? (
+                  <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
+                    <span className="moduleHint" style={{ margin: 0 }}>
+                      {t("showingFor")}: {drill.salesmanCode || t("allSalesmen")}
+                      {drill.tierKey ? ` · ${tierLabel(drill.tierKey)}` : ""}
+                    </span>
+                    <button type="button" className="moduleInlineButton" onClick={() => setDrill(null)}>
+                      {t("clearDrill")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="moduleHint">{t("drillHint")}</div>
+                )}
 
                 <ExportableTable
                   filename={`salesman-incentive-detail-${report.month}`}

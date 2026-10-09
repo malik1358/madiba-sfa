@@ -11,6 +11,14 @@ import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  BILL_MISMATCH_DAY_INCOMPLETE,
+  BILL_MISMATCH_LABELS,
+  BILL_MISMATCH_MISSING,
+  BILL_MISMATCH_OTHER_CUSTOMER,
+  BILL_MISMATCH_REVERSED,
+  summarizeOutstandingBillMismatches,
+} from "../../lib/outstandingReconcile.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -35,16 +43,87 @@ const TEXT = {
   totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
   computedOutstanding: { en: "Computed outstanding", ar: "المستحق المحسوب" },
   difference: { en: "Difference", ar: "الفرق" },
-  compare: { en: "Compare", ar: "قارن" },
+  branchIssue: { en: "Branch issue", ar: "مشكلة تخصيص الفاتورة" },
+  branchIssueTitle: {
+    en: "Customer total matches, but invoice balances differ. Review the invoice allocation with the customer’s requested adjustment.",
+    ar: "إجمالي العميل متطابق لكن أرصدة الفواتير مختلفة. راجع تخصيص الفاتورة حسب طلب العميل.",
+  },
   total: { en: "Total", ar: "الإجمالي" },
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
   deltaLoading: { en: "…", ar: "…" },
   deltaPending: { en: "—", ar: "—" },
   differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
   noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
+  recalculate: { en: "Recalculate", ar: "إعادة الحساب" },
+  recalculating: { en: "Recalculating…", ar: "جاري إعادة الحساب…" },
+  mismatchTitle: { en: "Tally bills not matched to a sales invoice", ar: "فواتير تالي غير المطابقة لفاتورة مبيعات" },
+  mismatchHint: {
+    en: "Each bill below opened its own row because its Ref. No. matched no sales invoice for that customer. Grouped by cause so the source of the problem is clear.",
+    ar: "كل فاتورة أدناه ظهرت كسطر مستقل لأن رقم المرجع لم يطابق أي فاتورة مبيعات لهذا العميل. مجمعة حسب السبب.",
+  },
+  billRef: { en: "Bill ref", ar: "مرجع الفاتورة" },
+  billDate: { en: "Bill date", ar: "تاريخ الفاتورة" },
+  pending: { en: "Pending", ar: "المستحق" },
+  invoiceDays: { en: "Invoice days", ar: "عمر الفاتورة" },
+  cause: { en: "Cause", ar: "السبب" },
+  detail: { en: "Detail", ar: "التفاصيل" },
+  allCauses: { en: "All causes", ar: "كل الأسباب" },
+  noMismatches: { en: "Every Tally bill matched a sales invoice.", ar: "كل فواتير تالي طابقت فواتير المبيعات." },
+  sameAmountAs: { en: "Same amount as", ar: "نفس مبلغ" },
+  coverageTitle: { en: "Sales days that look incomplete", ar: "أيام مبيعات تبدو غير مكتملة" },
+  coverageHint: {
+    en: "A sales upload replaces every stored row for the dates in the file, so a partial export deletes the rest of that day. These dates kept far fewer salesmen than the days around them. Re-upload a full sales export for them, then press Recalculate.",
+    ar: "رفع المبيعات يستبدل كل سطور التواريخ الموجودة في الملف، لذلك الملف الجزئي يحذف باقي اليوم. أعد رفع ملف مبيعات كامل لهذه التواريخ ثم اضغط إعادة الحساب.",
+  },
+  coverageDate: { en: "Date", ar: "التاريخ" },
+  coverageSalesmen: { en: "Salesmen kept", ar: "المندوبون المتبقون" },
+  coverageExpected: { en: "Usual salesmen", ar: "المعتاد" },
+  coverageLines: { en: "Sales lines", ar: "سطور المبيعات" },
+  coverageVouchers: { en: "Vouchers", ar: "الفواتير" },
+  coverageMissing: { en: "Salesmen missing that day", ar: "المندوبون المفقودون" },
+  coverageNone: { en: "Every sales day looks complete.", ar: "كل أيام المبيعات تبدو مكتملة." },
 };
 
+const MISMATCH_TYPES = [
+  BILL_MISMATCH_OTHER_CUSTOMER,
+  BILL_MISMATCH_REVERSED,
+  BILL_MISMATCH_DAY_INCOMPLETE,
+  BILL_MISMATCH_MISSING,
+];
+
+function mismatchTypeClass(type) {
+  if (type === BILL_MISMATCH_OTHER_CUSTOMER) return "paymentSettleStatus paymentSettleStatus--open";
+  if (type === BILL_MISMATCH_REVERSED) return "paymentSettleStatus paymentSettleStatus--partial";
+  if (type === BILL_MISMATCH_DAY_INCOMPLETE) return "paymentSettleStatus paymentSettleStatus--open";
+  return "paymentSettleStatus";
+}
+
 const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
+
+/** The rebuild runs well past a minute, so the browser may never see its response. */
+const RECALCULATE_POLL_MS = 5000;
+const RECALCULATE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+const SAVED_AT_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Riyadh",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function formatSavedAt(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return SAVED_AT_FORMAT.format(parsed).replace(",", "");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
 
 const CUSTOMER_COLUMNS = [
   { key: "code", labelKey: "code" },
@@ -161,6 +240,11 @@ export default function OutstandingComparePage() {
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
+  const savedMetaRef = useRef(null);
+  const [recalculating, setRecalculating] = useState(false);
+  const [mismatchRows, setMismatchRows] = useState([]);
+  const [coverageGaps, setCoverageGaps] = useState([]);
+  const [mismatchType, setMismatchType] = useState("");
   const deltaStartedRef = useRef(new Set());
 
   const canAccess = access.canAccess("outstandingCompare")
@@ -248,6 +332,18 @@ export default function OutstandingComparePage() {
     [deltaByCode],
   );
 
+  const mismatchSummary = useMemo(
+    () => summarizeOutstandingBillMismatches(mismatchRows),
+    [mismatchRows],
+  );
+
+  const visibleMismatchRows = useMemo(
+    () => (mismatchType ? mismatchRows.filter((row) => row.mismatch_type === mismatchType) : mismatchRows),
+    [mismatchRows, mismatchType],
+  );
+
+  const mismatchLabel = useMemo(() => translate(language, BILL_MISMATCH_LABELS), [language]);
+
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
     if (!supabase) return;
@@ -333,13 +429,14 @@ export default function OutstandingComparePage() {
     loadCustomers();
   }, [loadCustomers]);
 
-  const loadSavedReconcile = useCallback(async () => {
+  const loadSavedReconcile = useCallback(async ({ silent = false } = {}) => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) return null;
     try {
       const session = await resolveAuthSession(supabase);
       const response = await fetch("/api/outstanding-reconcile", {
         headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
@@ -347,17 +444,79 @@ export default function OutstandingComparePage() {
       }
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       setSavedRowsByCode(new Map(rows.map((row) => [String(row.customer_code || "").toUpperCase(), row])));
-      setSavedMeta({
+      setMismatchRows(Array.isArray(payload.mismatchRows) ? payload.mismatchRows : []);
+      setCoverageGaps(Array.isArray(payload.coverageGaps) ? payload.coverageGaps : []);
+      const meta = {
         builtAt: payload.builtAt || "",
         differenceCount: rows.length,
         scannedCount: Number(payload.scannedCount || 0),
-      });
+      };
+      setSavedMeta(meta);
+      savedMetaRef.current = meta;
+      return meta;
     } catch (err) {
+      if (silent) return null;
       setError(err.message || "Unable to load saved reconciliation.");
       setSavedRowsByCode(new Map());
+      setMismatchRows([]);
+      setCoverageGaps([]);
       setSavedMeta(null);
+      savedMetaRef.current = null;
+      return null;
     }
   }, []);
+
+  const recalculateOutstanding = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase || recalculating) return;
+
+    setRecalculating(true);
+    setError("");
+    setMessage("");
+    const previousBuiltAt = savedMetaRef.current?.builtAt || "";
+
+    try {
+      const session = await resolveAuthSession(supabase);
+      let payload = null;
+      let postError = null;
+
+      try {
+        const response = await fetch("/api/outstanding-reconcile", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.success) {
+          throw new Error(body.error || "Unable to recalculate outstanding differences.");
+        }
+        payload = body;
+      } catch (err) {
+        // The rebuild keeps running on the server even when this response is lost.
+        postError = err;
+      }
+
+      let meta = await loadSavedReconcile({ silent: Boolean(postError) });
+      const deadline = Date.now() + RECALCULATE_POLL_TIMEOUT_MS;
+      while (postError && (!meta || meta.builtAt === previousBuiltAt) && Date.now() < deadline) {
+        await wait(RECALCULATE_POLL_MS);
+        meta = await loadSavedReconcile({ silent: true });
+      }
+
+      if (postError && (!meta || meta.builtAt === previousBuiltAt)) {
+        throw postError;
+      }
+
+      setMessage(
+        `Recalculated ${formatCount(payload?.scannedCount ?? meta?.scannedCount ?? 0)} customers; `
+        + `${formatCount(payload?.differenceCount ?? meta?.differenceCount ?? 0)} with differences.`,
+      );
+    } catch (err) {
+      setError(err.message || "Unable to recalculate outstanding differences.");
+    } finally {
+      setRecalculating(false);
+    }
+  }, [loadSavedReconcile, recalculating]);
 
   useEffect(() => {
     loadSavedReconcile();
@@ -466,15 +625,27 @@ export default function OutstandingComparePage() {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{t("customer")}</h2>
-              <span>
-                {loadingCustomers
-                  ? "Loading customers..."
-                  : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
-                    checkedCount
-                      ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
-                      : ""
-                  }${savedMeta?.builtAt ? ` · saved ${savedMeta.builtAt.slice(0, 16).replace("T", " ")}` : ""}`}
-              </span>
+              <div className="moduleHeaderMeta">
+                <span>
+                  {loadingCustomers
+                    ? "Loading customers..."
+                    : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
+                      checkedCount
+                        ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
+                        : ""
+                    }${savedMeta?.builtAt ? ` · saved ${formatSavedAt(savedMeta.builtAt)}` : ""}`}
+                </span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="moduleFilterRow">
               <input
@@ -505,7 +676,7 @@ export default function OutstandingComparePage() {
                         {t(column.labelKey)}
                       </th>
                     ))}
-                    <th data-column-filter-label={t("compare")}>{t("compare")}</th>
+                    <th data-column-filter-label={t("branchIssue")}>{t("branchIssue")}</th>
                   </tr>
                   <tr className="moduleTableColumnFilterRow">
                     {CUSTOMER_COLUMNS.map((column) => (
@@ -522,12 +693,15 @@ export default function OutstandingComparePage() {
                         />
                       </th>
                     ))}
-                    <th data-column-filter-label={t("compare")} />
+                    <th data-column-filter-label={t("branchIssue")} />
                   </tr>
                 </thead>
                 <tbody>
                   {visibleCustomers.map((customer) => {
                     const active = selectedCustomer?.customer_code === customer.customer_code;
+                    const hasBranchIssue = customer.delta_status === "ready"
+                      && Math.abs(Number(customer.open_delta || 0)) <= DIFF_TOLERANCE
+                      && Number(customer.gap_count || 0) > 0;
                     return (
                       <tr key={customer.customer_code}>
                         <td>
@@ -566,14 +740,17 @@ export default function OutstandingComparePage() {
                               : t("deltaPending")}
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="moduleInlineButton moduleActionButton"
-                            onClick={() => void loadCompare(customer)}
-                            disabled={loadingCompare && active}
-                          >
-                            {t("compare")}
-                          </button>
+                          {hasBranchIssue ? (
+                            <button
+                              type="button"
+                              className="moduleInlineButton moduleActionButton"
+                              onClick={() => void loadCompare(customer)}
+                              disabled={loadingCompare}
+                              title={t("branchIssueTitle")}
+                            >
+                              {t("branchIssue")}
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -601,6 +778,177 @@ export default function OutstandingComparePage() {
                       </strong>
                     </td>
                     <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </ExportableTable>
+          </section>
+
+          <section className="moduleSection" id="sales-coverage">
+            <div className="moduleSectionHeader">
+              <h2>{t("coverageTitle")}</h2>
+              <div className="moduleHeaderMeta">
+                <span>{`${formatCount(coverageGaps.length)} ${t("coverageDate").toLowerCase()}(s)`}</span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <p className="moduleHint">{t("coverageHint")}</p>
+            <ExportableTable filename="sales-coverage-gaps" sheetName="CoverageGaps" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <th>{t("coverageDate")}</th>
+                    <th>{t("coverageSalesmen")}</th>
+                    <th>{t("coverageExpected")}</th>
+                    <th>{t("coverageLines")}</th>
+                    <th>{t("coverageVouchers")}</th>
+                    <th>{t("coverageMissing")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coverageGaps.map((gap) => (
+                    <tr key={`coverage-${gap.date}`}>
+                      <td>{gap.date}</td>
+                      <td className="moduleBiMonthCell--down">
+                        <strong>{formatCount(gap.salesmen)}</strong>
+                      </td>
+                      <td>{formatCount(gap.expected_salesmen)}</td>
+                      <td>{formatCount(gap.lines)}</td>
+                      <td>{formatCount(gap.vouchers)}</td>
+                      <td>
+                        <div className="auditSummaryCardMeta">
+                          {gap.missing_salesmen?.length ? gap.missing_salesmen.join(", ") : "—"}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!coverageGaps.length ? (
+                    <tr>
+                      <td colSpan={6}>{t("coverageNone")}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </ExportableTable>
+          </section>
+
+          <section className="moduleSection" id="bill-mismatch">
+            <div className="moduleSectionHeader">
+              <h2>{t("mismatchTitle")}</h2>
+              <div className="moduleHeaderMeta">
+                <span>
+                  {`${formatCount(mismatchSummary.count)} bills · ${formatMoney(mismatchSummary.pending)}`}
+                </span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <p className="moduleHint">{t("mismatchHint")}</p>
+            <div className="auditSummaryGrid">
+              {MISMATCH_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className="auditSummaryCard"
+                  onClick={() => setMismatchType((current) => (current === type ? "" : type))}
+                  style={{ textAlign: "start", cursor: "pointer", borderWidth: mismatchType === type ? 2 : 1 }}
+                >
+                  <span>{mismatchLabel(type)}</span>
+                  <strong>{formatCount(mismatchSummary.byType?.[type]?.count || 0)}</strong>
+                  <em className="auditSummaryCardMeta">
+                    {formatMoney(mismatchSummary.byType?.[type]?.pending || 0)}
+                  </em>
+                </button>
+              ))}
+            </div>
+            <div className="moduleFilterRow">
+              <button
+                type="button"
+                className="moduleInlineButton moduleActionButton"
+                onClick={() => setMismatchType("")}
+                disabled={!mismatchType}
+              >
+                {t("allCauses")}
+              </button>
+            </div>
+            <ExportableTable filename="tally-bill-mismatches" sheetName="BillMismatches" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <th>{t("code")}</th>
+                    <th>{t("customer")}</th>
+                    <th>{t("salesman")}</th>
+                    <th>{t("billRef")}</th>
+                    <th>{t("billDate")}</th>
+                    <th className="moduleBiTotalCol">{t("pending")}</th>
+                    <th>{t("invoiceDays")}</th>
+                    <th>{t("cause")}</th>
+                    <th>{t("detail")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleMismatchRows.map((row) => (
+                    <tr key={`mismatch-${row.customer_code}-${row.bill_ref}`}>
+                      <td>{row.customer_code || "—"}</td>
+                      <td>
+                        <Link href={settlementHref(row.customer_code)} className="moduleInlineButton">
+                          {row.customer_name || row.customer_code || "—"}
+                        </Link>
+                      </td>
+                      <td>{row.salesman_name || "—"}</td>
+                      <td>{row.bill_ref || "—"}</td>
+                      <td>{row.bill_date || "—"}</td>
+                      <td className="moduleBiTotalCol moduleBiMonthCell--down">
+                        <strong>{formatMoney(row.pending_amount)}</strong>
+                      </td>
+                      <td>{formatCount(row.invoice_days)}</td>
+                      <td>
+                        <span className={mismatchTypeClass(row.mismatch_type)}>
+                          {mismatchLabel(row.mismatch_type)}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="auditSummaryCardMeta">{row.note}</div>
+                        {row.same_amount_vouchers?.length ? (
+                          <div className="auditSummaryCardMeta">
+                            {`${t("sameAmountAs")}: ${row.same_amount_vouchers.join(", ")}`}
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                  {!visibleMismatchRows.length ? (
+                    <tr>
+                      <td colSpan={9}>{t("noMismatches")}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+                <tfoot>
+                  <tr className="moduleBiTotalRow">
+                    <td colSpan={5}><strong>{t("total")}</strong></td>
+                    <td className="moduleBiTotalCol">
+                      <strong>
+                        {formatMoney(visibleMismatchRows.reduce((sum, row) => sum + Number(row.pending_amount || 0), 0))}
+                      </strong>
+                    </td>
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               </table>

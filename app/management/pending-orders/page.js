@@ -26,7 +26,11 @@ import {
   orderNeedsSalesmanNumberRepair,
 } from "../../lib/salesOrderNumber";
 import { formatOrderSalesmanLabel } from "../../lib/orderSalesman";
-import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
+import {
+  findOutstandingForCustomer,
+  outstandingCustomerIdentityKey,
+  sortBucketLabels,
+} from "../../lib/outstanding";
 import { evaluateCreditApproval, outstandingAmountOverSixtyDays } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -63,6 +67,7 @@ import {
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
+import { uniqueExcelFilterOptions } from "../../lib/biExcelFilters";
 import {
   formatPendingDuration,
   pendingOrderTimeToMakeBucket,
@@ -129,7 +134,7 @@ function uniqueColumnValues(values) {
     seen.add(key);
     unique.push(text);
   });
-  return unique.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  return uniqueExcelFilterOptions(unique);
 }
 
 function matchesColumnFilter(value, filter) {
@@ -185,10 +190,7 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null, outstand
 }
 
 function pendingOrderCustomerKey(order) {
-  return [
-    String(order?.customer_code || "").trim().toUpperCase(),
-    String(order?.customer_name || "").trim().toUpperCase(),
-  ].join("|");
+  return outstandingCustomerIdentityKey(order?.customer_code, order?.customer_name);
 }
 
 function firstCustomerRowFlags(orders) {

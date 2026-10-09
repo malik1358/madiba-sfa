@@ -13,6 +13,7 @@ import {
   consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
   isOfficeSuppliesSale,
+  isLocalItemSale,
   kpiStatus,
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
@@ -20,7 +21,6 @@ import {
   resolveKpiPaceDate,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
-  withTotalSales,
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
@@ -28,7 +28,27 @@ import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
 import {
   loadPerformanceSnapshotsForSalesmen,
   loadSalesActuals,
+  loadSalesPaceShares,
 } from "../app/lib/performanceKpisServer.js";
+
+function activeSalesAdmin(rows) {
+  return {
+    from: () => ({
+      select: () => {
+        const filters = [];
+        const query = {
+          range: () => query,
+          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
+          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
+          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
+          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
+          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
+        };
+        return query;
+      },
+    }),
+  };
+}
 
 test("detects PostgREST schema-cache missing column errors", () => {
   assert.equal(isMissingSchemaColumn({
@@ -156,16 +176,16 @@ test("nets signed sales and positive or negative credit notes by category", () =
   );
 });
 
-test("separates local item sales from office supplies and other sales", () => {
-  const actuals = splitSalesActuals([
+test("classifies Local item sales after office supplies and excludes mixed origin", () => {
+  assert.equal(isLocalItemSale({ local_import: "Local" }), true);
+  assert.equal(isLocalItemSale({ local_import: "Local / Import" }), false);
+  assert.deepEqual(splitSalesActuals([
     { category: "Office Supplies", local_import: "Local", sales_amount: 100 },
     { category: "Electronics", local_import: "Local", sales_amount: 60 },
     { category: "Electronics", local_import: "Import", sales_amount: 40 },
     { category: "Electronics", local_import: "Local / Import", sales_amount: 10 },
     { category: "Electronics", local_import: "Local", voucher_type: "Credit Note", sales_amount: 5 },
-  ]);
-  assert.deepEqual(actuals, { officeSupplies: 100, localItemSales: 55, otherSales: 50 });
-  assert.equal(withTotalSales(actuals).totalSales, 205);
+  ]), { officeSupplies: 100, localItemSales: 55, otherSales: 50 });
 });
 
 test("credit notes do not count as buying customers", () => {
@@ -186,25 +206,11 @@ test("repeat customers require a qualifying prior purchase, not only a return", 
     { transaction_date: "2026-08-15", customer_code: "RETURN-ONLY", voucher_type: "Credit Note", sales_amount: 100 },
     { transaction_date: "2026-08-16", customer_code: "REAL-HISTORY", sales_amount: 100 },
   ];
-  const admin = {
-    from: () => ({
-      select: () => {
-        const filters = [];
-        const query = {
-          range: () => query,
-          eq: (column, value) => { filters.push((row) => row[column] === value); return query; },
-          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
-          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
-          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
-          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
-          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
-        };
-        return query;
-      },
-    }),
-  };
+  const actuals = await loadSalesActuals(activeSalesAdmin(rows), {
+    salesmanCode: "SM01",
+    reportDate: "2026-09-01",
+  });
 
-  const actuals = await loadSalesActuals(admin, { salesmanCode: "SM01", reportDate: "2026-09-01" });
   assert.deepEqual(actuals.priorCustomerCodes, ["REAL-HISTORY"]);
   assert.deepEqual(
     classifyBuyingCustomers(actuals.monthCustomerCodes, actuals.priorCustomerCodes),
@@ -212,87 +218,28 @@ test("repeat customers require a qualifying prior purchase, not only a return", 
   );
 });
 
-test("KPI actuals include sales imported under Thamer's legacy identities", async () => {
-  const rows = [
+test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
+  const actualRows = [
     { transaction_date: "2026-09-02", salesman_code: "SM002", customer_code: "A", category: "Office Supplies", sales_amount: 100 },
     { transaction_date: "2026-09-03", salesman_code: "THAMER", customer_code: "B", category: "Office Supplies", sales_amount: 200 },
     { transaction_date: "2026-09-04", salesman_code: "THAMER MOHAMMAD AHMED QASEM", customer_code: "C", category: "Office Supplies", sales_amount: 300 },
-    { transaction_date: "2026-09-05", salesman_code: "THAMER", customer_code: "D", category: "Furniture", local_import: "Local", sales_amount: 120 },
   ];
-  const admin = {
-    from: () => ({
-      select: () => {
-        const filters = [];
-        const query = {
-          range: () => query,
-          eq: (column, value) => { filters.push((row) => row[column] === value); return query; },
-          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
-          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
-          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
-          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
-          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
-        };
-        return query;
-      },
-    }),
-  };
-
-  const actuals = await loadSalesActuals(admin, { salesmanCode: "SM002", reportDate: "2026-09-01" });
-  assert.equal(actuals.officeSupplies, 600);
-  assert.equal(actuals.localItemSales, 120);
-  assert.equal(actuals.salesRows.length, 4);
-});
-
-test("performance snapshots reuse cached actuals without querying source data", async () => {
-  const cache = {
-    version: 2,
-    batchId: "batch-42",
-    actualsBySalesman: {
-      SM01: {
-        officeSupplies: 120,
-        localItemSales: 30,
-        otherSales: 30,
-        totalSales: 150,
-        collection: 40,
-        cashCollection: 10,
-        newCustomers: 2,
-        repeatCustomers: 1,
-      },
-    },
-    paceBySalesman: { SM01: { 1: 0.2 } },
-  };
-  const queriedTables = [];
-  const admin = {
-    from(table) {
-      queriedTables.push(table);
-      const filters = {};
-      const query = {
-        select: () => query,
-        eq: (column, value) => { filters[column] = value; return query; },
-        in: () => query,
-        maybeSingle: async () => ({
-          data: filters.setting_key === "active_sales_batch_id"
-            ? { setting_value: "batch-42" }
-            : { setting_value: JSON.stringify(cache) },
-          error: null,
-        }),
-        then: (resolve) => resolve({ data: [], error: null }),
-      };
-      return query;
-    },
-  };
-
-  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
-    salesmen: [{ salesmanCode: "SM01", salesmanName: "Ali" }],
+  const actuals = await loadSalesActuals(activeSalesAdmin(actualRows), {
+    salesmanCode: "SM002",
     reportDate: "2026-09-01",
   });
+  assert.equal(actuals.officeSupplies, 600);
 
-  assert.equal(snapshot.actuals.officeSupplies, 120);
-  assert.equal(snapshot.actuals.localItemSales, 30);
-  assert.equal(snapshot.actuals.collection, 40);
-  assert.equal(snapshot.kpis.find((kpi) => kpi.key === "totalSales").actual, 180);
-  assert.equal(queriedTables.includes("active_sales"), false);
-  assert.equal(queriedTables.includes("collection_visits"), false);
+  const paceRows = [
+    { transaction_date: "2026-08-01", salesman_code: "SM002", sales_amount: 100 },
+    { transaction_date: "2026-08-08", salesman_code: "THAMER", sales_amount: 100 },
+    { transaction_date: "2026-08-15", salesman_code: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 100 },
+  ];
+  const pace = await loadSalesPaceShares(activeSalesAdmin(paceRows), { reportDate: "2026-09-01" });
+  assert.equal(pace.bySalesman.get("SM002")[1], 1 / 3);
+  assert.equal(pace.bySalesman.get("SM002")[8], 2 / 3);
+  assert.equal(pace.bySalesman.get("SM002")[15], 1);
+  assert.equal(pace.bySalesman.has("THAMER"), false);
 });
 
 test("splits monthly collection visits between FIFO credit and cash invoices", () => {
@@ -319,31 +266,18 @@ test("splits monthly collection visits between FIFO credit and cash invoices", (
   assert.deepEqual(actuals, { collection: 230, cashCollection: 115 });
 });
 
-test("KPI transaction details reconcile sales, distinct customer counts and FIFO collections", () => {
+test("KPI detail contributions reconcile net sales, buyers, and per-customer FIFO", () => {
   const salesRows = [
     { transaction_date: "2026-09-01", voucher_number: "INV-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", sales_amount: 100 },
     { transaction_date: "2026-09-02", voucher_number: "INV-2", customer_code: "B", customer_name: "Beta", item_name: "Chair", category: "Furniture", local_import: "Local", sales_amount: 50 },
-    { transaction_date: "2026-09-02", voucher_number: "INV-3", customer_code: "C", customer_name: "Gamma", item_name: "Lamp", category: "Furniture", local_import: "Import", sales_amount: 25 },
     { transaction_date: "2026-09-03", voucher_number: "CN-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 10 },
   ];
   const office = buildKpiActualDetails({ kpiKey: "officeSupplies", salesmanCode: "SM01", salesRows });
   const local = buildKpiActualDetails({ kpiKey: "localItemSales", salesmanCode: "SM01", salesRows });
-  const other = buildKpiActualDetails({ kpiKey: "otherSales", salesmanCode: "SM01", salesRows });
-  const total = buildKpiActualDetails({ kpiKey: "totalSales", salesmanCode: "SM01", salesRows });
+  const buyers = buildKpiActualDetails({ kpiKey: "newCustomers", salesmanCode: "SM01", salesRows });
   assert.equal(office.actual, 90);
   assert.equal(local.actual, 50);
-  assert.equal(other.actual, 25);
-  assert.equal(total.actual, 165);
-
-  const newCustomers = buildKpiActualDetails({ kpiKey: "newCustomers", salesmanCode: "SM01", salesRows });
-  const repeatCustomers = buildKpiActualDetails({
-    kpiKey: "repeatCustomers",
-    salesmanCode: "SM01",
-    salesRows,
-    priorCustomerCodes: ["A"],
-  });
-  assert.equal(newCustomers.actual, 3);
-  assert.equal(repeatCustomers.actual, 1);
+  assert.equal(buyers.actual, 2);
 
   const collectionSalesRows = [
     { transaction_date: "2026-07-31", voucher_number: "B-CREDIT", customer_code: "B", sales_amount: 100, quantity: 1, rate: 100 },
@@ -351,39 +285,86 @@ test("KPI transaction details reconcile sales, distinct customer counts and FIFO
     { transaction_date: "2026-08-02", voucher_number: "NFD/200", customer_code: "A", sales_amount: 200, quantity: 1, rate: 200 },
   ];
   const collectionVisits = [{ id: 21, saved_at: "2026-09-04T10:00:00Z", customer_code: "A", amount_received: 230 }];
-  const creditCollection = buildKpiActualDetails({
+  const credit = buildKpiActualDetails({
     kpiKey: "collection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
     fromDate: "2026-09-01", toDate: "2026-09-30",
   });
-  const cashCollection = buildKpiActualDetails({
+  const cash = buildKpiActualDetails({
     kpiKey: "cashCollection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
     fromDate: "2026-09-01", toDate: "2026-09-30",
   });
-  assert.equal(creditCollection.actual, 115);
-  assert.equal(cashCollection.actual, 115);
-  assert.deepEqual(creditCollection.rows.map((row) => row.invoiceReference), ["NFD/200"]);
-  assert.deepEqual(cashCollection.rows.map((row) => row.invoiceReference), ["RC/100"]);
+  assert.equal(credit.actual, 115);
+  assert.equal(cash.actual, 115);
+  assert.deepEqual(credit.rows.map((row) => row.invoiceReference), ["NFD/200"]);
+  assert.deepEqual(cash.rows.map((row) => row.invoiceReference), ["RC/100"]);
+});
+
+test("performance snapshots reuse source actuals cached for the active batch", async () => {
+  const queriedTables = [];
+  const cache = {
+    version: 2,
+    batchId: "42",
+    actualsBySalesman: {
+      SM001: {
+        officeSupplies: 10,
+        localItemSales: 3,
+        otherSales: 7,
+        collection: 5,
+        cashCollection: 2,
+        newCustomers: 1,
+        repeatCustomers: 2,
+      },
+    },
+    paceBySalesman: {},
+  };
+  const admin = {
+    from(table) {
+      queriedTables.push(table);
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq: (key, value) => { filters[key] = value; return query; },
+        in: () => query,
+        maybeSingle: async () => ({
+          data: {
+            setting_value: filters.setting_key === "active_sales_batch_id" ? "42" : JSON.stringify(cache),
+          },
+          error: null,
+        }),
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return query;
+    },
+  };
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
+    reportDate: "2026-09-01",
+  });
+
+  assert.equal(snapshot.actuals.totalSales, 20);
+  assert.equal(snapshot.actuals.localItemSales, 3);
+  assert.equal(snapshot.actuals.collection, 5);
+  assert.equal(queriedTables.includes("active_sales"), false);
+  assert.equal(queriedTables.includes("customers"), false);
+  assert.equal(queriedTables.includes("collection_visits"), false);
 });
 
 test("does not move Others target into office supplies after save", () => {
   const saved = normalizePerformanceTargets({
     salesmanCode: "SM001",
     office_supplies_sales_target: 0,
-    local_item_sales_target: 75,
     other_sales_target: 250,
     sales_target: 250,
   });
   assert.equal(saved.officeSupplies, 0);
-  assert.equal(saved.localItemSales, 75);
   assert.equal(saved.otherSales, 250);
-  assert.equal(saved.totalSales, 325);
+  assert.equal(saved.totalSales, 250);
 
   const nested = normalizePerformanceTargets({
     officeSupplies: 0,
     otherSales: 180,
   });
   assert.equal(nested.officeSupplies, 0);
-  assert.equal(nested.localItemSales, 0);
   assert.equal(nested.otherSales, 180);
   assert.equal(nested.totalSales, 180);
 });

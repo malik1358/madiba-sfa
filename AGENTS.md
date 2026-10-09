@@ -21,6 +21,7 @@ These rules are mandatory for Cursor and Copilot:
 9. **Update relevant docs when business logic changes.** After any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the matching `docs/*.md` file and add a dated note to `docs/CHANGELOG_AI.md` **before finishing the task**.
 10. **Do not expose secrets or environment variables.** Never print, commit, or paste `.env*` values, service-role keys, `CRON_SECRET`, SMTP passwords, Firebase JSON, or tokens. `.env.example` lists names only.
 11. **Prefer incremental changes over unnecessary rewrites.** Large pages and shared libs (`paymentBehavior.js`, collections, pending orders, customer audit, sales import) are easy to break.
+12. **Report every production promotion.** In the final response after each production deploy, list every user-visible change included in that release and identify its PR, merge commit, and deployed build. Never say only “deployed” or omit changes included in the same promotion.
 
 ## Dual-agent workflow (Cursor + Copilot)
 

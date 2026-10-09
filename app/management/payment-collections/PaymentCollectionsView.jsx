@@ -319,6 +319,7 @@ const TEXT = {
   summaryQueuePriority: { en: "Queue priority", ar: "أولوية الزيارة" },
   summaryProbability: { en: "Payment probability", ar: "احتمالية التحصيل" },
   summarySalesman: { en: "Salesman", ar: "المندوب" },
+  summaryVisitDateTime: { en: "Visit date/time", ar: "تاريخ ووقت الزيارة" },
   summaryOutcome: { en: "Outcome", ar: "النتيجة" },
   summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
@@ -479,12 +480,14 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const queuePriority = Number(options.queuePriority || 0);
   const probabilityLabel = formatProbabilityLabel(row.probability_label, t);
   const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
+  const visitDateTime = formatKsaDateTime(options.visitAt || new Date().toISOString());
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
   const lines = [
     `${t("summaryCustomer")}: ${row.customer_name || row.customer_code}`,
     `${t("summaryCode")}: ${row.customer_code || "-"}`,
     `${t("summarySalesman")}: ${getSalesmanLabel(row) || "-"}`,
+    `${t("summaryVisitDateTime")}: ${visitDateTime}`,
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
 

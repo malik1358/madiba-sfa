@@ -3,7 +3,7 @@ import { parseOutstandingSheetDate, resolveInvoiceAgingDays } from "./outstandin
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
 export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString() } = {}) {
-  if (row.is_active === false || row.is_inactive === true) return false;
+  if (row.is_active === false) return false;
   const outstanding = Number(row.total_outstanding);
   if (!Number.isFinite(outstanding) || outstanding <= 0 || outstanding >= 15000) return false;
   const olderBuckets = [row.outstanding_61_90, row.outstanding_91_120, row.outstanding_above_120];

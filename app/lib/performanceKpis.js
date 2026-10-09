@@ -79,7 +79,7 @@ export function isOfficeSuppliesSale(row = {}) {
 }
 
 export function isLocalItemSale(row = {}) {
-  const origin = String(row.local_import || "").trim().toLowerCase();
+  const origin = String(row?.local_import || "").trim().toLowerCase();
   return /\blocal\b/.test(origin) && !/\bimport(?:ed)?\b/.test(origin);
 }
 

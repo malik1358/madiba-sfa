@@ -32,6 +32,7 @@ After any important change to business logic, database structure, reports, authe
 - Update relevant docs when business logic or architecture changes.
 - Never expose secrets or environment variable values. `.env.example` lists names only.
 - Prefer incremental changes over unnecessary rewrites.
+- After every production promotion, list every user-visible change included in that release and identify its PR, merge commit, and deployed build in the final response. Do not summarize only the change most recently requested.
 
 ## Where to look
 

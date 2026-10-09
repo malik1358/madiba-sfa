@@ -32,12 +32,12 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Payment Collections** and **Collection Report**: outstanding queues and visit capture. `/management/my-collections` still resolves for users who can open Payment Collections, but `myCollections` is not a separate enabled module.
 - **Payment Settlement** and **Outstanding Compare**: FIFO cash application versus the Tally outstanding file.
 - **Business Intelligence**: category growth, salesman month-over-month, period filters.
-- **Promoter Coverage** (`/management/promoter-coverage`): product promoters see their assigned head salesman's team customer book, their own 12-month visit coverage, repeated visits, and six completed months of customer sales.
+- **Promoter Coverage** (`/management/promoter-coverage`): all authenticated roles can select a product promoter and review that promoter's head-team customer book, 12-month visit coverage, repeat visits, and six completed months of customer sales.
 - **Salesman Incentive**: monthly incentive from collection speed (35/60-day buckets for office supplies, electronics and other categories, 3-day window for cash deals) plus 0.5% on the sales increase over last month.
 - **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Imports**.
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
 - **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.
-- **Customer GPS History** (`/management/customer-gps-history`, admin/manager only): historic old/new customer locations, actor, save time, explicit approval and distance; one combined previous-day salesman-accepted change email at 00:40 KSA.
+- **Customer GPS History** (`/management/customer-gps-history`, module `customerGpsHistory`): admin/manager only. Date-filtered, paginated history shows old/new coordinates and maps, displacement in meters, save actor/time in KSA, and explicitly recorded approval. Excel export covers the displayed page only. A daily digest of salesman-accepted changes goes to `malik@pinasz.com` by default at 00:40 KSA, including Friday and zero-change days.
 
 The home page (`app/page.js`) is email/password login, then a dashboard with nearest customers when GPS is available.
 

@@ -4,7 +4,6 @@ import { getKsaDateString } from "./workdayActivity.js";
 
 const VISIT_LOG_TYPES = ["VISIT_REPORT", "PROSPECT_FOLLOW_UP", "NOTE"];
 const FIELD_VISIT_LOG_TYPES = new Set(["VISIT_REPORT", "PROSPECT_FOLLOW_UP"]);
-const VISIT_LOOKBACK_DAYS = 120;
 const VISIT_LOG_ROW_LIMIT = 5000;
 const VISIT_QUERY_BATCH_SIZE = 80;
 
@@ -71,11 +70,9 @@ export function buildLatestNearVisitDatesByCustomer(
     const note = parseNote(row?.note);
     const entryType = String(row?.entry_type || "").trim().toUpperCase();
     if (!FIELD_VISIT_LOG_TYPES.has(entryType)) return;
-    const code = note?.customer_code || note?.customerCode;
-    const capturedAt = note?.captured_at || note?.capturedAt || row?.created_at;
     consider(
-      code,
-      capturedAt,
+      note?.customer_code || note?.customerCode,
+      note?.captured_at || note?.capturedAt || row?.created_at,
       parseGpsFromActivityNote(row?.note),
       isAcceptedGpsUpdate(note),
     );
@@ -104,13 +101,11 @@ function missingColumn(error) {
     || /column .* does not exist/i.test(String(error?.message || ""));
 }
 
-export async function loadLatestNearVisitDatesByCustomer(admin, customers = [], {
-  now = new Date(),
-} = {}) {
+export async function loadLatestNearVisitDatesByCustomer(admin, customers = [], { now = new Date() } = {}) {
   const codes = [...new Set((customers || []).map((row) => normalizeCode(row?.customer_code)).filter(Boolean))];
   if (!codes.length) return new Map();
 
-  const sinceIso = new Date(now.getTime() - VISIT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const sinceIso = new Date(now.getTime() - 120 * 24 * 60 * 60 * 1000).toISOString();
   const collectionVisits = [];
   let collectionTableMissing = false;
   for (let start = 0; start < codes.length; start += VISIT_QUERY_BATCH_SIZE) {
@@ -145,9 +140,8 @@ export async function loadLatestNearVisitDatesByCustomer(admin, customers = [], 
   }
 
   const activityLogs = [];
-  const pageSize = 1000;
-  for (let from = 0; from < VISIT_LOG_ROW_LIMIT; from += pageSize) {
-    const end = Math.min(from + pageSize, VISIT_LOG_ROW_LIMIT) - 1;
+  for (let from = 0; from < VISIT_LOG_ROW_LIMIT; from += 1000) {
+    const end = Math.min(from + 1000, VISIT_LOG_ROW_LIMIT) - 1;
     const { data, error } = await admin
       .from("daily_activity_logs")
       .select("entry_type,note,created_at")
@@ -160,7 +154,7 @@ export async function loadLatestNearVisitDatesByCustomer(admin, customers = [], 
       throw error;
     }
     activityLogs.push(...(data || []));
-    if ((data || []).length < pageSize) break;
+    if ((data || []).length < 1000) break;
   }
 
   return buildLatestNearVisitDatesByCustomer(customers, { collectionVisits, activityLogs });

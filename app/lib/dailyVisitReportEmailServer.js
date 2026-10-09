@@ -14,8 +14,10 @@ import {
 import { formatCollectorDisplayName } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
-import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
+import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, parseEmailList, sendEmail } from "./mailer.js";
 import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
+import { buildSalesmanIncentiveEmailSection } from "./salesmanIncentiveEmail.js";
+import { buildSalesmanIncentiveReportFromDb } from "./salesmanIncentiveServer.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
   buildCollectionStaleOverdueSalesmanSection,
@@ -178,6 +180,44 @@ function snapshotHasKpis(snapshot) {
   return Array.isArray(snapshot?.kpis) && snapshot.kpis.length > 0;
 }
 
+/**
+ * Month-to-date incentive for every salesman, loaded once per cycle because the
+ * report scans the whole sales ledger. Best effort: a failure here must never
+ * stop the daily visit report going out.
+ */
+async function loadIncentiveBySalesmanCode(admin, reportDate) {
+  const byCode = new Map();
+  const month = String(reportDate || "").slice(0, 7);
+  if (!admin || !/^\d{4}-\d{2}$/.test(month)) return byCode;
+
+  try {
+    const report = await buildSalesmanIncentiveReportFromDb(admin, { month });
+    (report?.salesmen || []).forEach((summary) => {
+      const code = normalizeSalesmanCode(summary?.salesman_code);
+      if (!code) return;
+      byCode.set(code, {
+        summary,
+        month: report.month,
+        rates: report.rates,
+        tierKeys: report.tierKeys,
+      });
+    });
+  } catch (error) {
+    console.error("Unable to load salesman incentive for the daily visit report email:", error);
+  }
+  return byCode;
+}
+
+function resolveIncentiveSection(incentiveByCode, profile) {
+  const entry = incentiveByCode.get(normalizeSalesmanCode(profile?.salesman_code));
+  if (!entry) return null;
+  return buildSalesmanIncentiveEmailSection(entry.summary, {
+    month: entry.month,
+    rates: entry.rates,
+    tierKeys: entry.tierKeys,
+  });
+}
+
 function leaderTeamTargetCodes(bossCode) {
   const code = normalizeSalesmanCode(bossCode);
   if (!code) return [];
@@ -283,6 +323,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   date,
   userIds,
   reportEmails,
+  digestOnlyTo = "",
   now = new Date(),
   env = process.env,
   send = sendEmail,
@@ -323,7 +364,8 @@ export async function runDailyVisitReportEmailCycle(admin, {
     };
   }
 
-  const managerEmails = parseEmailList(env.DAILY_VISIT_REPORT_TO);
+  const digestOnlyInbox = normalizeDeliverableEmail(digestOnlyTo);
+  const managerEmails = digestOnlyInbox ? [digestOnlyInbox] : parseEmailList(env.DAILY_VISIT_REPORT_TO);
   const sendToUser = envFlagEnabled(env.DAILY_VISIT_REPORT_SEND_TO_USERS, true);
 
   const [report, profiles, authUsers] = await Promise.all([
@@ -335,8 +377,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const staleAsOfKey = getKsaDateString(now instanceof Date ? now : new Date(now));
   const staleAsOfIso = (now instanceof Date ? now : new Date(now)).toISOString();
   let dueCollectionCustomers = [];
-  let collectionRecords = [];
-  let potentialSalesTargets = null;
+  let collectionRecords = null;
   try {
     let loader = loadDueCollectionCustomers;
     if (!loader) {
@@ -364,11 +405,14 @@ export async function runDailyVisitReportEmailCycle(admin, {
     dueCollectionCustomers = [];
   }
 
+  let potentialSalesTargets = null;
   try {
-    potentialSalesTargets = await loadPotentialSalesTargets(admin, {
-      records: collectionRecords,
-      todayKey: staleAsOfKey,
-    });
+    if (collectionRecords !== null || loadPotentialSalesTargets !== loadPotentialSalesTargetCustomers) {
+      potentialSalesTargets = await loadPotentialSalesTargets(admin, {
+        records: collectionRecords || [],
+        todayKey: staleAsOfKey,
+      });
+    }
   } catch (error) {
     console.error("Unable to load potential sales targets for visit report emails:", error);
   }
@@ -522,6 +566,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   }
 
   const reportMessageByUserId = new Map();
+  const incentiveByCode = await loadIncentiveBySalesmanCode(admin, reportDate);
   for (const { profile, user } of recipients) {
     let userReport = {
       ...user,
@@ -559,9 +604,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     });
     const scopeMatchers = buildSalesmanScopeMatchers([profile]);
     const profileCode = normalizeSalesmanCode(profile.salesman_code);
-    const potentialSalesTargetsSection = potentialSalesTargets && !isCollectionOnlyAccess({
-      role: profile.role, salesmanCode: profileCode,
-    }) ? buildPotentialSalesTargetsSection({
+    const potentialSalesTargetsSection = potentialSalesTargets ? buildPotentialSalesTargetsSection({
       todayKey: staleAsOfKey,
       rows: potentialSalesTargets.filter((row) => (
         Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
@@ -576,6 +619,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       team: teamPayload?.team || null,
       teamMembers: teamPayload?.members || [],
       staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
+      incentiveSection: resolveIncentiveSection(incentiveByCode, profile),
       potentialSalesTargetsSection,
     });
     reportMessageByUserId.set(userReport.userId, {
@@ -583,6 +627,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       userName: userReport.userName,
       message,
     });
+    if (digestOnlyInbox) continue;
 
     if (!to.length) {
       results.push({
@@ -655,7 +700,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const usedDigestEmails = new Set();
   const allKpiSnapshots = [...kpiByUserId.values()].filter(snapshotHasKpis);
 
-  for (const leader of leaders) {
+  for (const leader of digestOnlyInbox ? [] : leaders) {
     const payload = teamPayloadByLeaderId.get(leader.id) || null;
     const subordinateIds = resolveSubordinateUserIds(authUsers, leader, profiles);
     const reports = [...subordinateIds]

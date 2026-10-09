@@ -26,7 +26,7 @@ const TEXT = {
   loading: { en: "Loading price history...", ar: "جاري تحميل سجل الأسعار..." },
   searching: { en: "Searching...", ar: "جاري البحث..." },
   date: { en: "Date", ar: "التاريخ" },
-  price: { en: "Price (SAR)", ar: "السعر (ر.س)" },
+  price: { en: "Price (﷼)", ar: "السعر (﷼)" },
   change: { en: "Change", ar: "التغيير" },
   previous: { en: "Previous", ar: "السابق" },
   source: { en: "Source", ar: "المصدر" },

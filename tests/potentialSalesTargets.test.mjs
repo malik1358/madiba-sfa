@@ -20,7 +20,6 @@ test("potential sales targets require positive outstanding strictly below SAR 15
 
 test("potential sales targets exclude inactive customers and recent or missing invoices", () => {
   assert.equal(isPotentialSalesTarget({ ...customer, is_active: false }, options), false);
-  assert.equal(isPotentialSalesTarget({ ...customer, is_inactive: true }, options), false);
   for (const last_invoice_date of ["2026-09-22", "2026-10-07", "2026-10-08", "", "bad"]) {
     assert.equal(isPotentialSalesTarget({ ...customer, last_invoice_date }, options), false);
   }

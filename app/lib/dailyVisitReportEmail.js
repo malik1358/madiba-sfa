@@ -281,6 +281,7 @@ export function buildUserVisitReportEmail({
   team = null,
   teamMembers = [],
   staleOverdueSection = null,
+  incentiveSection = null,
   potentialSalesTargetsSection = null,
 } = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
@@ -319,7 +320,7 @@ export function buildUserVisitReportEmail({
     : buildDayRoutePoints(entries, idleGaps);
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
-  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints);
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints, idleGaps);
   const workingHoursRanges = (workingHours.ranges || [])
     .map((range) => `${formatReportTime(range.fromAt)} - ${formatReportTime(range.toAt)}`)
     .join("; ");
@@ -348,14 +349,15 @@ export function buildUserVisitReportEmail({
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
     `Working hours: ${workingHoursValue}`,
     `Visit without order: ${activitySplit.visitWithoutOrderCount}`,
-    `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} SAR`,
-    `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} SAR`,
-    `Collections: ${activitySplit.collectionCount} / ${formatSplitMoney(activitySplit.collectionValue)} SAR`,
+    `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} ﷼`,
+    `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} ﷼`,
+    `Collections: ${activitySplit.collectionCount} / ${formatSplitMoney(activitySplit.collectionValue)} ﷼`,
     `Collection visits without payment: ${activitySplit.collectionVisitWithoutPaymentCount || 0}`,
     ...locationNotes,
     "",
     ...kpiText,
     ...teamKpiText,
+    ...(incentiveSection?.text ? [incentiveSection.text] : []),
     ...(staleOverdueSection?.text ? [staleOverdueSection.text] : []),
     ...(potentialSalesTargetsSection?.text ? [potentialSalesTargetsSection.text] : []),
     ...entries.map((entry) => {
@@ -381,9 +383,9 @@ export function buildUserVisitReportEmail({
     </thead>
     <tbody>
       <tr><td>Visit without order</td><td>${activitySplit.visitWithoutOrderCount}</td><td>-</td></tr>
-      <tr><td>New-customer orders</td><td>${activitySplit.newCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.newCustomerOrderValue))} SAR</td></tr>
-      <tr><td>Repeat-customer orders</td><td>${activitySplit.repeatCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.repeatCustomerOrderValue))} SAR</td></tr>
-      <tr><td>Collections</td><td>${activitySplit.collectionCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.collectionValue))} SAR</td></tr>
+      <tr><td>New-customer orders</td><td>${activitySplit.newCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.newCustomerOrderValue))} ﷼</td></tr>
+      <tr><td>Repeat-customer orders</td><td>${activitySplit.repeatCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.repeatCustomerOrderValue))} ﷼</td></tr>
+      <tr><td>Collections</td><td>${activitySplit.collectionCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.collectionValue))} ﷼</td></tr>
       <tr><td>Collection visits without payment</td><td>${activitySplit.collectionVisitWithoutPaymentCount || 0}</td><td>-</td></tr>
     </tbody>
   </table>`;
@@ -460,6 +462,7 @@ export function buildUserVisitReportEmail({
   ${coachingHtml}
   ${kpiHtml}
   ${teamKpiHtml}
+  ${incentiveSection?.html || ""}
   ${staleOverdueSection?.html || ""}
   ${potentialSalesTargetsSection?.html || ""}
   ${routeHtml}

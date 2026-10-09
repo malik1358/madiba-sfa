@@ -97,6 +97,7 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
     ...(filters.groupBy === "customer" ? {
       customerCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate }),
       customerMonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "month" }),
+      customerBimonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "bimonth" }),
     } : {}),
     salesMix: buildSalesMixReport(rows, applied),
     measures: {

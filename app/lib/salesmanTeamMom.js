@@ -28,6 +28,8 @@ export const STORE_SALES_LABEL = "Store sales";
 const ECOM_SALESMAN_TOKENS = new Set(["TRENDYOL", "NOON"]);
 const STORE_VOUCHER_TOKENS = new Set(["RIYADH STORE SALES"]);
 
+export { ECOM_SALESMAN_TOKENS };
+
 function normalizeTeamToken(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }

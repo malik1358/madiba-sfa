@@ -29,6 +29,8 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
       salesman_name: "Ali",
       customer_code: "C1",
       item_code: "I1",
+      voucher_number: "RC/100",
+      local_import: "Local",
       sales_amount: 100,
       profit_amount: 30,
       quantity: 2,
@@ -40,6 +42,8 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
       salesman_name: "Ali",
       customer_code: "C1",
       item_code: "I1",
+      voucher_number: "RC/101",
+      local_import: "Local",
       sales_amount: 50,
       profit_amount: 10,
       quantity: 1,
@@ -63,6 +67,9 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
   assert.equal(february.sales_amount, 150);
   assert.equal(february.profit_amount, 40);
   assert.equal(february.quantity, 3);
+  assert.equal(february.cash_sales_amount, 150);
+  assert.equal(february.credit_sales_amount, 0);
+  assert.equal(february.local_sales_amount, 150);
   assert.equal(february.line_count, 2);
 });
 
@@ -90,6 +97,7 @@ test("serialized cube round-trips compact keys", () => {
   assert.equal(restored.facts.reduce((sum, row) => sum + row.local_sales_amount, 0), 40);
   assert.equal(restored.facts.reduce((sum, row) => sum + row.import_sales_amount, 0), 60);
   assert.equal(restored.facts.reduce((sum, row) => sum + row.unclassified_origin_sales_amount, 0), 0);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.sales_adjustments_amount, 0), -15);
 });
 
 test("cube facts produce the same yearly totals as raw invoice lines", () => {
@@ -147,6 +155,7 @@ test("cube rebuilds when it is older than the last sales upload or missing live 
       local_sales_amount: 0,
       import_sales_amount: 0,
       unclassified_origin_sales_amount: 100,
+      sales_adjustments_amount: 0,
     }],
   }, { liveHasProfit: true, lastImportAt: "2026-09-12T08:04:27.376Z" }), false);
 });

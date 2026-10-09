@@ -65,7 +65,7 @@ test("buildCollectionDaySummary matches SM001-style day narrative", () => {
   const joined = summary.lines.join("\n");
   assert.match(joined, /Visited 10 customer/);
   assert.match(joined, /Started at 12 pm and till 1:45 pm visited 4 customer/);
-  assert.match(joined, /collection only from 1 customer of 3,625 SAR/);
+  assert.match(joined, /collection only from 1 customer of 3,625 ﷼/);
   assert.match(joined, /Between 2:30 pm to 7:30 pm visited 2 customer/);
   assert.match(joined, /went to Kharj/);
   assert.match(joined, /In Kharj visited 3 customer/);
@@ -73,7 +73,7 @@ test("buildCollectionDaySummary matches SM001-style day narrative", () => {
   assert.match(joined, /Came back to Riyadh and visited 1 customer/);
   assert.match(joined, /Total 10 visit/);
   assert.match(joined, /2 successful collection/);
-  assert.match(joined, /4,625 SAR collected/);
+  assert.match(joined, /4,625 ﷼ collected/);
 });
 
 test("buildCollectionDaySummary includes lunch break when provided", () => {
@@ -304,7 +304,7 @@ test("buildCollectionDaySummary sorts idle with visits and uses last visit inste
   assert.match(joined, /Logout at 8:23 pm/);
   assert.doesNotMatch(joined, /11:59/);
   assert.doesNotMatch(joined, /lunch was not marked/);
-  assert.match(joined, /4,700 SAR collected/);
+  assert.match(joined, /4,700 ﷼ collected/);
 
   assert.match(joined, /At 11:31 am visited 1 customer/);
   assert.doesNotMatch(joined, /Started at 11:31 am and till 11:31 am/);
@@ -339,7 +339,7 @@ test("buildCollectionDaySummary uses field unique customers and collection by cu
 
   const joined = summary.lines.join("\n");
   assert.match(joined, /Visited 5 unique customer\(s\)/);
-  assert.match(joined, /Enjaz Gateway \(1497\): 575\.75 SAR collected/);
+  assert.match(joined, /Enjaz Gateway \(1497\): 575\.75 ﷼ collected/);
   assert.match(joined, /Bandar Est \(1084C\): no collection/);
   assert.equal(summary.stats.uniqueCustomers, 5);
 });
@@ -383,7 +383,7 @@ test("buildCollectionDaySummary includes posted order count and value", () => {
 
   const joined = summary.lines.join("\n");
   assert.match(joined, /No collection visits recorded/);
-  assert.match(joined, /Posted 4 order\(s\) totalling 12,500\.5 SAR/);
+  assert.match(joined, /Posted 4 order\(s\) totalling 12,500\.5 ﷼/);
   assert.equal(summary.stats.orderCount, 4);
   assert.equal(summary.stats.orderValue, 12500.5);
   assert.equal(summary.stats.newCustomerOrderCount, 4);

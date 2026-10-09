@@ -551,7 +551,10 @@ function emptyUserReport(userId, profile) {
   return {
     userId,
     userName: formatCollectorDisplayName(profile || {}),
-    homeLocation: hasGpsCoordinates(profile) ? {
+    homeLocation: hasGpsCoordinates({
+      latitude: profile?.home_latitude,
+      longitude: profile?.home_longitude,
+    }) ? {
       latitude: Number(profile.home_latitude),
       longitude: Number(profile.home_longitude),
     } : null,
@@ -573,14 +576,14 @@ async function loadProfilesById(admin, userIds, { includeActive = false } = {}) 
 
   const extra = includeActive ? ",is_active" : "";
   const full = `id,salesman_code,salesman_name,role,email,report_email,home_latitude,home_longitude${extra}`;
-  const fallback = `id,salesman_code,salesman_name,role,email,report_email${extra}`;
+  const fallback = `id,salesman_code,salesman_name,role,email${extra}`;
 
   let result = await admin.from("profiles").select(full).in("id", ids);
   if (result.error && isMissingSchemaColumn(result.error)) {
-    result = await admin.from("profiles").select(fallback).in("id", ids);
+    result = await admin.from("profiles").select(`id,salesman_code,salesman_name,role,email,report_email${extra}`).in("id", ids);
   }
   if (result.error && isMissingSchemaColumn(result.error)) {
-    result = await admin.from("profiles").select(`id,salesman_code,salesman_name,role,email${extra}`).in("id", ids);
+    result = await admin.from("profiles").select(fallback).in("id", ids);
   }
   if (result.error) throw result.error;
   return result.data || [];

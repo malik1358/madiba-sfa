@@ -13,9 +13,9 @@ import {
 } from "./salesBiCube.js";
 
 const SALES_SELECTS = [
-  "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,local_import,abc_class",
-  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,local_import,abc_class",
-  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type",
+  "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_number,reference,voucher_type,local_import,abc_class",
+  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_number,reference,voucher_type,local_import,abc_class",
+  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_number,reference,voucher_type",
   "transaction_date,category,sales_amount,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name",
   "transaction_date,category,sales_amount",
   "transaction_date,sales_amount",
@@ -154,6 +154,7 @@ async function writeCubeToTable(admin, facts) {
       local_sales_amount,
       import_sales_amount,
       unclassified_origin_sales_amount,
+      sales_adjustments_amount,
       ...fact
     }) => fact);
     const { error } = await admin.from(SALES_BI_TABLE).insert(tableChunk);

@@ -1,9 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  BILL_MISMATCH_DAY_INCOMPLETE,
+  BILL_MISMATCH_MISSING,
+  BILL_MISMATCH_OTHER_CUSTOMER,
+  BILL_MISMATCH_REVERSED,
   buildOutstandingReconcileRow,
+  classifyOutstandingBillMismatch,
   normalizeOutstandingReconcileDataset,
   sortOutstandingReconcileRows,
+  summarizeOutstandingBillMismatches,
   summarizeOutstandingReconcileRows,
 } from "../app/lib/outstandingReconcile.js";
 import { buildOutstandingReconcileEmail } from "../app/lib/outstandingReconcileEmail.js";
@@ -140,4 +146,79 @@ test("signature ignores row order", () => {
     { customer_code: "A", difference: 1, invoice_gap_count: 0 },
   ]);
   assert.equal(left, right);
+});
+
+test("classifyOutstandingBillMismatch separates the three causes", () => {
+  // 1027C bill RNFD/345: that voucher belongs to customer 1211 in sales.
+  const otherCustomer = classifyOutstandingBillMismatch({
+    customerCode: "1027C",
+    billRef: "RNFD/345",
+    refOwners: ["1211"],
+  });
+  assert.equal(otherCustomer.mismatch_type, BILL_MISMATCH_OTHER_CUSTOMER);
+  assert.match(otherCustomer.note, /1211/);
+
+  // 1486 bill RNFD/414: the customer's own voucher, dropped as a credit-note reversal.
+  const reversed = classifyOutstandingBillMismatch({
+    customerCode: "1486",
+    billRef: "RNFD/414",
+    refOwners: ["1486"],
+    reversedInSfa: true,
+  });
+  assert.equal(reversed.mismatch_type, BILL_MISMATCH_REVERSED);
+
+  // 1572 bill RNFD/408: nowhere in the sales export.
+  const missing = classifyOutstandingBillMismatch({
+    customerCode: "1572",
+    billRef: "RNFD/408",
+    refOwners: [],
+  });
+  assert.equal(missing.mismatch_type, BILL_MISMATCH_MISSING);
+});
+
+test("a reversed flag without the customer owning the ref is still an owner mismatch", () => {
+  const result = classifyOutstandingBillMismatch({
+    customerCode: "1300",
+    billRef: "RNFD/900",
+    refOwners: ["1400"],
+    reversedInSfa: true,
+  });
+  assert.equal(result.mismatch_type, BILL_MISMATCH_OTHER_CUSTOMER);
+});
+
+test("a missing ref on an incomplete sales day points at the partial upload", () => {
+  // 1027C bill RNFD/346: 2026-08-31 kept only one salesman after a partial sales upload.
+  const result = classifyOutstandingBillMismatch({
+    customerCode: "1027C",
+    billRef: "RNFD/346",
+    refOwners: [],
+    salesDayIncomplete: true,
+  });
+  assert.equal(result.mismatch_type, BILL_MISMATCH_DAY_INCOMPLETE);
+  assert.match(result.note, /Re-upload a full sales export/);
+});
+
+test("summarizeOutstandingBillMismatches totals each cause", () => {
+  const summary = summarizeOutstandingBillMismatches([
+    { mismatch_type: BILL_MISMATCH_OTHER_CUSTOMER, pending_amount: 100 },
+    { mismatch_type: BILL_MISMATCH_OTHER_CUSTOMER, pending_amount: 50 },
+    { mismatch_type: BILL_MISMATCH_MISSING, pending_amount: 25 },
+  ]);
+  assert.equal(summary.count, 3);
+  assert.equal(summary.pending, 175);
+  assert.equal(summary.byType[BILL_MISMATCH_OTHER_CUSTOMER].count, 2);
+  assert.equal(summary.byType[BILL_MISMATCH_OTHER_CUSTOMER].pending, 150);
+  assert.equal(summary.byType[BILL_MISMATCH_REVERSED].count, 0);
+});
+
+test("normalizeOutstandingReconcileDataset keeps mismatch rows", () => {
+  const dataset = normalizeOutstandingReconcileDataset({
+    rows: [],
+    mismatchRows: [
+      { customer_code: "1572", bill_ref: "RNFD/408", pending_amount: "92126.5", mismatch_type: BILL_MISMATCH_MISSING },
+    ],
+  });
+  assert.equal(dataset.mismatchRows.length, 1);
+  assert.equal(dataset.mismatchRows[0].pending_amount, 92126.5);
+  assert.equal(dataset.mismatchSummary.count, 1);
 });

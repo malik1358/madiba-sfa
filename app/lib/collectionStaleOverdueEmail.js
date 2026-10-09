@@ -5,7 +5,6 @@ import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./p
 import {
   addKsaCalendarDays,
   getKsaDateString,
-  getKsaWeekdayIndexForDateString,
   isKsaOrderDay,
 } from "./workdayActivity.js";
 
@@ -277,10 +276,10 @@ export function filterCollectionStaleOverdueRowsForProfile(rows = [], profile = 
 }
 
 export function collectionStaleOverdueGroupKey(row = {}) {
-  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim().toUpperCase();
-  if (code) return `code:${code}`;
   const name = String(getCollectionSalesmanLabel(row) || "").trim().toUpperCase();
   if (name) return `name:${name}`;
+  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim().toUpperCase();
+  if (code) return `code:${code}`;
   return "unknown";
 }
 
@@ -586,7 +585,7 @@ export function buildCollectionStaleOverdueEmail({
   const totals = summarizeCollectionStaleOverdueRows(allRows);
   const subject = `Stale overdue collections ${date} — ${totals.customers} customers / ${groups.length} salesmen`;
   const link = String(reportUrl || "").trim();
-  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, and last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown in the table but do not count as a fresh visit. One table per salesman.`;
+  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, no near collection visit in the last ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days, and last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown in the table but do not count as fresh visits. One table per salesman.`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">

@@ -453,6 +453,7 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
 async function persistDraftOrder(admin, {
   userId,
   orderId,
+  requestId = "",
   customerCode,
   customerName,
   salesmanCode,
@@ -492,6 +493,7 @@ async function persistDraftOrder(admin, {
       created_by: userId,
       updated_at: nowIso,
     };
+    if (requestId) insertRow.request_id = requestId;
     if (preferredOrderNumber) {
       insertRow.order_number = preferredOrderNumber;
     }
@@ -503,6 +505,25 @@ async function persistDraftOrder(admin, {
       .insert(insertRow)
       .select("id,order_number")
       .single());
+
+    if (orderError && requestId && orderError.code === "23505") {
+      const { data: replayOrder, error: replayError } = await admin
+        .from("sales_orders")
+        .select("id,order_number,customer_code,status")
+        .eq("request_id", requestId)
+        .eq("created_by", userId)
+        .maybeSingle();
+      if (replayError) throw replayError;
+      if (replayOrder) {
+        if (replayOrder.customer_code !== resolvedCustomerCode) {
+          throw new Error("Order request belongs to another customer.");
+        }
+        newOrder = replayOrder;
+        orderError = null;
+      } else if (!/order_number/i.test(String(orderError.message || ""))) {
+        throw orderError;
+      }
+    }
 
     if (orderError && preferredOrderNumber && /duplicate|unique/i.test(String(orderError.message || ""))) {
       // Rare multi-device collision: keep creating the order, then allot the next
@@ -774,6 +795,10 @@ export async function POST(request) {
     const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
+    const requestId = String(body?.requestId || "").trim();
+    if (requestId && !/^[0-9a-f-]{36}$/i.test(requestId)) {
+      return NextResponse.json({ success: false, error: "Invalid order request id." }, { status: 400 });
+    }
     const clientOrderNumber = String(body?.orderNumber || body?.order_number || "").trim();
     const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
 
@@ -792,6 +817,23 @@ export async function POST(request) {
     });
 
     const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+    let replayOrder = null;
+    if (requestId) {
+      const { data, error } = await admin.from("sales_orders")
+        .select("id,order_number,status,customer_code")
+        .eq("request_id", requestId)
+        .eq("created_by", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      replayOrder = data;
+      if (replayOrder && replayOrder.customer_code !== customerCode) {
+        return NextResponse.json({ success: false, error: "Order request belongs to another customer." }, { status: 409 });
+      }
+      if (replayOrder?.status === "SUBMITTED") {
+        return NextResponse.json({ success: true, orderId: replayOrder.id,
+          orderNumber: replayOrder.order_number, status: replayOrder.status, action });
+      }
+    }
     const userMetadata = user.user_metadata || user.app_metadata || {};
     const scope = await resolveSalesScopeForUserId(admin, user.id);
 
@@ -867,7 +909,7 @@ export async function POST(request) {
       admin,
       customerCode: controlCustomerCode,
       lines: pricedLines,
-      excludeOrderId: requestedOrderId,
+      excludeOrderId: replayOrder?.id || requestedOrderId,
     });
     if (!quantityControlCheck.ok) {
       return NextResponse.json({
@@ -879,7 +921,8 @@ export async function POST(request) {
 
     const { orderId, orderNumber, customerCode: persistedCustomerCode, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,
-      orderId: requestedOrderId,
+      orderId: replayOrder?.id || requestedOrderId,
+      requestId,
       customerCode,
       customerName,
       salesmanCode,

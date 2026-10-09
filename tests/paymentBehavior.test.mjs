@@ -43,6 +43,29 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
+test("matchPaymentsFifo applies an advance receipt to the next customer invoice", () => {
+  const { allocations, invoices, unmatchedReceiptAmount } = matchPaymentsFifo(
+    [
+      {
+        transaction_date: "2026-04-02",
+        voucher_number: "NFD/334",
+        sales_amount: 86362.5,
+        category: "Building Material",
+      },
+    ],
+    [{ receipt_date: "2026-04-01", amount: 99316.88, vch_no: "537" }],
+  );
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].voucher_number, "NFD/334");
+  assert.ok(invoices[0].remaining <= 0.009);
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].receipt_date, "2026-04-01");
+  assert.equal(allocations[0].vch_no, "537");
+  assert.equal(allocations[0].days, 0);
+  assert.ok(unmatchedReceiptAmount <= 0.01);
+});
+
 test("buildPaymentBehavior blends only open invoices older than paid-only avg", () => {
   const behavior = buildPaymentBehavior({
     transactions: [
@@ -200,6 +223,43 @@ test("cash receipt leftover after RC goes to credit invoices on FIFO", () => {
   const nfd2 = invoices.find((row) => row.voucher_number === "NFD/2");
   assert.equal(Number(nfd1.remaining.toFixed(2)), 70);
   assert.equal(Number(nfd2.remaining.toFixed(2)), 575);
+});
+
+test("a receipt older than a cash invoice waits while older bills are still open", () => {
+  // Customer 1224 style: Rcpt 675 on 2026-04-20 must not jump to cash DC/0024 on 2026-09-19.
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-03-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-19", voucher_number: "DC/0024", sales_amount: 2000, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-04-20", amount: 800 }],
+  );
+
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].voucher_number, "NFD/1");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 800);
+  const cash = invoices.find((row) => row.voucher_number === "DC/0024");
+  assert.equal(Number(cash.remaining.toFixed(2)), 2300);
+});
+
+test("a receipt older than a cash invoice settles it when nothing older is pending", () => {
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-03-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-19", voucher_number: "DC/0024", sales_amount: 2000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-03-05", amount: 1150 },
+      { receipt_date: "2026-04-20", amount: 800 },
+    ],
+  );
+
+  // First receipt clears the older credit bill, so the April receipt can reach the cash sale.
+  assert.equal(allocations[0].voucher_number, "NFD/1");
+  assert.equal(allocations[1].voucher_number, "DC/0024");
+  assert.equal(Number(allocations[1].amount.toFixed(2)), 800);
+  const cash = invoices.find((row) => row.voucher_number === "DC/0024");
+  assert.equal(Number(cash.remaining.toFixed(2)), 1500);
 });
 
 test("second receipt after cash uses normal FIFO including unfinished cash", () => {
@@ -537,6 +597,81 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
+test("credit notes settle their referenced invoice before falling back to FIFO", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-03-07", voucher_number: "NFD/211", sales_amount: 3765, item_code: "ITEM-A", quantity: 10, category: "Paper" },
+      { transaction_date: "2026-03-07", voucher_number: "NFD/212", sales_amount: 4609, item_code: "ITEM-B", quantity: 10, category: "Paper" },
+      {
+        transaction_date: "2026-08-03",
+        voucher_number: "429",
+        voucher_type: "Credit Note",
+        reference: "NFD/211",
+        sales_amount: -1080,
+        item_code: "ITEM-A",
+        quantity: -4,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-08-03",
+        voucher_number: "430",
+        voucher_type: "Credit Note",
+        reference: "NFD/212",
+        sales_amount: -2488.86,
+        item_code: "ITEM-B",
+        quantity: -8,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-07-05", amount: 1500, vch_no: "1180" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-03-07", ref_no: "NFD/211", pending_amount: 1587.75 },
+      { invoice_date: "2026-03-07", ref_no: "NFD/212", pending_amount: 2438.16 },
+    ],
+    todayIso: "2026-09-30",
+  });
+
+  const invoice211 = ledger.invoices.find((row) => row.voucher_number === "NFD/211");
+  const invoice212 = ledger.invoices.find((row) => row.voucher_number === "NFD/212");
+  assert.equal(Number(invoice211.remaining.toFixed(2)), 1587.75);
+  assert.equal(Number(invoice212.remaining.toFixed(2)), 2438.16);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 4025.91);
+  assert.equal(Number(ledger.outstandingCompareTotals.tally_open.toFixed(2)), 4025.91);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
+  assert.deepEqual(invoice211.fifo_credit_notes.map((row) => row.voucher_number), ["429"]);
+  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["430"]);
+});
+
+test("Outstanding Compare uses FIFO open when CN display attachment differs", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "A-PAID", sales_amount: 100, item_code: "ITEM-A", quantity: 1, category: "Paper" },
+      { transaction_date: "2026-01-01", voucher_number: "B-OPEN", sales_amount: 100, item_code: "ITEM-B", quantity: 1, category: "Paper" },
+      {
+        transaction_date: "2026-01-03",
+        voucher_number: "CN-ORPHAN",
+        voucher_type: "Credit Note",
+        sales_amount: -50,
+        item_code: "ITEM-A",
+        quantity: 1,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-01-02", amount: 115, vch_no: "R1" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "A-PAID", pending_amount: 0 },
+      { invoice_date: "2026-01-01", ref_no: "B-OPEN", pending_amount: 57.5 },
+    ],
+    todayIso: "2026-01-10",
+  });
+
+  const openInvoice = ledger.invoices.find((row) => row.voucher_number === "B-OPEN");
+  assert.equal(Number(openInvoice.remaining.toFixed(2)), 57.5);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 57.5);
+  assert.equal(Number(Math.abs(ledger.outstandingCompareTotals.open_delta).toFixed(2)), 0);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
+});
+
 test("partial credit note and sales return appear in creditNotes table, not reversed", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -764,7 +899,7 @@ test("CN/ and SR/ voucher codes with positive amounts are sales returns not invo
   assert.ok(Number(ledger.totals.net_sales_incl_vat) < Number(ledger.totals.sales_incl_vat));
 });
 
-test("Tally vs computed outstanding includes credit notes in computed open", () => {
+test("Tally vs computed outstanding follows FIFO credit-note allocation", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       {
@@ -808,10 +943,18 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
 
   const row2106 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "2106");
   assert.ok(row2106);
-  assert.ok(row2106.credit_note_settled > 0);
-  assert.equal(Number(row2106.computed_open.toFixed(2)), 0);
+  assert.equal(row2106.credit_note_settled, 0);
+  assert.equal(Number(row2106.computed_open.toFixed(2)), 2587.5);
   assert.equal(Number(row2106.tally_open.toFixed(2)), 0);
-  assert.equal(row2106.has_gap, false);
+  assert.equal(row2106.has_gap, true);
+
+  const row1691 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "1691");
+  assert.ok(row1691);
+  assert.equal(Number(row1691.credit_note_settled.toFixed(2)), 2587.5);
+  assert.equal(Number(row1691.computed_open.toFixed(2)), 38.52);
+  assert.equal(Number(row1691.tally_open.toFixed(2)), 2626.02);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 2626.02);
+  assert.equal(Number(ledger.outstandingCompareTotals.tally_open.toFixed(2)), 2626.02);
 
   const cashGap = (ledger.tallyFifoDiscrepancies || []).find((row) => row.voucher_number === "2106");
   assert.ok(cashGap);

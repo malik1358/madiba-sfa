@@ -249,7 +249,7 @@ export default function SchemesPage() {
                       />
                     </label>
                     <label>
-                      Discount SAR / CTN
+                      Discount ﷼ / CTN
                       <input
                         className="moduleInput"
                         type="number"

@@ -29,14 +29,14 @@ const now = new Date("2026-09-07T10:00:00.000Z");
 const createdOverdue = new Date(now.getTime() - MISSING_INVOICE_GRACE_MS - 60 * 1000).toISOString();
 const createdRecent = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
-function submittedOrder(id, createdAt = createdOverdue, salesman = {}) {
+function submittedOrder(id, createdAt = createdOverdue) {
   return {
     id,
     order_number: `SO-${id}`,
     customer_code: `C${id}`,
     customer_name: `Customer ${id}`,
-    salesman_code: salesman.code || "SM001",
-    salesman_name: salesman.name || "Ahmed",
+    salesman_code: "SM001",
+    salesman_name: "Ahmed",
     status: "SUBMITTED",
     created_at: createdAt,
     total_value: 1500,
@@ -268,33 +268,6 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, waiting c
   assert.equal(message.waitingOverdueCollectionCount, 1);
   assert.equal(message.quotationWaitingPaymentCount, 1);
   assert.equal(message.pendingWithSalesmanCount, 1);
-});
-
-test("buildMissingInvoiceAlertEmail nests salesman tables inside each status", () => {
-  const message = buildMissingInvoiceAlertEmail({
-    now,
-    orders: [
-      submittedOrder(41, createdOverdue, { code: "SM002", name: "Osama" }),
-      submittedOrder(42, createdOverdue, { code: "SM001", name: "Ahmed" }),
-      submittedOrder(43, createdOverdue, { code: "SM002", name: "Osama" }),
-    ],
-    metaByOrder: new Map([
-      ["41", { status: "Pending for approval" }],
-      ["42", { status: "Pending for approval" }],
-      ["43", { status: "Waiting for credit application" }],
-    ]),
-  });
-
-  const approvalSection = message.html.indexOf(">Pending for approval (2)</h3>");
-  const creditSection = message.html.indexOf(">Waiting for credit application (1)</h3>");
-  const ahmedTable = message.html.indexOf("Ahmed (SM001) (1)</h4>");
-  const osamaTable = message.html.indexOf("Osama (SM002) (1)</h4>");
-  assert.ok(approvalSection < ahmedTable);
-  assert.ok(ahmedTable < osamaTable);
-  assert.ok(osamaTable < creditSection);
-  assert.match(message.html, /Ahmed \(SM001\) \(1\)[\s\S]*?SO-42/);
-  assert.match(message.html, /Osama \(SM002\) \(1\)[\s\S]*?SO-41/);
-  assert.match(message.text, /Pending for approval \(2\)[\s\S]*Ahmed \(SM001\) \(1\)[\s\S]*SO-42[\s\S]*Osama \(SM002\) \(1\)[\s\S]*SO-41/);
 });
 
 test("runMissingInvoiceEmailCycle skips daytime sends when the two reminder queues are empty", async () => {

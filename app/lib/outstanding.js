@@ -10,6 +10,10 @@ export function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+export function outstandingCustomerIdentityKey(customerCode, customerName) {
+  return [normalizeCode(customerCode), normalizeName(customerName)].join("|");
+}
+
 function normalizeComparableName(value) {
   return String(value || "")
     .trim()

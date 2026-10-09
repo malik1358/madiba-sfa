@@ -2,15 +2,15 @@
 
 ## Backups and Recovery
 
-Google Drive backup tooling is in `.github/workflows/google-drive-backup.yml`: database every six hours (03:17/09:17/15:17/21:17 KSA), full database/Storage/Git/configuration nightly (02:47 KSA). All uploads are age-encrypted and checksum-verified. It is **inactive until configured, merged to main, and enabled** with repository variable `BACKUP_ENABLED=true`; production backup secrets belong only in protected GitHub environment `production-backup`, never local env files. Cleanup defaults off. `backup-health.yml` opens GitHub issues for failed/overdue backups; configure email notifications and an external monitor for GitHub-wide outages. Setup, retention, quotas, key custody, limitations and the required isolated restore drill are in `docs/BACKUP_RECOVERY.md`. Supabase Free should not be treated as a managed backup service. No migration or app-runtime change.
+`.github/workflows/google-drive-backup.yml` schedules PostgreSQL backups every six hours and full database/Storage/Git/configuration backups nightly, encrypted to Google Drive. The workflow is inactive until configured and enabled with repository variable `BACKUP_ENABLED=true` on `main`; production credentials belong only in the protected `production-backup` GitHub environment, never local env files. Recovery archives omit secret values and Android signing material. Cleanup is opt-in and disabled by default. `backup-health.yml` alerts through GitHub issues on failed or overdue exports. Setup, Free-plan quota risks, retention, custody, and the isolated restore drill are documented in `docs/BACKUP_RECOVERY.md`. No database migration or app-runtime behavior change.
 
 ## Environments
 
-There is **no cloud staging environment**. Local PC covers development and staging, including its local Supabase backend. Cloud is production only. Do not use or resume the legacy `madiba-sfa-staging` Supabase cloud project for local work.
+There is **no permanent cloud staging environment**. Local PC covers development and staging. Cloud is production only.
 
 | Environment | Where | Git | Hosting | Database |
 | --- | --- | --- | --- | --- |
-| Local / staging | Developer PC | Working / feature / AI branch | `npm run dev` | Supabase running on the developer PC |
+| Local / staging | Developer PC | Working / feature / AI branch | `npm run dev` | Local / dev Supabase only |
 | Production | Cloud | `main` | Vercel production | Production Supabase |
 
 Never put production Supabase keys in `.env.local` or any local/dev config.
@@ -63,10 +63,10 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_SUPPLIER_ORDER_EMAIL_TO`, `DAILY_SUPPLIER_ORDER_EMAIL_CC` | Extra order digest |
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` sends only the combined digest |
 | `OUTSTANDING_NO_GPS_EMAIL_TO`, `OUTSTANDING_NO_GPS_EMAIL_CC` | Optional management digest |
+| `CUSTOMER_GPS_CHANGE_EMAIL_TO` | Optional GPS-change digest override; defaults to `malik@pinasz.com`, no recipient configuration required |
 | `OUTSTANDING_RECONCILE_EMAIL_TO`, `OUTSTANDING_RECONCILE_EMAIL_CC` | Extra Tally vs SFA difference recipients (added to the built-in list) |
 | `OUTSTANDING_RECONCILE_EMAIL_TEST_TO` | Send the difference report only to these addresses and skip the dedupe marker |
 | `OUTSTANDING_NO_GPS_EMAIL_SEND_TO_USERS` | `false` skips per-salesman mail |
-| `CUSTOMER_GPS_CHANGE_EMAIL_TO` | Optional GPS digest recipients; defaults to the requested `malik@pinasz.com` inbox |
 | `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` | Field access to the visit plan |
 | `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` | Default false |
 | `SALESMAN_VISIT_PLAN_EMAIL_SEND_TO_USERS` | Default false |
@@ -76,7 +76,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `ANDROID_APK_DOWNLOAD_URL` | Where the update prompt sends the user |
 | `CAPACITOR_SERVER_URL` | Optional. Android shell target. Default is production Vercel |
 
-GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `DAILY_RECEIPT_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
+GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
 
 ## Schedules
 
@@ -90,18 +90,26 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA, build snapshot then maybe email | `/api/cron/salesman-visit-plan-email` |
 | `daily-visit-report-email.yml` | `10 21 * * 0-3,6`; `0 3 * * 6` | 00:10 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-visit-report-email` |
 | `daily-salesman-resume-email.yml` | `15 21 * * 0-3,6`; `0 3 * * 6` | 00:15 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-salesman-resume-email` |
-| `daily-receipt-email.yml` | `30 21 * * *` | 00:30 KSA daily, previous Riyadh calendar day | `/api/cron/daily-receipt-email` |
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |
-| `customer-gps-change-email.yml` | `40 21 * * *` | 00:40 KSA daily, previous calendar day including Friday | `/api/cron/customer-gps-change-email` |
+| `customer-gps-change-email.yml` | `40 21 * * *` | 00:40 KSA every day, including Friday; previous completed KSA calendar day | `/api/cron/customer-gps-change-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |
+| `KPI Targets Email` | Manual dispatch only | Operator-selected month; no scheduled sends | `/api/cron/kpi-targets-email` |
+
+KPI target edits notify affected salespeople after the save and CC their complete reporting chain. To manually send a month to all active KPI-eligible salespeople, run **Actions → KPI Targets Email → Run workflow**, selecting `2026-10` for the October 2026 targets. The workflow uses the existing `CRON_SECRET` and production Vercel host; it adds no secrets or schedule.
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
 
-GPS change digest activation: deploy the app and workflow to `main`, keep SMTP/Resend configured in Vercel and the existing GitHub `CRON_SECRET` aligned with Vercel. No new schema migration is required if the GPS history migration is already applied; otherwise apply `sql/setup_customer_gps_history.sql` separately before enabling delivery. The recipient defaults to `malik@pinasz.com`, or set `CUSTOMER_GPS_CHANGE_EMAIL_TO` in Vercel. Workflow dispatch sends only the previous completed KSA day and does not force duplicate sends; authorized endpoint calls may select an older completed day via `?date=YYYY-MM-DD`. Missing SMTP or audit schema fails the job visibly. Daily claims can remain `sending` after a process interruption: verify actual provider delivery before manually releasing the affected `customer_gps_change_email:<date>` key. Normal provider failures release the claim for retry; confirmed delivery followed by a marker error keeps the claim to prevent repeats. SMTP/API ambiguous delivery cannot guarantee exactly-once receipt.
+### Customer GPS digest activation and recovery
+
+Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries and does not skip Friday.
+
+No new schema migration is required. Verify the existing `customer_gps_history` schema is present; if absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or `sql/setup_customer_gps_history.sql` separately in Supabase before using history/report/digest. Git deployment does not apply SQL.
+
+Each report date is protected by an atomic `system_settings` key `customer_gps_change_email:<date>`: `sending` with a claim `token` and `claimedAt`, followed after delivery by `sent` with `sentAt` and `changeCount`. Duplicate runs skip existing keys. Provider failure releases only the caller's own claim. An interrupted `sending` claim requires inspection of provider delivery before manual recovery; do not clear it blindly. If email sends but saving the sent marker fails, keep the claim to prevent duplicate delivery. There is no force-send bypass.
 
 ## Local development
 
@@ -112,7 +120,7 @@ npm run dev
 
 `npm run dev` uses `scripts/dev-server.mjs`. `npm run dev:clean` and `npm run dev:stop` are the other local helpers. Copy `.env.example` to `.env.local` and fill **local/dev Supabase** keys only. Never paste production Supabase URL or service-role keys into `.env.local`.
 
-Local/dev (any non-Vercel **server** runtime) **fails fast** unless `NEXT_PUBLIC_SUPABASE_URL` points to `localhost`, `127.0.0.1`, or `::1`. The production Supabase project (`ynmtlzyqvmurpmfretji`) has its own explicit rejection message. The guard lives in `app/lib/supabaseGuard.js`, runs from `instrumentation.js`, `getSupabaseClient()` on the server, `scripts/dev-server.mjs`, and `scripts/import-customer-locations.mjs`. Vercel production and preview deploys are not blocked (`VERCEL` / `VERCEL_ENV`). The browser never enforces this guard: those Vercel vars are not `NEXT_PUBLIC_*`, so they are absent from the client bundle; throwing there crashed production hydration after PR #315. Local next dev is blocked on the server before pages load. Emergency override only: `MADIBA_ALLOW_PRODUCTION_SUPABASE=1` (do not use casually).
+Local/dev (any non-Vercel **server** runtime) **fail fast** if `NEXT_PUBLIC_SUPABASE_URL` points at the production Supabase project (`ynmtlzyqvmurpmfretji`). The guard lives in `app/lib/supabaseGuard.js`, runs from `instrumentation.js`, `getSupabaseClient()` on the server, `scripts/dev-server.mjs`, and `scripts/import-customer-locations.mjs`. Vercel production and preview deploys are not blocked (`VERCEL` / `VERCEL_ENV`). The browser never enforces this guard: those Vercel vars are not `NEXT_PUBLIC_*`, so they are absent from the client bundle; throwing there crashed production hydration after PR #315. Local next dev is still blocked on the server before pages load. Emergency override only: `MADIBA_ALLOW_PRODUCTION_SUPABASE=1` (do not use casually).
 
 Customer location import: `npm run import:customer-locations` (`scripts/import-customer-locations.mjs`). It requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
 
@@ -129,7 +137,7 @@ Historical salesperson home-location review (read-only, local/dev Supabase only)
 node scripts/audit-salesman-home-locations.mjs
 ```
 
-The script refuses the production Supabase project, reports candidate clusters on six or more distinct KSA dates, and does not change any data. It also lists customer pins within 25 m of Osama's supplied coordinate for review.
+The script refuses the production Supabase project, reports candidate clusters on six or more distinct KSA dates, and does not change data. Review candidates before assigning inferred home points.
 
 There is no `npm test` script.
 
@@ -161,3 +169,4 @@ Do not commit keystores, `android/keystore.properties`, or paste server private 
 3. SQL applied to the **production** Supabase project (and to local/dev when developing the feature).
 4. GitHub secret changes only when a new cron URL is introduced. Existing workflows already default to the production host.
 5. No service-role key in the client bundle. Only `NEXT_PUBLIC_*` values are public, and those must still not be the service role.
+6. In every production-promotion summary, list every user-visible change included in the release and identify the PR, merge commit, and deployed build. Do not report only the latest requested item.

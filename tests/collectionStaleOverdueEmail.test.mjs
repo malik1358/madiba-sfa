@@ -171,6 +171,31 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
   assert.equal(groups.reduce((sum, group) => sum + group.rows.length, 0), 2);
 });
 
+test("groupCollectionStaleOverdueBySalesman merges names with different placeholder codes", () => {
+  const groups = groupCollectionStaleOverdueBySalesman([
+    {
+      customer_code: "C1",
+      customer_name: "Shop One",
+      salesman_name: "Moinudin Khaja",
+      salesman_code: "N/A",
+      outstanding_above_120: 4000,
+      total_due_amount: 4000,
+    },
+    {
+      customer_code: "C2",
+      customer_name: "Shop Two",
+      salesman_name: "Moinudin Khaja",
+      salesman_code: "NA",
+      outstanding_above_120: 17000,
+      total_due_amount: 17000,
+    },
+  ]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].salesmanName, "Moinudin Khaja");
+  assert.equal(groups[0].rows.length, 2);
+});
+
 test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows", () => {
   const visitByCustomer = new Map([
     ["C1", { visitAt: "2026-09-05T09:00:00.000Z", isFar: true, nearVisitAt: "2026-08-01T09:00:00.000Z" }],
@@ -183,29 +208,14 @@ test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows",
 
 test("recent collection enrichment skips FAR visits and Friday", async () => {
   const visits = [
-    {
-      customer_code: "C1",
-      saved_at: "2026-09-26T08:00:00Z",
-      latitude: 25.5,
-      longitude: 47.5,
-    },
-    {
-      customer_code: "C1",
-      saved_at: "2026-09-24T08:00:00Z",
-      latitude: 24.7,
-      longitude: 46.7,
-    },
-    {
-      customer_code: "C2",
-      saved_at: "2026-09-25T08:00:00Z",
-      latitude: 24.7,
-      longitude: 46.7,
-    },
+    { customer_code: "C1", saved_at: "2026-09-26T08:00:00Z", latitude: 25.5, longitude: 47.5 },
+    { customer_code: "C1", saved_at: "2026-09-24T08:00:00Z", latitude: 24.7, longitude: 46.7 },
+    { customer_code: "C2", saved_at: "2026-09-25T08:00:00Z", latitude: 24.7, longitude: 46.7 },
   ];
   const query = {
     rangeStart: 0,
     select() { return this; },
-    in() { return this; },
+    or() { return this; },
     gte() { return this; },
     lte() { return this; },
     order() { return this; },
@@ -224,6 +234,98 @@ test("recent collection enrichment skips FAR visits and Friday", async () => {
 
   assert.equal(first.last_near_collection_visit_at, "2026-09-24T08:00:00.000Z");
   assert.equal(second.last_near_collection_visit_at, "");
+});
+
+test("recent Sep 27 collection under a C-suffixed account code excludes the numeric due code", async () => {
+  const queryCalls = [];
+  const query = {
+    select() { return this; },
+    gte(column, value) { queryCalls.push(["gte", column, value]); return this; },
+    lte(column, value) { queryCalls.push(["lte", column, value]); return this; },
+    order() { return this; },
+    range() { return this; },
+    then(resolve, reject) {
+      return Promise.resolve({
+        data: [{
+          customer_code: "1316C",
+          saved_at: "2026-09-27T08:00:00Z",
+          latitude: 24.7,
+          longitude: 46.7,
+        }],
+        error: null,
+      }).then(resolve, reject);
+    },
+  };
+  const row = {
+    customer_code: "1316",
+    customer_name: "Abdullah Salmeen Awad Al-Awathani Company",
+    latitude: 24.7,
+    longitude: 46.7,
+    outstanding_61_90: 100,
+    last_visit_without_order_at: "2026-09-01T08:00:00Z",
+  };
+  const visits = await loadLastNearCollectionVisitByCustomer(
+    { from: () => query },
+    [row],
+    "2026-09-29",
+  );
+  const [enriched] = attachLastNearCollectionVisit([row], visits);
+
+  assert.equal(enriched.last_near_collection_visit_at, "2026-09-27T08:00:00.000Z");
+  assert.equal(isCollectionStaleOverdueRow(enriched, { todayKey: "2026-09-29" }), false);
+  assert.equal(queryCalls.find(([method]) => method === "gte")[2], "2026-09-26T21:00:00.000Z");
+});
+
+test("recent FAR Sep 27 collection remains in the digest and is labelled FAR", async () => {
+  const query = {
+    select() { return this; },
+    gte() { return this; },
+    lte() { return this; },
+    order() { return this; },
+    range() { return this; },
+    then(resolve, reject) {
+      return Promise.resolve({
+        data: [{
+          customer_code: "1316C",
+          saved_at: "2026-09-27T08:00:00Z",
+          latitude: 25.5,
+          longitude: 47.5,
+        }],
+        error: null,
+      }).then(resolve, reject);
+    },
+  };
+  const sourceRow = {
+    customer_code: "1316",
+    customer_name: "Customer 1316",
+    latitude: 24.7,
+    longitude: 46.7,
+    outstanding_61_90: 100,
+    last_visit_without_order_at: "2026-09-01T08:00:00Z",
+    latest_collection: { saved_at: "2026-09-27T08:00:00Z" },
+  };
+  const visitMetadata = await loadLastNearCollectionVisitByCustomer(
+    { from: () => query },
+    [sourceRow],
+    "2026-09-29",
+  );
+  assert.deepEqual([...visitMetadata.latestVisitByCustomer], [["1316", {
+    saved_at: "2026-09-27T08:00:00Z",
+    latitude: 25.5,
+    longitude: 47.5,
+  }]]);
+  const [dueRow] = attachLastNearCollectionVisit([sourceRow], visitMetadata);
+
+  assert.equal(dueRow.last_near_collection_visit_at, "");
+  assert.equal(isCollectionStaleOverdueRow(dueRow, { todayKey: "2026-09-29" }), true);
+  assert.equal(dueRow.latest_collection.latitude, 25.5);
+
+  const email = buildCollectionStaleOverdueEmail({
+    date: "2026-09-29",
+    groups: [{ salesmanName: "Test", rows: [dueRow] }],
+  });
+  assert.match(email.html, /2026-09-27/);
+  assert.match(email.html, /FAR/);
 });
 
 test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {
@@ -327,6 +429,7 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
 
   assert.match(message.subject, /2 customers/);
   assert.match(message.html, /Stale overdue collections/);
+  assert.match(message.html, /no near collection visit in the last 3 working days/);
   assert.match(message.html, /Parvez \(S01\)/);
   assert.match(message.html, /Sara \(S02\)/);
   assert.match(message.html, /Recv 8d/);

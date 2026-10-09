@@ -136,7 +136,7 @@ When `outstanding_customerwise_dataset_v1` contains invoices or rows, that JSON 
 | `price_catalog_cache` | What `/api/pricing/cache` reads. |
 | `price_catalog_snapshots` | Dump written by price sync. `price_map` jsonb. |
 | `item_price_history` | `item_code`, `region` default `riyadh`, `price`, `recorded_at`, `source` default `price_sync`. |
-| `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `local_item_sales_target`, `other_sales_target`, `updated_by`. Apply `20261009120000_kpi_targets_local_item_sales.sql` in Supabase before saving Local item sales targets. |
+| `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `updated_by`. |
 | `recommendations`, `recommendation_results` | Suggestion engine tables from the baseline schema. |
 
 Schemes and quantity limits are settings, not tables:

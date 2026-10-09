@@ -12,7 +12,7 @@ import {
 import { isFarFromCustomer } from "./customerLocation.js";
 import { extractGpsFromVisitLocation } from "./outstandingNoGps.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
-import { resolveCustomerAccountCode } from "./outstanding.js";
+import { customerAccountCodesMatch, resolveCustomerAccountCode } from "./outstanding.js";
 import {
   getKsaDateString,
   getKsaWeekdayIndex,
@@ -292,11 +292,26 @@ export async function enrichDueCustomersWithVisitWithoutOrder(admin, rows = []) 
 export function attachLastNearCollectionVisit(rows = [], visitByCustomer = new Map()) {
   return (rows || []).map((row) => {
     let visitAt = "";
+    let latestVisit = null;
     customerCodeAliases(row?.customer_code).forEach((alias) => {
       visitAt = laterIso(visitAt, visitByCustomer.get(alias));
+      const candidate = visitByCustomer.latestVisitByCustomer?.get(alias);
+      if (candidate && (!latestVisit || Date.parse(candidate.saved_at) > Date.parse(latestVisit.saved_at))) {
+        latestVisit = candidate;
+      }
     });
+    const queueLatestAt = Date.parse(row?.latest_collection?.saved_at || "");
+    const scannedLatestAt = Date.parse(latestVisit?.saved_at || "");
+    const latestCollection = latestVisit && queueLatestAt === scannedLatestAt
+      ? {
+        ...row?.latest_collection,
+        latitude: latestVisit.latitude,
+        longitude: latestVisit.longitude,
+      }
+      : row?.latest_collection;
     return {
       ...row,
+      latest_collection: latestCollection,
       recent_collection_visits_checked: true,
       last_near_collection_visit_at: laterIso(row?.last_near_collection_visit_at, visitAt),
     };
@@ -305,54 +320,59 @@ export function attachLastNearCollectionVisit(rows = [], visitByCustomer = new M
 
 export async function loadLastNearCollectionVisitByCustomer(admin, rows = [], todayKey = getKsaDateString()) {
   const latestNearByCode = new Map();
-  const customerGpsByCode = new Map();
-  const codes = [...new Set((rows || []).flatMap((row) => {
-    const aliases = customerCodeAliases(row?.customer_code);
-    const gps = { latitude: row?.latitude, longitude: row?.longitude };
-    aliases.forEach((alias) => customerGpsByCode.set(alias, gps));
-    return aliases;
-  }).filter(Boolean))];
-  if (!codes.length || typeof admin?.from !== "function") return latestNearByCode;
+  latestNearByCode.latestVisitByCustomer = new Map();
+  if (!rows.length || typeof admin?.from !== "function") return latestNearByCode;
 
   const startKey = recentCollectionVisitWindowStart(todayKey);
   const { startIso } = ksaDayBounds(startKey);
   const { endIso } = ksaDayBounds(todayKey);
   const pageSize = 1000;
 
-  for (const batch of chunk(codes, 80)) {
-    let offset = 0;
-    while (true) {
-      const { data, error } = await admin
-        .from("collection_visits")
-        .select("customer_code,saved_at,latitude,longitude")
-        .in("customer_code", batch)
-        .gte("saved_at", startIso)
-        .lte("saved_at", endIso)
-        .order("saved_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
-      if (error) {
-        const message = String(error?.message || error?.details || "").toLowerCase();
-        if (error?.code === "42P01" || message.includes("does not exist")) return latestNearByCode;
-        throw error;
-      }
+  let offset = 0;
+  while (true) {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select("customer_code,saved_at,latitude,longitude")
+      .gte("saved_at", startIso)
+      .lte("saved_at", endIso)
+      .order("saved_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) {
+      const message = String(error?.message || error?.details || "").toLowerCase();
+      if (error?.code === "42P01" || message.includes("does not exist")) return latestNearByCode;
+      throw error;
+    }
 
-      const visits = Array.isArray(data) ? data : [];
-      visits.forEach((visit) => {
-        const customerCode = normalizeCustomerCode(visit?.customer_code);
-        const visitAt = String(visit?.saved_at || "").trim();
-        if (!customerCode || !visitAt || !isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
+    const visits = Array.isArray(data) ? data : [];
+    visits.forEach((visit) => {
+      const customerCode = normalizeCustomerCode(visit?.customer_code);
+      const visitAt = String(visit?.saved_at || "").trim();
+      if (!customerCode || !visitAt) return;
+      (rows || []).forEach((row) => {
+        if (!customerAccountCodesMatch(row?.customer_code, customerCode)) return;
+        customerCodeAliases(row?.customer_code).forEach((alias) => {
+          const previous = latestNearByCode.latestVisitByCustomer.get(alias);
+          if (!previous || Date.parse(visitAt) > Date.parse(previous.saved_at)) {
+            latestNearByCode.latestVisitByCustomer.set(alias, {
+              saved_at: visitAt,
+              latitude: visit?.latitude,
+              longitude: visit?.longitude,
+            });
+          }
+        });
+        if (!isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
         if (isFarFromCustomer(
           { latitude: visit?.latitude, longitude: visit?.longitude },
-          customerGpsByCode.get(customerCode) || null,
+          { latitude: row?.latitude, longitude: row?.longitude },
         )) return;
-        customerCodeAliases(customerCode).forEach((alias) => {
+        customerCodeAliases(row?.customer_code).forEach((alias) => {
           latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
         });
       });
+    });
 
-      if (visits.length < pageSize) break;
-      offset += pageSize;
-    }
+    if (visits.length < pageSize) break;
+    offset += pageSize;
   }
 
   return latestNearByCode;

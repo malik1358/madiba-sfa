@@ -81,28 +81,6 @@ test("customer-history cache is exposed with invalidate/subscribe helpers", asyn
   assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v5");
 });
 
-test("the global Refresh button also clears history/outstanding/collection caches, not just the mobile snapshot", async () => {
-  const source = await import("node:fs").then((fs) => (
-    fs.readFileSync(new URL("../app/components/GlobalAppStatus.jsx", import.meta.url), "utf8")
-  ));
-  const refreshFn = source.split("async function refreshDeviceData")[1]?.split("\n\n")[0] || "";
-  assert.match(refreshFn, /await invalidateOutstandingCache\(\)/);
-  assert.match(refreshFn, /await invalidateCustomerHistoryCache\(\)/);
-  assert.match(refreshFn, /await invalidateCollectionQueuesForUser\(\)/);
-  assert.match(refreshFn, /await ensureMobileSnapshotFresh/);
-});
-
-test("Customer Audit always revalidates history from the network, never a silently-fresh 24h cache", async () => {
-  const hookSource = await import("node:fs").then((fs) => (
-    fs.readFileSync(new URL("../app/management/customer-audit/hooks/useCustomerData.js", import.meta.url), "utf8")
-  ));
-  const cacheSource = await import("node:fs").then((fs) => (
-    fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
-  ));
-  assert.match(hookSource, /fetchCustomerHistoryCached\(\s*session\.access_token,\s*scope,\s*customer\.customer_code,\s*\{[\s\S]*?revalidate: true,/);
-  assert.match(cacheSource, /revalidate: Boolean\(options\.revalidate\)/);
-});
-
 test("collection queue cache keeps v6 current and still reads legacy v5/v4 offline queues", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")

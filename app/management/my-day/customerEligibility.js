@@ -41,14 +41,19 @@ export function removeDuplicateNameCodeCustomers(customers = []) {
   const codedNameKeys = new Set();
 
   rows.forEach((customer) => {
-    const codeKey = normalizeCustomerNameKey(customer?.customer_code);
+    const code = String(customer?.customer_code || "").trim();
+    const codeKey = normalizeCustomerNameKey(code);
     const nameKey = normalizeCustomerNameKey(customer?.customer_name);
-    if (codeKey && nameKey && codeKey !== nameKey) codedNameKeys.add(nameKey);
+    if (code && !/\s/.test(code) && codeKey && nameKey && codeKey !== nameKey) {
+      codedNameKeys.add(nameKey);
+    }
   });
 
   return rows.filter((customer) => {
-    const codeKey = normalizeCustomerNameKey(customer?.customer_code);
+    const code = String(customer?.customer_code || "").trim();
+    const codeKey = normalizeCustomerNameKey(code);
     const nameKey = normalizeCustomerNameKey(customer?.customer_name);
-    return !codeKey || codeKey !== nameKey || !codedNameKeys.has(nameKey);
+    const isNameAsCode = /\s/.test(code) && codeKey && codeKey === nameKey;
+    return !isNameAsCode || !codedNameKeys.has(nameKey);
   });
 }

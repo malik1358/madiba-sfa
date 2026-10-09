@@ -358,13 +358,14 @@ function orderRow(order, meta, now) {
 
 function renderOrderTableRows(rows) {
   if (!rows.length) {
-    return `<tr><td colspan="6" style="border:1px solid #c5d4de;padding:8px;">No orders in this queue.</td></tr>`;
+    return `<tr><td colspan="7" style="border:1px solid #c5d4de;padding:8px;">No orders in this queue.</td></tr>`;
   }
   return rows.map((row, index) => {
     const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
     return `<tr style="background:${rowBg};">
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.order)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.customer)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.salesman)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.createdAt)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.age)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.value)}</td>
@@ -373,23 +374,14 @@ function renderOrderTableRows(rows) {
   }).join("");
 }
 
-function groupOrderRowsBySalesman(rows) {
-  const groups = new Map();
-  rows.forEach((row) => {
-    const salesman = row.salesman || "-";
-    if (!groups.has(salesman)) groups.set(salesman, []);
-    groups.get(salesman).push(row);
-  });
-  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-}
-
-function renderOrderTableHtml(salesman, rows) {
-  return `<h4 style="margin: 12px 0 6px; color: #1f5360;">${escapeHtml(salesman)} (${rows.length})</h4>
+function renderOrderTableHtml(title, rows) {
+  return `<h3 style="margin: 20px 0 8px; color: #0f4c5c;">${escapeHtml(title)} (${rows.length})</h3>
   <table style="border-collapse: collapse; font-size: 13px; width: 100%;">
     <thead>
       <tr style="background:#0f4c5c;color:#ffffff;">
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Order</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Customer</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Salesman</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Created (KSA)</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Waiting</th>
         <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c5c;">Value</th>
@@ -400,37 +392,20 @@ function renderOrderTableHtml(salesman, rows) {
   </table>`;
 }
 
-function renderStatusTableHtml(title, rows) {
-  const salesmanTables = groupOrderRowsBySalesman(rows)
-    .map(([salesman, salesmanRows]) => renderOrderTableHtml(salesman, salesmanRows))
-    .join("");
-  const emptyTable = rows.length
-    ? ""
-    : `<table style="border-collapse: collapse; font-size: 13px; width: 100%;"><tbody>${renderOrderTableRows(rows)}</tbody></table>`;
-  return `<h3 style="margin: 20px 0 8px; color: #0f4c5c;">${escapeHtml(title)} (${rows.length})</h3>${salesmanTables || emptyTable}`;
-}
-
 function renderOrderTableText(title, rows) {
-  const salesmanTables = groupOrderRowsBySalesman(rows).map(([salesman, salesmanRows]) => [
-    `  ${salesman} (${salesmanRows.length})`,
-    "  Order | Customer | Created (KSA) | Waiting | Value | Invoice status",
-    ...salesmanRows.map((row) => [
+  return [
+    `${title} (${rows.length})`,
+    "Order | Customer | Salesman | Created (KSA) | Waiting | Value | Invoice status",
+    ...rows.map((row) => [
       row.order,
       row.customer,
+      row.salesman,
       row.createdAt,
       row.age,
       row.value,
       row.invoiceStatus,
     ].join(" | ")),
-  ].join("\n"));
-  return [
-    `${title} (${rows.length})`,
-    ...(salesmanTables.length ? salesmanTables : ["  No orders in this queue."]),
   ].join("\n");
-}
-
-function renderStatusTableText(title, rows) {
-  return renderOrderTableText(title, rows);
 }
 
 export function buildMissingInvoiceAlertEmail({
@@ -472,29 +447,29 @@ const text = [
   "Orders rejected by management, stock unavailable, waiting-stock-transfer, invoice-made, test-customer orders, and orders created before September 2026 are excluded.",
   `Checked at (KSA): ${formatKsaDateTime(now)}`,
     "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows),
     "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows),
     "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows),
   "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows),
   "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows),
   "",
-  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows),
+  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows),
 ].join("\n");
 
 const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
 <h2 style="margin: 0 0 12px; color: #0f4c5c;">Orders pending invoice action after 1 hour</h2>
 <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "still needs" : "still need"} invoice action more than 1 hour after creation. This email includes <strong>Pending for approval</strong> (${approvalRows.length}), <strong>Waiting for credit application</strong> (${waitingCreditApplicationRows.length}), <strong>Pending for invoice creation</strong> (${invoiceRows.length}), <strong>Waiting for overdue collection</strong> (${overdueCollectionRows.length}), <strong>Quotation submitted waiting for the payment</strong> (${quotationRows.length}), and <strong>Pending with salesman</strong> (${pendingWithSalesmanRows.length}) in separate tables.</p>
 <p style="margin: 0 0 16px; color: #52616b; font-size: 13px;">Checked at (KSA): ${escapeHtml(formatKsaDateTime(now))}. Rejected, stock-unavailable, waiting-stock-transfer, invoice-made, test-customer, and pre-September-2026 orders are excluded.</p>
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows)}
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows)}
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows)}
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
-${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
+${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
 <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes while Pending for approval or Pending for invoice creation has orders. When both queues are empty, one summary is sent at midnight KSA.</p>
 </div>`;
 

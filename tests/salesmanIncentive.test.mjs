@@ -9,9 +9,10 @@ import {
   classifyIncentiveCategory,
   collectionIncentiveTier,
   computeGrowthIncentive,
-  incentiveHistoryStartDate,
   incentiveMonthRange,
+  isExcludedIncentiveSalesman,
   parseIncentiveMonth,
+  resolvePeakMonthlySales,
   shiftIncentiveMonth,
 } from "../app/lib/salesmanIncentive.js";
 
@@ -237,20 +238,150 @@ test("cash deals pay 0.20% on the whole invoice within 3 days and nothing after"
 test("computeGrowthIncentive pays 0.5% of a positive delta only", () => {
   assert.deepEqual(computeGrowthIncentive(1000, 800), {
     currentMonthSales: 1000,
-    previousMonthSales: 800,
+    benchmarkSales: 800,
     salesDelta: 200,
     growthIncentive: 1,
   });
   assert.equal(computeGrowthIncentive(800, 1000).growthIncentive, 0);
 });
 
-test("month helpers resolve the report window and history start", () => {
+test("resolvePeakMonthlySales takes the best earlier month, never the current one", () => {
+  const byMonth = new Map([
+    ["2026-01", 500],
+    ["2026-02", 900],
+    ["2026-03", 300],
+    ["2026-04", 5000],
+  ]);
+  assert.deepEqual(
+    resolvePeakMonthlySales(byMonth, "2026-04"),
+    { peakMonth: "2026-02", peakSales: 900, hasHistory: true },
+  );
+});
+
+test("resolvePeakMonthlySales floors at zero when there is no positive history", () => {
+  assert.deepEqual(
+    resolvePeakMonthlySales(new Map([["2026-03", -200]]), "2026-04"),
+    { peakMonth: "", peakSales: 0, hasHistory: true },
+  );
+  assert.deepEqual(
+    resolvePeakMonthlySales(new Map(), "2026-04"),
+    { peakMonth: "", peakSales: 0, hasHistory: false },
+  );
+});
+
+test("a salesman's first month earns no growth incentive", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([["S99", new Map([["2026-04", 400000]])]]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.salesman_code, "S99");
+  assert.equal(summary.has_sales_history, false);
+  assert.equal(summary.current_month_sales, 400000);
+  assert.equal(summary.peak_month_sales, 0);
+  assert.equal(summary.sales_delta, 0);
+  assert.equal(summary.growth_incentive, 0);
+});
+
+test("the month after the first one is measured against that first month", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-05",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S99", new Map([["2026-04", 400000], ["2026-05", 450000]])],
+    ]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.has_sales_history, true);
+  assert.equal(summary.peak_month, "2026-04");
+  assert.equal(summary.sales_delta, 50000);
+  assert.equal(summary.growth_incentive, 250);
+});
+
+test("computeGrowthIncentive pays nothing without history", () => {
+  assert.deepEqual(computeGrowthIncentive(1000, 0, { hasHistory: false }), {
+    currentMonthSales: 1000,
+    benchmarkSales: 0,
+    salesDelta: 0,
+    growthIncentive: 0,
+  });
+});
+
+test("growth incentive is measured against the all-time best month", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S01", new Map([["2025-06", 9000], ["2026-03", 1000], ["2026-04", 10000]])],
+    ]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.peak_month, "2025-06");
+  assert.equal(summary.peak_month_sales, 9000);
+  assert.equal(summary.sales_delta, 1000);
+  assert.equal(summary.growth_incentive, 5);
+});
+
+test("beating last month but not the record pays no growth incentive", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S01", new Map([["2025-06", 9000], ["2026-03", 1000], ["2026-04", 2000]])],
+    ]),
+  });
+  assert.equal(report.salesmen[0].growth_incentive, 0);
+  assert.equal(report.salesmen[0].sales_delta, -7000);
+});
+
+test("TRENDYOL and NOON are excluded from the incentive report", () => {
+  assert.equal(isExcludedIncentiveSalesman({ salesman_code: "TRENDYOL" }), true);
+  assert.equal(isExcludedIncentiveSalesman({ salesman_name: "noon" }), true);
+  assert.equal(isExcludedIncentiveSalesman({ salesman_code: "S01", salesman_name: "Ali" }), false);
+  assert.equal(isExcludedIncentiveSalesman({}), false);
+
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      transactions: MIXED_INVOICE.map((row) => ({
+        ...row,
+        salesman_code: "TRENDYOL",
+        salesman_name: "TRENDYOL",
+      })),
+      receipts: [{ receipt_date: "2026-04-01", amount: 230, vch_no: "R/9" }],
+    }],
+  });
+  assert.deepEqual(report.salesmen, []);
+  assert.deepEqual(report.rows, []);
+});
+
+test("a receipt settles an old invoice regardless of how old the bill is", () => {
+  const rows = buildCustomerIncentiveRows({
+    customerCode: "C001",
+    transactions: [salesLine({ transaction_date: "2023-01-10", voucher_number: "S/9" })],
+    receipts: [{ receipt_date: "2026-04-15", amount: 115, vch_no: "R/9" }],
+    fromDate: "2026-04-01",
+    toDate: "2026-04-30",
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].invoice_date, "2023-01-10");
+  assert.equal(rows[0].office_base, 100);
+  assert.equal(rows[0].incentive, 0);
+  assert.equal(rows[0].primary_tier, "late");
+});
+
+test("month helpers resolve the report window", () => {
   assert.equal(parseIncentiveMonth("2026-04-17"), "2026-04");
   assert.equal(parseIncentiveMonth("", "2026-02-09"), "2026-02");
   assert.throws(() => parseIncentiveMonth("nope"), /Invalid month/);
   assert.equal(shiftIncentiveMonth("2026-01", -1), "2025-12");
   assert.deepEqual(incentiveMonthRange("2026-02"), { from: "2026-02-01", to: "2026-02-28" });
-  assert.equal(incentiveHistoryStartDate("2026-04", 12), "2025-04-01");
 });
 
 test("buildSalesmanIncentiveReport combines collection and growth incentive", () => {
@@ -270,7 +401,6 @@ test("buildSalesmanIncentiveReport combines collection and growth incentive", ()
   });
 
   assert.equal(report.month, "2026-04");
-  assert.equal(report.previousMonth, "2026-03");
   assert.equal(report.monthStart, "2026-04-01");
   assert.equal(report.monthEnd, "2026-04-30");
   assert.equal(report.rows.length, 1);
@@ -279,15 +409,20 @@ test("buildSalesmanIncentiveReport combines collection and growth incentive", ()
   assert.equal(summary.salesman_code, "S01");
   assert.equal(summary.collection_incentive, 1.25);
   assert.equal(summary.current_month_sales, 1000);
-  assert.equal(summary.previous_month_sales, 200);
+  assert.equal(summary.peak_month, "2026-03");
+  assert.equal(summary.peak_month_sales, 200);
   assert.equal(summary.sales_delta, 800);
   assert.equal(summary.growth_incentive, 4);
   assert.equal(summary.total_incentive, 5.25);
   assert.equal(summary.tier_base.officeSuppliesFast, 100);
   assert.equal(summary.tier_base.otherFast, 100);
+  assert.equal(summary.tier_incentive.officeSuppliesFast, 0.25);
+  assert.equal(summary.tier_incentive.otherFast, 1);
+  assert.equal(summary.tier_incentive.late, 0);
   assert.equal(summary.eligible_base, 200);
   assert.equal(summary.late_base, 0);
   assert.equal(report.totals.total_incentive, 5.25);
+  assert.equal(report.totals.tier_incentive.otherFast, 1);
 });
 
 test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {
@@ -314,7 +449,38 @@ test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {
   const scoped = buildSalesmanIncentiveReport({ month: "2026-04", customers, salesmanCodes: ["S02"] });
   assert.deepEqual(scoped.salesmen.map((row) => row.salesman_code), ["S02"]);
   assert.equal(scoped.rows.length, 0);
-  assert.equal(scoped.salesmen[0].growth_incentive, 2.5);
+  // S02 only sells in the report month, so it is a first month and earns no growth.
+  assert.equal(scoped.salesmen[0].has_sales_history, false);
+  assert.equal(scoped.salesmen[0].growth_incentive, 0);
+});
+
+test("incentive report merges Thamer aliases from the cube and invoice rows", () => {
+  const invoice = salesLine({
+    transaction_date: "2026-03-02",
+    salesman_code: "THAMER",
+    salesman_name: "THAMER",
+  });
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      customerName: "Alpha Trading",
+      transactions: [invoice],
+      receipts: [{ receipt_date: "2026-04-01", amount: 115, vch_no: "R/9" }],
+    }],
+    monthlySalesBySalesman: new Map([
+      ["THAMER", new Map([["2026-03", 100], ["2026-04", 200]])],
+      ["THAMER MOHAMMAD AHMED QASEM", new Map([["2026-03", 150], ["2026-04", 300]])],
+      ["SM002", new Map([["2026-03", 50], ["2026-04", 100]])],
+    ]),
+  });
+
+  assert.equal(report.salesmen.length, 1);
+  assert.equal(report.salesmen[0].salesman_code, "SM002");
+  assert.equal(report.salesmen[0].salesman_name, "Thamer");
+  assert.equal(report.salesmen[0].current_month_sales, 600);
+  assert.equal(report.salesmen[0].peak_month_sales, 300);
+  assert.equal(report.rows[0].salesman_code, "SM002");
 });
 
 test("incentive report combines Thamer aliases for sales and collection rows", () => {
@@ -327,17 +493,18 @@ test("incentive report combines Thamer aliases for sales and collection rows", (
       transactions: [legacyInvoice],
       receipts: [{ receipt_date: "2026-04-01", amount: 115, vch_no: "R/9" }],
     }],
-    salesTransactions: [
-      { ...legacyInvoice, transaction_date: "2026-04-05", sales_amount: 100 },
-      { ...legacyInvoice, transaction_date: "2026-04-06", salesman_code: "THAMER MOHAMMAD AHMED QASEM", salesman_name: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 200 },
-      { ...legacyInvoice, transaction_date: "2026-03-05", salesman_code: "SM002", salesman_name: "Thamer", sales_amount: 50 },
-    ],
+    monthlySalesBySalesman: new Map([
+      ["THAMER", new Map([["2026-04", 100]])],
+      ["THAMER MOHAMMAD AHMED QASEM", new Map([["2026-04", 200]])],
+      ["SM002", new Map([["2026-03", 50]])],
+    ]),
   });
 
   assert.equal(report.salesmen.length, 1);
   assert.equal(report.salesmen[0].salesman_code, "SM002");
   assert.equal(report.salesmen[0].salesman_name, "Thamer");
   assert.equal(report.salesmen[0].current_month_sales, 300);
-  assert.equal(report.salesmen[0].previous_month_sales, 50);
+  assert.equal(report.salesmen[0].peak_month_sales, 50);
+  assert.equal(report.salesmen[0].sales_delta, 250);
   assert.equal(report.rows[0].salesman_code, "SM002");
 });

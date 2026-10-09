@@ -166,7 +166,7 @@ function PaymentTypeControl({ paymentType, onChange, pricingRegion, allowedRegio
       <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
         {pricingRegionLabel(pricingRegion)} prices
         {paymentType === "cash" ? " • cash discount applied when published" : ""}
-        {" • value discount applies when a SKU exceeds 5,000 SAR"}
+        {" • value discount applies when a SKU exceeds 5,000 ﷼"}
       </div>
     </div>
   );

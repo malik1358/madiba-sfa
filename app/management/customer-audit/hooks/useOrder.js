@@ -53,6 +53,7 @@ function buildOrderPayload({
   creditApprovalRequired = false,
   orderBlock = null,
   orderNumber = "",
+  requestId = "",
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -75,6 +76,7 @@ function buildOrderPayload({
     action,
     orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
     orderNumber: String(orderNumber || "").trim() || undefined,
+    requestId: requestId || undefined,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
     salesmanCode: orderMaker?.salesmanCode || "",
@@ -126,6 +128,9 @@ export function useOrder({
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const submitInFlight = useRef(false);
+  const orderRequestId = useRef(null);
+  const completedOrderIds = useRef(new Set());
   const [showOrderReview, setShowOrderReview] = useState(false);
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadedOrderStatus, setLoadedOrderStatus] = useState('DRAFT');
@@ -134,6 +139,10 @@ export function useOrder({
     () => Object.values(orderQuantities || {}).filter((qty) => Number(qty) > 0).length,
     [orderQuantities]
   );
+
+  useEffect(() => {
+    orderRequestId.current = null;
+  }, [selectedCustomer?.customer_code, editOrderId]);
 
   useEffect(() => {
     const orderEntryOpen = selectedQuantityCount > 0 || showOrderReview || savingOrder || submittingOrder;
@@ -147,6 +156,18 @@ export function useOrder({
   );
 
   const orderSummary = useMemo(() => buildOrderSummary(orderItems), [orderItems]);
+
+  const clearSubmittedOrder = useCallback((contextKey, orderId) => {
+    completedOrderIds.current.add(String(orderId));
+    if (draftContextRef.current !== contextKey) return;
+    setOrderQuantities({});
+    setDraftOrderId(null);
+    setDraftOrderNumber('');
+    setOrderHistory([]);
+    setLoadedOrderStatus('DRAFT');
+    setShowOrderReview(false);
+    orderRequestId.current = null;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -226,7 +247,7 @@ export function useOrder({
           order = draft;
         }
 
-        if (!order) {
+        if (!order || completedOrderIds.current.has(String(order.id))) {
           return;
         }
 
@@ -244,6 +265,7 @@ export function useOrder({
 
         if (cancelled) return;
         if (lineError) throw lineError;
+        if (completedOrderIds.current.has(String(order.id))) return;
 
         const loadedQuantities = {};
         (lines || []).forEach((line) => {
@@ -261,6 +283,7 @@ export function useOrder({
         if (cancelled) return;
         const historyPayload = await historyResponse.json().catch(() => ({}));
         if (cancelled) return;
+        if (completedOrderIds.current.has(String(order.id))) return;
         if (!historyResponse.ok || !historyPayload.success) {
           setOrderHistory([]);
         } else {
@@ -300,7 +323,8 @@ export function useOrder({
 
   const saveDraft = useCallback(async (options = {}) => {
     if (!selectedCustomer) return null;
-    const contextMatches = draftContextKey === orderContextKey(selectedCustomer, editOrderId);
+    const requestContextKey = orderContextKey(selectedCustomer, editOrderId);
+    const contextMatches = draftContextKey === requestContextKey;
     const currentDraftOrderId = contextMatches ? draftOrderId : null;
     const currentDraftOrderNumber = contextMatches ? draftOrderNumber : '';
     if (orderItems.length === 0) {
@@ -366,7 +390,8 @@ export function useOrder({
           accessToken: session.access_token,
         },
       );
-      setDraftOrderNumber(allottedOrderNumber);
+      if (draftContextRef.current === requestContextKey) setDraftOrderNumber(allottedOrderNumber);
+      orderRequestId.current ||= crypto.randomUUID();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -389,6 +414,7 @@ export function useOrder({
           capturedAt,
           platform,
           orderNumber: allottedOrderNumber,
+          requestId: orderRequestId.current,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -406,7 +432,7 @@ export function useOrder({
         const existingServerOrderId = currentDraftOrderId && !isPendingOrderId(currentDraftOrderId)
           ? currentDraftOrderId
           : null;
-        if (!currentDraftOrderId) {
+        if (!currentDraftOrderId && draftContextRef.current === requestContextKey) {
           setDraftOrderId(pendingOrderId);
         }
         // Only invent a local pending row for brand-new offline drafts. Re-saves of
@@ -445,13 +471,17 @@ export function useOrder({
       }
 
       const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
-      setDraftOrderId(payload.orderId);
-      setDraftOrderNumber(confirmedNumber);
+      if (draftContextRef.current === requestContextKey) {
+        setDraftOrderId(payload.orderId);
+        setDraftOrderNumber(confirmedNumber);
+      }
       if (confirmedNumber) {
         void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
       }
-      setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
-      setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
+      if (draftContextRef.current === requestContextKey) {
+        setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
+        setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
+      }
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
         setMessage('Draft order saved successfully.');
@@ -470,7 +500,9 @@ export function useOrder({
   }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
-    const contextMatches = draftContextKey === orderContextKey(selectedCustomer, editOrderId);
+    if (submitInFlight.current) return null;
+    const requestContextKey = orderContextKey(selectedCustomer, editOrderId);
+    const contextMatches = draftContextKey === requestContextKey;
     const currentDraftOrderId = contextMatches ? draftOrderId : null;
     const currentDraftOrderNumber = contextMatches ? draftOrderNumber : '';
     if (orderItems.length === 0) {
@@ -488,6 +520,7 @@ export function useOrder({
       return null;
     }
 
+    submitInFlight.current = true;
     setSubmittingOrder(true);
     setError('');
     setMessage('');
@@ -543,7 +576,8 @@ export function useOrder({
           accessToken: session.access_token,
         },
       );
-      setDraftOrderNumber(allottedOrderNumber);
+      if (draftContextRef.current === requestContextKey) setDraftOrderNumber(allottedOrderNumber);
+      orderRequestId.current ||= crypto.randomUUID();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -568,6 +602,7 @@ export function useOrder({
           creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
           orderBlock,
           orderNumber: allottedOrderNumber,
+          requestId: orderRequestId.current,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -585,7 +620,7 @@ export function useOrder({
         const existingServerOrderId = currentDraftOrderId && !isPendingOrderId(currentDraftOrderId)
           ? currentDraftOrderId
           : null;
-        if (!currentDraftOrderId) {
+        if (!currentDraftOrderId && draftContextRef.current === requestContextKey) {
           setDraftOrderId(pendingOrderId);
         }
         // Only invent a local pending row for brand-new offline submits. Re-submits of
@@ -611,8 +646,7 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
         }
-        setShowOrderReview(false);
-        setLoadedOrderStatus('SUBMITTED');
+        clearSubmittedOrder(requestContextKey, existingServerOrderId || pendingOrderId);
         return {
           orderId: existingServerOrderId || pendingOrderId,
           orderNumber: allottedOrderNumber,
@@ -626,18 +660,22 @@ export function useOrder({
       }
 
       const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
-      setDraftOrderId(payload.orderId);
-      setDraftOrderNumber(confirmedNumber);
+      if (draftContextRef.current === requestContextKey) {
+        setDraftOrderId(payload.orderId);
+        setDraftOrderNumber(confirmedNumber);
+      }
       if (confirmedNumber) {
         void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
       }
-      setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
-      setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
+      if (draftContextRef.current === requestContextKey) {
+        setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
+        setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
+      }
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
         setMessage(`Order #${confirmedNumber} submitted successfully.`);
       }
-      setShowOrderReview(false);
+      clearSubmittedOrder(requestContextKey, payload.orderId);
       return {
         orderId: payload.orderId,
         orderNumber: confirmedNumber,
@@ -647,9 +685,10 @@ export function useOrder({
       setError(friendlyErrorMessage(err, 'Unable to submit order.'));
       return null;
     } finally {
+      submitInFlight.current = false;
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

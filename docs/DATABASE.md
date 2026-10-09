@@ -130,7 +130,9 @@ When `outstanding_customerwise_dataset_v1` contains invoices or rows, that JSON 
 
 ## Catalog, prices, KPIs
 
-Product Catalogue reads existing `items_master`, `products.unit` and stock-take packing metadata only. No photo table or image-storage bucket is introduced. Image persistence is deferred to the separate receipt/image-storage project; current previews are page-only browser memory and do not write to any database. The proposed catalogue-photo migration was removed before application.
+Product Catalogue reads existing `items_master`, `products.unit` and stock-take packing metadata, with read-only packing descriptions from AM of the public KSA Price Tag Format sheet (product code B). No photo table or image-storage bucket is introduced. Image persistence is deferred to the separate receipt/image-storage project; current previews are page-only browser memory and do not write to any database. The proposed catalogue-photo migration was removed before application.
+
+Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` JSON now also contains `retailRegionPriceMaps`, keyed by `riyadh`, `dammam` and `jeddah`; existing wholesale `regionPriceMaps` remain unchanged. Retail prices are published by the existing Apps Script feed, not a new table or public copy of the private costing workbook. The offline pricing content hash includes retail maps. `order_pricing_meta:<id>` and the existing order-history JSON retain `pricingType` (`wholesale` or `retail`); legacy orders default to wholesale. `item_price_history` continues recording wholesale regional history only.
 
 | Table | Role |
 | --- | --- |

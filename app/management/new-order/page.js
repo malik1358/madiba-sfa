@@ -31,7 +31,7 @@ import {
   summarizePricedLines,
   normalizePaymentType,
   pricingRegionLabel,
-  regionPriceMapFor,
+  orderPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -67,6 +67,7 @@ import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
+import { hasCataloguePrice } from "../../lib/productCatalogue";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -133,7 +134,7 @@ function OrderTotalsPanel({ totals, actions, remark, language = "en" }) {
   );
 }
 
-function PaymentTypeControl({ paymentType, onChange, pricingRegion, allowedRegions, onRegionChange }) {
+function PaymentTypeControl({ paymentType, onChange, pricingRegion, pricingType = "wholesale", allowedRegions, onRegionChange }) {
   const canSelectRegion = Array.isArray(allowedRegions) && allowedRegions.length > 1;
 
   return (
@@ -166,9 +167,9 @@ function PaymentTypeControl({ paymentType, onChange, pricingRegion, allowedRegio
         </select>
       </label>
       <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
-        {pricingRegionLabel(pricingRegion)} prices
+        {pricingRegionLabel(pricingRegion)} {pricingType === "retail" ? "retail" : "wholesale"} prices
         {paymentType === "cash" ? " • cash discount applied when published" : ""}
-        {" • value discount applies when a SKU exceeds 5,000 ﷼"}
+        {" • value discount applies when a SKU reaches 5,000 ﷼"}
       </div>
     </div>
   );
@@ -624,11 +625,14 @@ export default function NewOrderPage() {
   const [auditExpandedCategories, setAuditExpandedCategories] = useState({});
   const [showTransactions, setShowTransactions] = useState(false);
   const [loadingCustomerHistory, setLoadingCustomerHistory] = useState(false);
+  const [historyCustomerCode, setHistoryCustomerCode] = useState("");
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [priceList, setPriceList] = useState({});
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
+  const [retailRegionPriceMaps, setRetailRegionPriceMaps] = useState({});
+  const [pricingType, setPricingType] = useState("wholesale");
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
@@ -780,19 +784,27 @@ export default function NewOrderPage() {
   );
 
   const regionPriceList = useMemo(
-    () => regionPriceMapFor(regionPriceMaps, pricingRegion, priceList),
-    [priceList, pricingRegion, regionPriceMaps]
+    () => orderPriceMapFor({ regionPriceMaps, retailRegionPriceMaps, priceMap: priceList }, pricingRegion, pricingType),
+    [priceList, pricingRegion, regionPriceMaps, retailRegionPriceMaps, pricingType]
   );
 
   const analytics = useAnalytics(transactions, receipts, {}, {
     customer: outstandingInfo.customer,
     customerInvoices: outstandingInfo.customerInvoices,
   });
+  const suggestionItems = useMemo(
+    () => catalogueMode ? mergedItemsMaster.filter((item) => hasCataloguePrice(regionPriceList[item.item_code])) : mergedItemsMaster,
+    [catalogueMode, mergedItemsMaster, regionPriceList],
+  );
+  const suggestionPeers = useMemo(
+    () => catalogueMode ? peerTransactions.filter((row) => hasCataloguePrice(regionPriceList[normalizeCode(row.item_code)])) : peerTransactions,
+    [catalogueMode, peerTransactions, regionPriceList],
+  );
   const quickOrderSuggestions = useQuickOrder({
-    analytics,
+    analytics: catalogueMode && historyCustomerCode !== selectedCustomerCode ? null : analytics,
     transactions,
-    peerTransactions,
-    itemMaster: mergedItemsMaster,
+    peerTransactions: suggestionPeers,
+    itemMaster: suggestionItems,
   });
 
   const quickOrderAllItems = useMemo(
@@ -844,6 +856,7 @@ export default function NewOrderPage() {
     const q = itemSearch.trim().toLowerCase();
 
     return mergedItemsMaster.filter((item) => {
+      if (catalogueMode && !hasCataloguePrice(regionPriceList[item.item_code])) return false;
       if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       return !q || (
@@ -852,7 +865,7 @@ export default function NewOrderPage() {
         String(item.category || "").toLowerCase().includes(q)
       );
     });
-  }, [mergedItemsMaster, categoryFilter, itemSearch]);
+  }, [mergedItemsMaster, categoryFilter, itemSearch, catalogueMode, regionPriceList]);
 
   const groupedItems = useMemo(() => {
     const map = new Map();
@@ -942,6 +955,8 @@ export default function NewOrderPage() {
     schemes,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
+    pricingType,
+    setPricingType,
     setError,
     setMessage,
     accessScope,
@@ -1068,6 +1083,7 @@ export default function NewOrderPage() {
         salesmanName: orderMaker.salesmanName,
         paymentType: normalizePaymentType(paymentType),
         pricingRegion,
+        pricingType,
         itemCount: orderSummary.itemCount,
         totalQuantity: orderSummary.totalQuantity,
         grandTotal: totals.amountExclVat,
@@ -1094,6 +1110,7 @@ export default function NewOrderPage() {
       pricedOrderLines,
       paymentType,
       pricingRegion,
+      pricingType,
       selectedCustomer,
       visibleOutstandingBuckets,
     ]
@@ -1543,6 +1560,7 @@ export default function NewOrderPage() {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
         setRegionPriceMaps(parsed.regionPriceMaps || {});
+        setRetailRegionPriceMaps(parsed.retailRegionPriceMaps || {});
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
@@ -1566,8 +1584,11 @@ export default function NewOrderPage() {
   }, [editOrderId, prefilledCustomer]);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadCustomerHistory() {
+      setHistoryCustomerCode("");
       if (!selectedCustomer) {
+        setLoadingCustomerHistory(false);
         setTransactions([]);
         setPeerTransactions([]);
         setReceipts([]);
@@ -1614,24 +1635,29 @@ export default function NewOrderPage() {
         }
 
         let payload = await loadHistory(false);
+        if (cancelled) return;
         if (!Array.isArray(payload.transactions) || payload.transactions.length === 0) {
           payload = await loadHistory(true);
         }
 
+        if (cancelled) return;
         setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
         setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
         setReceipts(Array.isArray(payload.receipts) ? payload.receipts : []);
+        setHistoryCustomerCode(selectedCustomer.customer_code);
       } catch (err) {
+        if (cancelled) return;
         setTransactions([]);
         setPeerTransactions([]);
         setReceipts([]);
         setError(err.message || "Unable to load customer details history.");
       } finally {
-        setLoadingCustomerHistory(false);
+        if (!cancelled) setLoadingCustomerHistory(false);
       }
     }
 
     loadCustomerHistory();
+    return () => { cancelled = true; };
   }, [accessScope, selectedCustomer, setError]);
 
   useEffect(() => {
@@ -1689,9 +1715,32 @@ export default function NewOrderPage() {
             onDecrease={decreaseQty}
             priceList={regionPriceList}
             pricingRegion={pricingRegion}
+            pricingType={pricingType}
+            onPricingType={setPricingType}
+            allowedPricingRegions={allowedPricingRegions}
+            onPricingRegion={setSelectedPricingRegion}
+            retailAvailable={Object.values(retailRegionPriceMaps[pricingRegion] || {}).some(hasCataloguePrice)}
+            paymentType={paymentType}
+            onPaymentType={setPaymentType}
+            cashDiscountMap={cashDiscountMap}
+            valueDiscountMap={valueDiscountMap}
+            schemeApplications={schemeApplications}
+            newItems={quickOrderSuggestions.newItems}
+            historyLoading={loadingCustomerHistory}
+            historyReady={Boolean(selectedCustomer && historyCustomerCode === selectedCustomer.customer_code)}
+            nearestCustomers={<NearestCustomerSuggestions
+              suggestions={nearestCustomerSuggestions.slice(0, 3)}
+              loading={nearestCustomersLoading}
+              locationUnavailable={nearestCustomersUnavailable}
+              onSelect={(customer) => selectCustomer(customer.customer_code, customer.customer_name)}
+              onRefresh={refreshNearestCustomers}
+              actionLabel={language === "ar" ? "اختيار" : "Select"}
+            />}
             language={language}
             selectedCustomer={selectedCustomer}
-            customers={customers.filter((customer) => customer.is_prospect || !isExcludedNewOrderCustomer(customer))}
+            customerSearch={customerSearch}
+            onCustomerSearch={setCustomerSearch}
+            customerSuggestions={customerNameSuggestions}
             onCustomer={selectCustomer}
             orderTotal={orderTotals.amountInclVat}
             selectedCount={orderSummary.itemCount}
@@ -1901,6 +1950,7 @@ export default function NewOrderPage() {
             paymentType={paymentType}
             onChange={setPaymentType}
             pricingRegion={pricingRegion}
+            pricingType={pricingType}
             allowedRegions={allowedPricingRegions}
             onRegionChange={setSelectedPricingRegion}
           />
@@ -2144,6 +2194,7 @@ export default function NewOrderPage() {
                 paymentType={paymentType}
                 onChange={setPaymentType}
                 pricingRegion={pricingRegion}
+                pricingType={pricingType}
                 allowedRegions={allowedPricingRegions}
                 onRegionChange={setSelectedPricingRegion}
               />

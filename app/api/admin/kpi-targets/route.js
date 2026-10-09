@@ -64,7 +64,6 @@ async function listFieldSalesmen(admin) {
   const { data, error } = await admin
     .from("profiles")
     .select("id,salesman_code,salesman_name,role,is_active")
-    .eq("is_active", true)
     .order("salesman_name");
 
   if (error) throw error;

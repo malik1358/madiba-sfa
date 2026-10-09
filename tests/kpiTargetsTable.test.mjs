@@ -36,6 +36,13 @@ test("KPI roster still excludes other collectors and profiles without a code", (
   assert.equal(isKpiTargetProfile(null), false);
 });
 
+test("inactive KPI exceptions stay visible without admitting other inactive profiles", () => {
+  assert.equal(isKpiTargetProfile({ salesman_code: "CL01", salesman_name: "Zia", role: "collector", is_active: false }), true);
+  assert.equal(isKpiTargetProfile({ salesman_code: "CL02", salesman_name: "Asrar Ahmed", role: "collector", is_active: false }), true);
+  assert.equal(isKpiTargetProfile({ salesman_code: "SM03", salesman_name: "Inactive salesman", role: "salesman", is_active: false }), false);
+  assert.equal(isKpiTargetProfile({ salesman_code: "CL05", salesman_name: "Inactive collector", role: "collector", is_active: false }), false);
+});
+
 const ahmed = {
   salesmanCode: "AHMED",
   salesmanName: "Ahmed",

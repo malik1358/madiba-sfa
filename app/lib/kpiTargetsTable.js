@@ -13,7 +13,9 @@ export function isKpiTargetProfile(profile) {
   const code = normalizeSalesmanCode(profile?.salesman_code);
   if (!code) return false;
   const name = String(profile?.salesman_name || "").trim().toUpperCase().replace(/\s+/g, " ");
-  return ["ZIA", "ASRAR", "ASRAR AHMED"].includes(name)
+  const namedException = ["ZIA", "ASRAR", "ASRAR AHMED"].includes(name);
+  if (profile?.is_active === false && !namedException) return false;
+  return namedException
     || !isCollectionOnlyAccess({ role: profile?.role, salesmanCode: code });
 }
 

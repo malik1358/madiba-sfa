@@ -47,7 +47,9 @@ export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString()
     const age = potentialTargetInvoiceAgeDays(invoice, todayKey);
     return age === null || age >= 60;
   })) return false;
-  const lastInvoiceDate = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
+  const lastInvoiceDate = parseOutstandingSheetDate(
+    row.last_order_invoice_date || row.last_invoice_date || row.latest_transaction_date,
+  );
   return Boolean(lastInvoiceDate && lastInvoiceDate < addKsaCalendarDays(todayKey, -15));
 }
 

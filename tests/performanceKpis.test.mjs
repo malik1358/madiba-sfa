@@ -278,10 +278,10 @@ test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
   assert.equal(pace.bySalesman.has("THAMER"), false);
 });
 
-test("KPI targets prefer canonical Thamer target and fall back to legacy aliases", async () => {
+test("KPI targets use the latest Thamer alias and canonical saves win when newer", async () => {
   const targetRows = [
     { salesman_code: "THAMER", target_month: "2026-09-01", office_supplies_sales_target: 100, local_item_sales_target: 10, other_sales_target: 50, updated_at: "2026-09-02T00:00:00.000Z" },
-    { salesman_code: "SM002", target_month: "2026-09-01", office_supplies_sales_target: 200, local_item_sales_target: 25, other_sales_target: 75, updated_at: "2026-09-01T00:00:00.000Z" },
+    { salesman_code: "SM002", target_month: "2026-09-01", office_supplies_sales_target: 0, local_item_sales_target: 0, other_sales_target: 0, updated_at: "2026-09-01T00:00:00.000Z" },
     { salesman_code: "THAMER MOHAMMAD AHMED QASEM", target_month: "2026-09-01", office_supplies_sales_target: 300, local_item_sales_target: 30, other_sales_target: 80, updated_at: "2026-09-03T00:00:00.000Z" },
   ];
   const targetAdmin = (rows) => ({
@@ -303,16 +303,19 @@ test("KPI targets prefer canonical Thamer target and fall back to legacy aliases
     reportDate: "2026-09-01",
   });
   assert.equal(targets.size, 1);
-  assert.equal(targets.get("SM002").targets.officeSupplies, 200);
-  assert.equal(targets.get("SM002").targets.localItemSales, 25);
+  assert.equal(targets.get("SM002").targets.officeSupplies, 300);
+  assert.equal(targets.get("SM002").targets.localItemSales, 30);
   assert.equal(targets.get("THAMER"), undefined);
 
-  const fallback = await loadKpiTargetsBySalesman(
-    targetAdmin(targetRows.filter((row) => row.salesman_code !== "SM002")),
+  const clearedCanonical = await loadKpiTargetsBySalesman(
+    targetAdmin([
+      ...targetRows,
+      { salesman_code: "SM002", target_month: "2026-09-01", office_supplies_sales_target: 0, local_item_sales_target: 0, other_sales_target: 0, updated_at: "2026-09-04T00:00:00.000Z" },
+    ]),
     { salesmanCodes: ["SM002"], reportDate: "2026-09-01" },
   );
-  assert.equal(fallback.get("SM002").targets.officeSupplies, 300);
-  assert.equal(fallback.get("SM002").targets.localItemSales, 30);
+  assert.equal(clearedCanonical.get("SM002").targets.officeSupplies, 0);
+  assert.equal(clearedCanonical.get("SM002").targets.localItemSales, 0);
 });
 
 test("splits monthly collection visits between FIFO credit and cash invoices", () => {

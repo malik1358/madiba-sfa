@@ -36,7 +36,7 @@ import {
 import { isVisitStatusCustomer, removeDuplicateNameCodeCustomers } from "./customerEligibility";
 import { daysSinceKsaDate } from "../../lib/latestCustomerVisits.js";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
-import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
+import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, customerOutstandingBreakdown, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
@@ -163,8 +163,8 @@ const PAGE_TEXT = {
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
   inactiveBlockedOutstanding: {
-    en: "Customers with outstanding cannot be marked inactive.",
-    ar: "لا يمكن تعطيل العملاء الذين لديهم مستحقات.",
+    en: "Cannot mark this customer inactive because an outstanding balance remains.",
+    ar: "لا يمكن تعطيل هذا العميل لوجود رصيد مستحق عليه.",
   },
   markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
   markingActive: { en: "Activating...", ar: "جاري التفعيل..." },
@@ -1526,8 +1526,36 @@ export default function MyDayPage({ mode = "default" } = {}) {
     const code = String(customer?.customer_code || "").trim();
     if (!code) return;
 
+    function inactiveOutstandingReason() {
+      const { total, buckets } = customerOutstandingBreakdown(customer);
+      const currency = new Intl.NumberFormat(language === "ar" ? "ar-SA" : "en-SA", {
+        style: "currency",
+        currency: "SAR",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const bucketLabels = {
+        "0-30": t("outstanding0To30"),
+        "31-60": t("outstanding30To60"),
+        "61-90": t("outstanding61To90"),
+        ">90": t("outstandingAbove90Column"),
+      };
+      const details = [];
+
+      if (total > 0) {
+        details.push(`${t("totalOutstanding")}: ${currency.format(total)}`);
+      }
+      if (buckets.length > 0) {
+        details.push(buckets
+          .map((bucket) => `${bucketLabels[bucket.key] || bucket.key}: ${currency.format(bucket.amount)}`)
+          .join(", "));
+      }
+
+      return [t("inactiveBlockedOutstanding"), ...details].join(" ");
+    }
+
     if (customerHasOutstandingBalance(customer)) {
-      setError(t("inactiveBlockedOutstanding"));
+      setError(inactiveOutstandingReason());
       return;
     }
 
@@ -1571,7 +1599,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         const apiError = String(saveResult?.error || saveResult?.message || "");
         throw new Error(
           apiError === CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR
-            ? t("inactiveBlockedOutstanding")
+            ? inactiveOutstandingReason()
             : (apiError || "Unable to mark customer inactive."),
         );
       }

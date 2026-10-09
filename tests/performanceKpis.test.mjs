@@ -26,6 +26,7 @@ import {
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
 import {
+  loadKpiTargetsBySalesman,
   loadPerformanceSnapshotsForSalesmen,
   loadSalesActuals,
   loadSalesPaceShares,
@@ -128,6 +129,41 @@ test("expected pace uses historical share of month sales by that date", () => {
   assert.equal(status.key, "behind");
   assert.equal(status.expected, 70);
   assert.match(status.label, /50\.0% behind pace/);
+});
+
+test("historical sales pace applies only to sales KPIs", () => {
+  const reportDate = "2026-10-01";
+  const todayIso = "2026-10-09";
+  const workdayPace = ksaWorkdayProgressRatio(todayIso) * 100;
+  const snapshot = buildPerformanceSnapshot({
+    reportDate,
+    todayIso,
+    paceShares: { 9: 0.7 },
+    actuals: {
+      officeSupplies: 50,
+      localItemSales: 50,
+      otherSales: 50,
+      collection: 50,
+      newCustomers: 5,
+      repeatCustomers: 5,
+    },
+    targets: {
+      officeSupplies: 100,
+      localItemSales: 100,
+      otherSales: 100,
+      collection: 100,
+      newCustomers: 10,
+      repeatCustomers: 10,
+    },
+  });
+  const expectedByKey = Object.fromEntries(snapshot.kpis.map((kpi) => [kpi.key, kpi.expected]));
+
+  for (const key of ["officeSupplies", "localItemSales", "otherSales", "totalSales"]) {
+    assert.equal(expectedByKey[key], 70, `${key} should use historical sales pace`);
+  }
+  for (const key of ["collection", "newCustomers", "repeatCustomers"]) {
+    assert.equal(expectedByKey[key], workdayPace, `${key} should use elapsed KSA workdays`);
+  }
 });
 
 test("expected pace ignores a 0% historical start and uses working days instead", () => {
@@ -240,6 +276,43 @@ test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
   assert.equal(pace.bySalesman.get("SM002")[8], 2 / 3);
   assert.equal(pace.bySalesman.get("SM002")[15], 1);
   assert.equal(pace.bySalesman.has("THAMER"), false);
+});
+
+test("KPI targets prefer canonical Thamer target and fall back to legacy aliases", async () => {
+  const targetRows = [
+    { salesman_code: "THAMER", target_month: "2026-09-01", office_supplies_sales_target: 100, local_item_sales_target: 10, other_sales_target: 50, updated_at: "2026-09-02T00:00:00.000Z" },
+    { salesman_code: "SM002", target_month: "2026-09-01", office_supplies_sales_target: 200, local_item_sales_target: 25, other_sales_target: 75, updated_at: "2026-09-01T00:00:00.000Z" },
+    { salesman_code: "THAMER MOHAMMAD AHMED QASEM", target_month: "2026-09-01", office_supplies_sales_target: 300, local_item_sales_target: 30, other_sales_target: 80, updated_at: "2026-09-03T00:00:00.000Z" },
+  ];
+  const targetAdmin = (rows) => ({
+    from: () => ({
+      select: () => {
+        const filters = [];
+        const query = {
+          eq: (column, value) => { filters.push((row) => row[column] === value); return query; },
+          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
+          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
+        };
+        return query;
+      },
+    }),
+  });
+
+  const targets = await loadKpiTargetsBySalesman(targetAdmin(targetRows), {
+    salesmanCodes: ["SM002"],
+    reportDate: "2026-09-01",
+  });
+  assert.equal(targets.size, 1);
+  assert.equal(targets.get("SM002").targets.officeSupplies, 200);
+  assert.equal(targets.get("SM002").targets.localItemSales, 25);
+  assert.equal(targets.get("THAMER"), undefined);
+
+  const fallback = await loadKpiTargetsBySalesman(
+    targetAdmin(targetRows.filter((row) => row.salesman_code !== "SM002")),
+    { salesmanCodes: ["SM002"], reportDate: "2026-09-01" },
+  );
+  assert.equal(fallback.get("SM002").targets.officeSupplies, 300);
+  assert.equal(fallback.get("SM002").targets.localItemSales, 30);
 });
 
 test("splits monthly collection visits between FIFO credit and cash invoices", () => {

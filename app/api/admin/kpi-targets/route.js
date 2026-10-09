@@ -3,10 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
 import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode, PERFORMANCE_KPI_LABELS } from "../../../lib/performanceKpis.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
-import { isKpiTargetProfile, isTeamTargetSalesmanCode, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
+import { isKpiTargetProfile, isTeamTargetSalesmanCode, mergeKpiTargetProfiles, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
 import { changedKpiTargetKeys } from "../../../lib/kpiTargetsEmail.js";
 import { runKpiTargetsEmailCycle } from "../../../lib/kpiTargetsEmailServer.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
+import { normalizeReportSalesmanCode } from "../../../lib/salesmanReportIdentity.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
@@ -68,7 +69,7 @@ async function listFieldSalesmen(admin) {
 
   if (error) throw error;
 
-  return (data || []).filter(isKpiTargetProfile);
+  return mergeKpiTargetProfiles((data || []).filter(isKpiTargetProfile));
 }
 
 async function attachBosses(admin, salesmen) {
@@ -190,7 +191,7 @@ export async function PUT(request) {
       const rawCode = row.salesmanCode || row.salesman_code;
       const salesmanCode = isTeamTargetSalesmanCode(rawCode)
         ? String(rawCode || "").trim().toUpperCase().replace(/\s+/g, " ")
-        : normalizeSalesmanCode(rawCode);
+        : normalizeReportSalesmanCode(rawCode);
       if (!salesmanCode) {
         throw new Error("Each row needs a salesman code.");
       }

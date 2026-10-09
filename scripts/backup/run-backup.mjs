@@ -319,9 +319,14 @@ export async function runBackup(config, options = {}) {
     await backupStage("Google Drive upload", () => rclone("copyto", encrypted, remoteFile, "--immutable", "--checksum"));
     await backupStage("Google Drive upload verification", async () => {
       const remoteStat = JSON.parse(await rclone("lsjson", remoteFile, "--stat", "--hash"));
-      if (remoteStat.Size !== (await stat(encrypted)).size
-        || remoteStat.Hashes?.MD5?.toLowerCase() !== await fileHash(encrypted, "md5")) {
-        throw new BackupDiagnosticError("Drive upload checksum/size verification failed; retention cleanup skipped.");
+      const localSize = (await stat(encrypted)).size;
+      const remoteMd5 = Object.entries(remoteStat.Hashes || {})
+        .find(([algorithm]) => algorithm.toLowerCase() === "md5")?.[1];
+      const sizeMatches = remoteStat.Size === localSize;
+      const md5Present = typeof remoteMd5 === "string";
+      const md5Matches = md5Present && remoteMd5.toLowerCase() === await fileHash(encrypted, "md5");
+      if (!sizeMatches || !md5Matches) {
+        throw new BackupDiagnosticError(`Drive upload checksum/size verification failed (size_match=${sizeMatches}, md5_present=${md5Present}, md5_match=${md5Matches}); retention cleanup skipped.`);
       }
     });
     console.log("Encrypted Drive upload verified.");

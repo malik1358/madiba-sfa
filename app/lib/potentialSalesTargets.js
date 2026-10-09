@@ -2,6 +2,17 @@ import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { parseOutstandingSheetDate, resolveInvoiceAgingDays } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
+function normalizeSalesmanIdentity(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function matchesSalesmanProfile(value, identitySet) {
+  const raw = String(value || "").trim();
+  if (identitySet.has(normalizeSalesmanIdentity(raw))) return true;
+  return [...raw.matchAll(/\(([^)]+)\)/g)]
+    .some((match) => identitySet.has(normalizeSalesmanIdentity(match[1])));
+}
+
 export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString() } = {}) {
   if (row.is_active === false) return false;
   const outstanding = Number(row.total_outstanding);
@@ -15,6 +26,23 @@ export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString()
   return Boolean(lastInvoiceDate && lastInvoiceDate < addKsaCalendarDays(todayKey, -15));
 }
 
+export function filterPotentialSalesTargetsForProfile(rows = [], profile = {}) {
+  const profileCode = normalizeSalesmanIdentity(profile.salesman_code);
+  const identities = new Set([profileCode, normalizeSalesmanIdentity(profile.salesman_name)].filter(Boolean));
+  return (rows || []).filter((row) => (
+    Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
+      .some((code) => normalizeSalesmanIdentity(code) === profileCode)
+    || matchesSalesmanProfile(row.salesman_code, identities)
+    || matchesSalesmanProfile(row.salesman_name, identities)
+  ));
+}
+
+export function daysSincePotentialSalesTargetInvoice(row = {}, todayKey = getKsaDateString()) {
+  const invoiceDate = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
+  if (!invoiceDate) return null;
+  return Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${invoiceDate}T00:00:00Z`)) / 86400000);
+}
+
 export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsaDateString() } = {}) {
   const targets = rows.filter((row) => isPotentialSalesTarget(row, { todayKey }))
     .sort((left, right) => String(left.last_invoice_date || left.latest_transaction_date)
@@ -25,7 +53,7 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
   const headers = ["Customer Code", "Customer", "City / Area", "Last Invoice", "Days Since Invoice", "Outstanding (SAR)"];
   const values = (row) => {
     const date = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
-    const days = Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) / 86400000);
+    const days = daysSincePotentialSalesTargetInvoice(row, todayKey);
     return [row.customer_code, row.customer_name, [row.city, row.area].filter(Boolean).join(" / ") || "-", date, days, money(row.total_outstanding)];
   };
   const text = [
@@ -44,5 +72,11 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
         || '<tr><td colspan="6">No qualifying customers.</td></tr>'}</tbody>
       <tfoot style="background:#0f4c5c;color:#ffffff;font-weight:700;"><tr><td colspan="5">Total (${targets.length} customers)</td><td style="text-align:right;">${money(total)} SAR</td></tr></tfoot>
     </table>`;
-  return { html, text, rows: targets, customerCount: targets.length, totalOutstanding: total };
+  return {
+    html,
+    text,
+    rows: targets.map((row) => ({ ...row, days_since_last_invoice: daysSincePotentialSalesTargetInvoice(row, todayKey) })),
+    customerCount: targets.length,
+    totalOutstanding: total,
+  };
 }

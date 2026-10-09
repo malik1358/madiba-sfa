@@ -51,6 +51,8 @@ const TEXT = {
   time: { en: "Time", ar: "الوقت" },
   userName: { en: "User name", ar: "اسم المستخدم" },
   customer: { en: "Customer", ar: "العميل" },
+  customerCode: { en: "Customer Code", ar: "رمز العميل" },
+  customers: { en: "customers", ar: "عملاء" },
   transaction: { en: "Transaction", ar: "المعاملة" },
   outcome: { en: "Outcome", ar: "النتيجة" },
   distanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
@@ -65,6 +67,16 @@ const TEXT = {
   },
   totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
   waitingTotalShort: { en: "Est. waiting total", ar: "إجمالي الانتظار التقديري" },
+  potentialSalesTargets: { en: "Potential Sales Target Customers", ar: "عملاء محتملون لزيادة المبيعات" },
+  potentialSalesTargetsHint: {
+    en: "Active customers with positive outstanding below SAR 15,000, all open invoices under 60 days, and no invoice in the last 15 days.",
+    ar: "العملاء النشطون الذين تقل مستحقاتهم عن 15,000 ريال، وجميع فواتيرهم المفتوحة أقل من 60 يوماً، ولم تصدر لهم فاتورة خلال آخر 15 يوماً.",
+  },
+  noPotentialSalesTargets: { en: "No qualifying customers.", ar: "لا يوجد عملاء مطابقون للشروط." },
+  potentialSalesTargetsUnavailable: { en: "Potential target customers could not be loaded.", ar: "تعذر تحميل العملاء المحتملين." },
+  daysSinceInvoice: { en: "Days Since Invoice", ar: "الأيام منذ آخر فاتورة" },
+  lastInvoiceDate: { en: "Last Invoice", ar: "آخر فاتورة" },
+  outstanding: { en: "Outstanding (SAR)", ar: "المستحق (ريال)" },
   map: { en: "Map", ar: "الخريطة" },
   openMap: { en: "Open", ar: "فتح" },
   noCustomerLocation: { en: "No customer location", ar: "لا موقع للعميل" },
@@ -770,6 +782,63 @@ export default function DailyVisitReportPage() {
 
           {!loading && report && (
             <>
+              {Array.isArray(report.potentialSalesTargets) ? (
+                <section className="moduleSection">
+                  <div className="moduleSectionHeader">
+                    <h2>{t("potentialSalesTargets")}</h2>
+                    <span>{report.potentialSalesTargets.length} {t("customers")}</span>
+                  </div>
+                  <p className="moduleHint">{t("potentialSalesTargetsHint")}</p>
+                  {report.potentialSalesTargets.length ? (
+                    <ExportableTable filename="potential-sales-target-customers" sheetName="Potential Targets" className="moduleTableWrap">
+                      <table className="moduleTable">
+                        <thead>
+                          <tr>
+                            <th>{t("customerCode")}</th>
+                            <th>{t("customer")}</th>
+                            {report.potentialTargetsIncludeSalesman ? <th>{t("userName")}</th> : null}
+                            <th>{t("area")}</th>
+                            <th>{t("lastInvoiceDate")}</th>
+                            <th>{t("daysSinceInvoice")}</th>
+                            <th>{t("outstanding")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.potentialSalesTargets.map((row) => (
+                            <tr key={row.customer_code}>
+                              <td>{row.customer_code}</td>
+                              <td>{row.customer_name}</td>
+                              {report.potentialTargetsIncludeSalesman ? <td>{row.salesman_name || row.salesman_code || "-"}</td> : null}
+                              <td>{[row.city, row.area].filter(Boolean).join(" / ") || "-"}</td>
+                              <td>{row.last_invoice_date || row.latest_transaction_date || "-"}</td>
+                              <td>{row.days_since_last_invoice ?? "-"}</td>
+                              <td style={{ textAlign: "right", background: "#dcfce7", fontWeight: 700 }}>
+                                {formatSplitMoney(row.total_outstanding)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <td
+                              colSpan={report.potentialTargetsIncludeSalesman ? 6 : 5}
+                              style={{ background: "#0f4c5c", color: "#ffffff", fontWeight: 700 }}
+                            >
+                              Total ({report.potentialSalesTargets.length} {t("customers")})
+                            </td>
+                            <td style={{ textAlign: "right", background: "#0f4c5c", color: "#ffffff", fontWeight: 700 }}>
+                              {formatSplitMoney(report.potentialSalesTargets.reduce((sum, row) => sum + Number(row.total_outstanding || 0), 0))}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </ExportableTable>
+                  ) : <p className="moduleHint">{t("noPotentialSalesTargets")}</p>}
+                </section>
+              ) : report.potentialSalesTargetsUnavailable ? (
+                <div className="moduleError" role="status">{t("potentialSalesTargetsUnavailable")}</div>
+              ) : null}
+
               <div className="moduleMetricGrid">
                 <section className="moduleMetricCard">
                   <span>{t("totalEntries")}</span>

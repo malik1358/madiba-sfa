@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-09** - My Day still showed a duplicate for Al-muntaj: a legacy row used the full customer name as both code and name beside coded account 1625, duplicating the same outstanding via name matching. Visit Status now hides only name-as-code rows with a coded same-name twin; distinct coded accounts and standalone name-only customers remain. Added regressions; no migration.
 - **2026-10-08** - My Day Visit Status now shows each customer's code in a separate bilingual column, making same-name accounts distinguishable. Sales and outstanding calculations are unchanged; no migration.
 - **2026-10-08** - My Day and Salesman Visit Plan now use the same latest-visit-by-anyone date for their visit-day columns, across field visit reports and collection visits. FAR visits are ignored using the shared customer-distance rule; accepted GPS pin updates remain qualifying visits. Both count KSA calendar days. My Day requests a fresh scoped customer payload; visit plan reflects its stored snapshot until rebuild. Added focused regressions; no migration.
 - **2026-10-07** - KPI target additions/edits now send each affected salesperson the full current-month KPI snapshot and CC every reporting-chain boss; unchanged saves do not send. Added a manual month-send workflow (October 2026 default), protected by the existing cron secret, for initial/monthly resend. No migration or new environment variable.

@@ -1,3 +1,5 @@
+import { normalizeCustomerNameKey } from "../../lib/customerCode.js";
+
 export function isDoNotUseCustomer(customerName) {
   return /do\s*not\s*use/i.test(String(customerName || "").trim());
 }
@@ -32,4 +34,26 @@ export function isBuildingMaterialCustomer(customer) {
 
 export function isVisitStatusCustomer(customer) {
   return customer?.is_active !== false && !isDoNotUseCustomer(customer?.customer_name);
+}
+
+export function removeDuplicateNameCodeCustomers(customers = []) {
+  const rows = Array.isArray(customers) ? customers : [];
+  const codedNameKeys = new Set();
+
+  rows.forEach((customer) => {
+    const code = String(customer?.customer_code || "").trim();
+    const codeKey = normalizeCustomerNameKey(code);
+    const nameKey = normalizeCustomerNameKey(customer?.customer_name);
+    if (code && !/\s/.test(code) && codeKey && nameKey && codeKey !== nameKey) {
+      codedNameKeys.add(nameKey);
+    }
+  });
+
+  return rows.filter((customer) => {
+    const code = String(customer?.customer_code || "").trim();
+    const codeKey = normalizeCustomerNameKey(code);
+    const nameKey = normalizeCustomerNameKey(customer?.customer_name);
+    const isNameAsCode = /\s/.test(code) && codeKey && codeKey === nameKey;
+    return !isNameAsCode || !codedNameKeys.has(nameKey);
+  });
 }

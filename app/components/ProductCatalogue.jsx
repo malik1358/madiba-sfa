@@ -129,7 +129,7 @@ export default function ProductCatalogue({
   }
 
   const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
-  const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(getPrice(priceMap, code)));
+  const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
   const lastPage = Math.max(0, Math.ceil(browseItems.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
   const visible = browseItems.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);

@@ -10,6 +10,20 @@ import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel } from
 
 const loadCatalogueDetails = (admin) => loadDetails(admin, async () => ({}));
 
+test("catalogue flags selected cart items missing prices after a pricing change", () => {
+  const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
+  const selector = source.match(/const unpricedCartCodes = [^\r\n]+/)[0];
+  const context = vm.createContext({
+    quantities: { A1000: 1, A1001: 2, A1002: 0, A1003: 3 },
+    priceList: { A1000: 120, A1003: 0 },
+    hasCataloguePrice,
+  });
+  vm.runInContext(`${selector}\nglobalThis.result = unpricedCartCodes;`, context);
+  assert.deepEqual(Array.from(context.result), ["A1001", "A1003"]);
+  context.priceList = { A1000: 120, A1001: 100, A1003: 140 };
+  assert.deepEqual(Array.from(vm.runInContext("Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]))", context)), []);
+});
+
 test("catalogue packing uses sheet AM description matched by normalized product code", async () => {
   const header = Array(42).fill("");
   header[1] = "Product Code";

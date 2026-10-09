@@ -317,8 +317,12 @@ export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDat
     const updatedAt = Date.parse(row.updated_at || "") || 0;
     const previousPriority = targetPriorityByCode.get(reportCode);
     if (previousPriority) {
-      if (previousPriority.isCanonical && !isCanonicalCode) return;
-      if (previousPriority.isCanonical === isCanonicalCode && previousPriority.updatedAt > updatedAt) return;
+      if (previousPriority.updatedAt > updatedAt) return;
+      if (
+        previousPriority.updatedAt === updatedAt
+        && previousPriority.isCanonical
+        && !isCanonicalCode
+      ) return;
     }
     targetPriorityByCode.set(reportCode, { isCanonical: isCanonicalCode, updatedAt });
     byCode.set(reportCode, {

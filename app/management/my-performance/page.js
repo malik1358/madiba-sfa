@@ -21,7 +21,7 @@ import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
-  subtitle: { en: "Office supplies, other sales, total sales, collection, and customer KPIs", ar: "مستلزمات المكتب والمبيعات الأخرى وإجمالي المبيعات والتحصيل والعملاء" },
+  subtitle: { en: "Office supplies, local item sales, other sales, total sales, collection, and customer KPIs", ar: "مستلزمات المكتب والأصناف المحلية والمبيعات الأخرى وإجمالي المبيعات والتحصيل والعملاء" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
   actual: { en: "Actual", ar: "الفعلي" },
@@ -50,6 +50,7 @@ const STATUS_LABELS = {
 
 const KPI_LABELS = {
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },

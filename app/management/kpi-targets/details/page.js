@@ -29,6 +29,7 @@ const TEXT = {
 
 const KPI_LABELS = {
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },

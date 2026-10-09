@@ -2,6 +2,7 @@ import { isCashSalesVoucher, matchPaymentsFifo } from "./paymentBehavior.js";
 import {
   buyingCustomerCodesFromSales,
   isOfficeSuppliesSale,
+  isLocalItemSale,
   netKpiSalesAmount,
   normalizeSalesmanCode,
 } from "./performanceKpis.js";
@@ -22,13 +23,15 @@ function salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode) {
     || String(left?.voucher_number || left?.reference || "").localeCompare(String(right?.voucher_number || right?.reference || ""))
   ));
 
-  if (["officeSupplies", "otherSales", "totalSales"].includes(kpiKey)) {
+  if (["officeSupplies", "localItemSales", "otherSales", "totalSales"].includes(kpiKey)) {
     return sorted.flatMap((row) => {
       const amount = netKpiSalesAmount(row);
       if (amount === 0) return [];
       const officeSupplies = isOfficeSuppliesSale(row);
+      const localItemSales = !officeSupplies && isLocalItemSale(row);
       if (kpiKey === "officeSupplies" && !officeSupplies) return [];
-      if (kpiKey === "otherSales" && officeSupplies) return [];
+      if (kpiKey === "localItemSales" && !localItemSales) return [];
+      if (kpiKey === "otherSales" && (officeSupplies || localItemSales)) return [];
       return [{ ...detailBase(row, salesmanCode), description: row?.item_name || row?.category || "Sales line", amount }];
     });
   }

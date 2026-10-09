@@ -199,6 +199,7 @@ export async function PUT(request) {
         target_month: targetMonth,
         sales_target: targets.totalSales,
         office_supplies_sales_target: targets.officeSupplies,
+        local_item_sales_target: targets.localItemSales,
         other_sales_target: targets.otherSales,
         collection_target: targets.collection,
         new_buying_customers_target: Math.round(targets.newCustomers),
@@ -223,8 +224,14 @@ export async function PUT(request) {
     }
 
     if (result.error) {
+      if (
+        isMissingColumnError(result.error)
+        && String(result.error.message || result.error.details || "").includes("local_item_sales_target")
+      ) {
+        throw new Error("Apply supabase/migrations/20261009120000_kpi_targets_local_item_sales.sql before saving Local item sales targets.");
+      }
       throw new Error(
-        "Unable to save Office supplies / Others sales targets. Apply sql/setup_kpi_targets_collection.sql so office_supplies_sales_target and other_sales_target exist.",
+        "Unable to save KPI targets. Apply sql/setup_kpi_targets_collection.sql and the KPI target migrations so all target columns exist.",
       );
     }
 

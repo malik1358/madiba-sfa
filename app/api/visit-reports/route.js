@@ -136,7 +136,7 @@ export async function PATCH(request) {
     const { data: updatedCustomer, error: updateError } = await admin
       .from("customers")
       .update({ is_active: body?.isActive !== false })
-      .eq("customer_code", storedCustomerCode)
+      .eq("customer_code", visibleCustomer.customer_code)
       .select("customer_code,is_active")
       .maybeSingle();
 

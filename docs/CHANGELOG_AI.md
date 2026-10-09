@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-08** - Fixed customer activation/deactivation failing for mixed-case legacy customer codes: authorized lookup returned the stored row, but the status update uppercased its case-sensitive key and matched no row. PATCH now updates the exact stored code while retaining normalized metadata keys, scope checks, GPS requirements and outstanding-balance protection. Added handler regressions for legacy/name-containing and canonical codes and blocked outstanding. No migration.
 - **2026-10-07** - KPI target additions/edits now send each affected salesperson the full current-month KPI snapshot and CC every reporting-chain boss; unchanged saves do not send. Added a manual month-send workflow (October 2026 default), protected by the existing cron secret, for initial/monthly resend. No migration or new environment variable.
 - **2026-10-07** - KPI Targets now includes active Zia and Asrar/Asrar Ahmed profiles despite collection-only roles/codes. Other collector exclusions, caller permissions and collection-queue rules remain unchanged. Added roster regressions; no migration.
 - **2026-10-07** - Merged Thamer's imported sales identities (`SM002`, `THAMER`, `THAMER MOHAMMAD AHMED QASEM`) in BI salesman dimensions/filters, KPI sales actuals/pace, and Salesman Incentive cube and collection rows. Profile identity, access, targets, and customer ownership remain unchanged. Added focused alias regressions; no migration.

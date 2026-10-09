@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildTeamVisitReportEmail,
@@ -17,6 +18,17 @@ import {
 } from "../app/lib/dailyVisitReportEmailServer.js";
 import { buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
 import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
+
+const dailyVisitReportEmailRoute = readFileSync(
+  new URL("../app/api/daily-visit-report/email/route.js", import.meta.url),
+  "utf8",
+);
+
+test("potential-sales-targets trial is admin-only and always uses the caller's login inbox", () => {
+  assert.match(dailyVisitReportEmailRoute, /potentialSalesTargetsOnly && String\(access\.profile\?\.role \|\| ""\)\.toLowerCase\(\) !== "admin"/);
+  assert.match(dailyVisitReportEmailRoute, /const potentialSalesTargetsOnlyTo = potentialSalesTargetsOnly \? String\(access\.user\?\.email \|\| ""\)\.trim\(\) : ""/);
+  assert.match(dailyVisitReportEmailRoute, /potentialSalesTargetsOnlyTo,/);
+});
 
 test("isExcludedVisitReportEmailSalesman matches Fazlur by code or display name", () => {
   assert.equal(isExcludedVisitReportEmailSalesman({

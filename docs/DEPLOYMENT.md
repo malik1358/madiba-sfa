@@ -39,6 +39,8 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 
+Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
+
 ## Environment variable names
 
 Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is gitignored. Names from `.env.example`:
@@ -75,6 +77,18 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `MIN_ANDROID_APK_VERSION_NAME` | Display name for the block |
 | `ANDROID_APK_DOWNLOAD_URL` | Where the update prompt sends the user |
 | `CAPACITOR_SERVER_URL` | Optional. Android shell target. Default is production Vercel |
+| `ATTACHMENT_WRITE_PROVIDER` | Server-only. `supabase` (default) or `r2` |
+| `ATTACHMENT_DUAL_WRITE` | Server-only. `1` = best-effort Supabase copy while R2 is primary. Default `0` |
+| `ATTACHMENT_FORCE_SUPABASE_READS` | Server-only rollback switch for reads |
+| `ATTACHMENT_SIGNED_URL_TTL_SECONDS` | Server-only. Default 300, max 900 |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | Server-only Cloudflare R2 S3 API credentials (bucket-scoped token). Never `NEXT_PUBLIC_` |
+
+### Cloudflare R2
+
+- Buckets: `madiba-attachments-dev` (local/dev) and `madiba-attachments-prod` (Vercel production only). Both private: no r2.dev URL, no custom domain. `app/lib/storage/r2Guard.js` blocks the prod bucket unless `VERCEL_ENV=production` **and** `NEXT_PUBLIC_SUPABASE_URL` is the production project, and blocks any non-prod bucket in Vercel production. Preview deployments may only use the dev bucket.
+- `R2_ENDPOINT` must be the account S3 endpoint (`https://<account>.r2.cloudflarestorage.com`, or `https://<account>.<jurisdiction>.r2.cloudflarestorage.com` for a jurisdiction bucket).
+- **Location / jurisdiction decision (record here when the production bucket is created):** _not decided yet_ — bucket location hint: …, jurisdiction: …, endpoint: …, decided by/date: ….
+- Switching production to R2 is a separate, approved step (Phase 4): set `ATTACHMENT_WRITE_PROVIDER=r2` (and `ATTACHMENT_DUAL_WRITE=1` for the verification period) in Vercel production only.
 
 GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
 

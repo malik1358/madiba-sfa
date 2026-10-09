@@ -14,21 +14,28 @@ import {
   validateDocumentDates,
 } from "../../lib/customerDocumentParse.js";
 import { isMissingRelationError } from "../../lib/schemaGuards.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
+import {
+  ATTACHMENT_BUCKETS,
+  ATTACHMENT_CATEGORIES,
+  bucketRelativePath,
+} from "../../lib/storage/attachmentKeys.js";
+import { resolveUploadContentType } from "../../lib/collectionUploadFile.js";
+import {
+  ATTACHMENT_ENTITY_TYPES,
+  isMissingAttachmentSchemaError,
+  linkAttachmentsToEntity,
+  storeAttachment,
+} from "../../lib/storage/attachmentRecords.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-export const CUSTOMER_DOCUMENTS_BUCKET = "customer-documents";
-const DOCUMENT_MIME_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-];
+export const CUSTOMER_DOCUMENTS_BUCKET = ATTACHMENT_BUCKETS.customerDocuments;
+const DOCUMENT_SELECT = "id,customer_code,document_type,file_path,expiry_date,uploaded_by_salesman_code,created_at,extracted_json,parsed_cr_number,parsed_vat_number,issue_date,link_status,link_message,original_file_name";
+const DOCUMENT_SELECT_WITH_ATTACHMENT = `${DOCUMENT_SELECT},attachment_id`;
 
 function adminClient() {
   return createClient(supabaseUrl, serviceKey, {
@@ -72,31 +79,15 @@ function isManagerRole(role) {
   return ["admin", "manager"].includes(String(role || "").toLowerCase());
 }
 
-async function ensureBucket(admin) {
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(CUSTOMER_DOCUMENTS_BUCKET);
-  if (!bucketError && bucket) return;
-
-  const { error: createError } = await admin.storage.createBucket(CUSTOMER_DOCUMENTS_BUCKET, {
-    public: true,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: DOCUMENT_MIME_TYPES,
-  });
-
-  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-    throw createError;
-  }
-}
-
-function publicUrlFor(path) {
-  if (!path) return "";
-  return `${supabaseUrl}/storage/v1/object/public/${CUSTOMER_DOCUMENTS_BUCKET}/${path}`;
-}
-
-function withFileUrl(row) {
+// Files open via /api/attachments/[id]/url; responses never carry storage paths or public URLs.
+export function toClientDocument(row) {
   if (!row) return row;
+  const { file_path: filePath, ...rest } = row;
   return {
-    ...row,
-    file_url: publicUrlFor(row.file_path),
+    ...rest,
+    attachment_id: rest.attachment_id || null,
+    file_name: rest.original_file_name || String(filePath || "").split("/").pop() || "",
+    has_file: Boolean(rest.attachment_id || String(filePath || "").trim()),
   };
 }
 
@@ -131,11 +122,19 @@ async function loadCustomer(admin, customerCode) {
 }
 
 async function loadDocuments(admin, customerCode) {
-  const { data, error } = await admin
+  let { data, error } = await admin
     .from("customer_documents")
-    .select("id,customer_code,document_type,file_path,expiry_date,uploaded_by_salesman_code,created_at,extracted_json,parsed_cr_number,parsed_vat_number,issue_date,link_status,link_message,original_file_name")
+    .select(DOCUMENT_SELECT_WITH_ATTACHMENT)
     .eq("customer_code", customerCode)
     .order("created_at", { ascending: false });
+
+  if (error && isMissingAttachmentSchemaError(error)) {
+    ({ data, error } = await admin
+      .from("customer_documents")
+      .select(DOCUMENT_SELECT)
+      .eq("customer_code", customerCode)
+      .order("created_at", { ascending: false }));
+  }
 
   if (error) {
     if (isMissingRelationError(error)) {
@@ -218,7 +217,7 @@ export async function GET(request) {
     const customerCode = String(url.searchParams.get("customerCode") || "").trim();
     const customer = await loadCustomer(admin, customerCode);
     const documents = await loadDocuments(admin, customer.customer_code);
-    const linked = relinkCustomerDocuments(documents, customer.cr_number);
+    const linked = relinkCustomerDocuments(documents, customer.cr_number).map(toClientDocument);
 
     return NextResponse.json({
       success: true,
@@ -228,7 +227,7 @@ export async function GET(request) {
         cr_number: canonicalCrFromDocuments(linked, customer.cr_number) || customer.cr_number || "",
         vat_number: customer.vat_number || "",
       },
-      documents: linked.map(withFileUrl),
+      documents: linked,
       compliance: buildCustomerDocumentCompliance(linked, customer),
     });
   } catch (error) {
@@ -269,7 +268,7 @@ export async function POST(request) {
     }
 
     const customer = await loadCustomer(admin, customerCode);
-    await ensureBucket(admin);
+    await ensureAttachmentBucket(admin, CUSTOMER_DOCUMENTS_BUCKET);
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const mime = String(file.type || "").toLowerCase();
@@ -322,17 +321,21 @@ export async function POST(request) {
         unparsed: parsed.unparsed,
       });
 
-    const stamp = Date.now();
     const fileName = safeFileName(file.name);
-    const filePath = `${customer.customer_code}/${parsed.documentType}/${stamp}-${fileName}`;
-
-    const { error: uploadError } = await admin.storage
-      .from(CUSTOMER_DOCUMENTS_BUCKET)
-      .upload(filePath, buffer, {
-        contentType: mime || "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw uploadError;
+    const { stored, attachmentId: documentAttachmentId } = await storeAttachment(admin, {
+      category: ATTACHMENT_CATEGORIES.customerDocument,
+      keyInput: {
+        customerCode: customer.customer_code,
+        documentType: parsed.documentType,
+        fileName,
+      },
+      body: buffer,
+      contentType: resolveUploadContentType({ name: file.name, type: mime }, buffer.subarray(0, 16)),
+      originalFileName: file.name || fileName,
+      customerCode: customer.customer_code,
+      uploadedBy: auth.user.id,
+    });
+    const filePath = bucketRelativePath(stored.key, CUSTOMER_DOCUMENTS_BUCKET);
 
     const insertRow = {
       customer_code: customer.customer_code,
@@ -347,19 +350,36 @@ export async function POST(request) {
       link_status: link.link_status,
       link_message: link.link_message,
       original_file_name: String(file.name || fileName),
+      ...(documentAttachmentId ? { attachment_id: documentAttachmentId } : {}),
     };
 
-    const { data: inserted, error: insertError } = await admin
+    let { data: inserted, error: insertError } = await admin
       .from("customer_documents")
       .insert(insertRow)
-      .select("id,customer_code,document_type,file_path,expiry_date,uploaded_by_salesman_code,created_at,extracted_json,parsed_cr_number,parsed_vat_number,issue_date,link_status,link_message,original_file_name")
+      .select(documentAttachmentId ? DOCUMENT_SELECT_WITH_ATTACHMENT : DOCUMENT_SELECT)
       .single();
+
+    if (insertError && documentAttachmentId && isMissingAttachmentSchemaError(insertError)) {
+      const { attachment_id: _attachmentId, ...legacyRow } = insertRow;
+      ({ data: inserted, error: insertError } = await admin
+        .from("customer_documents")
+        .insert(legacyRow)
+        .select(DOCUMENT_SELECT)
+        .single());
+    }
 
     if (insertError) {
       if (isMissingRelationError(insertError)) {
         throw Object.assign(new Error("Run the customer documents SQL migration in Supabase first."), { status: 500 });
       }
       throw insertError;
+    }
+
+    if (documentAttachmentId && inserted?.attachment_id === documentAttachmentId) {
+      await linkAttachmentsToEntity(admin, [documentAttachmentId], {
+        entityType: ATTACHMENT_ENTITY_TYPES.customerDocument,
+        entityId: inserted.id,
+      });
     }
 
     const nextCustomer = { ...customer };
@@ -379,12 +399,12 @@ export async function POST(request) {
       nextCustomer.vat_number = parsed.parsed_vat_number;
     }
     const allDocs = await loadDocuments(admin, customer.customer_code);
-    const linked = await persistRelinkedDocuments(admin, allDocs, nextCustomer.cr_number);
+    const linked = (await persistRelinkedDocuments(admin, allDocs, nextCustomer.cr_number)).map(toClientDocument);
 
     return NextResponse.json({
       success: true,
-      document: withFileUrl(inserted),
-      documents: linked.map(withFileUrl),
+      document: toClientDocument(inserted),
+      documents: linked,
       customer: {
         customer_code: nextCustomer.customer_code,
         customer_name: nextCustomer.customer_name,

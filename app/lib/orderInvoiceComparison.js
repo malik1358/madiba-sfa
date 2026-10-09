@@ -2,8 +2,10 @@ import { resolveInvoiceAmountExclVat } from "./invoiceAmountFromPdf.js";
 import { compareOrderLinesWithInvoiceText } from "./invoiceOrderCompare.js";
 import { extractPdfText } from "./extractPdfText.js";
 import { updateMasterUnitsFromInvoicePdf } from "./tallyItemUnits.js";
+import { ATTACHMENT_BUCKETS } from "./storage/attachmentKeys.js";
+import { readOrderInvoiceFile } from "./storage/attachmentRecords.js";
 
-export const INVOICE_BUCKET = "order-invoices";
+export const INVOICE_BUCKET = ATTACHMENT_BUCKETS.orderInvoices;
 
 export async function loadOrderLines(admin, orderId) {
   const { data, error } = await admin
@@ -43,11 +45,9 @@ export async function compareInvoiceBufferWithOrder(admin, orderId, pdfBuffer) {
   };
 }
 
-export async function compareStoredInvoiceWithOrder(admin, orderId, invoiceFilePath) {
-  const { data, error } = await admin.storage.from(INVOICE_BUCKET).download(invoiceFilePath);
-  if (error) throw error;
-
-  const buffer = await data.arrayBuffer();
+// invoiceRef: order invoice meta (preferred, uses invoiceAttachmentId) or a legacy invoiceFilePath.
+export async function compareStoredInvoiceWithOrder(admin, orderId, invoiceRef) {
+  const buffer = await readOrderInvoiceFile(admin, invoiceRef);
   return compareInvoiceBufferWithOrder(admin, orderId, buffer);
 }
 

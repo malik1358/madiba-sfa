@@ -76,6 +76,7 @@ import {
 } from "../../lib/pendingOrderTimeToMake";
 import { amountInclVat } from "../../lib/invoiceAmountFromPdf";
 import { useAppPopup } from "../../components/AppPopupProvider";
+import { openAttachment } from "../../lib/openAttachment";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -1963,8 +1964,19 @@ export default function PendingOrdersPage() {
                                   {meta?.rejectionReason ? (
                                     <span> | <strong>Rejection reason:</strong> {meta.rejectionReason}</span>
                                   ) : null}
-                                  {meta?.invoiceFileUrl ? (
-                                    <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
+                                  {meta?.invoiceFilePath ? (
+                                    <span> | <a
+                                      href="#"
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        openAttachment({
+                                          getAccessToken: getAuthToken,
+                                          attachmentId: meta.invoiceAttachmentId || "",
+                                          legacyKind: "order_invoice",
+                                          legacyRef: order.id,
+                                        }).catch((err) => setError(err?.message || "Unable to open invoice."));
+                                      }}
+                                    >View uploaded invoice</a></span>
                                   ) : null}
                                   <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
                                   <span> | <strong>Time to make:</strong> <TimeToMakeClock order={order} meta={meta} approvalRequired={approvalRequired} /></span>

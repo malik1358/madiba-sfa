@@ -7,6 +7,9 @@ import {
   INVOICE_BUCKET,
 } from "../../lib/orderInvoiceComparison.js";
 import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
+import { ATTACHMENT_CATEGORIES, bucketRelativePath } from "../../lib/storage/attachmentKeys.js";
+import { ATTACHMENT_ENTITY_TYPES, storeAttachment } from "../../lib/storage/attachmentRecords.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
@@ -65,18 +68,15 @@ function parseJson(value) {
   }
 }
 
-function safeFileName(name) {
-  return String(name || "invoice.pdf")
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "invoice.pdf";
-}
-
 function parseIso(value) {
   const text = String(value || "").trim();
   if (!text) return null;
   const ms = Date.parse(text);
   return Number.isFinite(ms) ? new Date(ms) : null;
+}
+
+export async function resolveOrderInvoiceScope(admin, token) {
+  return resolveScope(admin, token);
 }
 
 async function resolveScope(admin, token) {
@@ -164,7 +164,7 @@ async function loadOrders(admin, orderIds) {
   return rows;
 }
 
-function canSeeOrder(order, scope) {
+export function canSeeOrder(order, scope) {
   if (scope.hasAllAccess) return true;
 
   const createdByVisible = (scope.visibleUserIds || []).includes(order.created_by);
@@ -185,21 +185,6 @@ async function ensureOrderVisible(admin, orderId, scope) {
   if (!canSeeOrder(order, scope)) throw new Error("You do not have access to this order.");
 
   return order;
-}
-
-async function ensureBucket(admin) {
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(INVOICE_BUCKET);
-  if (!bucketError && bucket) return;
-
-  const { error: createError } = await admin.storage.createBucket(INVOICE_BUCKET, {
-    public: false,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: ["application/pdf"],
-  });
-
-  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-    throw createError;
-  }
 }
 
 async function readMetaMap(admin, orderIds) {
@@ -232,7 +217,7 @@ async function hydrateMetaWithComparison(admin, meta, { forceCompare = false } =
   if (!forceCompare && meta.comparisonCheckedAt) return meta;
 
   try {
-    const comparison = await compareStoredInvoiceWithOrder(admin, meta.orderId, meta.invoiceFilePath);
+    const comparison = await compareStoredInvoiceWithOrder(admin, meta.orderId, meta);
     const enriched = attachComparisonToMeta(meta, comparison);
     await upsertMeta(admin, enriched);
     return enriched;
@@ -241,18 +226,11 @@ async function hydrateMetaWithComparison(admin, meta, { forceCompare = false } =
   }
 }
 
-async function withSignedUrl(admin, meta) {
-  if (!meta?.invoiceFilePath) return meta;
-
-  try {
-    const signed = await admin.storage.from(INVOICE_BUCKET).createSignedUrl(meta.invoiceFilePath, 60 * 60 * 24 * 30);
-    return {
-      ...meta,
-      invoiceFileUrl: signed?.data?.signedUrl || "",
-    };
-  } catch {
-    return { ...meta, invoiceFileUrl: "" };
-  }
+// Invoice links are signed on demand by /api/attachments/[id]/url after an access check.
+function toClientInvoiceMeta(meta) {
+  if (!meta || !("invoiceFileUrl" in meta)) return meta;
+  const { invoiceFileUrl: _signedUrl, ...rest } = meta;
+  return rest;
 }
 
 async function upsertMeta(admin, meta) {
@@ -310,8 +288,7 @@ export async function GET(request) {
         meta = linked.meta;
       }
 
-      const hydrated = await withSignedUrl(admin, meta);
-      return NextResponse.json({ success: true, item: hydrated });
+      return NextResponse.json({ success: true, item: toClientInvoiceMeta(meta) });
     }
 
     const requestedIds = orderIdsCsv
@@ -392,24 +369,28 @@ export async function POST(request) {
       }
 
       const order = await ensureOrderVisible(admin, orderId, scope);
-      await ensureBucket(admin);
+      await ensureAttachmentBucket(admin, INVOICE_BUCKET);
 
       const now = new Date();
       const nowIso = now.toISOString();
       const customerCode = normalizeCode(order.customer_code) || "UNKNOWN";
-      const safeName = safeFileName(file.name || "invoice.pdf");
-      const storagePath = `${customerCode}/${orderId}/${Date.now()}-${safeName}`;
 
       const arrayBuffer = await file.arrayBuffer();
-      const uploadRes = await admin.storage.from(INVOICE_BUCKET).upload(storagePath, arrayBuffer, {
+      const { stored, attachmentId: invoiceAttachmentId } = await storeAttachment(admin, {
+        category: ATTACHMENT_CATEGORIES.orderInvoice,
+        keyInput: { customerCode, orderId, fileName: file.name || "invoice.pdf", now },
+        body: arrayBuffer,
         contentType: "application/pdf",
-        upsert: true,
+        originalFileName: file.name || "",
+        customerCode,
+        entityType: ATTACHMENT_ENTITY_TYPES.salesOrder,
+        entityId: orderId,
+        uploadedBy: scope.userId,
       });
-
-      if (uploadRes.error) throw uploadRes.error;
+      const storagePath = bucketRelativePath(stored.key, INVOICE_BUCKET);
 
       const existingMap = await readMetaMap(admin, [orderId]);
-      const existing = existingMap.get(orderId) || { orderId };
+      const { invoiceAttachmentId: _previousAttachmentId, ...existing } = existingMap.get(orderId) || { orderId };
 
       const orderCreatedAt = parseIso(order.created_at);
       const diffSeconds = orderCreatedAt ? Math.max(0, Math.round((now.getTime() - orderCreatedAt.getTime()) / 1000)) : null;
@@ -421,6 +402,7 @@ export async function POST(request) {
         invoiceUploadedAt: nowIso,
         invoiceUploadedBy: scope.userId,
         invoiceFilePath: storagePath,
+        ...(invoiceAttachmentId ? { invoiceAttachmentId } : {}),
         updatedAt: nowIso,
         statusUpdatedAt: nowIso,
         statusUpdatedBy: scope.userId,
@@ -454,7 +436,7 @@ export async function POST(request) {
       if (enriched !== updated) {
         await upsertMeta(admin, enriched);
       }
-      const hydrated = await withSignedUrl(admin, enriched);
+      const hydrated = toClientInvoiceMeta(enriched);
 
       return NextResponse.json({ success: true, item: hydrated, prospectLink });
     }
@@ -489,11 +471,11 @@ export async function POST(request) {
             metaMap.set(orderId, linked.meta);
           }
           prospectLinks[orderId] = linked.prospectLink;
-          items[orderId] = await withSignedUrl(admin, linked.meta);
+          items[orderId] = toClientInvoiceMeta(linked.meta);
           continue;
         }
 
-        items[orderId] = await withSignedUrl(admin, compared);
+        items[orderId] = toClientInvoiceMeta(compared);
       }
 
       return NextResponse.json({ success: true, items, prospectLinks });
@@ -518,7 +500,7 @@ export async function POST(request) {
       const items = {};
       for (const orderId of visibleIds) {
         const meta = metaMap.get(orderId) || { orderId };
-        items[orderId] = await withSignedUrl(admin, meta);
+        items[orderId] = toClientInvoiceMeta(meta);
       }
 
       return NextResponse.json({
@@ -543,7 +525,7 @@ export async function POST(request) {
       if (linked.meta !== compared) {
         await upsertMeta(admin, linked.meta);
       }
-      const hydrated = await withSignedUrl(admin, linked.meta);
+      const hydrated = toClientInvoiceMeta(linked.meta);
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
@@ -616,7 +598,7 @@ export async function POST(request) {
         };
 
         await upsertMeta(admin, updated);
-        items[orderId] = await withSignedUrl(admin, updated);
+        items[orderId] = toClientInvoiceMeta(updated);
         marked += 1;
       }
 
@@ -717,7 +699,7 @@ export async function POST(request) {
         }
 
         await upsertMeta(admin, updated);
-        items[orderId] = await withSignedUrl(admin, updated);
+        items[orderId] = toClientInvoiceMeta(updated);
         marked += 1;
       }
 
@@ -772,7 +754,7 @@ export async function POST(request) {
       };
 
       await upsertMeta(admin, updated);
-      const hydrated = await withSignedUrl(admin, updated);
+      const hydrated = toClientInvoiceMeta(updated);
       return NextResponse.json({ success: true, item: hydrated });
     }
 
@@ -811,7 +793,7 @@ export async function POST(request) {
       };
 
       await upsertMeta(admin, updated);
-      const hydrated = await withSignedUrl(admin, updated);
+      const hydrated = toClientInvoiceMeta(updated);
       return NextResponse.json({ success: true, item: hydrated });
     }
 
@@ -852,7 +834,7 @@ export async function POST(request) {
     }
 
     await upsertMeta(admin, updated);
-    const hydrated = await withSignedUrl(admin, updated);
+    const hydrated = toClientInvoiceMeta(updated);
 
     return NextResponse.json({ success: true, item: hydrated });
   } catch (error) {

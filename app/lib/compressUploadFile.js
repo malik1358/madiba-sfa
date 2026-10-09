@@ -7,6 +7,11 @@ const CANVAS_BLOB_TIMEOUT_MS = 12000;
 const HEADER_SNIFF_TIMEOUT_MS = 3000;
 const MAX_STORAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 
+export const RECEIPT_MAX_IMAGE_DIMENSION = 1600;
+export const RECEIPT_JPEG_QUALITY = 0.75;
+export const RECEIPT_MIN_JPEG_QUALITY = 0.7;
+export const RECEIPT_TARGET_BYTES = 500 * 1024;
+
 function withTimeout(promise, timeoutMs, message) {
   return Promise.race([
     promise,
@@ -101,6 +106,100 @@ async function compressImageFile(file) {
 
   const baseName = String(file.name || "upload").replace(/\.[^.]+$/, "") || "upload";
   return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+export function receiptCanvasSize(width, height, maxDimension = RECEIPT_MAX_IMAGE_DIMENSION) {
+  const safeWidth = Math.max(1, Number(width) || 1);
+  const safeHeight = Math.max(1, Number(height) || 1);
+  const scale = Math.min(1, maxDimension / Math.max(safeWidth, safeHeight));
+  return {
+    width: Math.max(1, Math.round(safeWidth * scale)),
+    height: Math.max(1, Math.round(safeHeight * scale)),
+    scaled: scale < 1,
+  };
+}
+
+// The ~500 KB target only decides whether 0.70 is tried; it never rejects a receipt.
+export async function encodeReceiptJpeg(encode) {
+  let blob = await encode(RECEIPT_JPEG_QUALITY);
+  let quality = RECEIPT_JPEG_QUALITY;
+  if (blob.size > RECEIPT_TARGET_BYTES) {
+    const lower = await encode(RECEIPT_MIN_JPEG_QUALITY);
+    if (lower.size < blob.size) {
+      blob = lower;
+      quality = RECEIPT_MIN_JPEG_QUALITY;
+    }
+  }
+  return { blob, quality };
+}
+
+export function shouldKeepOriginalReceipt({ originalSize, compressedSize, scaled, isHeic }) {
+  if (isHeic || scaled) return false;
+  return Number(compressedSize) >= Number(originalSize);
+}
+
+async function compressReceiptImage(file, { isHeic }) {
+  const image = await loadImageFromFile(file);
+  const size = receiptCanvasSize(image.width, image.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to compress this photo in the browser.");
+
+  // JPEG has no alpha; transparent PNG receipts would otherwise turn black.
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, size.width, size.height);
+  context.drawImage(image, 0, 0, size.width, size.height);
+
+  const { blob } = await encodeReceiptJpeg((quality) => canvasToJpegBlob(canvas, quality));
+  if (shouldKeepOriginalReceipt({
+    originalSize: file.size,
+    compressedSize: blob.size,
+    scaled: size.scaled,
+    isHeic,
+  })) {
+    return null;
+  }
+
+  const baseName = String(file.name || "receipt-copy").replace(/\.[^.]+$/, "") || "receipt-copy";
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+// Receipt copies only. Payment copies and customer documents keep prepareUploadFile.
+export async function prepareReceiptUploadFile(file) {
+  if (!file || typeof File === "undefined" || !(file instanceof Blob)) return file;
+
+  const headerBuffer = await readUploadHeader(file);
+  const mime = String(file.type || "").toLowerCase();
+  const name = String(file.name || "").toLowerCase();
+  const resolvedType = resolveUploadContentType(
+    { name: file.name, type: file.type },
+    headerBuffer,
+  );
+
+  if (resolvedType === "application/pdf" || mime === "application/pdf" || name.endsWith(".pdf")) {
+    return prepareUploadFile(file);
+  }
+
+  const isImage = mime.startsWith("image/")
+    || ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(resolvedType);
+  if (!isImage) {
+    return prepareUploadFile(file);
+  }
+
+  const isHeic = [mime, resolvedType].some((value) => value.includes("heic") || value.includes("heif"));
+  try {
+    const compressed = await compressReceiptImage(file, { isHeic });
+    if (compressed) return compressed;
+    return ensureNamedUploadFile(file, "receipt-copy.jpg", headerBuffer);
+  } catch (error) {
+    // Same fallback as prepareUploadFile: send the original bytes if storage accepts them.
+    if (Number(file.size || 0) > 0 && Number(file.size || 0) <= MAX_STORAGE_UPLOAD_BYTES) {
+      return ensureNamedUploadFile(file, "receipt-copy.jpg", headerBuffer);
+    }
+    throw error;
+  }
 }
 
 export async function prepareUploadFile(file) {

@@ -5,6 +5,7 @@ import { CUSTOMER_DOCUMENT_TYPES, addYearsToIsoDate, validateDocumentDates } fro
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
+import { openAttachment } from "../../lib/openAttachment";
 
 export default function CustomerDocumentsPanel({ customer, t, onClose }) {
   const [loading, setLoading] = useState(true);
@@ -100,6 +101,16 @@ export default function CustomerDocumentsPanel({ customer, t, onClose }) {
 
   const credit = payload?.compliance?.creditApplication;
 
+  function openDocument(document) {
+    setError("");
+    openAttachment({
+      getAccessToken: async () => (await resolveAuthSession(getSupabaseClient(), 8000))?.access_token,
+      attachmentId: document?.attachment_id || "",
+      legacyKind: "customer_document",
+      legacyRef: document?.id ?? "",
+    }).catch((err) => setError(err?.message || "Unable to open document."));
+  }
+
   return (
     <section id="customer-documents-panel" className="moduleSection" style={{ marginTop: "12px" }}>
       <div className="moduleSectionHeader">
@@ -153,7 +164,7 @@ export default function CustomerDocumentsPanel({ customer, t, onClose }) {
               {current ? (
                 <>
                   <div className="moduleHint">
-                    {current.original_file_name || current.file_path}
+                    {current.file_name || current.original_file_name}
                     {current.parsed_cr_number ? ` · CR ${current.parsed_cr_number}` : ""}
                     {current.parsed_vat_number ? ` · VAT ${current.parsed_vat_number}` : ""}
                     {current.extracted_json?.companyName ? ` · ${current.extracted_json.companyName}` : ""}
@@ -172,10 +183,14 @@ export default function CustomerDocumentsPanel({ customer, t, onClose }) {
                   <div className="moduleHint" style={{ color: mismatch ? "#9b1c1c" : undefined, fontWeight: mismatch ? 700 : 400 }}>
                     {current.link_message || current.link_status || ""}
                   </div>
-                  {current.file_url ? (
-                    <a className="moduleInlineButton moduleActionButton" href={current.file_url} target="_blank" rel="noreferrer">
+                  {current.has_file ? (
+                    <button
+                      type="button"
+                      className="moduleInlineButton moduleActionButton"
+                      onClick={() => openDocument(current)}
+                    >
                       {t("openFile")}
-                    </a>
+                    </button>
                   ) : null}
                 </>
               ) : (

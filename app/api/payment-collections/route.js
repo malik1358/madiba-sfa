@@ -52,20 +52,28 @@ import {
   resolveUploadContentType,
   storageExtensionFromUpload,
 } from "../../lib/collectionUploadFile.js";
+import {
+  buildCollectionVisitReplayResponse,
+  findCollectionVisitBySubmissionId,
+  isMissingClientSubmissionColumnError,
+  isUniqueViolationError,
+  parseClientSubmissionId,
+} from "../../lib/collectionSubmission.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
+import {
+  ATTACHMENT_BUCKETS,
+  ATTACHMENT_CATEGORIES,
+} from "../../lib/storage/attachmentKeys.js";
+import {
+  ATTACHMENT_ENTITY_TYPES,
+  collectionVisitAttachmentSummary,
+  isMissingAttachmentSchemaError,
+  linkAttachmentsToEntity,
+  storeAttachment,
+} from "../../lib/storage/attachmentRecords.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const COLLECTION_FILES_BUCKET = "payment-collections";
-const COLLECTION_FILE_MIME_TYPES = [
-  "image/jpeg",
-  "image/jpg",
-  "image/pjpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-];
 
 export const maxDuration = 60;
 
@@ -100,7 +108,7 @@ function preferMatchingCustomerKey(candidates, targetCode) {
   return bestMatch || normalizedTarget;
 }
 
-function findScopedCollectionRecord(records, customerCode) {
+export function findScopedCollectionRecord(records, customerCode) {
   const target = canonicalCustomerCode(customerCode);
   if (!target) return null;
 
@@ -268,38 +276,6 @@ async function sniffUploadHeader(file) {
     return new Uint8Array(await file.slice(0, 16).arrayBuffer());
   } catch {
     return null;
-  }
-}
-
-async function ensureCollectionFilesBucket(admin) {
-  const bucketConfig = {
-    public: true,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: COLLECTION_FILE_MIME_TYPES,
-  };
-
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(COLLECTION_FILES_BUCKET);
-  if (bucketError && !String(bucketError.message || "").toLowerCase().includes("not found")) {
-    throw bucketError;
-  }
-
-  if (!bucket) {
-    const { error: createError } = await admin.storage.createBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-    if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-      throw createError;
-    }
-    return;
-  }
-
-  // Best-effort MIME refresh only. Never block attachment saves if updateBucket
-  // is slow, permission-denied, or unsupported on this project.
-  try {
-    const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-    if (updateError) {
-      console.warn("Unable to refresh payment-collections bucket settings:", updateError);
-    }
-  } catch (updateError) {
-    console.warn("Unable to refresh payment-collections bucket settings:", updateError);
   }
 }
 
@@ -557,6 +533,23 @@ export async function getSalesScope(admin, userId) {
   };
 }
 
+const QUEUE_VISIT_SELECT = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,receipt_copy_url,payment_copy_url";
+
+// Copy URLs are read only to derive has_*_copy flags; collectionVisitAttachmentSummary drops them.
+async function loadQueueCollectionVisits(admin) {
+  const query = (columns) => admin
+    .from("collection_visits")
+    .select(columns)
+    .order("saved_at", { ascending: false })
+    .limit(3000);
+
+  const result = await query(`${QUEUE_VISIT_SELECT},receipt_attachment_id,payment_attachment_id`);
+  if (result.error && isMissingAttachmentSchemaError(result.error)) {
+    return query(QUEUE_VISIT_SELECT);
+  }
+  return result;
+}
+
 const CUSTOMER_PAGE_SIZE = 1000;
 const CUSTOMER_LOOKUP_BATCH_SIZE = 200;
 const CUSTOMER_COLLECTION_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,mobile,latitude,longitude";
@@ -670,11 +663,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     .from("profiles")
     .select("salesman_code,salesman_name");
 
-  const visitsQuery = admin
-    .from("collection_visits")
-    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by")
-    .order("saved_at", { ascending: false })
-    .limit(3000);
+  const visitsQuery = loadQueueCollectionVisits(admin);
 
   const legalQuery = admin
     .from("legal_transfers")
@@ -704,7 +693,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     salesmanByVoucher,
   );
 
-  const visits = Array.isArray(visitsData) ? visitsData : [];
+  const visits = (Array.isArray(visitsData) ? visitsData : []).map(collectionVisitAttachmentSummary);
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
 
   const creatorIds = [...new Set(visits.map((visit) => visit.created_by).filter(Boolean))];
@@ -1013,6 +1002,36 @@ export async function POST(request) {
     const customerCodeRaw = String(formData.get("customerCode") || "");
     const customerName = String(formData.get("customerName") || "").trim();
     let customerCode = canonicalCustomerCode(customerCodeRaw);
+
+    const submission = parseClientSubmissionId(formData.get("clientSubmissionId"));
+    if (!submission.valid) {
+      return Response.json(
+        { success: false, error: "Invalid collection submission id." },
+        { status: 400 },
+      );
+    }
+    const clientSubmissionId = submission.id;
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // Replay before validation/uploads so a retry days later (e.g. next visit now in the past)
+    // still resolves to the visit that was already saved.
+    let submissionIdSupported = Boolean(clientSubmissionId);
+    if (clientSubmissionId) {
+      const replay = await findCollectionVisitBySubmissionId(admin, clientSubmissionId, user.id);
+      submissionIdSupported = replay.supported;
+      if (replay.row) {
+        if (customerCode && !customerAccountCodesMatch(replay.row.customer_code, customerCode)) {
+          return Response.json(
+            { success: false, error: "This collection submission belongs to another customer." },
+            { status: 409 },
+          );
+        }
+        return Response.json(buildCollectionVisitReplayResponse(replay.row));
+      }
+    }
     const visitOutcome = String(formData.get("visitOutcome") || "").trim();
     const paymentStatus = String(formData.get("paymentStatus") || "").trim();
     const amountReceived = Number(formData.get("amountReceived") || 0);
@@ -1067,10 +1086,6 @@ export async function POST(request) {
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
 
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
     const scope = await getSalesScope(admin, user.id);
     const requireGps = shouldRequireTransactionGps(scope.userRole);
 
@@ -1106,47 +1121,41 @@ export async function POST(request) {
     customerCode = await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     // Handle file uploads for payment and receipt copies
-    let paymentCopyUrl = null;
-    let receiptCopyUrl = null;
-
     const paymentCopyFile = formData.get("paymentCopy");
     const receiptCopyFile = formData.get("receiptCopy");
     const hasFileUpload = (paymentCopyFile && paymentCopyFile.size > 0)
       || (receiptCopyFile && receiptCopyFile.size > 0);
 
     if (hasFileUpload) {
-      await ensureCollectionFilesBucket(admin);
+      await ensureAttachmentBucket(admin, ATTACHMENT_BUCKETS.collections);
     }
 
-    if (paymentCopyFile && paymentCopyFile.size > 0) {
-      const paymentHeader = await sniffUploadHeader(paymentCopyFile);
-      const ext = storageExtension(paymentCopyFile, paymentHeader);
-      const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.${ext}`;
-      const { data: paymentData, error: paymentError } = await admin.storage
-        .from(COLLECTION_FILES_BUCKET)
-        .upload(paymentCopyPath, paymentCopyFile, {
-          upsert: true,
-          contentType: uploadContentType(paymentCopyFile, paymentHeader),
+    async function storeCollectionCopy(kind, file) {
+      if (!file || !(file.size > 0)) return null;
+      const header = await sniffUploadHeader(file);
+      try {
+        const { stored, attachmentId } = await storeAttachment(admin, {
+          category: kind === "receipt" ? ATTACHMENT_CATEGORIES.receiptCopy : ATTACHMENT_CATEGORIES.paymentCopy,
+          keyInput: { customerCode, extension: storageExtension(file, header) },
+          body: file,
+          contentType: uploadContentType(file, header),
+          originalFileName: file.name || "",
+          customerCode,
+          uploadedBy: user.id,
         });
-
-      if (paymentError) throw normalizeStorageError(paymentError);
-      paymentCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${paymentData.path}`;
+        return { attachmentId, key: stored.key };
+      } catch (storageError) {
+        throw normalizeStorageError(storageError);
+      }
     }
 
-    if (receiptCopyFile && receiptCopyFile.size > 0) {
-      const receiptHeader = await sniffUploadHeader(receiptCopyFile);
-      const ext = storageExtension(receiptCopyFile, receiptHeader);
-      const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.${ext}`;
-      const { data: receiptData, error: receiptError } = await admin.storage
-        .from(COLLECTION_FILES_BUCKET)
-        .upload(receiptCopyPath, receiptCopyFile, {
-          upsert: true,
-          contentType: uploadContentType(receiptCopyFile, receiptHeader),
-        });
-
-      if (receiptError) throw normalizeStorageError(receiptError);
-      receiptCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${receiptData.path}`;
-    }
+    const paymentCopy = await storeCollectionCopy("payment", paymentCopyFile);
+    const receiptCopy = await storeCollectionCopy("receipt", receiptCopyFile);
+    // Before the attachments migration, keep the object key (never a public URL) in the legacy column.
+    const legacyCopyRef = (copy) => (copy && !copy.attachmentId ? copy.key : null);
+    const paymentCopyUrl = legacyCopyRef(paymentCopy);
+    const receiptCopyUrl = legacyCopyRef(receiptCopy);
+    const copyAttachmentIds = [paymentCopy?.attachmentId, receiptCopy?.attachmentId].filter(Boolean);
 
     // Insert new collection visit
     const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
@@ -1196,6 +1205,8 @@ export async function POST(request) {
       non_payment_reason: nonPaymentReason,
       payment_copy_url: paymentCopyUrl,
       receipt_copy_url: receiptCopyUrl,
+      ...(paymentCopy?.attachmentId ? { payment_attachment_id: paymentCopy.attachmentId } : {}),
+      ...(receiptCopy?.attachmentId ? { receipt_attachment_id: receiptCopy.attachmentId } : {}),
       summary_text: finalSummaryText || null,
       queue_priority: queuePriority > 0 ? queuePriority : null,
       probability_score: probabilityScore > 0 ? probabilityScore : null,
@@ -1212,6 +1223,10 @@ export async function POST(request) {
       gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
     };
 
+    let visitInsertRow = submissionIdSupported
+      ? { ...visitInsertWithGps, client_submission_id: clientSubmissionId }
+      : visitInsertWithGps;
+
     let insertData = null;
     let insertError = null;
 
@@ -1220,9 +1235,50 @@ export async function POST(request) {
       error: insertError,
     } = await admin
       .from("collection_visits")
-      .insert(visitInsertWithGps)
+      .insert(visitInsertRow)
       .select("id")
       .maybeSingle());
+
+    if (insertError && submissionIdSupported && isMissingClientSubmissionColumnError(insertError)) {
+      visitInsertRow = visitInsertWithGps;
+      ({
+        data: insertData,
+        error: insertError,
+      } = await admin
+        .from("collection_visits")
+        .insert(visitInsertRow)
+        .select("id")
+        .maybeSingle());
+    }
+
+    if (insertError && copyAttachmentIds.length > 0 && isMissingAttachmentSchemaError(insertError)) {
+      const {
+        payment_attachment_id: _paymentAttachmentId,
+        receipt_attachment_id: _receiptAttachmentId,
+        ...withoutAttachmentIds
+      } = visitInsertRow;
+      visitInsertRow = {
+        ...withoutAttachmentIds,
+        payment_copy_url: paymentCopy?.key || null,
+        receipt_copy_url: receiptCopy?.key || null,
+      };
+      ({
+        data: insertData,
+        error: insertError,
+      } = await admin
+        .from("collection_visits")
+        .insert(visitInsertRow)
+        .select("id")
+        .maybeSingle());
+    }
+
+    // Concurrent retry won the race: return its result instead of a second visit.
+    if (insertError && submissionIdSupported && isUniqueViolationError(insertError)) {
+      const replay = await findCollectionVisitBySubmissionId(admin, clientSubmissionId, user.id);
+      if (replay.row) {
+        return Response.json(buildCollectionVisitReplayResponse(replay.row));
+      }
+    }
 
     if (insertError) {
       if (isMissingColumnError(insertError)) {
@@ -1233,7 +1289,7 @@ export async function POST(request) {
           probability_label: _probabilityLabel,
           visit_number_for_day: _visitNumberForDay,
           ...visitInsertWithoutMeta
-        } = visitInsertWithGps;
+        } = visitInsertRow;
 
         ({
           data: insertData,
@@ -1254,6 +1310,13 @@ export async function POST(request) {
         throw new Error("Collection tables are not initialized in this environment yet.");
       }
       throw new Error(formatRouteError(insertError));
+    }
+
+    if (insertData?.id && (visitInsertRow.payment_attachment_id || visitInsertRow.receipt_attachment_id)) {
+      await linkAttachmentsToEntity(admin, copyAttachmentIds, {
+        entityType: ATTACHMENT_ENTITY_TYPES.collectionVisit,
+        entityId: insertData.id,
+      });
     }
 
     if (customerGpsUpdateAccepted && insertData?.id && Number.isFinite(latitude) && Number.isFinite(longitude)) {

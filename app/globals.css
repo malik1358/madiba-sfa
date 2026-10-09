@@ -31,6 +31,34 @@ body {
   box-sizing: border-box;
 }
 
+.moduleReportSortButton {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  margin-inline-start: 6px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.moduleReportSortButton::after {
+  content: attr(data-direction);
+}
+
+.moduleReportSortButton:hover,
+.moduleReportSortButton:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
 .environmentBanner {
   position: sticky;
   top: 0;

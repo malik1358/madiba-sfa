@@ -56,11 +56,12 @@ function dedupeVisits(visits = []) {
   return kept;
 }
 
-function resolveSalesTrend(monthSales, monthKeys) {
-  if (monthKeys.length < 6) return { trend: "insufficient_history", recentSales: 0, previousSales: 0, changePercent: null };
+function resolveSalesTrend(monthSales, monthKeys, currentMonth) {
+  const completedMonths = monthKeys.filter((month) => month < currentMonth);
+  if (completedMonths.length < 6) return { trend: "insufficient_history", recentSales: 0, previousSales: 0, changePercent: null };
 
-  const previousSales = monthKeys.slice(-6, -3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
-  const recentSales = monthKeys.slice(-3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
+  const previousSales = completedMonths.slice(-6, -3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
+  const recentSales = completedMonths.slice(-3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
   if (previousSales <= 0 && recentSales > 0) {
     return { trend: "new_sales", recentSales, previousSales, changePercent: null };
   }
@@ -78,8 +79,14 @@ export function buildPromoterCoverageReport({
   salesRows = [],
   visits = [],
   monthKeys = [],
+  currentMonth = "",
 } = {}) {
   const months = [...new Set(monthKeys.map((month) => String(month || "").slice(0, 7)).filter(Boolean))].sort();
+  const trendCurrentMonth = currentMonth || (() => {
+    const date = new Date(`${months.at(-1) || "1970-01"}-01T00:00:00.000Z`);
+    date.setUTCMonth(date.getUTCMonth() + 1);
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  })();
   const byCode = new Map();
 
   const ensureCustomer = (code, fallback = {}) => {
@@ -91,7 +98,6 @@ export function buildPromoterCoverageReport({
         customerName: String(fallback.customer_name || fallback.customerName || "").trim(),
         teamSalesmanCode: String(fallback.current_salesman_code || fallback.salesman_code || fallback.teamSalesmanCode || "").trim(),
         monthSales: Object.fromEntries(months.map((month) => [month, 0])),
-        monthQuantity: Object.fromEntries(months.map((month) => [month, 0])),
         monthSkuCodes: Object.fromEntries(months.map((month) => [month, new Set()])),
         visits: [],
       });
@@ -110,9 +116,8 @@ export function buildPromoterCoverageReport({
     const month = monthOf(sale.transaction_date);
     if (!customer || !Object.hasOwn(customer.monthSales, month)) return;
     customer.monthSales[month] += Number(sale.net_sales_amount ?? sale.sales_amount ?? 0) || 0;
-    customer.monthQuantity[month] += Number(sale.net_quantity ?? sale.quantity ?? 0) || 0;
     const itemCode = String(sale.item_code || "").trim().toUpperCase();
-    if (!sale.is_credit_note && Number(sale.quantity || 0) > 0 && itemCode) {
+    if (!sale.is_credit_note && Number(sale.sales_amount || 0) > 0 && itemCode) {
       customer.monthSkuCodes[month].add(itemCode);
     }
   });
@@ -124,17 +129,48 @@ export function buildPromoterCoverageReport({
 
   const rows = [...byCode.values()].map((customer) => {
     const orderedVisits = customer.visits.sort((left, right) => visitTimestamp(left.savedAt) - visitTimestamp(right.savedAt));
-    const quantityTrend = resolveSalesTrend(customer.monthQuantity, months);
     const { monthSkuCodes, ...reportCustomer } = customer;
+    const monthSkuCount = Object.fromEntries(months.map((month) => [month, monthSkuCodes[month].size]));
+    const monthSalesChange = {};
+    const monthSkuChange = {};
+    months.forEach((month, index) => {
+      if (month >= trendCurrentMonth || index === 0) {
+        monthSalesChange[month] = null;
+        monthSkuChange[month] = null;
+        return;
+      }
+      const previousMonth = months[index - 1];
+      const priorSales = customer.monthSales[previousMonth] || 0;
+      const currentSales = customer.monthSales[month] || 0;
+      const priorSkus = monthSkuCount[previousMonth] || 0;
+      const currentSkus = monthSkuCount[month] || 0;
+      monthSalesChange[month] = priorSales === 0
+        ? (currentSales > 0 ? { trend: "new_sales", changePercent: null } : { trend: "stable", changePercent: 0 })
+        : {
+          trend: currentSales > priorSales ? "increasing" : currentSales < priorSales ? "decreasing" : "stable",
+          changePercent: ((currentSales - priorSales) / Math.abs(priorSales)) * 100,
+        };
+      monthSkuChange[month] = priorSkus === 0
+        ? (currentSkus > 0 ? { trend: "new_sales", changePercent: null } : { trend: "stable", changePercent: 0 })
+        : {
+          trend: currentSkus > priorSkus ? "increasing" : currentSkus < priorSkus ? "decreasing" : "stable",
+          changePercent: ((currentSkus - priorSkus) / priorSkus) * 100,
+        };
+    });
+    const skuTrend = resolveSalesTrend(monthSkuCount, months, trendCurrentMonth);
     return {
       ...reportCustomer,
-      monthSkuCount: Object.fromEntries(months.map((month) => [month, monthSkuCodes[month].size])),
+      monthSkuCount,
+      monthSalesChange,
+      monthSkuChange,
       visitCount: orderedVisits.length,
       lastVisitAt: orderedVisits.at(-1)?.savedAt || "",
       visitStatus: orderedVisits.length === 0 ? "not_visited" : orderedVisits.length > 1 ? "repeated" : "visited_once",
-      quantityTrend: quantityTrend.trend,
-      quantityChangePercent: quantityTrend.changePercent,
-      ...resolveSalesTrend(customer.monthSales, months),
+      ...resolveSalesTrend(customer.monthSales, months, trendCurrentMonth),
+      skuTrend: skuTrend.trend,
+      skuRecentCount: skuTrend.recentSales,
+      skuPreviousCount: skuTrend.previousSales,
+      skuChangePercent: skuTrend.changePercent,
     };
   }).sort((left, right) => {
     const statusOrder = { not_visited: 0, repeated: 1, visited_once: 2 };
@@ -151,6 +187,8 @@ export function buildPromoterCoverageReport({
     repeatedCustomerCount: rows.filter((row) => row.visitCount > 1).length,
     increasingCustomerCount: rows.filter((row) => row.trend === "increasing" || row.trend === "new_sales").length,
     decreasingCustomerCount: rows.filter((row) => row.trend === "decreasing").length,
+    increasingSkuCustomerCount: rows.filter((row) => row.skuTrend === "increasing" || row.skuTrend === "new_sales").length,
+    decreasingSkuCustomerCount: rows.filter((row) => row.skuTrend === "decreasing").length,
     rows,
   };
 }

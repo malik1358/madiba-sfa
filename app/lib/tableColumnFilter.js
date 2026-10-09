@@ -65,7 +65,8 @@ export function headerCellLabel(cell) {
     .filter((node) => {
       if (node.nodeType === 3) return true;
       if (node.nodeType !== 1) return false;
-      return !node.classList?.contains("moduleTableColumnFilterInput");
+      return !node.classList?.contains("moduleTableColumnFilterInput")
+        && !node.classList?.contains("moduleReportSortButton");
     })
     .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -153,6 +154,61 @@ export function groupTableBodyRows(table) {
   }
 
   return groups;
+}
+
+function sortableNumber(value) {
+  const normalized = String(value || "").replace(/[\s,﷼%]/g, "").replace(/[()]/g, "-");
+  if (!normalized || !/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function sortTableRowGroups(groups = [], columnIndex = 0, direction = "asc") {
+  const sign = direction === "desc" ? -1 : 1;
+  const sortable = [];
+  const pinned = [];
+  groups.forEach((group, index) => {
+    const firstCell = String(group?.primaryCells?.[0]?.innerText || group?.primaryCells?.[0]?.textContent || "").trim().toLowerCase();
+    const isPinned = group?.primary?.classList?.contains?.("moduleBiTotalRow")
+      || /^(grand\s+)?total\b/.test(firstCell)
+      || /^subtotal\b/.test(firstCell);
+    const cell = group?.primaryCells?.[columnIndex];
+    const value = String(cell?.dataset?.sortValue ?? cell?.innerText ?? cell?.textContent ?? "").replace(/\s+/g, " ").trim();
+    (isPinned ? pinned : sortable).push({ group, index, value });
+  });
+
+  const values = sortable.map(({ value }) => value).filter(Boolean);
+  const numeric = values.length > 0 && values.every((value) => sortableNumber(value) !== null);
+  const date = !numeric && values.length > 0 && values.every((value) => (
+    /^\d{4}-\d{1,2}-\d{1,2}$/.test(value)
+    || /^\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}$/.test(value)
+  ));
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const timestamp = (value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) return Date.UTC(year, month - 1, day);
+    return Date.parse(value);
+  };
+
+  sortable.sort((left, right) => {
+    if (!left.value && right.value) return 1;
+    if (left.value && !right.value) return -1;
+    if (!left.value && !right.value) return left.index - right.index;
+    const comparison = numeric
+      ? sortableNumber(left.value) - sortableNumber(right.value)
+      : date ? timestamp(left.value) - timestamp(right.value) : collator.compare(left.value, right.value);
+    return comparison === 0 ? left.index - right.index : comparison * sign;
+  });
+
+  return [...sortable, ...pinned].map(({ group }) => group);
+}
+
+export function isSortableReportTable(table) {
+  return Boolean(
+    table?.matches?.("table.moduleTable, table.auditMatrix, table.auditCategoryMatrixV3, table.auditItemMatrix, table.auditPerformanceMatrix, table.auditQuickOrderTable, table.auditTransactionTable")
+    && !table.closest(".moduleOrderEntry, .moduleOrderReview, [data-disable-report-sort]")
+    && !table.querySelector("tbody input, tbody select, tbody textarea"),
+  );
 }
 
 function setRowFilteredOut(row, hidden) {

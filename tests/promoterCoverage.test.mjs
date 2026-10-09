@@ -24,7 +24,6 @@ test("team customer trend includes September invoice sales credited outside the 
       salesman_code: "OUTSIDE_TEAM",
       transaction_date: "2026-09-29",
       sales_amount: 9141,
-      quantity: 12,
       item_code: "SKU-1",
     },
     {
@@ -32,7 +31,6 @@ test("team customer trend includes September invoice sales credited outside the 
       salesman_code: "OUTSIDE_TEAM",
       transaction_date: "2026-09-29",
       sales_amount: 4000,
-      quantity: 4,
       item_code: "SKU-2",
     },
   ], ["1273C"]);
@@ -43,23 +41,40 @@ test("team customer trend includes September invoice sales credited outside the 
   });
 
   assert.equal(report.rows[0].monthSales["2026-09"], 9141);
-  assert.equal(report.rows[0].monthQuantity["2026-09"], 12);
   assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
 });
 
-test("credit notes reduce monthly sales and quantity without adding a sold SKU", () => {
+test("credit notes reduce sales without adding a sold SKU", () => {
   const report = buildPromoterCoverageReport({
     customers: [{ customer_code: "C1" }],
     salesRows: [
-      { customer_code: "C1", transaction_date: "2026-09-01", sales_amount: 500, quantity: 5, item_code: "A" },
-      { customer_code: "C1", transaction_date: "2026-09-15", sales_amount: -100, quantity: -1, net_sales_amount: -100, net_quantity: -1, item_code: "B", is_credit_note: true },
+      { customer_code: "C1", transaction_date: "2026-09-01", sales_amount: 500, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-09-15", sales_amount: -100, net_sales_amount: -100, item_code: "B", is_credit_note: true },
     ],
     monthKeys: ["2026-09"],
   });
 
   assert.equal(report.rows[0].monthSales["2026-09"], 400);
-  assert.equal(report.rows[0].monthQuantity["2026-09"], 4);
   assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
+});
+
+test("current and future months stay neutral in monthly and aggregate trends", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "C1" }],
+    salesRows: [
+      { customer_code: "C1", transaction_date: "2026-08-10", sales_amount: 100, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-09-10", sales_amount: 200, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-10-01", sales_amount: 300, item_code: "B" },
+    ],
+    monthKeys: ["2026-08", "2026-09", "2026-10", "2026-11"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].monthSalesChange["2026-09"].trend, "increasing");
+  assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "stable");
+  assert.equal(report.rows[0].monthSalesChange["2026-10"], null);
+  assert.equal(report.rows[0].monthSkuChange["2026-11"], null);
+  assert.equal(report.rows[0].trend, "insufficient_history");
 });
 
 test("coverage includes unvisited team customers and separates repeat visits", () => {

@@ -1,5 +1,9 @@
 # Architecture
 
+## Backup Automation
+
+Standalone scripts under `scripts/backup/` run in gated, main-only GitHub Actions workflows, separate from Next.js and the local Supabase guard. They make read-only PostgreSQL, Supabase Storage/Management, and Vercel requests; archive Git history; encrypt with age; and upload to a private personal Google Drive folder through rclone. Vercel environment values are not decrypted/exported, Auth secrets are redacted, and operator recovery data contains only a vault reference and secret names. A separate workflow monitors failed or overdue backups. Offline verification does not write to a database. Database and Storage snapshots are not atomic. Activation, custody, and selective Supabase restore requirements are in `docs/BACKUP_RECOVERY.md`; code on a branch does not mean backups are active or restore-tested.
+
 ## Stack
 
 - Next.js 15 App Router (`app/`), React 19, JavaScript only.

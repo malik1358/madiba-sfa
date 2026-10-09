@@ -1,0 +1,80 @@
+name: Google Drive Backup
+run-name: Google Drive backup (${{ inputs.mode || (github.event.schedule == '47 23 * * *' && 'full' || 'database') }})
+
+on:
+  schedule:
+    - cron: "17 0,6,12,18 * * *"
+    - cron: "47 23 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Backup scope
+        type: choice
+        options: [database, full]
+        default: full
+      validate_only:
+        description: Validate settings without exporting or uploading
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-google-drive-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.ref == 'refs/heads/main' && vars.BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: production-backup
+    env:
+      BACKUP_SUPABASE_PROJECT_REF: ${{ vars.BACKUP_SUPABASE_PROJECT_REF }}
+      BACKUP_SUPABASE_URL: ${{ vars.BACKUP_SUPABASE_URL }}
+      BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      BACKUP_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BACKUP_SUPABASE_SERVICE_ROLE_KEY }}
+      BACKUP_SUPABASE_ACCESS_TOKEN: ${{ secrets.BACKUP_SUPABASE_ACCESS_TOKEN }}
+      BACKUP_RCLONE_CONFIG: ${{ secrets.BACKUP_RCLONE_CONFIG }}
+      BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+      BACKUP_DRIVE_PATH: ${{ vars.BACKUP_DRIVE_PATH }}
+      BACKUP_PRUNE_ENABLED: ${{ vars.BACKUP_PRUNE_ENABLED }}
+      BACKUP_VERCEL_TOKEN: ${{ secrets.BACKUP_VERCEL_TOKEN }}
+      BACKUP_VERCEL_PROJECT_ID: ${{ vars.BACKUP_VERCEL_PROJECT_ID }}
+      BACKUP_VERCEL_TEAM_ID: ${{ vars.BACKUP_VERCEL_TEAM_ID }}
+      BACKUP_RECOVERY_INVENTORY_JSON: ${{ secrets.BACKUP_RECOVERY_INVENTORY_JSON }}
+      BACKUP_MODE: ${{ inputs.mode || (github.event.schedule == '47 23 * * *' && 'full' || 'database') }}
+      VALIDATE_ONLY: ${{ inputs.validate_only || false }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Test backup tooling
+        run: node --test tests/backupPolicy.test.mjs tests/backupRuntime.test.mjs
+      - name: Validate required settings
+        run: node scripts/backup/run-backup.mjs "$BACKUP_MODE" --check-config
+      - name: Install backup tools
+        if: env.VALIDATE_ONLY != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes age rclone
+          docker pull postgres:17
+      - name: Test real encryption tools
+        if: env.VALIDATE_ONLY != 'true'
+        env:
+          BACKUP_TOOL_TESTS: 'true'
+        run: node --test tests/backupTools.test.mjs
+      - name: Export, encrypt, upload and verify
+        if: env.VALIDATE_ONLY != 'true'
+        run: node scripts/backup/run-backup.mjs "$BACKUP_MODE"
+      - name: Record result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          printf '### Google Drive backup\n\nScope: %s\n\nStatus: %s\n\nConfiguration-only: %s\n' "$BACKUP_MODE" "$JOB_STATUS" "$VALIDATE_ONLY" >> "$GITHUB_STEP_SUMMARY"

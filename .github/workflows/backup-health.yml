@@ -1,0 +1,61 @@
+name: Backup Health
+
+on:
+  schedule:
+    - cron: "37 */3 * * *"
+  workflow_run:
+    workflows: [Google Drive Backup]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: production-backup-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: vars.BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const now = Date.now();
+            const thresholds = { database: 9, full: 30 };
+            const latest = {};
+            for await (const response of github.paginate.iterator(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: 'google-drive-backup.yml', branch: 'main', per_page: 100,
+            })) {
+              for (const run of response.data) {
+                if (run.conclusion !== 'success' || !['schedule', 'workflow_dispatch'].includes(run.event)) continue;
+                const mode = /\((database|full)\)/.exec(run.display_title)?.[1];
+                if (!mode || latest[mode]) continue;
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                  owner, repo, run_id: run.id, per_page: 100,
+                });
+                if (jobs.some(job => job.steps?.some(step => step.name === 'Export, encrypt, upload and verify' && step.conclusion === 'success'))) latest[mode] = run;
+              }
+              if (Object.keys(latest).length === 2) break;
+              if (response.data.length && now - Date.parse(response.data.at(-1).created_at) > 45 * 86400000) break;
+            }
+            const failures = Object.entries(thresholds).filter(([mode, hours]) => !latest[mode] || now - Date.parse(latest[mode].updated_at) > hours * 3600000);
+            const completed = context.payload.workflow_run;
+            if (completed?.head_branch === 'main' && completed.conclusion === 'failure') failures.push(['last run failed', 0]);
+            const title = '[Backup alert] MADIBA SFA Google Drive backup needs attention';
+            const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'open', creator: 'github-actions[bot]', per_page: 100 });
+            const existing = issues.find(issue => issue.title === title && !issue.pull_request);
+            if (failures.length) {
+              const body = 'Automated backup health check detected a problem.\n\n' + failures.map(([mode, hours]) => `- ${mode}: ${hours ? `no verified export within ${hours} hours` : 'workflow failure'}`).join('\n') + '\n\nOpen Actions > Google Drive Backup, check setup and permissions, then run a full backup. A settings-only validation or skipped job does not count as a backup.\n\nEnable GitHub email notifications for this repository. No credentials or business data are included in this alert.';
+              if (existing) await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              else await github.rest.issues.create({ owner, repo, title, body });
+              core.setFailed('Backups are failed or overdue; an issue has been opened/updated.');
+            } else if (existing) {
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, state: 'closed' });
+            }

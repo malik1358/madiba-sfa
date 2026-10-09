@@ -1,5 +1,9 @@
 # Deployment
 
+## Backups and Recovery
+
+`.github/workflows/google-drive-backup.yml` schedules PostgreSQL backups every six hours and full database/Storage/Git/configuration backups nightly, encrypted to Google Drive. The workflow is inactive until configured and enabled with repository variable `BACKUP_ENABLED=true` on `main`; production credentials belong only in the protected `production-backup` GitHub environment, never local env files. Recovery archives omit secret values and Android signing material. Cleanup is opt-in and disabled by default. `backup-health.yml` alerts through GitHub issues on failed or overdue exports. Setup, Free-plan quota risks, retention, custody, and the isolated restore drill are documented in `docs/BACKUP_RECOVERY.md`. No database migration or app-runtime behavior change.
+
 ## Environments
 
 There is **no permanent cloud staging environment**. Local PC covers development and staging. Cloud is production only.

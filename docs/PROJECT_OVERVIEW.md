@@ -28,6 +28,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **My Day** (`/management/my-day`): attendance punches, visit list, priorities.
 - **Customers Audit** (`/management/customer-audit`): customer history, orders, settlement, visits.
 - **New Order** and **Visit Without Order**: field transactions.
+- **Product Catalogue** (`/management/product-catalogue`): searchable ecommerce-style product cards with code, name, regional wholesale price, existing unit/packing information, and a photo carousel. Existing order-catalogue items appear immediately with a no-photo placeholder. Field order users select a scoped customer and prepare/save/submit using the same New Order workspace. Admin/manager can try temporary photo previews; no images are uploaded or saved yet. Image-storage integration is deferred to the separate receipt/image-storage setup.
 - **Old Pending Orders**: invoice workflow for submitted orders.
 - **Payment Collections** and **Collection Report**: outstanding queues and visit capture. `/management/my-collections` still resolves for users who can open Payment Collections, but `myCollections` is not a separate enabled module.
 - **Payment Settlement** and **Outstanding Compare**: FIFO cash application versus the Tally outstanding file.

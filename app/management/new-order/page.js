@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -65,6 +66,7 @@ import { formatSalesOrderNumber, formatSalesOrderNumberForDisplay } from "../../
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
+import ProductCatalogue from "../../components/ProductCatalogue";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -601,6 +603,7 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
+  const catalogueMode = usePathname() === "/management/product-catalogue";
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -1544,7 +1547,8 @@ export default function NewOrderPage() {
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
         setPriceSheetItems(parsed.sheetItems || []);
-      } catch {
+      } catch (err) {
+        if (catalogueMode) setError(err.message || "Unable to load catalogue prices.");
         // Keep previously loaded prices if fresh and cached sources are unavailable.
       }
     }
@@ -1665,11 +1669,35 @@ export default function NewOrderPage() {
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>{t("title")}</h1>
-            <p className="moduleSubtitle">{t("subtitle")}</p>
+            <h1>{catalogueMode ? (language === "ar" ? "كتالوج المنتجات" : "Product Catalogue") : t("title")}</h1>
+            <p className="moduleSubtitle">{catalogueMode ? (language === "ar" ? "تصفح المنتجات والصور وأعد طلب العميل" : "Browse products, photos, and packing - then prepare a customer order") : t("subtitle")}</p>
           </div>
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
+
+        {catalogueMode && (
+          <ProductCatalogue
+            items={filteredItems}
+            categories={categories}
+            search={itemSearch}
+            onSearch={setItemSearch}
+            category={categoryFilter}
+            onCategory={setCategoryFilter}
+            quantities={orderQuantities}
+            onQty={updateQty}
+            onIncrease={increaseQty}
+            onDecrease={decreaseQty}
+            priceList={regionPriceList}
+            pricingRegion={pricingRegion}
+            language={language}
+            selectedCustomer={selectedCustomer}
+            customers={customers.filter((customer) => customer.is_prospect || !isExcludedNewOrderCustomer(customer))}
+            onCustomer={selectCustomer}
+            orderTotal={orderTotals.amountInclVat}
+            selectedCount={orderSummary.itemCount}
+            orderLines={pricedOrderLines}
+          />
+        )}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -1817,7 +1845,7 @@ export default function NewOrderPage() {
           )}
         </section>
 
-        <section className="moduleSection">
+        <section className="moduleSection" id="catalogue-customer">
           <div className="moduleSectionHeader">
             <h2>Customer Search</h2>
             {editOrderId && <span>Editing order #{editOrderId}</span>}
@@ -2111,7 +2139,7 @@ export default function NewOrderPage() {
               </ExportableTable>
             </section>
 
-            <section className="moduleSection">
+            <section className="moduleSection" id="catalogue-order-review">
               <PaymentTypeControl
                 paymentType={paymentType}
                 onChange={setPaymentType}

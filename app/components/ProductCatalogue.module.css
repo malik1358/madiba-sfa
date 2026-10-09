@@ -1,0 +1,50 @@
+.catalogue { position: relative; }
+.customer { display: grid; gap: 6px; margin-bottom: 18px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 16px; }
+.toolbar label { display: grid; gap: 6px; flex: 1 1 200px; }
+.toolbar label:first-child { flex-grow: 2; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 20px; margin-top: 20px; }
+.card { background: white; border: 1px solid #dce6e9; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 14px #0f4c5c0b; display: flex; flex-direction: column; }
+.selected { border-color: #0f766e; box-shadow: 0 0 0 2px #0f766e22; }
+.gallery { position: relative; height: 240px; background: #f3f7f8; display: flex; align-items: center; justify-content: center; }
+.gallery img { width: 100%; height: 100%; object-fit: contain; padding: 12px; }
+.placeholder { display: grid; justify-items: center; gap: 12px; color: #687f87; padding: 24px; text-align: center; font-size: 14px; }
+.carouselControls { position: absolute; inset-inline: 12px; bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+.carouselControls span { background: #ffffffed; border-radius: 12px; padding: 4px 10px; font-size: 12px; }
+.carouselControls button { border: 1px solid #cedce0; border-radius: 50%; background: white; width: 34px; height: 34px; cursor: pointer; }
+.removePhoto { position: absolute; top: 8px; inset-inline-end: 8px; color: #9b1c1c; border: 1px solid #eed4d4; border-radius: 8px; background: #fff; padding: 6px 10px; cursor: pointer; }
+.cardBody { display: flex; flex-direction: column; gap: 8px; padding: 18px; flex: 1; }
+.category { color: #0f766e; font-size: 12px; font-weight: 700; }
+.cardBody h3 { margin: 0; color: #143d49; font-size: 16px; overflow-wrap: anywhere; }
+.packing { margin: 6px 0; color: #526c75; font-size: 13px; }
+.packing span { display: block; margin-top: 4px; }
+.price { font-size: 21px; color: #0f4c5c; margin-top: auto; }
+.qty { display: flex; margin-top: 8px; height: 42px; gap: 6px; }
+.qty button { width: 44px; border: 1px solid #bed3d9; border-radius: 8px; background: #edf6f7; color: #0f4c5c; font-size: 22px; cursor: pointer; }
+.qty input { min-width: 0; width: 100%; text-align: center; border: 1px solid #bed3d9; border-radius: 8px; }
+.qty button:disabled, .qty input:disabled { opacity: .45; cursor: not-allowed; }
+.upload { display: grid; gap: 6px; font-size: 13px; color: #0f4c5c; margin-top: 6px; }
+.upload input { width: 100%; font-size: 12px; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 22px 0; }
+.pagination button, .cartDetails button { border: 1px solid #cedce0; border-radius: 8px; background: #fff; padding: 8px 14px; cursor: pointer; }
+.pagination button:disabled { opacity: .4; cursor: not-allowed; }
+.cart { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; border-radius: 12px; background: #0f4c5c; color: white; padding: 16px; margin-top: 20px; }
+.cart span { display: block; font-size: 13px; margin-top: 4px; }
+.cart a { background: white; color: #0f4c5c; text-decoration: none; }
+.cartDetails { margin-top: 16px; }
+.cartDetails summary { cursor: pointer; font-weight: 700; }
+.cartDetails > div { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-bottom: 1px solid #dce6e9; padding: 10px 0; }
+.cartDetails > div span { flex: 1 1 180px; }
+.error { background: #fff0f0; color: #9b1c1c; border-radius: 8px; padding: 12px; }
+.notice { background: #fff8e7; color: #735b17; border-radius: 8px; padding: 12px; font-size: 14px; }
+.notice a { color: inherit; font-weight: 700; }
+@media (max-width: 580px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .gallery { height: 170px; }
+  .cardBody { padding: 12px; }
+  .cardBody h3 { font-size: 14px; }
+  .price { font-size: 17px; }
+  .qty { height: 38px; gap: 3px; }
+  .qty button { width: 32px; flex-shrink: 0; }
+}
+@media (max-width: 340px) { .grid { grid-template-columns: 1fr; } }

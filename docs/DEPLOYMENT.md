@@ -39,6 +39,8 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 
+Product Catalogue currently needs no migration, image bucket, new environment variables or Android rebuild. The previously proposed photo migration was removed without being applied. Image-storage integration is deferred to the separate receipt/image-storage project. Verify existing products/packing and salesman browse/cart after release; admin/manager image selection is a temporary page-only preview, not an upload. The feature is not live merely because local code and tests are complete.
+
 ### Production database migration workflow
 
 `.github/workflows/production-db-migrations.yml` is a manually dispatched, audited path for exactly these existing migrations: `20260930190000_sales_order_request_id.sql`, `20261002120000_collection_visit_client_submission_id.sql`, and `20261002130000_attachments.sql`. It does not run on push, pull request, or a schedule. The default `preflight` mode is read-only. This workflow does not use `db push` or `migration up`, and it does not change Storage buckets or policies. The workflow and its runner are committed to the feature branch only until separately reviewed and merged; **no production SQL, GitHub environment, secret, or variable was changed as part of their implementation**.

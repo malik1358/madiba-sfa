@@ -163,15 +163,15 @@ test("normal matched email claims each app visit once and prefers report email",
     now: new Date("2026-10-09T21:35:00Z"),
     env: { ...mailEnv, MATCHED_RECEIPT_EMAIL_ENABLED: "true" },
     loadData: async () => ({ groups: new Map([["S01", sampleGroup()]]) }),
-    claim: async (_admin, visitId) => { claimed.push(visitId); return true; },
-    complete: async (_admin, visitIds) => completed.push(...visitIds),
+    claim: async (_admin, claimId) => { claimed.push(claimId); return true; },
+    complete: async (_admin, claimIds) => completed.push(...claimIds),
     send: async (message) => { sent.push(message); return { id: "provider-id" }; },
   });
 
   assert.equal(result.sentCount, 1);
   assert.equal(result.claimedCount, 1);
-  assert.deepEqual(claimed, ["visit-1"]);
-  assert.deepEqual(completed, ["visit-1"]);
+  assert.deepEqual(claimed, ["visit-1:salesman:S01"]);
+  assert.deepEqual(completed, ["visit-1:salesman:S01"]);
   assert.deepEqual(sent[0].to, ["reports@example.com"]);
 });
 
@@ -187,6 +187,95 @@ test("already-claimed matched receipts are not sent twice", async () => {
   assert.equal(result.sentCount, 0);
   assert.equal(result.claimedCount, 0);
   assert.equal(sent, false);
+});
+
+function bossReportingFixture() {
+  const first = sampleGroup();
+  first.salesman = { ...first.salesman, id: "sales-1" };
+  const second = sampleGroup();
+  second.salesman = {
+    ...second.salesman,
+    id: "sales-2",
+    salesman_code: "S02",
+    salesman_name: "Sales Two",
+    report_email: "sales-two@example.com",
+  };
+  second.rows = second.rows.map((row) => ({
+    ...row,
+    visit: { ...row.visit, id: "visit-2", salesman_code: "S02", customer_code: "C2", customer_name: "Shop Two" },
+    tally: { ...row.tally, vch_no: "R-200" },
+  }));
+  const boss = {
+    id: "boss-1",
+    role: "manager",
+    salesman_code: "BOSS",
+    salesman_name: "Team Boss",
+    report_email: "boss@example.com",
+    is_active: true,
+  };
+  return {
+    groups: new Map([["S01", first], ["S02", second]]),
+    profiles: [boss, first.salesman, second.salesman],
+    authUsers: [
+      { id: "sales-1", user_metadata: { head_salesman_code: "BOSS" } },
+      { id: "sales-2", user_metadata: { head_salesman_code: "BOSS" } },
+      { id: "boss-1", user_metadata: {} },
+    ],
+  };
+}
+
+test("daily run sends separate salesman emails and one consolidated email to their boss", async () => {
+  const sent = [];
+  const claimed = [];
+  const completed = [];
+  const fixture = bossReportingFixture();
+  const result = await runMatchedReceiptEmailCycle({}, {
+    date: "2026-10-08",
+    now: new Date("2026-10-09T21:35:00Z"),
+    env: { ...mailEnv, MATCHED_RECEIPT_EMAIL_ENABLED: "true" },
+    loadData: async () => fixture,
+    claim: async (_admin, claimId) => { claimed.push(claimId); return true; },
+    complete: async (_admin, claimIds) => completed.push(...claimIds),
+    send: async (message) => { sent.push(message); return { id: `email-${sent.length}` }; },
+  });
+
+  assert.equal(result.sentCount, 3);
+  assert.equal(result.claimedCount, 4);
+  assert.equal(result.sentBosses.length, 1);
+  assert.deepEqual(sent.map((message) => message.to[0]).sort(), [
+    "boss@example.com",
+    "reports@example.com",
+    "sales-two@example.com",
+  ]);
+  const bossMail = sent.find((message) => message.to[0] === "boss@example.com");
+  assert.match(bossMail.subject, /Consolidated/);
+  assert.match(bossMail.html, /Sales One/);
+  assert.match(bossMail.html, /Sales Two/);
+  assert.equal(sent.filter((message) => message.to[0] === "boss@example.com").length, 1);
+  assert.ok(claimed.includes("visit-1:boss:boss-1"));
+  assert.ok(claimed.includes("visit-2:boss:boss-1"));
+  assert.equal(completed.length, 4);
+});
+
+test("receipt-register upload trigger sends salesman mail without a separate boss digest", async () => {
+  const sent = [];
+  const fixture = bossReportingFixture();
+  const result = await runMatchedReceiptEmailCycle({}, {
+    uploadDates: ["2026-10-08"],
+    now: new Date("2026-10-09T12:00:00Z"),
+    env: { ...mailEnv, MATCHED_RECEIPT_EMAIL_ENABLED: "true" },
+    loadData: async () => fixture,
+    claim: async () => true,
+    complete: async () => {},
+    send: async (message) => { sent.push(message); return { id: `email-${sent.length}` }; },
+  });
+
+  assert.equal(result.sentCount, 2);
+  assert.deepEqual(sent.map((message) => message.to[0]).sort(), [
+    "reports@example.com",
+    "sales-two@example.com",
+  ]);
+  assert.equal(sent.some((message) => message.to[0] === "boss@example.com"), false);
 });
 
 test("reconciliation exposes matched pairs only for trusted internal use and enriches owner", async () => {

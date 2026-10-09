@@ -96,7 +96,7 @@ function renderSalesmanSection(salesman, rows) {
   };
 }
 
-export function buildMatchedReceiptEmail({ dateLabel, salesmanGroups = [], preview = false } = {}) {
+export function buildMatchedReceiptEmail({ dateLabel, salesmanGroups = [], preview = false, digest = false } = {}) {
   const groups = (salesmanGroups || [])
     .map((group) => ({ ...group, rows: Array.isArray(group.rows) ? group.rows : [] }))
     .filter((group) => group.rows.length > 0)
@@ -105,10 +105,12 @@ export function buildMatchedReceiptEmail({ dateLabel, salesmanGroups = [], previ
   const sections = groups.map((group) => renderSalesmanSection(group.salesman || {}, group.rows));
   const receiptCount = sections.reduce((sum, section) => sum + section.count, 0);
   const totalAmount = sections.reduce((sum, section) => sum + section.total, 0);
-  const title = preview ? "TEST PREVIEW: matched app receipts" : "Matched app receipts";
+  const title = preview
+    ? "TEST PREVIEW: matched app receipts"
+    : (digest ? "Consolidated matched receipt report" : "Matched app receipts");
 
   return {
-    subject: `${preview ? "TEST PREVIEW - " : ""}Matched app receipts - ${dateLabel}`,
+    subject: `${preview ? "TEST PREVIEW - " : (digest ? "Consolidated matched receipts - " : "Matched app receipts - ")}${dateLabel}`,
     html: `<div style="font-family:Arial,sans-serif;color:#172326">
       <h1 style="margin:0 0 8px">${escapeHtml(title)}</h1>
       <p>${escapeHtml(dateLabel)} | ${receiptCount} matched receipts | ${amount(totalAmount)}</p>

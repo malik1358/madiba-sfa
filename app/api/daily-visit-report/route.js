@@ -1,10 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { canViewManagementReports, isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
-import {
-  buildPotentialSalesTargetsSection,
-  filterPotentialSalesTargetsForProfile,
-} from "../../lib/potentialSalesTargets.js";
-import { loadPotentialSalesTargetCustomers } from "../../lib/potentialSalesTargetsServer.js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 import { buildDailyVisitReport } from "../../lib/dailyVisitReportServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 
@@ -88,51 +83,10 @@ export async function GET(request) {
     }
 
     const report = await buildDailyVisitReport(admin, { date, userIdFilter });
-    let potentialSalesTargets = null;
-    let potentialSalesTargetsUnavailable = false;
-    const collectionOnly = isCollectionOnlyAccess({
-      role: profile.role,
-      salesmanCode: profile.salesman_code,
-      collectionOnlyMetadata: Boolean(user.user_metadata?.collection_only),
-    });
-
-    if (!collectionOnly) {
-      try {
-        const { getSalesScope, fetchOutstandingAndCollectionRecords } = await import("../payment-collections/route.js");
-        const scope = viewAll
-          ? {
-            hasAllAccess: true,
-            visibleSalesmanCodes: [],
-            scopeProfiles: [],
-            userRole: profile.role,
-            userId: null,
-            canSeeAllSchedulers: true,
-            visibleSchedulerUserIds: null,
-          }
-          : await getSalesScope(admin, user.id);
-        const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-        const todayKey = getKsaDateString();
-        const targets = await loadPotentialSalesTargetCustomers(admin, { records, todayKey });
-        const targetProfile = userId ? await getProfile(admin, userId) : (restrictToSelf ? profile : null);
-        const scopedTargets = targetProfile
-          ? filterPotentialSalesTargetsForProfile(targets, targetProfile)
-          : targets;
-        potentialSalesTargets = buildPotentialSalesTargetsSection({
-          rows: scopedTargets,
-          todayKey,
-        }).rows;
-      } catch (error) {
-        console.error("Unable to load potential sales targets for daily visit report:", error);
-        potentialSalesTargetsUnavailable = true;
-      }
-    }
 
     return Response.json({
       success: true,
       canSendVisitReportEmail: canSendVisitReportEmail(profile),
-      potentialSalesTargets,
-      potentialSalesTargetsUnavailable,
-      potentialTargetsIncludeSalesman: viewAll && !userId,
       ...report,
     });
   } catch (error) {

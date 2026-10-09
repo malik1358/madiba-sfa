@@ -1,9 +1,16 @@
 import { escapeHtml } from "./dailyVisitReportEmail.js";
-import { parseOutstandingSheetDate, resolveInvoiceAgingDays } from "./outstanding.js";
+import { isCreditNoteTransaction } from "./paymentBehavior.js";
+import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode, resolveInvoiceAgingDays } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
 function normalizeSalesmanIdentity(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function potentialTargetAccountCode(value) {
+  const code = normalizeCode(resolveCustomerAccountCode(value));
+  const match = code.match(/^0*(\d{3,6})[A-Z]?$/);
+  return match ? String(Number(match[1])) : code;
 }
 
 function matchesSalesmanProfile(value, identitySet) {
@@ -79,4 +86,78 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
     customerCount: targets.length,
     totalOutstanding: total,
   };
+}
+
+export function potentialSalesTargetMonthKeys(todayKey = getKsaDateString()) {
+  const match = String(todayKey || "").match(/^(\d{4})-(\d{2})-/);
+  if (!match) return [];
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return [];
+  return [-3, -2, -1, 0].map((offset) => {
+    const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+export function potentialSalesTargetSalesmanCode(row = {}) {
+  return String(row.salesman_code || row.current_salesman_code || row.previous_salesman_code || "")
+    .trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+export function potentialSalesTargetMatchesSalesman(row = {}, salesmanCode = "") {
+  const selected = String(salesmanCode || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!selected) return true;
+  return [row.salesman_code, row.current_salesman_code, row.previous_salesman_code]
+    .some((code) => String(code || "").trim().toUpperCase().replace(/\s+/g, " ") === selected);
+}
+
+export function sumPotentialSalesByCustomerAndMonth(rows = [], monthKeys = []) {
+  const months = new Set(monthKeys || []);
+  const byCustomer = new Map();
+  (rows || []).forEach((row) => {
+    const code = potentialTargetAccountCode(row.customer_code);
+    const month = String(row.transaction_date || "").slice(0, 7);
+    if (!code || !months.has(month)) return;
+    const amount = Number(row.sales_amount || 0);
+    if (!Number.isFinite(amount)) return;
+    const values = byCustomer.get(code) || Object.fromEntries([...months].map((key) => [key, 0]));
+    values[month] += isCreditNoteTransaction(row) ? -Math.abs(amount) : amount;
+    byCustomer.set(code, values);
+  });
+  return byCustomer;
+}
+
+function parseVisitNote(value) {
+  try {
+    return JSON.parse(String(value || "null")) || {};
+  } catch {
+    return {};
+  }
+}
+
+export function buildPotentialSalesTargetLastVisitMap({ collectionVisits = [], activityLogs = [], profiles = [] } = {}) {
+  const salesmanByUserId = new Map((profiles || []).map((profile) => [
+    String(profile.id || ""),
+    String(profile.salesman_code || "").trim().toUpperCase().replace(/\s+/g, " "),
+  ]));
+  const latest = new Map();
+  const remember = (customerCode, userId, dateValue) => {
+    const customer = potentialTargetAccountCode(customerCode);
+    const salesman = salesmanByUserId.get(String(userId || "")) || "";
+    const date = parseOutstandingSheetDate(dateValue);
+    if (!customer || !salesman || !date) return;
+    const key = `${customer}::${salesman}`;
+    if (date > (latest.get(key) || "")) latest.set(key, date);
+  };
+  (collectionVisits || []).forEach((visit) => {
+    remember(visit.customer_code, visit.created_by, visit.saved_at);
+  });
+  (activityLogs || []).forEach((log) => {
+    const note = parseVisitNote(log.note);
+    const type = String(log.entry_type || "").trim().toUpperCase();
+    if (type !== "VISIT_REPORT" && type !== "PROSPECT_FOLLOW_UP") return;
+    remember(note.customer_code || note.customerCode, log.user_id, note.captured_at || note.capturedAt || log.created_at);
+  });
+  return latest;
 }

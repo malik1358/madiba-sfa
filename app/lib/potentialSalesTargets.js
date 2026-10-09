@@ -70,7 +70,11 @@ export function daysSincePotentialSalesTargetInvoice(row = {}, todayKey = getKsa
   return Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${invoiceDate}T00:00:00Z`)) / 86400000);
 }
 
-export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsaDateString() } = {}) {
+export function buildPotentialSalesTargetsSection({
+  rows = [],
+  todayKey = getKsaDateString(),
+  title = "Potential Sales Target Customers",
+} = {}) {
   const targets = rows.filter((row) => isPotentialSalesTarget(row, { todayKey }))
     .sort((left, right) => String(left.last_invoice_date || left.latest_transaction_date)
       .localeCompare(String(right.last_invoice_date || right.latest_transaction_date))
@@ -86,14 +90,14 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
   };
   const totalExpectedSale = targets.reduce((sum, row) => sum + (Number(row.potential_sale_expected) || 0), 0);
   const text = [
-    "Potential Sales Target Customers",
+    title,
     `As of ${todayKey} (KSA)`,
     headers.join(" | "),
     ...targets.map((row) => values(row).join(" | ")),
     ...(!targets.length ? ["No qualifying customers."] : []),
     `Total | ${targets.length} customers | Outstanding ${money(total)} SAR | Potential Sale Expected ${money(totalExpectedSale)} SAR`,
   ].join("\n");
-  const html = `<h2 style="font-size:16px;color:#0f4c5c;">Potential Sales Target Customers</h2>
+  const html = `<h2 style="font-size:16px;color:#0f4c5c;">${escapeHtml(title)}</h2>
     <p style="font-size:12px;">As of ${escapeHtml(todayKey)} (KSA)</p>
     <table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px;width:100%;border-color:#99d5cf;">
       <thead style="background:#0f4c5c;color:#ffffff;"><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
@@ -111,7 +115,49 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
     })),
     customerCount: targets.length,
     totalOutstanding: total,
+    totalExpectedSale,
   };
+}
+
+export function buildPotentialSalesTargetsDigest({ rows = [], todayKey = getKsaDateString() } = {}) {
+  const groups = new Map();
+  (rows || []).filter((row) => isPotentialSalesTarget(row, { todayKey })).forEach((row) => {
+    const salesmanCode = potentialSalesTargetSalesmanCode(row);
+    const salesmanName = String(row.salesman_name || row.current_salesman_code || salesmanCode || "Unassigned").trim();
+    const key = salesmanCode || salesmanName.toUpperCase();
+    const group = groups.get(key) || { salesmanCode, salesmanName, rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+
+  const sections = [...groups.values()]
+    .sort((left, right) => left.salesmanName.localeCompare(right.salesmanName))
+    .map((group) => ({
+      ...group,
+      section: buildPotentialSalesTargetsSection({
+        rows: group.rows,
+        todayKey,
+        title: `${group.salesmanName}${group.salesmanCode ? ` (${group.salesmanCode})` : ""}`,
+      }),
+    }))
+    .filter((group) => group.section.customerCount > 0);
+  const customerCount = sections.reduce((sum, group) => sum + group.section.customerCount, 0);
+  const totalOutstanding = sections.reduce((sum, group) => sum + group.section.totalOutstanding, 0);
+  const totalExpectedSale = sections.reduce((sum, group) => sum + group.section.totalExpectedSale, 0);
+  const money = (value) => Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const html = `<h2 style="font-size:18px;color:#0f4c5c;">Daily Potential Sales Target Customers</h2>
+    <p>Full customer list grouped by salesman as of ${escapeHtml(todayKey)} (KSA).</p>
+    ${sections.map((group) => `<section style="margin:16px 0;">${group.section.html}</section>`).join("")
+      || "<p>No qualifying customers.</p>"}
+    <p style="font-weight:700;">Overall: ${customerCount} customers | Outstanding ${money(totalOutstanding)} SAR | Potential Sale Expected ${money(totalExpectedSale)} SAR</p>`;
+  const text = [
+    "Daily Potential Sales Target Customers — all salesmen",
+    `As of ${todayKey} (KSA)`,
+    ...sections.flatMap((group) => [group.section.text, ""]),
+    ...(!sections.length ? ["No qualifying customers.", ""] : []),
+    `Overall: ${customerCount} customers | Outstanding ${money(totalOutstanding)} SAR | Potential Sale Expected ${money(totalExpectedSale)} SAR`,
+  ].join("\n");
+  return { subject: `Daily Potential Sales Target Customers — ${todayKey}`, html, text, customerCount, totalOutstanding, totalExpectedSale };
 }
 
 export function potentialSalesTargetMonthKeys(todayKey = getKsaDateString()) {

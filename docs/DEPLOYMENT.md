@@ -86,6 +86,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `RESEND_API_KEY` | Alternative mail transport |
 | `DAILY_VISIT_REPORT_TO` | Extra visit-report inbox |
 | `DAILY_VISIT_REPORT_SEND_TO_USERS` | `false` sends only the extra inbox |
+| `DAILY_POTENTIAL_SALES_TARGETS_TO` | Optional comma-separated recipients for the separate daily full target digest, grouped by salesman |
 | `DAILY_SALESMAN_RESUME_TO` | Resume digest recipients |
 | `MATCHED_RECEIPT_EMAIL_ENABLED` | Set `true` in Vercel production to send daily salesman mail and consolidated hierarchy-boss digests after the preview is approved; remains false by default in local/dev |
 | `MISSING_INVOICE_EMAIL_TO`, `MISSING_INVOICE_EMAIL_CC` | Extra invoice-chase addresses |

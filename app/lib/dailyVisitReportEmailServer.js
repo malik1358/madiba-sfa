@@ -29,7 +29,7 @@ import {
   enrichDueCustomersWithVisitWithoutOrder,
 } from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
-import { buildPotentialSalesTargetsSection } from "./potentialSalesTargets.js";
+import { buildPotentialSalesTargetsDigest, buildPotentialSalesTargetsSection } from "./potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
 import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 import {
@@ -366,6 +366,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
 
   const digestOnlyInbox = normalizeDeliverableEmail(digestOnlyTo);
   const managerEmails = digestOnlyInbox ? [digestOnlyInbox] : parseEmailList(env.DAILY_VISIT_REPORT_TO);
+  const potentialSalesTargetsEmails = parseEmailList(env.DAILY_POTENTIAL_SALES_TARGETS_TO);
   const sendToUser = envFlagEnabled(env.DAILY_VISIT_REPORT_SEND_TO_USERS, true);
 
   const [report, profiles, authUsers] = await Promise.all([
@@ -695,6 +696,19 @@ export async function runDailyVisitReportEmailCycle(admin, {
       });
       return [];
     }
+  }
+
+  if (potentialSalesTargets && potentialSalesTargetsEmails.length) {
+    await sendDigestEmail({
+      userId: "potential-sales-targets",
+      userName: "Potential Sales Targets",
+      to: potentialSalesTargetsEmails,
+      kind: "potential_sales_targets_digest",
+      message: buildPotentialSalesTargetsDigest({
+        rows: potentialSalesTargets,
+        todayKey: staleAsOfKey,
+      }),
+    });
   }
 
   const usedDigestEmails = new Set();

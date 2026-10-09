@@ -666,6 +666,48 @@ test("runDailyVisitReportEmailCycle digestOnlyTo sends only the all-teams digest
   assert.match(sent[0].html, /Belal/);
 });
 
+test("runDailyVisitReportEmailCycle sends full customer-wise potential target digest to its configured recipient", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-10-08",
+    now: new Date("2026-10-09T21:10:00Z"),
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_POTENTIAL_SALES_TARGETS_TO: "malik@pinasz.com",
+    },
+    send: async (message) => { sent.push(message); return { provider: "test" }; },
+    loadReport: async () => ({ date: "2026-10-08", thresholdKm: 0.5, users: [] }),
+    loadProfiles: async () => [],
+    loadAuthUsers: async () => [],
+    loadSummary: async () => ({ daySummary: { lines: [] } }),
+    loadKpis: async () => [],
+    loadTeamTargets: async () => new Map(),
+    loadDueCollectionCustomers: async () => [],
+    loadPotentialSalesTargets: async () => [
+      {
+        customer_code: "C1", customer_name: "Shop One", salesman_code: "SM001", salesman_name: "Sales One",
+        is_active: true, total_outstanding: 1000, last_invoice_date: "2026-09-20",
+        invoices: [{ pending_amount: 1000, invoice_date: "2026-09-20" }], potential_sale_expected: 2000,
+      },
+      {
+        customer_code: "C2", customer_name: "Shop Two", salesman_code: "SM002", salesman_name: "Sales Two",
+        is_active: true, total_outstanding: 1500, last_invoice_date: "2026-09-20",
+        invoices: [{ pending_amount: 1500, invoice_date: "2026-09-20" }], potential_sale_expected: 3000,
+      },
+    ],
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].to, ["malik@pinasz.com"]);
+  assert.match(sent[0].subject, /Potential Sales Target Customers/);
+  assert.match(sent[0].html, /Sales One \(SM001\)/);
+  assert.match(sent[0].html, /Sales Two \(SM002\)/);
+  assert.match(sent[0].text, /C1 \| Shop One/);
+  assert.match(sent[0].text, /C2 \| Shop Two/);
+});
+
 test("runDailyVisitReportEmailCycle skips when email is not configured", async () => {
   const result = await runDailyVisitReportEmailCycle({}, {
     date: "2026-09-02",

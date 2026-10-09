@@ -65,32 +65,38 @@ export function buildPotentialSalesTargetsSection({ rows = [], todayKey = getKsa
       || String(left.customer_code).localeCompare(String(right.customer_code)));
   const money = (value) => Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const total = targets.reduce((sum, row) => sum + Number(row.total_outstanding), 0);
-  const headers = ["Customer Code", "Customer", "City / Area", "Last Invoice", "Days Since Invoice", "Outstanding (SAR)"];
+  const headers = ["Customer Code", "Customer", "City / Area", "Last Invoice", "Days Since Invoice", "Outstanding (SAR)", "Potential Sale Expected (SAR)"];
   const values = (row) => {
     const date = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
     const days = daysSincePotentialSalesTargetInvoice(row, todayKey);
-    return [row.customer_code, row.customer_name, [row.city, row.area].filter(Boolean).join(" / ") || "-", date, days, money(row.total_outstanding)];
+    const potentialSaleExpected = Number(row.potential_sale_expected) || 0;
+    return [row.customer_code, row.customer_name, [row.city, row.area].filter(Boolean).join(" / ") || "-", date, days, money(row.total_outstanding), money(potentialSaleExpected)];
   };
+  const totalExpectedSale = targets.reduce((sum, row) => sum + (Number(row.potential_sale_expected) || 0), 0);
   const text = [
     "Potential Sales Target Customers",
     `As of ${todayKey} (KSA)`,
     headers.join(" | "),
     ...targets.map((row) => values(row).join(" | ")),
     ...(!targets.length ? ["No qualifying customers."] : []),
-    `Total | ${targets.length} customers | ${money(total)} SAR`,
+    `Total | ${targets.length} customers | Outstanding ${money(total)} SAR | Potential Sale Expected ${money(totalExpectedSale)} SAR`,
   ].join("\n");
   const html = `<h2 style="font-size:16px;color:#0f4c5c;">Potential Sales Target Customers</h2>
     <p style="font-size:12px;">As of ${escapeHtml(todayKey)} (KSA)</p>
     <table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px;width:100%;border-color:#99d5cf;">
       <thead style="background:#0f4c5c;color:#ffffff;"><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-      <tbody>${targets.map((row, index) => `<tr style="background:${index % 2 ? "#ecfdf5" : "#ffffff"};">${values(row).map((value, column) => `<td${column === 5 ? ' style="text-align:right;background:#dcfce7;font-weight:700;"' : ""}>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")
-        || '<tr><td colspan="6">No qualifying customers.</td></tr>'}</tbody>
-      <tfoot style="background:#0f4c5c;color:#ffffff;font-weight:700;"><tr><td colspan="5">Total (${targets.length} customers)</td><td style="text-align:right;">${money(total)} SAR</td></tr></tfoot>
+      <tbody>${targets.map((row, index) => `<tr style="background:${index % 2 ? "#ecfdf5" : "#ffffff"};">${values(row).map((value, column) => `<td${column >= 5 ? ' style="text-align:right;background:#dcfce7;font-weight:700;"' : ""}>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")
+        || '<tr><td colspan="7">No qualifying customers.</td></tr>'}</tbody>
+      <tfoot style="background:#0f4c5c;color:#ffffff;font-weight:700;"><tr><td colspan="5">Total (${targets.length} customers)</td><td style="text-align:right;">${money(total)} SAR</td><td style="text-align:right;">${money(totalExpectedSale)} SAR</td></tr></tfoot>
     </table>`;
   return {
     html,
     text,
-    rows: targets.map((row) => ({ ...row, days_since_last_invoice: daysSincePotentialSalesTargetInvoice(row, todayKey) })),
+    rows: targets.map((row) => ({
+      ...row,
+      potential_sale_expected: Number(row.potential_sale_expected) || 0,
+      days_since_last_invoice: daysSincePotentialSalesTargetInvoice(row, todayKey),
+    })),
     customerCount: targets.length,
     totalOutstanding: total,
   };
@@ -106,6 +112,27 @@ export function potentialSalesTargetMonthKeys(todayKey = getKsaDateString()) {
     const date = new Date(Date.UTC(year, month - 1 + offset, 1));
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
   });
+}
+
+export function potentialSalesTargetSalesMonthKeys(todayKey = getKsaDateString()) {
+  const currentMonthKey = potentialSalesTargetMonthKeys(todayKey).at(-1);
+  if (!currentMonthKey) return [];
+  const [year, month] = currentMonthKey.split("-").map(Number);
+  return [-6, -5, -4, -3, -2, -1, 0].map((offset) => {
+    const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+export function potentialSalesTargetExpectedSale(salesByMonth = {}, todayKey = getKsaDateString()) {
+  const completedMonths = potentialSalesTargetSalesMonthKeys(todayKey).slice(0, 6);
+  const recentMonths = completedMonths.slice(-3);
+  const maximum = (months) => months.reduce((highest, month) => {
+    const amount = Number(salesByMonth?.[month]);
+    return Number.isFinite(amount) ? Math.max(highest, amount) : highest;
+  }, 0);
+  const recentMaximum = maximum(recentMonths);
+  return recentMaximum > 0 ? recentMaximum : maximum(completedMonths);
 }
 
 export function potentialSalesTargetSalesmanCode(row = {}) {

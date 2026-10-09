@@ -1,8 +1,10 @@
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
 import {
   buildPotentialSalesTargetLastVisitMap,
+  potentialSalesTargetExpectedSale,
   potentialTargetAccountCode,
   potentialSalesTargetMonthKeys,
+  potentialSalesTargetSalesMonthKeys,
   sumPotentialSalesByCustomerAndMonth,
 } from "./potentialSalesTargets.js";
 import { promoterCoverageCustomerCodeVariants } from "./promoterCoverage.js";
@@ -40,9 +42,9 @@ async function loadSubmittedOrderDates(admin, customerCodes) {
 }
 
 async function loadPotentialTargetMonthlySales(admin, customerCodes, monthKeys) {
-  const completedMonthKeys = (monthKeys || []).slice(0, 3);
-  const currentMonthKey = (monthKeys || [])[3];
-  if (completedMonthKeys.length !== 3 || !currentMonthKey) return new Map();
+  const completedMonthKeys = (monthKeys || []).slice(0, -1);
+  const currentMonthKey = (monthKeys || []).at(-1);
+  if (completedMonthKeys.length !== 6 || !currentMonthKey) return new Map();
   const queryCodes = [...new Set(customerCodes.flatMap(promoterCoverageCustomerCodeVariants))];
   const salesRows = [];
   for (let start = 0; start < queryCodes.length; start += 200) {
@@ -130,6 +132,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
   const candidates = customers.filter((row) => recordByCode.has(potentialTargetAccountCode(row.customer_code)));
   const codes = [...new Set(candidates.map((row) => row.customer_code))];
   const browserMonthKeys = potentialSalesTargetMonthKeys(todayKey);
+  const expectedSaleMonthKeys = potentialSalesTargetSalesMonthKeys(todayKey);
   const lastInvoiceByCode = new Map();
   const salesRows = [];
   const queryCodes = includeBrowserDetails
@@ -156,9 +159,9 @@ export async function loadPotentialSalesTargetCustomers(admin, {
       if ((data || []).length < 1000) break;
     }
   }
-  const monthlySales = includeBrowserDetails
-    ? sumPotentialSalesByCustomerAndMonth(salesRows, browserMonthKeys)
-    : await loadPotentialTargetMonthlySales(admin, codes, browserMonthKeys);
+  const expectedSaleMonthlySales = includeBrowserDetails
+    ? sumPotentialSalesByCustomerAndMonth(salesRows, expectedSaleMonthKeys)
+    : await loadPotentialTargetMonthlySales(admin, codes, expectedSaleMonthKeys);
   const submittedOrderDates = includeBrowserDetails ? await loadSubmittedOrderDates(admin, codes) : new Map();
   const lastVisitDates = includeBrowserDetails ? await loadBrowserVisitData(admin, candidates, profiles) : new Map();
 
@@ -175,6 +178,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
       .trim().toUpperCase();
     const invoiceDate = dates.at(-1) || "";
     const orderDate = submittedOrderDates.get(code) || "";
+    const salesByMonth = expectedSaleMonthlySales.get(code) || {};
     const visitBySalesman = {};
     [record.salesman_code, customer.current_salesman_code, customer.previous_salesman_code]
       .map((value) => String(value || "").trim().toUpperCase())
@@ -189,7 +193,11 @@ export async function loadPotentialSalesTargetCustomers(admin, {
       total_outstanding: totalOutstanding,
       last_invoice_date: invoiceDate,
       last_order_invoice_date: [invoiceDate, orderDate].filter(Boolean).sort().at(-1) || "",
-      sales_by_month: monthlySales.get(code) || Object.fromEntries(browserMonthKeys.map((month) => [month, 0])),
+      sales_by_month: Object.fromEntries(browserMonthKeys.map((month) => [month, Number(salesByMonth[month]) || 0])),
+      potential_sale_expected: potentialSalesTargetExpectedSale(
+        salesByMonth,
+        todayKey,
+      ),
       ...(includeBrowserDetails ? {
         last_visit_by_salesman: visitBySalesman,
       } : {}),

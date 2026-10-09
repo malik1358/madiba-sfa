@@ -20,8 +20,8 @@ const TEXT = {
     ar: "العملاء النشطون ذوو المستحقات الحديثة دون فاتورة حديثة، مع المبيعات وزيارات المتابعة لكل عميل.",
   },
   hint: {
-    en: "Targets have positive outstanding below SAR 15,000, all open invoices under 60 days, and no invoice in the last 15 days. Sales are net of credit notes and returns. The current month is month-to-date.",
-    ar: "المستحقات أقل من 15,000 ريال وجميع الفواتير المفتوحة أقل من 60 يوماً، ولم تصدر فاتورة خلال آخر 15 يوماً. المبيعات صافية بعد خصم الإشعارات الدائنة والمرتجعات. الشهر الحالي حتى تاريخه.",
+    en: "Targets have positive outstanding below SAR 15,000 or below their recent monthly sales peak, all open invoices under 60 days, and no invoice in the last 15 days. Expected sale is the highest net-sales month from the last three completed months, falling back to six when the latest three have no sales. Current-month sales are excluded from expected sale.",
+    ar: "المستحقات الإيجابية أقل من 15,000 ريال أو أقل من أعلى مبيعات شهرية حديثة، وجميع الفواتير المفتوحة أقل من 60 يوماً، ولم تصدر فاتورة خلال آخر 15 يوماً. المبيعات المتوقعة هي أعلى صافي مبيعات خلال آخر ثلاثة أشهر مكتملة، أو آخر ستة أشهر عند عدم وجود مبيعات في الأشهر الثلاثة الأخيرة. لا تدخل مبيعات الشهر الحالي في المتوقع.",
   },
   back: { en: "← Reports", ar: "← التقارير" },
   loading: { en: "Loading potential sales targets...", ar: "جاري تحميل أهداف المبيعات المحتملة..." },
@@ -33,8 +33,10 @@ const TEXT = {
   lastVisitBySalesman: { en: "Last Visit by Salesman", ar: "آخر زيارة بواسطة المندوب" },
   lastOrderInvoice: { en: "Last Order / Invoice", ar: "آخر طلب / فاتورة" },
   outstanding: { en: "Outstanding", ar: "المستحق" },
+  potentialSaleExpected: { en: "Potential Sale Expected", ar: "المبيعات المتوقعة" },
   targets: { en: "Target customers", ar: "العملاء المستهدفون" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
+  totals: { en: "Totals", ar: "الإجماليات" },
   noRows: { en: "No qualifying customers for this salesman.", ar: "لا يوجد عملاء مطابقون لهذا المندوب." },
   noSalesmen: { en: "No salesman targets are available.", ar: "لا توجد أهداف لمندوبي المبيعات." },
   unavailable: { en: "Unable to load potential sales targets.", ar: "تعذر تحميل أهداف المبيعات المحتملة." },
@@ -143,6 +145,7 @@ export default function PotentialSalesTargetsPage() {
   const monthKeys = report?.monthKeys || [];
   const monthTotals = report?.summary?.monthlySales || {};
   const currentMonth = String(report?.asOfDate || "").slice(0, 7);
+  const totalExpectedSale = rows.reduce((sum, row) => sum + Number(row.potential_sale_expected || 0), 0);
 
   return (
     <MorningAttendanceGate requireMorningAttendance={false}>
@@ -223,6 +226,7 @@ export default function PotentialSalesTargetsPage() {
                           {monthKeys.map((month) => (
                             <th key={month}>{monthLabel(month, language, month === currentMonth)}</th>
                           ))}
+                          <th>{t("potentialSaleExpected")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -240,13 +244,16 @@ export default function PotentialSalesTargetsPage() {
                                 {formatAmount(row.sales_by_month?.[month], language)}
                               </td>
                             ))}
+                            <td style={{ textAlign: "right", background: "#dcfce7", fontWeight: 700 }}>
+                              {formatAmount(row.potential_sale_expected, language)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr>
                           <td colSpan={report.showSalesmanColumn ? 6 : 5} style={{ background: "#0f4c5c", color: "#ffffff", fontWeight: 700 }}>
-                            {t("totalOutstanding")} · {rows.length}
+                            {t("totals")} · {rows.length}
                           </td>
                           <td style={{ background: "#0f4c5c", color: "#ffffff", fontWeight: 700, textAlign: "right" }}>
                             {formatAmount(report.summary.totalOutstanding, language)}
@@ -256,6 +263,9 @@ export default function PotentialSalesTargetsPage() {
                               {formatAmount(monthTotals[month], language)}
                             </td>
                           ))}
+                          <td style={{ background: "#0f4c5c", color: "#ffffff", fontWeight: 700, textAlign: "right" }}>
+                            {formatAmount(totalExpectedSale, language)}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>

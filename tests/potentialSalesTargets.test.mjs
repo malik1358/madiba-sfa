@@ -8,7 +8,9 @@ import {
   filterPotentialSalesTargetsForProfile,
   isPotentialSalesTarget,
   potentialSalesTargetMatchesSalesman,
+  potentialSalesTargetExpectedSale,
   potentialSalesTargetMonthKeys,
+  potentialSalesTargetSalesMonthKeys,
   potentialSalesTargetVisitedWithinDays,
   sumPotentialSalesByCustomerAndMonth,
 } from "../app/lib/potentialSalesTargets.js";
@@ -65,14 +67,34 @@ test("all outstanding must be under 60 days including the strict day-60 boundary
 });
 
 test("potential target section renders escaped customer details and totals in both email formats", () => {
-  const section = buildPotentialSalesTargetsSection({ rows: [customer, { ...customer, is_active: false }], ...options });
+  const section = buildPotentialSalesTargetsSection({
+    rows: [{ ...customer, potential_sale_expected: 20000 }, { ...customer, is_active: false }],
+    ...options,
+  });
   assert.equal(section.customerCount, 1);
   assert.equal(section.totalOutstanding, 14999.99);
   assert.match(section.html, /Shop &lt;One&gt;/);
   assert.match(section.html, /#0f4c5c/);
-  assert.match(section.text, /2026-09-21 \| 16 \| 14,999.99/);
-  assert.match(section.text, /Total \| 1 customers/);
+  assert.match(section.text, /Potential Sale Expected \(SAR\)/);
+  assert.match(section.text, /2026-09-21 \| 16 \| 14,999\.99 \| 20,000\.00/);
+  assert.match(section.text, /Potential Sale Expected 20,000\.00 SAR/);
+  assert.doesNotMatch(buildPotentialSalesTargetsSection({ rows: [customer], ...options }).text, /NaN/);
   assert.match(buildPotentialSalesTargetsSection({ ...options }).text, /No qualifying customers/);
+});
+
+test("expected sale uses the recent three-month peak then falls back to six completed months", () => {
+  assert.deepEqual(potentialSalesTargetSalesMonthKeys("2026-10-07"), [
+    "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10",
+  ]);
+  assert.equal(potentialSalesTargetExpectedSale({
+    "2026-04": 40000, "2026-05": 25000, "2026-06": 10000,
+    "2026-07": 18000, "2026-08": 12000, "2026-09": 14000, "2026-10": 99000,
+  }, "2026-10-07"), 18000);
+  assert.equal(potentialSalesTargetExpectedSale({
+    "2026-04": 40000, "2026-05": 25000, "2026-06": 10000,
+    "2026-07": 0, "2026-08": -50, "2026-09": 0, "2026-10": 99000,
+  }, "2026-10-07"), 40000);
+  assert.equal(potentialSalesTargetExpectedSale({}, "2026-10-07"), 0);
 });
 
 test("loader uses active customers and latest actual invoice, not credit notes or only open invoices", async () => {
@@ -152,6 +174,7 @@ test("email target loader uses net sales from the three completed months for hig
     ...options,
   });
   assert.deepEqual(rows[0].sales_by_month, { "2026-07": 22000, "2026-08": 19000, "2026-09": 20000, "2026-10": 0 });
+  assert.equal(rows[0].potential_sale_expected, 22000);
   assert.equal(isPotentialSalesTarget(rows[0], options), true);
 });
 
@@ -196,6 +219,7 @@ test("browser target loader returns order date, salesperson visit, three complet
   assert.equal(rows[0].last_order_invoice_date, "2026-10-06");
   assert.equal(rows[0].last_visit_by_salesman.SM001, "2026-10-03");
   assert.deepEqual(rows[0].sales_by_month, { "2026-07": 90, "2026-08": 200, "2026-09": 0, "2026-10": 0 });
+  assert.equal(rows[0].potential_sale_expected, 200);
   assert.equal(isPotentialSalesTarget(rows[0], { todayKey: "2026-10-09" }), true);
 });
 

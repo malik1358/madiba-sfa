@@ -66,6 +66,18 @@ export async function databaseStage(label, operation) {
   }
 }
 
+export function validateDatabaseArchiveCoverage(toc) {
+  const requiredSections = [
+    ["business table data", "TABLE DATA public"],
+    ["Supabase Auth user data", "TABLE DATA auth users"],
+    ["Supabase Storage metadata", "TABLE DATA storage"],
+  ];
+  const missing = requiredSections.filter(([, marker]) => !toc.includes(marker)).map(([label]) => label);
+  if (missing.length) {
+    throw new BackupDiagnosticError(`Database archive is missing required sections: ${missing.join(", ")}. No backup was uploaded.`);
+  }
+}
+
 export async function execute(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -252,9 +264,7 @@ export async function runBackup(config, options = {}) {
     ]), pgOptions));
     const toc = await databaseStage("archive validation (pg_restore)", () => run("docker", ["run", "--rm", "--volume", `${workspace}:/backup:ro`,
       "postgres:17", "pg_restore", "--list", "/backup/payload/database.dump"]));
-    for (const marker of ["TABLE DATA public", "TABLE DATA auth users", "TABLE DATA storage"]) {
-      if (!toc.includes(marker)) throw new Error("Database archive lacks required business/Auth/Storage data");
-    }
+    validateDatabaseArchiveCoverage(toc);
     await writeFile(path.join(payload, "database-toc.txt"), toc, { mode: 0o600 });
     const manifest = {
       formatVersion: 1, mode: config.mode, startedAt: date.toISOString(), projectRef: config.projectRef,

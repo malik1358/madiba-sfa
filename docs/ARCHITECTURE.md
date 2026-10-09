@@ -141,6 +141,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 5. Cron routes use `app/lib/cronAuth.js`: `Authorization: Bearer <CRON_SECRET>` or header `x-cron-secret`. If `CRON_SECRET` is empty, cron calls are rejected.
 6. Android login can be blocked by a minimum APK version (`app/lib/androidAppVersionPolicy.js`, setting `android_apk_min_version_v1`, env `MIN_ANDROID_APK_VERSION_CODE`).
 7. Android also gates login/morning attendance on unrestricted battery (`app/lib/androidBatteryOptimization.js`, details in `ANDROID_APK.md`).
+8. Active admins can use the global **Login as** control. `/api/admin/login-as` revalidates the admin profile and target profile, then uses Supabase Admin `generateLink` plus browser `verifyOtp` to create a real target-user session without handling passwords. The admin access/refresh tokens are kept in tab `sessionStorage` for the **Return to admin** control. App APIs and audit fields see the selected user; there is no separate impersonation audit record. No schema migration is required.
 
 Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` may contain `head_salesman_code` and `head_salesman_name`. `app/lib/salesHierarchy.js` walks that chain. Customer book shares are a real table (`customer_book_shares`) plus hardcoded pairs in `app/lib/mutualSalesmanGroups.js`.
 

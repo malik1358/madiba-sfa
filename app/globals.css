@@ -204,6 +204,97 @@ body {
   cursor: pointer;
 }
 
+.globalLoginAsControl {
+  position: fixed;
+  top: 4px;
+  right: 82px;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 170px);
+}
+
+.globalLoginAsButton {
+  min-height: 26px;
+  max-width: 150px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  background: #e2f2e8;
+  color: #145b38;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.globalLoginAsName {
+  max-width: 190px;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adminLoginAsModal {
+  display: grid;
+  gap: 14px;
+}
+
+.adminLoginAsModal h2,
+.adminLoginAsModal p {
+  margin: 0;
+}
+
+.adminLoginAsWarning {
+  padding: 12px;
+  border-left: 4px solid #b66a13;
+  background: #fff4df;
+  color: #563300;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.adminLoginAsField {
+  display: grid;
+  gap: 6px;
+  color: #123f49;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.adminLoginAsField select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid #9bb9c0;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #123f49;
+  font: inherit;
+}
+
+.adminLoginAsConfirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #123f49;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.adminLoginAsConfirm input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
 .globalBackButton {
   position: fixed;
   top: 4px;
@@ -224,11 +315,31 @@ body {
   top: 38px;
 }
 
+.environmentBanner + .globalAppStatus + .globalLoginAsControl {
+  top: 38px;
+}
+
 .environmentBanner + .globalAppStatus + .globalBackButton {
   top: 38px;
 }
 
 @media (max-width: 640px) {
+  .globalLoginAsControl {
+    right: 76px;
+    max-width: calc(100vw - 146px);
+  }
+
+  .globalLoginAsName {
+    max-width: 72px;
+  }
+
+  .globalLoginAsButton {
+    max-width: 80px;
+    padding-right: 5px;
+    padding-left: 5px;
+    font-size: 10px;
+  }
+
   .globalAppStatus {
     gap: 8px 14px;
     flex-wrap: wrap;

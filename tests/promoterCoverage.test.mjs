@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildPromoterCoverageReport,
   filterPromoterCoverageSalesRows,
+  promoterCoverageCustomerCodeVariants,
   promoterCoverageMonthKeys,
   promoterCoverageSalesmanMatches,
 } from "../app/lib/promoterCoverage.js";
@@ -135,4 +136,23 @@ test("trend treats zero-base sales as new and negative sales as decreasing", () 
 test("team salesman matching ignores imported casing and repeated spaces", () => {
   assert.equal(promoterCoverageSalesmanMatches(" team   seller ", ["TEAM SELLER"]), true);
   assert.equal(promoterCoverageSalesmanMatches("OTHER", ["TEAM SELLER"]), false);
+});
+
+test("team customer 1553 matches active-sales account-code variants", () => {
+  const variants = promoterCoverageCustomerCodeVariants("1553");
+  assert.ok(variants.includes("1553C"));
+  assert.ok(variants.includes("01553C"));
+
+  const salesRows = filterPromoterCoverageSalesRows([
+    { customer_code: "01553C", transaction_date: "2026-09-23", sales_amount: 500, item_code: "SKU-1553" },
+    { customer_code: "OTHER", transaction_date: "2026-09-23", sales_amount: 900, item_code: "SKU-OTHER" },
+  ], ["1553"]);
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "1553", customer_name: "Ahla Al Tawfeer Company" }],
+    salesRows,
+    monthKeys: ["2026-09"],
+  });
+
+  assert.equal(report.rows[0].monthSales["2026-09"], 500);
+  assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
 });

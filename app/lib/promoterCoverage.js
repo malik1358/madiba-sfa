@@ -1,3 +1,5 @@
+import { customerCodeCandidates, customerAccountCodesMatch, resolveCustomerAccountCode } from "./outstanding.js";
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -19,12 +21,32 @@ export function promoterCoverageMonthKeys(fromMonth, toMonth) {
 export function promoterCoverageCustomerCodeVariants(value) {
   const raw = String(value || "").trim();
   const normalized = normalizeCode(raw);
-  return [...new Set([raw, normalized, normalized.toLowerCase()].filter(Boolean))];
+  const candidates = [raw, normalized, ...customerCodeCandidates(normalized), resolveCustomerAccountCode(normalized)];
+  const accountCodes = candidates.map((candidate) => normalizeCode(resolveCustomerAccountCode(candidate))).filter(Boolean);
+
+  accountCodes.forEach((code) => {
+    const accountMatch = code.match(/^0*(\d{3,6})([A-Z]?)$/);
+    if (!accountMatch) return;
+    const base = String(Number(accountMatch[1]));
+    const suffix = accountMatch[2] || "C";
+    for (let width = base.length; width <= 6; width += 1) {
+      const padded = base.padStart(width, "0");
+      candidates.push(padded, `${padded}${suffix}`);
+    }
+  });
+
+  return [...new Set(candidates.map((candidate) => String(candidate || "").trim()).filter(Boolean))];
+}
+
+function accountMatchKey(value) {
+  const account = normalizeCode(resolveCustomerAccountCode(value));
+  const match = account.match(/^0*(\d{3,6})[A-Z]?$/);
+  return match ? String(Number(match[1])) : account;
 }
 
 export function filterPromoterCoverageSalesRows(salesRows = [], customerCodes = []) {
-  const teamCustomerCodes = new Set(customerCodes.map(normalizeCode).filter(Boolean));
-  return salesRows.filter((sale) => teamCustomerCodes.has(normalizeCode(sale.customer_code)));
+  const teamKeys = new Set(customerCodes.map(accountMatchKey).filter(Boolean));
+  return salesRows.filter((sale) => teamKeys.has(accountMatchKey(sale.customer_code)));
 }
 
 function monthOf(value) {

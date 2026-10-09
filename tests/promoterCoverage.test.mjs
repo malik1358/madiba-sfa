@@ -200,3 +200,22 @@ test("aggregate trend uses the latest pair even in a longer selected range", () 
   assert.equal(report.rows[0].trend, "stable");
   assert.equal(report.rows[0].changePercent, 0);
 });
+
+test("April sales prevent September from being mislabeled new after zero August", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "APR-SEP" }],
+    salesRows: [
+      { customer_code: "APR-SEP", transaction_date: "2026-04-10", sales_amount: 500, item_code: "APR-SKU" },
+      { customer_code: "APR-SEP", transaction_date: "2026-09-10", sales_amount: 250, item_code: "SEP-SKU" },
+    ],
+    monthKeys: ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].monthSalesChange["2026-09"].trend, "increasing");
+  assert.equal(report.rows[0].monthSalesChange["2026-09"].changePercent, null);
+  assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "increasing");
+  assert.equal(report.rows[0].monthSkuChange["2026-09"].changePercent, null);
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].skuTrend, "increasing");
+});

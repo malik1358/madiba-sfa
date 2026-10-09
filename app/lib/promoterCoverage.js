@@ -80,18 +80,23 @@ function dedupeVisits(visits = []) {
 
 function resolveSalesTrend(monthSales, monthKeys, currentMonth) {
   const completedMonths = monthKeys.filter((month) => month < currentMonth);
-  if (completedMonths.length < 6) return { trend: "insufficient_history", recentSales: 0, previousSales: 0, changePercent: null };
+  if (completedMonths.length < 2) return { trend: "insufficient_history", recentSales: 0, previousSales: 0, changePercent: null };
 
-  const previousSales = completedMonths.slice(-6, -3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
-  const recentSales = completedMonths.slice(-3).reduce((sum, month) => sum + (monthSales[month] || 0), 0);
-  if (previousSales <= 0 && recentSales > 0) {
+  const splitIndex = Math.floor(completedMonths.length / 2);
+  const previousMonths = completedMonths.slice(0, splitIndex);
+  const recentMonths = completedMonths.slice(splitIndex);
+  const previousSales = previousMonths.reduce((sum, month) => sum + (monthSales[month] || 0), 0);
+  const recentSales = recentMonths.reduce((sum, month) => sum + (monthSales[month] || 0), 0);
+  const previousAverage = previousSales / previousMonths.length;
+  const recentAverage = recentSales / recentMonths.length;
+  if (previousAverage <= 0 && recentAverage > 0) {
     return { trend: "new_sales", recentSales, previousSales, changePercent: null };
   }
-  if (previousSales <= 0) {
+  if (previousAverage <= 0) {
     return { trend: "no_sales", recentSales, previousSales, changePercent: null };
   }
 
-  const changePercent = ((recentSales - previousSales) / previousSales) * 100;
+  const changePercent = ((recentAverage - previousAverage) / previousAverage) * 100;
   const trend = changePercent > 0.5 ? "increasing" : changePercent < -0.5 ? "decreasing" : "stable";
   return { trend, recentSales, previousSales, changePercent };
 }

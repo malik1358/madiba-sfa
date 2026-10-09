@@ -75,7 +75,8 @@ test("current and future months stay neutral in monthly and aggregate trends", (
   assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "stable");
   assert.equal(report.rows[0].monthSalesChange["2026-10"], null);
   assert.equal(report.rows[0].monthSkuChange["2026-11"], null);
-  assert.equal(report.rows[0].trend, "insufficient_history");
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 100);
 });
 
 test("coverage includes unvisited team customers and separates repeat visits", () => {
@@ -155,4 +156,42 @@ test("team customer 1553 matches active-sales account-code variants", () => {
 
   assert.equal(report.rows[0].monthSales["2026-09"], 500);
   assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
+});
+
+test("aggregate trend uses the selected completed months when fewer than six are selected", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "SHORT", customer_name: "Short range" }],
+    salesRows: [
+      { customer_code: "SHORT", transaction_date: "2026-07-10", sales_amount: 100, item_code: "A" },
+      { customer_code: "SHORT", transaction_date: "2026-08-10", sales_amount: 200, item_code: "A" },
+      { customer_code: "SHORT", transaction_date: "2026-09-10", sales_amount: 600, item_code: "B" },
+      { customer_code: "SHORT", transaction_date: "2026-09-15", sales_amount: 100, item_code: "C" },
+      { customer_code: "SHORT", transaction_date: "2026-10-10", sales_amount: 10000, item_code: "C" },
+    ],
+    monthKeys: ["2026-07", "2026-08", "2026-09", "2026-10"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 350);
+  assert.equal(report.rows[0].skuTrend, "increasing");
+  assert.equal(report.rows[0].skuChangePercent, 50);
+});
+
+test("odd selected ranges compare average monthly values between range halves", () => {
+  const report = buildPromoterCoverageReport({
+    customers: [{ customer_code: "ODD" }],
+    salesRows: [
+      { customer_code: "ODD", transaction_date: "2026-06-01", sales_amount: 100 },
+      { customer_code: "ODD", transaction_date: "2026-07-01", sales_amount: 100 },
+      { customer_code: "ODD", transaction_date: "2026-08-01", sales_amount: 400 },
+      { customer_code: "ODD", transaction_date: "2026-09-01", sales_amount: 400 },
+      { customer_code: "ODD", transaction_date: "2026-10-01", sales_amount: 9999 },
+    ],
+    monthKeys: ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10"],
+    currentMonth: "2026-10",
+  });
+
+  assert.equal(report.rows[0].trend, "increasing");
+  assert.equal(report.rows[0].changePercent, 300);
 });

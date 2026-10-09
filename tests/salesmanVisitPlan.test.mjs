@@ -350,6 +350,22 @@ test("merge candidates keep sales metrics and collection probability", () => {
   assert.ok(payload.visitCount >= 1);
 });
 
+test("FAR-only collection history does not become the visit-plan last visit", () => {
+  const merged = mergeVisitPlanCustomerCandidates(
+    [],
+    [{
+      customer_code: "A1",
+      current_salesman_code: "S1",
+      latest_collection: { saved_at: "2026-10-05T10:00:00.000Z" },
+    }],
+    "2026-10-06T08:00:00.000Z",
+    new Map(),
+  );
+
+  assert.equal(merged[0].last_visit_date, null);
+  assert.equal(merged[0].days_since_last_visit, null);
+});
+
 test("email send stays skipped while disabled unless forcePreview", async () => {
   const skipped = await sendSalesmanVisitPlanEmailsFromPayload({
     reportDate: "2026-09-12",

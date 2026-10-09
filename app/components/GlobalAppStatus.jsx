@@ -10,7 +10,13 @@ import {
   seedDataRefreshMeta,
   subscribeDataRefreshStatus,
 } from "../lib/dataRefreshStatus";
-import { ensureMobileSnapshotFresh, readMobileSnapshotMeta } from "../lib/mobileDataCache";
+import {
+  ensureMobileSnapshotFresh,
+  invalidateCollectionQueuesForUser,
+  invalidateCustomerHistoryCache,
+  invalidateOutstandingCache,
+  readMobileSnapshotMeta,
+} from "../lib/mobileDataCache";
 import { localizedRoleLabel } from "../lib/moduleAccess";
 import { countPendingOfflineQueue } from "../lib/offlineSyncQueue";
 import { getSupabaseClient } from "../lib/supabase";
@@ -112,6 +118,12 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
     if (dataStatus.active || refreshingNow) return;
     setRefreshingNow(true);
     try {
+      // The mobile snapshot alone does not cover the per-customer history/outstanding/
+      // collection-queue caches, so clear those too or this button leaves stale
+      // settlement numbers on Customer Audit / Payment Collections after an upload.
+      await invalidateOutstandingCache();
+      await invalidateCustomerHistoryCache();
+      await invalidateCollectionQueuesForUser();
       await ensureMobileSnapshotFresh({ forceRefresh: true });
     } catch {
       // Status bar already shows the error from the refresh job.

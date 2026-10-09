@@ -42,6 +42,7 @@ const ahmed = {
   bossCode: "DIRECTOR",
   bossName: "Director",
   officeSupplies: "100",
+  localItemSales: "40",
   otherSales: "50",
   totalSales: "150",
   collection: "20",
@@ -49,6 +50,7 @@ const ahmed = {
   repeatCustomers: "4",
   kpis: [
     { key: "officeSupplies", actual: 40 },
+    { key: "localItemSales", actual: 10 },
     { key: "otherSales", actual: 10 },
     { key: "totalSales", actual: 50 },
     { key: "collection", actual: 5 },
@@ -63,6 +65,7 @@ const ali = {
   bossCode: "AHMED",
   bossName: "Ahmed",
   officeSupplies: "80",
+  localItemSales: "20",
   otherSales: "20",
   totalSales: "100",
   collection: "10",
@@ -70,6 +73,7 @@ const ali = {
   repeatCustomers: "3",
   kpis: [
     { key: "officeSupplies", actual: 30 },
+    { key: "localItemSales", actual: 5 },
     { key: "otherSales", actual: 20 },
     { key: "totalSales", actual: 50 },
     { key: "collection", actual: 8 },
@@ -123,8 +127,10 @@ test("filtered totals skip team rows so they are not double counted", () => {
   assert.equal(totals.officeSupplies.actual, 70);
   assert.equal(totals.officeSupplies.target, 180);
   assert.equal(totals.totalSales.actual, 100);
-  assert.equal(totals.totalSales.target, 250);
+  assert.equal(totals.totalSales.target, 310);
   assert.equal(totals.officeSupplies.achievement, (70 / 180) * 100);
+  assert.equal(totals.localItemSales.actual, 15);
+  assert.equal(totals.localItemSales.target, 60);
 });
 
 test("unique bosses and team members include the boss", () => {

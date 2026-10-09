@@ -110,7 +110,9 @@ export function sumKpiActuals(rows = []) {
 
 export function rowTargetValue(row, key) {
   if (key === "totalSales") {
-    return (Number(row?.officeSupplies || 0) || 0) + (Number(row?.otherSales || 0) || 0)
+    return (Number(row?.officeSupplies || 0) || 0)
+      + (Number(row?.localItemSales || 0) || 0)
+      + (Number(row?.otherSales || 0) || 0)
       || Number(row?.totalSales || 0)
       || 0;
   }

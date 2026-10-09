@@ -246,6 +246,7 @@ Android APK (Capacitor)
 | Blank white screen | Confirm phone has internet on first launch; check Vercel URL opens in Chrome |
 | Gradle sync failed | Open SDK Manager in Android Studio; install latest SDK Platform + Build Tools |
 | Location/camera blocked | App info â†’ Permissions â†’ allow Location + Camera |
+| File picker says no files are available | For customer or prospect documents, use **Take Photo** to capture the document, or download the file to an Android Files provider and use **Choose File / PDF**. |
 | Old UI after deploy | Force-close app and reopen; web updates come from Vercel automatically |
 | APK install failed | Uninstall old MADIBA SFA first; use latest **madiba-sfa-release-apk** (not an old debug build) |
 

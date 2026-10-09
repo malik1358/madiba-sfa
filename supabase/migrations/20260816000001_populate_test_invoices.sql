@@ -13,7 +13,7 @@ SELECT
     'INV-' || ROW_NUMBER() OVER (ORDER BY c.customer_code),
     c.customer_code,
     c.current_salesman_code,
-    CURRENT_DATE - (ROW_NUMBER() OVER (ORDER BY c.customer_code) % 120),
+    CURRENT_DATE - (ROW_NUMBER() OVER (ORDER BY c.customer_code) % 120)::integer,
     (ROW_NUMBER() OVER (ORDER BY c.customer_code) % 5 + 1) * 1000 + (ROW_NUMBER() OVER (ORDER BY c.customer_code) % 500),
     'REF-' || ROW_NUMBER() OVER (ORDER BY c.customer_code)
 FROM "public"."customers" c

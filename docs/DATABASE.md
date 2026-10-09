@@ -65,7 +65,9 @@ RLS `customers_select` allows management, the current salesman, or the previous 
 
 `customer_gps_history`: `customer_code`, lat/long, previous lat/long, `source`, `updated_by`, `updated_by_name`, `created_at`.
 
-The GPS report/digest uses this existing history schema; no new migration is required. If absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or the matching `sql/setup_customer_gps_history.sql` separately in Supabase. Explicit approval is stored in `source`: `salesman_accepted` for an authenticated salesman accepting a prompt, `visit_accepted` for other roles; automatic promotions remain `visit`. Legacy sources do not prove approval. Displacement and approval labels are computed, not new columns; KSA report/digest dates use server `created_at`, including offline sync.
+Confirmed field prompt overwrites additionally use text sources `salesman_accepted` and `visit_accepted`; no column change is required. `created_at` is server persistence time (including offline sync), not a separately recorded device acceptance time. Existing `20260831153000_customer_gps_history.sql` / `sql/setup_customer_gps_history.sql` must already be applied in Supabase for audit recording and digest delivery; deployment alone cannot create the table.
+
+`system_settings` keys `customer_gps_change_email:<YYYY-MM-DD>` atomically claim each GPS digest day using the unique `setting_key`. JSON values have `status: sending`, a claim token and `claimedAt`, then `status: sent`, `sentAt` and `changeCount`. Failed pre-delivery attempts release their own claim; post-delivery marker failures retain it to avoid duplicate mail. An interrupted `sending` claim requires operator review of provider delivery before clearing it; never delete a delivered day's claim just to rerun cron.
 
 `customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`.
 
@@ -93,7 +95,7 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 ## Orders
 
-`sales_orders`: `order_number` unique, nullable unique `request_id` (UUID; offline order replay key), `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`. Apply `20260930190000_sales_order_request_id.sql` in Supabase before deploying the API that reads this column.
+`sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`.
 
 `salesman_code` / `salesman_name` are the order maker (authenticated profile at save/submit), not a copy of `customers.current_salesman_code`. `/api/sales-orders` overwrites both from the caller’s profile; the client still sends `customerSalesmanCode` only for pricing-region fallback.
 
@@ -166,6 +168,7 @@ Schemes and quantity limits are settings, not tables:
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
+| `performance_kpi_actuals_v1:<YYYY-MM-01>` | Per-salesman KPI actuals and historical pace for the month, rebuilt after sales uploads and saved collection visits; read by `/api/performance` to avoid rescanning source transactions on each screen load |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |
 | `order_quantity_controls` | Per-customer quantity caps |
@@ -184,9 +187,7 @@ Schemes and quantity limits are settings, not tables:
 | `missing_invoice_email_last_sent_at` | Email dedupe |
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
-| `customer_gps_change_email:<date>` | Atomic daily GPS-digest claim: `sending` with `token`/`claimedAt`, then `sent` with `sentAt`/`changeCount` |
-
-GPS-digest claims are inserted atomically under the unique setting key; an existing claim or sent marker skips delivery. Completion and release compare both key and the owning claim value. Provider failure releases only that cycle's own claim; interruption or post-send marker failure leaves `sending` in place. Inspect provider delivery before any manual recovery; there is no force-send bypass. See `docs/DEPLOYMENT.md`.
+| `daily_receipt_email_last_sent:<YYYY-MM-DD>` | Daily app-entered receipt email dedupe, one marker per Riyadh report date |
 
 Do not create a new table for a small flag if the surrounding feature already uses one of these keys. Do not rename a key; clients and cron jobs compare the string exactly.
 
@@ -214,4 +215,4 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
 
-`20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Apply on local/dev before testing and on production through the approved release process. Saving a home point in Salesman Hierarchy clears matching customer pins through the GPS-audited API.
+`20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Run the migration on local/dev first and production only through the normal approved release process; saving a home point in Salesman Hierarchy also clears matching customer pins through the GPS-audited API.

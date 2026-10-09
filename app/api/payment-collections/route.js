@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 import {
   assertCollectionVisitRemark,
   buildCollectionQueues,
@@ -46,6 +47,7 @@ import {
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
 import { promoteEntryGpsToCustomerIfMissing } from "../../lib/customerGpsHistory.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
+import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
 import {
   resolveUploadContentType,
   storageExtensionFromUpload,
@@ -1317,6 +1319,17 @@ export async function POST(request) {
         },
       });
     }
+
+    after(async () => {
+      try {
+        const cacheAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await rebuildPerformanceKpiCache(cacheAdmin);
+      } catch (cacheError) {
+        console.error("Performance KPI cache rebuild after collection save failed:", cacheError);
+      }
+    });
 
     return Response.json({
       success: true,

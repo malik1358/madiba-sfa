@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
+import { loginErrorMessage } from "./lib/loginError";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import DashboardNearestCustomers from "./components/DashboardNearestCustomers";
@@ -219,9 +220,7 @@ export default function Home() {
 
     if (error) {
       showPopup({
-        message: ar
-          ? "البريد الإلكتروني أو كلمة المرور غير صحيحة"
-          : "Incorrect email or password",
+        message: loginErrorMessage(error, ar),
         variant: "error",
       });
 

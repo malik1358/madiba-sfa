@@ -38,6 +38,7 @@ const TEXT = {
     ar: "اختر ملف Excel بأعمدة Party Name و Lattitude و Longitutde ثم اضغط رفع.",
   },
   chooseFile: { en: "Choose file", ar: "اختر ملف" },
+  capturePhoto: { en: "Capture photo", ar: "التقاط صورة" },
   upload: { en: "Upload GPS", ar: "رفع GPS" },
   uploading: { en: "Uploading...", ar: "جاري الرفع..." },
   clearFile: { en: "Clear", ar: "إلغاء" },

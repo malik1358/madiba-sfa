@@ -496,6 +496,7 @@ export async function fetchCustomerHistoryCached(accessToken, scope, customerCod
       onUpdate: options.onUpdate,
       // Empty history was often a failed code-only lookup; always revalidate those.
       forceRefresh: Boolean(options.forceRefresh),
+      revalidate: Boolean(options.revalidate),
     },
   );
 }

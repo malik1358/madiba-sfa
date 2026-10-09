@@ -875,6 +875,11 @@ export default function DailyVisitReportPage() {
                           <td>{entryUser.activitySplit.collectionVisitWithoutPaymentCount || 0}</td>
                           <td>-</td>
                         </tr>
+                        <tr>
+                          <td>{t("collectionVisitsWithoutPayment")}</td>
+                          <td>{entryUser.activitySplit.collectionVisitWithoutPaymentCount || 0}</td>
+                          <td>-</td>
+                        </tr>
                       </tbody>
                     </table>
                   ) : null}

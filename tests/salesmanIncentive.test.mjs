@@ -482,3 +482,29 @@ test("incentive report merges Thamer aliases from the cube and invoice rows", ()
   assert.equal(report.salesmen[0].peak_month_sales, 300);
   assert.equal(report.rows[0].salesman_code, "SM002");
 });
+
+test("incentive report combines Thamer aliases for sales and collection rows", () => {
+  const legacyInvoice = salesLine({ salesman_code: "THAMER", salesman_name: "THAMER" });
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      customerName: "Alpha Trading",
+      transactions: [legacyInvoice],
+      receipts: [{ receipt_date: "2026-04-01", amount: 115, vch_no: "R/9" }],
+    }],
+    monthlySalesBySalesman: new Map([
+      ["THAMER", new Map([["2026-04", 100]])],
+      ["THAMER MOHAMMAD AHMED QASEM", new Map([["2026-04", 200]])],
+      ["SM002", new Map([["2026-03", 50]])],
+    ]),
+  });
+
+  assert.equal(report.salesmen.length, 1);
+  assert.equal(report.salesmen[0].salesman_code, "SM002");
+  assert.equal(report.salesmen[0].salesman_name, "Thamer");
+  assert.equal(report.salesmen[0].current_month_sales, 300);
+  assert.equal(report.salesmen[0].peak_month_sales, 50);
+  assert.equal(report.salesmen[0].sales_delta, 250);
+  assert.equal(report.rows[0].salesman_code, "SM002");
+});

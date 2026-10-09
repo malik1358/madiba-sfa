@@ -71,6 +71,21 @@ test("promoteEntryGpsToCustomerIfMissing writes when customer has no GPS", async
   const history = [];
   const admin = {
     from(table) {
+      if (table === "profiles") {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  async maybeSingle() {
+                    return { data: null, error: null };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
       if (table === "customers") {
         return {
           update(payload) {

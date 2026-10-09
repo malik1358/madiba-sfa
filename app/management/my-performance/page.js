@@ -21,7 +21,7 @@ import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
-  subtitle: { en: "Office supplies, other sales, total sales, collection, and customer KPIs", ar: "مستلزمات المكتب والمبيعات الأخرى وإجمالي المبيعات والتحصيل والعملاء" },
+  subtitle: { en: "Office supplies, local item sales, other sales, total sales, collection, and customer KPIs", ar: "مستلزمات المكتب والأصناف المحلية والمبيعات الأخرى وإجمالي المبيعات والتحصيل والعملاء" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
   actual: { en: "Actual", ar: "الفعلي" },
@@ -50,6 +50,7 @@ const STATUS_LABELS = {
 
 const KPI_LABELS = {
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
@@ -69,6 +70,17 @@ function statusClass(statusKey) {
 
 function kpiByKey(snapshot, key) {
   return (snapshot?.kpis || []).find((item) => item.key === key);
+}
+
+function actualDetailsHref(kpiKey, salesmanCodes, reportDate) {
+  const codes = [...new Set((salesmanCodes || []).filter(Boolean))];
+  if (!codes.length || !reportDate) return "";
+  const params = new URLSearchParams({
+    month: String(reportDate).slice(0, 7),
+    kpi: kpiKey,
+    salesmanCodes: codes.join(","),
+  });
+  return `/management/kpi-targets/details?${params.toString()}`;
 }
 
 export default function MyPerformancePage() {
@@ -153,6 +165,9 @@ export default function MyPerformancePage() {
   const kpis = snapshot?.kpis || [];
   const updatedLabel = snapshot ? performanceUpdatedStatusLabel(snapshot) : "";
   const showTeamTable = canViewTeam && memberSnapshots.length > 0;
+  const selectedSalesmanCodes = snapshot?.salesmanCode === TEAM_PERFORMANCE_VIEW
+    ? memberSnapshots.map((member) => member.salesmanCode)
+    : [snapshot?.salesmanCode];
 
   return (
     <MorningAttendanceGate>
@@ -215,7 +230,11 @@ export default function MyPerformancePage() {
                 <span>{KPI_LABELS[kpi.key]?.[language] || kpi.label}</span>
                 <strong>{formatAchievementPercent(kpi.achievement)}</strong>
                 <p className="moduleKpiMeta">
-                  {t("actual")}: {formatPerformanceKpiValue(kpi.key, kpi.actual)}
+                  {t("actual")}: {actualDetailsHref(kpi.key, selectedSalesmanCodes, snapshot?.reportDate) ? (
+                    <Link className="moduleKpiActualLink" href={actualDetailsHref(kpi.key, selectedSalesmanCodes, snapshot?.reportDate)}>
+                      {formatPerformanceKpiValue(kpi.key, kpi.actual)}
+                    </Link>
+                  ) : formatPerformanceKpiValue(kpi.key, kpi.actual)}
                   {" · "}
                   {t("target")}: {kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—"}
                   {kpi.expected != null ? ` · Expected ${formatAchievementPercent(kpi.expected)} by today` : ""}
@@ -258,7 +277,13 @@ export default function MyPerformancePage() {
                           <td key={key}>
                             <div>{formatAchievementPercent(kpi?.achievement)}</div>
                             <div className="moduleKpiMeta">
-                              {formatPerformanceKpiValue(key, kpi?.actual)}
+                              <Link
+                                className="moduleKpiActualLink"
+                                href={actualDetailsHref(key, [member.salesmanCode], snapshot?.reportDate)}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {formatPerformanceKpiValue(key, kpi?.actual)}
+                              </Link>
                               {" / "}
                               {kpi?.target > 0 ? formatPerformanceKpiValue(key, kpi.target) : "—"}
                             </div>

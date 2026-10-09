@@ -7,11 +7,7 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offl
 import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
-import {
-  describePartialDateOverwrites,
-  detectPartialDateOverwrites,
-  summarizeSalesDays,
-} from "../../lib/salesCoverage.js";
+import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
 import {
   findImportValue,
   findProfitAmount,
@@ -32,65 +28,6 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 /* ============================================================
    HELPERS
    ============================================================ */
-
-/**
- * Reads what is already stored for the dates in this file and returns the dates
- * where the merge would drop salesmen or most of the lines.
- */
-async function detectPartialUploadDates(admin, mappedRows) {
-  const uploadDates = [
-    ...new Set(
-      mappedRows
-        .map((row) => row.transaction_date)
-        .filter(Boolean)
-    ),
-  ];
-
-  if (!uploadDates.length) return [];
-
-  const { data: activeSetting, error: activeError } = await admin
-    .from("system_settings")
-    .select("setting_value")
-    .eq("setting_key", "active_sales_batch_id")
-    .maybeSingle();
-
-  if (activeError) return [];
-
-  const activeBatchId = Number(activeSetting?.setting_value);
-  if (!Number.isFinite(activeBatchId) || activeBatchId <= 0) return [];
-
-  const storedRows = [];
-  const PAGE = 1000;
-  const DATE_CHUNK = 50;
-
-  for (let i = 0; i < uploadDates.length; i += DATE_CHUNK) {
-    const dateChunk = uploadDates.slice(i, i + DATE_CHUNK);
-    let from = 0;
-
-    while (true) {
-      const { data, error } = await admin
-        .from("sales_raw")
-        .select("transaction_date,voucher_number,salesman_name,salesman_code")
-        .eq("import_batch_id", activeBatchId)
-        .in("transaction_date", dateChunk)
-        .range(from, from + PAGE - 1);
-
-      if (error) return [];
-
-      const rows = data || [];
-      storedRows.push(...rows);
-      if (rows.length < PAGE) break;
-      from += PAGE;
-    }
-  }
-
-  if (!storedRows.length) return [];
-
-  return detectPartialDateOverwrites({
-    incoming: summarizeSalesDays(mappedRows),
-    existing: summarizeSalesDays(storedRows),
-  });
-}
 
 function clean(value) {
   if (value === undefined || value === null) return null;
@@ -869,49 +806,6 @@ export async function POST(request) {
     }
 
     /* ========================================================
-       7b. PARTIAL-DAY OVERWRITE GUARD
-
-       The merge deletes every stored row whose date appears in
-       this file. A single-salesman export therefore wipes the
-       rest of that day. Stop and ask before that happens.
-       ======================================================== */
-
-    const partialWarnings =
-      await detectPartialUploadDates(
-        admin,
-        mappedRows
-      );
-
-    const confirmPartial =
-      String(
-        formData.get(
-          "confirmPartialDates"
-        ) || ""
-      ) === "1";
-
-    if (
-      partialWarnings.length &&
-      !confirmPartial
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          requiresConfirmation: true,
-          reason: "partial_dates",
-          error:
-            describePartialDateOverwrites(
-              partialWarnings
-            ),
-          partialDates:
-            partialWarnings,
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    /* ========================================================
        8. CREATE NEW IMPORT BATCH
        ======================================================== */
 
@@ -1262,6 +1156,20 @@ export async function POST(request) {
         });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const kpiAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const cache = await rebuildPerformanceKpiCache(kpiAdmin);
+        console.info("Performance KPI cache rebuilt after sales upload:", {
+          salesmanCount: Object.keys(cache.actualsBySalesman).length,
+          reportMonth: cache.reportMonth,
+        });
+      } catch (kpiError) {
+        console.error("Performance KPI cache rebuild after sales upload failed:", kpiError);
       }
 
       try {

@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPotentialSalesTargetsSection,
+  buildPotentialSalesTargetLastVisitMap,
   daysSincePotentialSalesTargetInvoice,
   filterPotentialSalesTargetsForProfile,
   isPotentialSalesTarget,
+  potentialSalesTargetMatchesSalesman,
+  potentialSalesTargetMonthKeys,
+  sumPotentialSalesByCustomerAndMonth,
 } from "../app/lib/potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "../app/lib/potentialSalesTargetsServer.js";
 import { runDailyVisitReportEmailCycle } from "../app/lib/dailyVisitReportEmailServer.js";
@@ -82,6 +86,50 @@ test("loader uses active customers and latest actual invoice, not credit notes o
   assert.equal(isPotentialSalesTarget(rows[0], options), false);
 });
 
+test("browser target loader returns order date, salesperson visit, three completed sales months and current MTD", async () => {
+  const dataByTable = {
+    customers: [{
+      customer_code: "1001", customer_name: "Shop One", current_salesman_code: "SM001",
+      is_active: true, latest_transaction_date: "2026-09-20", city: "Riyadh", area: "Olaya",
+    }],
+    active_sales: [
+      { customer_code: "1001C", transaction_date: "2026-07-15", sales_amount: 100 },
+      { customer_code: "1001", transaction_date: "2026-07-20", sales_amount: 10, voucher_type: "Credit Note" },
+      { customer_code: "1001", transaction_date: "2026-08-18", sales_amount: 200 },
+    ],
+    sales_orders: [{ customer_code: "1001", submitted_at: "2026-10-06T08:00:00Z", created_at: "2026-10-05T08:00:00Z" }],
+    collection_visits: [{ customer_code: "1001", created_by: "u1", saved_at: "2026-10-02T08:00:00Z" }],
+    daily_activity_logs: [{
+      user_id: "u1", entry_type: "VISIT_REPORT", created_at: "2026-10-03T08:00:00Z",
+      note: JSON.stringify({ customer_code: "1001", captured_at: "2026-10-03T08:00:00Z" }),
+    }],
+  };
+  const admin = { from(table) {
+    const query = {
+      select() { return this; }, eq() { return this; }, gt() { return this; }, lte() { return this; },
+      in() { return this; }, order() { return this; },
+      async range() { return { data: dataByTable[table] || [], error: null }; },
+    };
+    return query;
+  } };
+  const rows = await loadPotentialSalesTargetCustomers(admin, {
+    records: [{
+      customer_code: "1001", customer_name: "Shop One", salesman_code: "SM001", salesman_name: "Sales One",
+      invoices: [{ pending_amount: 500, invoice_day: 20, invoice_date: "2026-09-20" }],
+      outstanding_0_30: 500, outstanding_30_60: 0, outstanding_61_90: 0,
+      outstanding_91_120: 0, outstanding_above_120: 0,
+    }],
+    todayKey: "2026-10-09",
+    includeBrowserDetails: true,
+    profiles: [{ id: "u1", salesman_code: "SM001", salesman_name: "Sales One" }],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last_order_invoice_date, "2026-10-06");
+  assert.equal(rows[0].last_visit_by_salesman.SM001, "2026-10-03");
+  assert.deepEqual(rows[0].sales_by_month, { "2026-07": 90, "2026-08": 200, "2026-09": 0, "2026-10": 0 });
+  assert.equal(isPotentialSalesTarget(rows[0], { todayKey: "2026-10-09" }), true);
+});
+
 test("daily emails carry salesman-specific potential targets into the company digest", async () => {
   const sent = [];
   const profiles = [
@@ -135,4 +183,35 @@ test("browser target scope includes current and previous assignments but not ano
 test("browser target invoice age is calculated on KSA report date keys", () => {
   assert.equal(daysSincePotentialSalesTargetInvoice({ last_invoice_date: "2026-09-21" }, "2026-10-07"), 16);
   assert.equal(daysSincePotentialSalesTargetInvoice({ last_invoice_date: "bad" }, "2026-10-07"), null);
+});
+
+test("standalone target report shows three completed KSA months and the current month", () => {
+  assert.deepEqual(potentialSalesTargetMonthKeys("2026-01-04"), ["2025-10", "2025-11", "2025-12", "2026-01"]);
+  assert.deepEqual(potentialSalesTargetMonthKeys("bad"), []);
+});
+
+test("monthly customer sales net credit notes and returns, including current month", () => {
+  const totals = sumPotentialSalesByCustomerAndMonth([
+    { customer_code: "1001C", transaction_date: "2026-08-03", sales_amount: 500 },
+    { customer_code: "1001", transaction_date: "2026-08-04", sales_amount: 70, voucher_type: "Credit Note" },
+    { customer_code: "1001", transaction_date: "2026-10-02", sales_amount: 120 },
+    { customer_code: "OTHER", transaction_date: "2026-10-02", sales_amount: 900 },
+  ], ["2026-08", "2026-09", "2026-10"]);
+  assert.deepEqual(totals.get("1001"), { "2026-08": 430, "2026-09": 0, "2026-10": 120 });
+});
+
+test("last visit dates are keyed by customer and the visiting salesman's profile", () => {
+  const dates = buildPotentialSalesTargetLastVisitMap({
+    profiles: [{ id: "u1", salesman_code: "SM001" }, { id: "u2", salesman_code: "SM002" }],
+    collectionVisits: [{ customer_code: "1001C", created_by: "u1", saved_at: "2026-09-02T10:00:00Z" }],
+    activityLogs: [
+      { entry_type: "VISIT_REPORT", user_id: "u1", created_at: "2026-10-01T10:00:00Z", note: JSON.stringify({ customer_code: "1001", captured_at: "2026-10-01T10:00:00Z" }) },
+      { entry_type: "VISIT_REPORT", user_id: "u2", created_at: "2026-10-03T10:00:00Z", note: JSON.stringify({ customer_code: "1001", captured_at: "2026-10-03T10:00:00Z" }) },
+      { entry_type: "NOTE", user_id: "u1", created_at: "2026-10-05T10:00:00Z", note: JSON.stringify({ customer_code: "1001" }) },
+    ],
+  });
+  assert.equal(dates.get("1001::SM001"), "2026-10-01");
+  assert.equal(dates.get("1001::SM002"), "2026-10-03");
+  assert.equal(potentialSalesTargetMatchesSalesman({ current_salesman_code: "SM001" }, "SM001"), true);
+  assert.equal(potentialSalesTargetMatchesSalesman({ salesman_code: "SM002" }, "SM001"), false);
 });

@@ -52,6 +52,17 @@ test("salesmen see field modules and payment collections", () => {
   assert.equal(access.canAccess("upload"), false);
 });
 
+test("potential sales targets is available to salesmen and report viewers, not collectors", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("potentialSalesTargets"), false);
+  assert.equal(buildModuleAccess({ role: "product-promoter" }).canAccess("potentialSalesTargets"), false);
+  assert.equal(moduleLabelForPath("/management/potential-sales-targets", "en"), "Potential Sales Targets");
+  assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
+});
+
 test("promoter coverage is available to all app roles", () => {
   const roles = ["admin", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
@@ -260,4 +271,15 @@ test("localized module and nav labels return Arabic text", () => {
   assert.equal(localizedModuleLabel("newOrder", "ar"), "طلب جديد");
   assert.equal(localizedNavGroupLabel("collections", "ar"), "التحصيلات");
   assert.equal(moduleLabelForPath("/management/new-order", "ar"), "طلب جديد");
+});
+
+test("potential sales targets is available to salesmen and report viewers, not collectors", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("potentialSalesTargets"), true);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("potentialSalesTargets"), false);
+  assert.equal(buildModuleAccess({ role: "product-promoter" }).canAccess("potentialSalesTargets"), false);
+  assert.equal(moduleLabelForPath("/management/potential-sales-targets", "en"), "Potential Sales Targets");
+  assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
 });

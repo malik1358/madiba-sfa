@@ -38,6 +38,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
 - **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.
 - **Customer GPS History** (`/management/customer-gps-history`, module `customerGpsHistory`): admin/manager only. Date-filtered, paginated history shows old/new coordinates and maps, displacement in meters, save actor/time in KSA, and explicitly recorded approval. Excel export covers the displayed page only. A daily digest of salesman-accepted changes goes to `malik@pinasz.com` by default at 00:40 KSA, including Friday and zero-change days.
+- **Potential Sales Targets** (`/management/potential-sales-targets`): independent, exportable report of active customers with qualifying outstanding. Filter by visible salesman; rows show last visit by that salesman, latest order/invoice, monthly net sales for the three latest completed KSA months and current month-to-date.
 
 The home page (`app/page.js`) is email/password login, then a dashboard with nearest customers when GPS is available.
 

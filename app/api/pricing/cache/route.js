@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ORDER_SCHEMES_CACHE_KEY, resolveStoredOrderSchemes } from "../../../lib/orderSchemes.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { overlayGoogleSheetItemNames } from "../../../lib/pricePayload.js";
+import { loadRetailPriceMaps } from "../../../lib/retailPricingServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -109,6 +110,16 @@ export async function GET() {
 
     const ageHours = getAgeHours(data.source_synced_at || data.updated_at);
     const rules = rulesRow?.price_map && typeof rulesRow.price_map === "object" ? rulesRow.price_map : {};
+    let retailRegionPriceMaps = rules.retailRegionPriceMaps || {};
+    const warnings = [];
+    if (!Object.values(retailRegionPriceMaps).some((map) => Object.keys(map).length > 0)) {
+      try {
+        retailRegionPriceMaps = await loadRetailPriceMaps();
+      } catch (error) {
+        console.error("Retail pricing unavailable:", error.message);
+        warnings.push("Retail pricing is unavailable. Wholesale prices remain available; retry after price sync.");
+      }
+    }
     const cachedSheetItems = Array.isArray(data.sheet_items) ? data.sheet_items : [];
     const googleSheetItems = await loadGoogleSheetItems(admin);
     const sheetItems = googleSheetItems.length > 0
@@ -122,6 +133,8 @@ export async function GET() {
       syncedAt: data.source_synced_at || data.updated_at,
       priceMap: data.price_map || {},
       regionPriceMaps: rules.regionPriceMaps || {},
+      retailRegionPriceMaps,
+      warnings,
       cashDiscountMap: rules.cashDiscountMap || {},
       valueDiscountMap: rules.valueDiscountMap || {},
       schemes: resolveStoredOrderSchemes(schemesRow?.price_map),

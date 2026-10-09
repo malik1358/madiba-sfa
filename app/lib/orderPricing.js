@@ -10,7 +10,8 @@ import {
   getPricedOrderLine,
   lookupDiscountRate,
   normalizePaymentType,
-  regionPriceMapFor,
+  normalizePricingType,
+  orderPriceMapFor,
   resolveOrderPricingRegion,
 } from "./regionalPricing.js";
 
@@ -29,11 +30,16 @@ export function priceOrderLines(lines, {
   valueDiscountMap = {},
   paymentType = "credit",
   schemes = [],
+  pricingType = "wholesale",
 } = {}) {
   const schemeApplications = evaluateOrderSchemes(lines, schemes);
   return (Array.isArray(lines) ? lines : []).map((line) => {
     const code = normalizeCode(line?.item_code);
     const quantity = toNumber(line?.quantity ?? line?.order_quantity);
+    const publishedRate = lookupPositiveRate(regionPriceMap, code, 0);
+    if (pricingType === "retail" && !(publishedRate > 0)) {
+      throw Object.assign(new Error(`Retail price unavailable for ${code}. Choose wholesale pricing or remove this item.`), { status: 400 });
+    }
     const scheme = lookupSchemeApplication(schemeApplications, code);
     const priced = getPricedOrderLine({
       wholesaleRate: lookupPositiveRate(regionPriceMap, code, line?.rate ?? line?.wholesaleRate),
@@ -89,6 +95,7 @@ export async function loadCachedPricingCatalog(admin) {
   const parsed = parsePricePayload({
     priceMap: defaultRow?.price_map || {},
     regionPriceMaps: rules.regionPriceMaps || {},
+    retailRegionPriceMaps: rules.retailRegionPriceMaps || {},
     cashDiscountMap: rules.cashDiscountMap || {},
     valueDiscountMap: rules.valueDiscountMap || {},
     sheetItems: Array.isArray(defaultRow?.sheet_items) ? defaultRow.sheet_items : [],
@@ -107,6 +114,7 @@ export function resolveCatalogForOrder(catalog, {
   customerSalesmanCode,
   pricingRegionBySalesmanCode,
   paymentType,
+  pricingType,
 } = {}) {
   const region = resolveOrderPricingRegion({
     selectedRegion,
@@ -119,7 +127,8 @@ export function resolveCatalogForOrder(catalog, {
   return {
     region,
     paymentType: normalizePaymentType(paymentType),
-    regionPriceMap: regionPriceMapFor(catalog?.regionPriceMaps, region, catalog?.priceMap),
+    pricingType: normalizePricingType(pricingType),
+    regionPriceMap: orderPriceMapFor(catalog, region, pricingType),
     cashDiscountMap: catalog?.cashDiscountMap || {},
     valueDiscountMap: catalog?.valueDiscountMap || {},
     schemes: catalog?.schemes || [],

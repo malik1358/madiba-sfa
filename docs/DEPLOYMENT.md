@@ -41,6 +41,14 @@ Pushing the git repo does **not** apply SQL. Schema changes need a person to run
 
 Product Catalogue currently needs no migration, image bucket, new environment variables or Android rebuild. The previously proposed photo migration was removed without being applied. Image-storage integration is deferred to the separate receipt/image-storage project. Verify existing products/packing and salesman browse/cart after release; admin/manager image selection is a temporary page-only preview, not an upload. The feature is not live merely because local code and tests are complete.
 
+### Retail price-feed operator step
+
+Git/Vercel deployment does not update Google Apps Script. Copy [the updated price feed](../scripts/google-apps-script/price-feed.gs) into the **existing** Apps Script project, then edit the **existing web-app deployment** to use a new version so its URL stays unchanged. Run the existing admin price sync and verify `/api/pricing/cache` returns positive `retailRegionPriceMaps` for each configured city. Until then, wholesale remains usable, retail is unavailable with an explicit notice, and retail order saves are rejected rather than converted to wholesale.
+
+The private costing spreadsheet ID is `15DFVFiwKkv3rNdHZkxYzOpGdfFgpc7AkyQGUq6QIzJc` (uppercase `I` in `q6QI`); its tab is `2077649997`. Do **not** publish this workbook or change sharing. Retail reads CD/CH/CJ (Riyadh/Dammam/Jeddah), ex-VAT. Packing independently reads the already-public KSA Price Tag Format tab `612911319`, AM descriptions keyed by B product code, and does not require a database migration. Validate Cash/Credit, discount thresholds, nearest customers, never-bought recommendations and retail draft/PDF consistency before promotion. Local completion does not mean these enhancements are deployed.
+
+On 2026-10-09 the operator reported updating Google Apps Script. A read-only check of the existing feed confirmed 268 retail item prices for each city (and 297 Riyadh wholesale prices). Production promotion follows PR/CI; run the existing price sync after deployment to persist retail maps in the cache.
+
 ### Production database migration workflow
 
 `.github/workflows/production-db-migrations.yml` is a manually dispatched, audited path for exactly these existing migrations: `20260930190000_sales_order_request_id.sql`, `20261002120000_collection_visit_client_submission_id.sql`, and `20261002130000_attachments.sql`. It does not run on push, pull request, or a schedule. The default `preflight` mode is read-only. This workflow does not use `db push` or `migration up`, and it does not change Storage buckets or policies. The workflow and its runner are committed to the feature branch only until separately reviewed and merged; **no production SQL, GitHub environment, secret, or variable was changed as part of their implementation**.

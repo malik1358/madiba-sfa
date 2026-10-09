@@ -40,6 +40,7 @@ function createHarness(result, { draftId = 586 } = {}) {
     rememberSalesmanOrderSequence: async () => {},
     getPrice: () => 100,
     normalizePaymentType: (value) => value,
+    normalizePricingType: (value) => value === "retail" ? "retail" : "wholesale",
     priceOrderLines: (lines) => lines,
     postJsonResilient: async (request) => {
       requests.push(request);

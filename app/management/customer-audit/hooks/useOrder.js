@@ -13,7 +13,7 @@ import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
-import { normalizePaymentType } from '../../../lib/regionalPricing';
+import { normalizePaymentType, normalizePricingType } from '../../../lib/regionalPricing';
 import { priceOrderLines } from '../../../lib/orderPricing';
 import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
@@ -45,6 +45,7 @@ function buildOrderPayload({
   valueDiscountMap,
   schemes,
   pricingRegion,
+  pricingType = 'wholesale',
   draftOrderId,
   loadedOrderStatus,
   location,
@@ -69,6 +70,7 @@ function buildOrderPayload({
       valueDiscountMap,
       paymentType,
       schemes,
+      pricingType,
     },
   );
 
@@ -84,6 +86,7 @@ function buildOrderPayload({
     customerSalesmanCode: String(selectedCustomer.current_salesman_code || "").trim(),
     paymentType: normalizePaymentType(paymentType),
     pricingRegion,
+    pricingType: normalizePricingType(pricingType),
     loadedOrderStatus: loadedOrderStatus || 'DRAFT',
     capturedAt,
     location,
@@ -118,6 +121,8 @@ export function useOrder({
   schemes = [],
   pricingRegion = 'riyadh',
   setPricingRegion = null,
+  pricingType = 'wholesale',
+  setPricingType = null,
   creditApprovalRequired = false,
   orderBlock = null,
 }) {
@@ -297,6 +302,10 @@ export function useOrder({
           if (latestPricingRegion && typeof setPricingRegion === "function") {
             setPricingRegion(latestPricingRegion);
           }
+          if (typeof setPricingType === "function") {
+            const latestPricingType = [...history].reverse().find((entry) => entry?.pricingType)?.pricingType;
+            setPricingType(normalizePricingType(latestPricingType));
+          }
         }
       } catch (err) {
         if (!cancelled) setError(friendlyErrorMessage(err, 'Unable to restore draft order.'));
@@ -408,6 +417,7 @@ export function useOrder({
           valueDiscountMap,
           schemes,
           pricingRegion,
+          pricingType,
           draftOrderId: currentDraftOrderId,
           loadedOrderStatus: contextMatches ? loadedOrderStatus : 'DRAFT',
           location,
@@ -497,7 +507,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, pricingType, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (submitInFlight.current) return null;
@@ -594,6 +604,7 @@ export function useOrder({
           valueDiscountMap,
           schemes,
           pricingRegion,
+          pricingType,
           draftOrderId: currentDraftOrderId,
           loadedOrderStatus: contextMatches ? loadedOrderStatus : 'DRAFT',
           location,
@@ -688,7 +699,7 @@ export function useOrder({
       submitInFlight.current = false;
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

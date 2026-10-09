@@ -21,8 +21,9 @@ import {
   lookupDiscountRate,
   normalizePaymentType,
   normalizePricingRegion,
+  normalizePricingType,
   pricingRegionLabel,
-  regionPriceMapFor,
+  orderPriceMapFor,
   summarizePricedLines,
   vatAmountFromExcl,
   vatRateForProduct,
@@ -111,12 +112,14 @@ export function formatHistoryChange(change) {
 
 export function inferPricingFromHistory(history = []) {
   const entries = Array.isArray(history) ? history : [];
+  const pricingType = normalizePricingType([...entries].reverse().find((entry) => entry?.pricingType)?.pricingType);
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
-    if (entry?.paymentType || entry?.pricingRegion) {
+    if (entry?.paymentType || entry?.pricingRegion || entry?.pricingType) {
       return {
         paymentType: normalizePaymentType(entry.paymentType),
         pricingRegion: normalizePricingRegion(entry.pricingRegion),
+        pricingType,
       };
     }
   }
@@ -124,6 +127,7 @@ export function inferPricingFromHistory(history = []) {
   return {
     paymentType: DEFAULT_PAYMENT_TYPE,
     pricingRegion: DEFAULT_PRICING_REGION,
+    pricingType,
   };
 }
 
@@ -168,10 +172,11 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
   paymentType = DEFAULT_PAYMENT_TYPE,
   pricingCatalog = null,
   pricingRegion = DEFAULT_PRICING_REGION,
+  pricingType = "wholesale",
 } = {}) {
   const region = normalizePricingRegion(pricingRegion);
   const regionPriceMap = pricingCatalog
-    ? regionPriceMapFor(pricingCatalog.regionPriceMaps, region, pricingCatalog.priceMap)
+    ? orderPriceMapFor(pricingCatalog, region, pricingType)
     : {};
   const cashDiscountMap = pricingCatalog?.cashDiscountMap || {};
   const valueDiscountMap = pricingCatalog?.valueDiscountMap || {};
@@ -224,15 +229,18 @@ export function buildOrderPdfSnapshotFromSavedOrder({
   creditApprovalRemark = "",
   paymentType,
   pricingRegion,
+  pricingType,
   pricingCatalog = null,
 } = {}) {
   const inferred = inferPricingFromHistory(history);
   const resolvedPayment = normalizePaymentType(paymentType || inferred.paymentType);
   const resolvedRegion = normalizePricingRegion(pricingRegion || inferred.pricingRegion);
+  const resolvedPricingType = normalizePricingType(pricingType || inferred.pricingType);
   const pdfLines = mapSavedOrderLinesToPdfLines(lines, {
     paymentType: resolvedPayment,
     pricingCatalog,
     pricingRegion: resolvedRegion,
+    pricingType: resolvedPricingType,
   });
   const totals = summarizePricedLines(pdfLines);
   const orderNumber = formatSalesOrderNumber(order);
@@ -248,6 +256,7 @@ export function buildOrderPdfSnapshotFromSavedOrder({
     salesmanName: order?.salesman_name || order?.salesman_code || "",
     paymentType: resolvedPayment,
     pricingRegion: resolvedRegion,
+    pricingType: resolvedPricingType,
     itemCount: pdfLines.length,
     totalQuantity: pdfLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
     grandTotal: totals.amountExclVat,
@@ -420,6 +429,7 @@ export async function enrichOrderPdfLiveData(snapshot, {
           paymentType: next.paymentType || snapshot.paymentType,
           pricingCatalog,
           pricingRegion: next.pricingRegion || snapshot.pricingRegion,
+          pricingType: next.pricingType || snapshot.pricingType,
         });
         const totals = summarizePricedLines(repriced);
         next.lines = repriced;
@@ -637,7 +647,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
   doc.text(
-    `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)}`,
+    `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)} | ${normalizePricingType(snapshot.pricingType).toUpperCase()}`,
     marginX + 12,
     marginTop + 90
   );

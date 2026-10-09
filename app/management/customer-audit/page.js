@@ -28,7 +28,7 @@ import {
   buildEffectivePriceList,
   normalizePaymentType,
   pricingRegionLabel,
-  regionPriceMapFor,
+  orderPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
 import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, resolveUploadedOutstandingSalesman, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
@@ -91,6 +91,8 @@ function CustomerAuditPageContent() {
   usePopupMessages({ message, error });
   const [priceList, setPriceList] = useState({});
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
+  const [retailRegionPriceMaps, setRetailRegionPriceMaps] = useState({});
+  const [pricingType, setPricingType] = useState("wholesale");
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
@@ -180,8 +182,8 @@ function CustomerAuditPageContent() {
   );
 
   const regionPriceList = useMemo(
-    () => regionPriceMapFor(regionPriceMaps, pricingRegion, priceList),
-    [priceList, pricingRegion, regionPriceMaps]
+    () => orderPriceMapFor({ regionPriceMaps, retailRegionPriceMaps, priceMap: priceList }, pricingRegion, pricingType),
+    [priceList, pricingRegion, regionPriceMaps, retailRegionPriceMaps, pricingType]
   );
 
   const orderCatalog = useMemo(
@@ -220,6 +222,8 @@ function CustomerAuditPageContent() {
     schemes,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
+    pricingType,
+    setPricingType,
     setError,
     setMessage,
     accessScope,
@@ -398,6 +402,7 @@ function CustomerAuditPageContent() {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
         setRegionPriceMaps(parsed.regionPriceMaps || {});
+        setRetailRegionPriceMaps(parsed.retailRegionPriceMaps || {});
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
@@ -706,7 +711,7 @@ function CustomerAuditPageContent() {
             <button type="button" className="auditTransactionToggle" onClick={() => window.print()}>Print / Save PDF</button>
           </div>
           <div className="auditEmpty" style={{ marginTop: "8px" }}>
-            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices • Item master {itemMasterStatus}
+            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} {pricingType} prices • Item master {itemMasterStatus}
           </div>
           <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
             {allowedPricingRegions.length > 1 ? (

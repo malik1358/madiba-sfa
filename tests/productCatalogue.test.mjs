@@ -3,10 +3,52 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import {
-  cataloguePacking, cataloguePermissions, validateCataloguePreview, MAX_PRODUCT_PHOTO_BYTES,
+  cataloguePacking, cataloguePermissions, catalogueSheetPacking, hasCataloguePrice, validateCataloguePreview, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
-import { loadCatalogueDetails, requireCatalogueAccess } from "../app/lib/productCatalogueServer.js";
+import { loadCatalogueDetails as loadDetails, loadCatalogueSheetPacking, requireCatalogueAccess } from "../app/lib/productCatalogueServer.js";
 import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel } from "../app/lib/moduleAccess.js";
+
+const loadCatalogueDetails = (admin) => loadDetails(admin, async () => ({}));
+
+test("catalogue flags selected cart items missing prices after a pricing change", () => {
+  const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
+  const selector = source.match(/const unpricedCartCodes = [^\r\n]+/)[0];
+  const context = vm.createContext({
+    quantities: { A1000: 1, A1001: 2, A1002: 0, A1003: 3 },
+    priceList: { A1000: 120, A1003: 0 },
+    hasCataloguePrice,
+  });
+  vm.runInContext(`${selector}\nglobalThis.result = unpricedCartCodes;`, context);
+  assert.deepEqual(Array.from(context.result), ["A1001", "A1003"]);
+  context.priceList = { A1000: 120, A1001: 100, A1003: 140 };
+  assert.deepEqual(Array.from(vm.runInContext("Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]))", context)), []);
+});
+
+test("catalogue packing uses sheet AM description matched by normalized product code", async () => {
+  const header = Array(42).fill("");
+  header[1] = "Product Code";
+  header[2] = "Item Name";
+  header[38] = "Unit description";
+  const row = Array(42).fill("");
+  row[1] = " a123 ";
+  row[38] = " CTN OF 20 PACK OF 12 PC ";
+  const matrix = [["Title"], header, row];
+  assert.deepEqual(catalogueSheetPacking(matrix), { A123: "CTN OF 20 PACK OF 12 PC" });
+  assert.throws(() => catalogueSheetPacking([["Other header"]]), /AM/);
+  const packing = await loadCatalogueSheetPacking(async (url, options) => {
+    assert.match(url, /gid=612911319/);
+    assert.equal(options.cache, "no-store");
+    assert.ok(options.signal);
+    return new Response(matrix.map((entry) => entry.join(",")).join("\n"));
+  });
+  const result = await loadDetails(mockAdmin({ items_master: [{ item_code: "A123", tally_unit: "CTN" }] }), async () => packing);
+  assert.deepEqual(result.details.A123, { sellingUnit: "CTN", packing: "CTN OF 20 PACK OF 12 PC" });
+  const unavailable = await loadDetails(mockAdmin({ items_master: [{ item_code: "A123" }] }), async () => {
+    throw new Error("Sheet offline");
+  });
+  assert.match(unavailable.warnings[0], /Sheet offline/);
+  await assert.rejects(loadCatalogueSheetPacking(async () => new Response("", { status: 403 })), /403/);
+});
 
 function mockAdmin(tables = {}, options = {}) {
   const calls = [];
@@ -53,6 +95,69 @@ function routeHarness(admin) {
   vm.runInContext(source.replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];\s*/g, "").replace(/export /g, ""), context);
   return context;
 }
+
+test("catalogue only displays finite positive regional prices while New Order keeps its item list", () => {
+  for (const value of [undefined, null, "", " ", "invalid", 0, -1, Infinity, NaN]) {
+    assert.equal(hasCataloguePrice(value), false, String(value));
+  }
+  for (const value of [0.01, 12, "25.50"]) assert.equal(hasCataloguePrice(value), true);
+  const source = fs.readFileSync(new URL("../app/management/new-order/page.js", import.meta.url), "utf8");
+  const selector = source.slice(source.indexOf("  const filteredItems = useMemo("), source.indexOf("  const groupedItems = useMemo("))
+    .replace("const filteredItems =", "result =");
+  const items = ["A", "B", "C", "D", "E"].map((item_code) => ({ item_code, item_name: item_code, category: "Office" }));
+  function select(catalogueMode, regionPriceList, itemSearch = "", categoryFilter = "ALL") {
+    const context = {
+      catalogueMode, regionPriceList, itemSearch, categoryFilter, mergedItemsMaster: items,
+      hasCataloguePrice, normalizeText: String, normalizeCategoryLabel: (value) => value,
+      useMemo: (fn) => fn(),
+    };
+    vm.runInNewContext(selector, context);
+    return Array.from(context.result, (item) => item.item_code);
+  }
+  assert.deepEqual(select(true, { A: 10, B: 0, C: -1, D: "bad" }), ["A"]);
+  assert.deepEqual(select(true, { B: "12" }), ["B"], "switching regions changes visibility");
+  assert.deepEqual(select(true, {}), []);
+  assert.deepEqual(select(true, { A: 10 }, "B"), []);
+  assert.deepEqual(select(true, { A: 10 }, "", "Other"), []);
+  assert.deepEqual(select(false, {}), ["A", "B", "C", "D", "E"]);
+  assert.match(source, /items=\{filteredItems\}/);
+  assert.match(source, /filteredItems\.forEach/);
+});
+
+test("catalogue customer search reuses scoped code/name suggestions and explicit selection", () => {
+  const page = fs.readFileSync(new URL("../app/management/new-order/page.js", import.meta.url), "utf8");
+  const component = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
+  const selector = (
+    page.match(/const filteredCustomers = useMemo\([\s\S]*?\}, \[customers, customerSearch\]\);/)[0] +
+    page.match(/const customerNameSuggestions = useMemo\([\s\S]*?\);/)[0]
+  )
+    .replace("const filteredCustomers =", "filteredCustomers =")
+    .replace("const customerNameSuggestions =", "result =");
+  const customers = [
+    { customer_code: "C01", customer_name: "Alpha Trading" },
+    { customer_code: "C02", customer_name: "Alpha Excluded", excluded: true },
+    ...Array.from({ length: 12 }, (_, i) => ({ customer_code: `P${i}`, customer_name: `Prospect ${i}`, is_prospect: true })),
+  ];
+  function search(customerSearch) {
+    const context = { customerSearch, customers, isExcludedNewOrderCustomer: (customer) => customer.excluded, useMemo: (fn) => fn() };
+    vm.runInNewContext(selector, context);
+    return Array.from(context.result, (customer) => customer.customer_code);
+  }
+  assert.deepEqual(search("  c01 "), ["C01"]);
+  assert.deepEqual(search("ALPHA"), ["C01"], "excluded customers never become suggestions");
+  assert.deepEqual(search("unknown"), []);
+  assert.deepEqual(search(""), []);
+  assert.equal(search("prospect").length, 10);
+  assert.match(page, /customerSuggestions=\{customerNameSuggestions\}/);
+  assert.match(page, /onCustomerSearch=\{setCustomerSearch\}/);
+  assert.match(component, /onCustomer\(customer\.customer_code, customer\.customer_name\)/);
+  assert.match(component, /onCustomerSearch\(event\.target\.value\)/);
+  assert.match(component, /Selected customer:/);
+  assert.match(component, /Clear customer/);
+  assert.match(component, /No matching customers/);
+  assert.match(component, /\[search, category, pricingRegion, pricingType, selectedCustomer\?\.customer_code\]/);
+  assert.doesNotMatch(component, /customers\.map/);
+});
 
 test("catalogue navigation follows field order access and keeps collector exclusions", () => {
   for (const role of ["admin", "manager", "salesman", "invoice_maker", "product-promoter"]) {
@@ -162,7 +267,7 @@ test("photo selection and removal only use in-memory blob URLs, with no upload o
     setError: (value) => { error = value; },
     setPreviewPhotos: (update) => { photos = update(photos); },
   });
-  const handlers = source.slice(source.indexOf("  function preview("), source.indexOf("  const lastPage"));
+  const handlers = source.slice(source.indexOf("  function preview("), source.indexOf("  const { recommended:"));
   vm.runInContext(handlers, context);
   context.preview("A123", { type: "image/png", size: 10 });
   context.preview("A123", { type: "image/jpeg", size: 10 });

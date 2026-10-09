@@ -5,6 +5,7 @@ import {
   DEFAULT_PRICING_REGION,
   PRICING_REGIONS,
   REGION_PRICE_COLUMNS,
+  RETAIL_PRICE_COLUMNS,
   SCHEME_COLUMNS,
   emptyRegionPriceMaps,
   parseDiscountRate,
@@ -298,7 +299,7 @@ function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
-function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, schemes) {
+function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, schemes, retailRegionPriceMaps) {
   const aliasedRegions = {};
   PRICING_REGIONS.forEach((region) => {
     aliasedRegions[region] = applyPriceCodeAliases(regionPriceMaps?.[region] || {});
@@ -336,6 +337,9 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
       dammam: stripExcludedPrices(resolvedRegions.dammam),
       jeddah: stripExcludedPrices(resolvedRegions.jeddah),
     },
+    retailRegionPriceMaps: Object.fromEntries(PRICING_REGIONS.map((region) => [
+      region, stripExcludedPrices(applyPriceCodeAliases(retailRegionPriceMaps?.[region] || {})),
+    ])),
     cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
     valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
     sheetItems: keptSheetItems,
@@ -451,6 +455,7 @@ function hasDataAtIndex(rows, index, maxRows = 50) {
 export function parsePricePayload(payload) {
   const priceMap = {};
   const regionPriceMaps = emptyRegionPriceMaps();
+  const retailRegionPriceMaps = emptyRegionPriceMaps();
   const cashDiscountMap = {};
   const valueDiscountMap = {};
   const sheetItems = [];
@@ -647,6 +652,10 @@ export function parsePricePayload(payload) {
           addRate(code, riyadhRate || rawRate, "riyadh");
           addRate(code, dammamRate, "dammam");
           addRate(code, jeddahRate, "jeddah");
+          PRICING_REGIONS.forEach((region) => {
+            const retailRate = sheetCell(row, sheetColumnIndex(RETAIL_PRICE_COLUMNS[region]));
+            if (toNumber(retailRate) > 0) addMappedRate(retailRegionPriceMaps[region], code, retailRate);
+          });
           if (cashDiscountIndex >= 0) addDiscount(cashDiscountMap, code, sheetCell(row, cashDiscountIndex));
           if (valueDiscountIndex >= 0) addDiscount(valueDiscountMap, code, sheetCell(row, valueDiscountIndex));
         });
@@ -690,6 +699,15 @@ export function parsePricePayload(payload) {
         return;
       }
 
+      if (key === "retailRegionPriceMaps") {
+        PRICING_REGIONS.forEach((region) => {
+          Object.entries(entry?.[region] || {}).forEach(([code, rate]) => {
+            if (toNumber(rate) > 0) addMappedRate(retailRegionPriceMaps[region], code, rate);
+          });
+        });
+        return;
+      }
+
       if (["cashDiscountMap", "cashDiscounts"].includes(key)) {
         ingestDiscountMap(cashDiscountMap, entry);
         return;
@@ -713,7 +731,7 @@ export function parsePricePayload(payload) {
 
   if (Array.isArray(payload)) {
     walk(payload);
-    return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems);
+    return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, undefined, retailRegionPriceMaps);
   }
 
   if (payload && typeof payload === "object") {
@@ -732,10 +750,11 @@ export function parsePricePayload(payload) {
       valueDiscountMap,
       sheetItems,
       payload.schemes,
+      retailRegionPriceMaps,
     );
   }
 
-  return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems);
+  return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, undefined, retailRegionPriceMaps);
 }
 
 function readCached(cacheKey) {
@@ -753,6 +772,7 @@ function readCached(cacheKey) {
       parsed.valueDiscountMap,
       Array.isArray(parsed.sheetItems) ? parsed.sheetItems : [],
       parsed.schemes,
+      parsed.retailRegionPriceMaps,
     );
   } catch {
     return null;
@@ -800,6 +820,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
             data.valueDiscountMap,
             Array.isArray(data.sheetItems) ? data.sheetItems : [],
             data.schemes,
+            data.retailRegionPriceMaps,
           )
         : parsePricePayload(data || {});
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { getSupabaseClient } from "../lib/supabase";
-import { validateCataloguePreview } from "../lib/productCatalogue";
+import { catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePreview } from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import styles from "./ProductCatalogue.module.css";
 
@@ -45,7 +45,12 @@ function PhotoCarousel({ photos, name, language, onRemove }) {
 export default function ProductCatalogue({
   items, categories, search, onSearch, category, onCategory, quantities,
   onQty, onIncrease, onDecrease, priceList, pricingRegion, language,
-  selectedCustomer, customers, onCustomer, orderTotal, selectedCount, orderLines,
+  selectedCustomer, customerSearch, onCustomerSearch, customerSuggestions, onCustomer,
+  orderTotal, selectedCount, orderLines,
+  pricingType, onPricingType, allowedPricingRegions, onPricingRegion, retailAvailable,
+  nearestCustomers,
+  paymentType, onPaymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
+  newItems, historyLoading, historyReady,
 }) {
   const ar = language === "ar";
   const [details, setDetails] = useState({});
@@ -55,6 +60,7 @@ export default function ProductCatalogue({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const previewUrls = useRef(new Set());
   const mounted = useRef(false);
 
@@ -96,7 +102,7 @@ export default function ProductCatalogue({
     };
   }, [refresh]);
 
-  useEffect(() => { setPage(0); }, [search, category]);
+  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
 
   function preview(itemCode, file) {
     if (!file || !canManagePhotos) return;
@@ -122,23 +128,81 @@ export default function ProductCatalogue({
     previewUrls.current.delete(photoId);
   }
 
-  const lastPage = Math.max(0, Math.ceil(items.length / PAGE_SIZE) - 1);
+  const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
+  const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
+  const lastPage = Math.max(0, Math.ceil(browseItems.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
-  const visible = items.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const visible = browseItems.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const groups = [
+    ...(historyReady ? [{ key: "new", items: recommendedItems }] : []),
+    { key: "all", items: visible },
+  ];
   return (
     <section className={`moduleSection ${styles.catalogue}`}>
       <div className="moduleSectionHeader">
         <h2>{ar ? "تصفح المنتجات" : "Shop the catalogue"}</h2>
         <span>{items.length} {ar ? "منتج" : "products"} · {pricingRegionLabel(pricingRegion)}</span>
       </div>
-      <label className={styles.customer}>
-        {ar ? "العميل للطلب" : "Order customer"}
-        <select className="moduleInput" value={selectedCustomer?.customer_code || ""} onChange={(event) => onCustomer(event.target.value)}>
-          <option value="">{ar ? "اختر العميل" : "Select a customer"}</option>
-          {customers.map((customer) => <option key={customer.customer_code} value={customer.customer_code}>{customer.customer_code} - {customer.customer_name}</option>)}
-        </select>
-      </label>
+      {nearestCustomers}
+      <div className={styles.customer}>
+        <label htmlFor="catalogue-order-customer">{ar ? "العميل للطلب" : "Order customer"}</label>
+        <div className="moduleCustomerSearch"
+          onFocus={() => setCustomerSearchOpen(true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setCustomerSearchOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setCustomerSearchOpen(false);
+          }}>
+          <input id="catalogue-order-customer" className="moduleInput" type="search"
+            placeholder={ar ? "ابحث عن العميل بالرمز أو الاسم" : "Search customer by code or name"}
+            value={customerSearch} autoComplete="off"
+            onChange={(event) => {
+              onCustomerSearch(event.target.value);
+              setCustomerSearchOpen(true);
+            }} />
+          {customerSearchOpen && customerSearch.trim() && (
+            <div className="moduleCustomerSuggestions">
+              {customerSuggestions.map((customer) => (
+                <button type="button" key={customer.customer_code} onClick={() => {
+                  onCustomer(customer.customer_code, customer.customer_name);
+                  setCustomerSearchOpen(false);
+                }}>
+                  <strong>{customer.customer_name}{customer.is_prospect ? (ar ? " (عميل محتمل)" : " (Prospect)") : ""}</strong>
+                  <span>{customer.customer_code}</span>
+                </button>
+              ))}
+              {customerSuggestions.length === 0 && <p role="status">{ar ? "لا يوجد عميل مطابق." : "No matching customers."}</p>}
+            </div>
+          )}
+        </div>
+        {selectedCustomer && <div className={styles.selectedCustomer}>
+          <span>{ar ? "العميل المحدد:" : "Selected customer:"} {selectedCustomer.customer_code} - {selectedCustomer.customer_name}</span>
+          <button type="button" className="moduleInlineButton" onClick={() => {
+            onCustomer("");
+            onCustomerSearch("");
+            setCustomerSearchOpen(false);
+          }}>{ar ? "مسح العميل" : "Clear customer"}</button>
+        </div>}
+      </div>
       <div className={styles.toolbar}>
+        <label>{ar ? "طريقة الدفع" : "Payment type"}
+          <select className="moduleInput" value={paymentType} onChange={(event) => onPaymentType(event.target.value)}>
+            <option value="credit">{ar ? "آجل" : "Credit"}</option>
+            <option value="cash">{ar ? "نقداً" : "Cash"}</option>
+          </select>
+        </label>
+        <label>{ar ? "نوع التسعير" : "Pricing type"}
+          <select className="moduleInput" value={pricingType} onChange={(event) => onPricingType(event.target.value)}>
+            <option value="wholesale">{ar ? "الجملة" : "Wholesale"}</option>
+            <option value="retail" disabled={!retailAvailable}>{ar ? "التجزئة" : "Retail"}</option>
+          </select>
+        </label>
+        <label>{ar ? "مدينة التسعير" : "Pricing city"}
+          <select className="moduleInput" value={pricingRegion} onChange={(event) => onPricingRegion(event.target.value)}>
+            {allowedPricingRegions.map((region) => <option key={region} value={region}>{pricingRegionLabel(region)}</option>)}
+          </select>
+        </label>
         <label>{ar ? "البحث" : "Search"}
           <input className="moduleInput" placeholder={ar ? "رمز الصنف أو الاسم أو الفئة" : "Item code, name, or category"} value={search} onChange={(event) => onSearch(event.target.value)} />
         </label>
@@ -150,20 +214,35 @@ export default function ProductCatalogue({
         <button type="button" className="moduleInlineButton" disabled={loading} onClick={refresh}>{ar ? "تحديث التعبئة" : "Refresh packing"}</button>
       </div>
       <p className="moduleHint">
-        {ar ? "الأسعار بالجملة قبل الضريبة. الخصومات والعروض تحسب في مراجعة الطلب." : "Wholesale prices exclude VAT. Cash discounts, value discounts, and schemes are calculated in the order review."}
+        {ar ? "الأسعار قبل الضريبة. نوع التسعير والمدينة يطبقان على الطلب. الخصومات والعروض تحسب في مراجعة الطلب." : "Prices exclude VAT. Pricing type and city apply to your order. Cash discounts, value discounts, and schemes are calculated in the order review."}
       </p>
+      {!retailAvailable && <p className={styles.notice}>{ar ? "أسعار التجزئة غير متاحة لهذه المدينة. أعد المحاولة بعد مزامنة الأسعار." : "Retail prices are unavailable for this city. Retry after price sync."}</p>}
+      {unpricedCartCodes.length > 0 && <p role="alert" className={styles.error}>
+        {ar ? "بعض أصناف الطلب ليس لها سعر في المدينة ونوع التسعير المحددين. غيّر التسعير أو احذفها من مراجعة الطلب:" : "Some cart items have no price for this city and pricing type. Change pricing or remove them in order review:"} {unpricedCartCodes.join(", ")}
+      </p>}
       <p className={styles.notice}>{ar ? "ربط تخزين الصور مؤجل. الصور للمعاينة فقط في هذه الصفحة ولا يتم رفعها أو حفظها أو مشاركتها، وتختفي عند تحديث الصفحة أو مغادرتها." : "Image storage is not connected yet. Photo previews are only for this page: they are not uploaded, saved, or shared, and disappear when you reload or leave."}</p>
       {canManagePhotos && <p className="moduleHint">{ar ? "معاينة صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. اختر عدة صور للصنف لتجربة الشرائح." : "Preview JPEG, PNG, or WebP photos, up to 3 MB each. Select more than one photo to try the carousel."}</p>}
       {loading && <p role="status">{ar ? "جاري تحميل التعبئة..." : "Loading packing..."}</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {warnings.map((warning) => <p key={warning} className={styles.notice}>{warning}</p>)}
       {!selectedCustomer && <p className={styles.notice}><a href="#catalogue-customer">{ar ? "اختر العميل أدناه لإعداد الطلب." : "Choose a customer below to prepare an order."}</a> {ar ? "يمكنك تصفح جميع المنتجات الآن." : "You can browse all products now."}</p>}
-      <div className={styles.grid}>
-        {visible.map((item) => {
+      {selectedCustomer && historyLoading && <p role="status">{ar ? "جاري تحميل توصيات العميل..." : "Loading customer recommendations..."}</p>}
+      {groups.map((group) => <section key={group.key}>
+        {group.key === "new" ? <>
+          <h3>{ar ? "أصناف جديدة" : "New Items"}</h3>
+          <p className="moduleHint">{ar ? "أصناف لم يشترها هذا العميل من قبل" : "Items this customer has never bought"}</p>
+          {group.items.length === 0 && <p>{ar ? "لا توجد توصيات مطابقة لهذه الفلاتر." : "No new item recommendations match these filters."}</p>}
+        </> : <h3>{ar ? "جميع المنتجات" : "All products"}</h3>}
+        <div className={styles.grid}>
+        {group.items.map((item) => {
           const detail = details[item.item_code] || {};
           const qty = Number(quantities[item.item_code] || 0);
           const price = Number(priceList[item.item_code]);
-          const hasPrice = Number.isFinite(price) && price > 0;
+          const hasPrice = hasCataloguePrice(price);
+          const priced = catalogueCardPrice(item, {
+            price, quantity: qty, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
+          });
+          const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
@@ -177,7 +256,17 @@ export default function ProductCatalogue({
                   <strong>{ar ? "التعبئة" : "Packing"}:</strong> {detail.sellingUnit || (ar ? "الوحدة غير محددة" : "Unit not specified")}
                   {detail.packing ? <span>{detail.packing}</span> : <span>{ar ? "حجم العبوة غير متوفر" : "Pack size not available"}</span>}
                 </p>
-                <strong className={styles.price}>{hasPrice ? `${formatMoneyAmount(price)} ﷼` : (ar ? "السعر غير متوفر" : "Price unavailable")}</strong>
+                <div className={styles.priceRow}>
+                  {discounted && <del className={styles.originalPrice}>{formatMoneyAmount(price)} ﷼</del>}
+                  <strong className={styles.price}>{hasPrice ? `${formatMoneyAmount(priced.rate)} ﷼` : (ar ? "السعر غير متوفر" : "Price unavailable")}</strong>
+                </div>
+                {discounted && <span className={styles.discountLabel}>
+                  {[
+                    priced.applied.cash && (ar ? "خصم نقدي" : "Cash discount"),
+                    priced.applied.value && (ar ? "خصم الكمية" : "Volume discount"),
+                    priced.applied.scheme && (ar ? "عرض" : "Scheme"),
+                  ].filter(Boolean).join(" + ")}
+                </span>}
                 {hasPrice && detail.sellingUnit && <span className="moduleCode">{ar ? "لكل" : "per"} {detail.sellingUnit}</span>}
                 <div className={styles.qty}>
                   <button type="button" disabled={disabled || qty <= 0} aria-label={`${ar ? "تقليل" : "Decrease"} ${item.item_name}`} onClick={() => onDecrease(item.item_code)}>-</button>
@@ -201,7 +290,8 @@ export default function ProductCatalogue({
             </article>
           );
         })}
-      </div>
+        </div>
+      </section>)}
       {items.length === 0 && <p>{ar ? "لا توجد منتجات تطابق البحث." : "No products match these filters."}</p>}
       {lastPage > 0 && <div className={styles.pagination}>
         <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{ar ? "السابق" : "Previous"}</button>

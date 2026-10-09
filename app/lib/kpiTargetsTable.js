@@ -5,6 +5,11 @@ import {
   normalizeSalesmanCode,
 } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
+import {
+  normalizeReportSalesmanCode,
+  normalizeReportSalesmanName,
+  THAMER_REPORT_CODE,
+} from "./salesmanReportIdentity.js";
 
 export const NO_BOSS_KEY = "__NO_BOSS__";
 export const TEAM_TARGET_PREFIX = "TEAM:";
@@ -17,6 +22,31 @@ export function isKpiTargetProfile(profile) {
   if (profile?.is_active === false && !namedException) return false;
   return namedException
     || !isCollectionOnlyAccess({ role: profile?.role, salesmanCode: code });
+}
+
+export function mergeKpiTargetProfiles(profiles = []) {
+  const byCode = new Map();
+
+  (profiles || []).forEach((profile) => {
+    const storedCode = normalizeSalesmanCode(profile?.salesman_code);
+    const code = normalizeReportSalesmanCode(storedCode);
+    if (!code) return;
+
+    const current = byCode.get(code);
+    const priority = code === THAMER_REPORT_CODE && storedCode === code ? 1 : 0;
+    if (current && current.priority >= priority) return;
+
+    byCode.set(code, {
+      ...profile,
+      salesman_code: code,
+      salesman_name: normalizeReportSalesmanName(profile?.salesman_name)
+        || normalizeReportSalesmanName(storedCode)
+        || code,
+      priority,
+    });
+  });
+
+  return [...byCode.values()].map(({ priority, ...profile }) => profile);
 }
 
 export function teamTargetSalesmanCode(bossCode) {

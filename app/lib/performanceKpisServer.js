@@ -284,7 +284,7 @@ export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDat
       .from("kpi_targets")
       .select(select)
       .eq("target_month", targetMonth)
-      .in("salesman_code", codes);
+      .in("salesman_code", codes.flatMap(reportSalesmanCodeAliases));
 
     if (!result.error) break;
     if (isMissingTableError(result.error)) return empty;
@@ -308,10 +308,20 @@ export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDat
   }
 
   const byCode = new Map();
+  const targetPriorityByCode = new Map();
   (result.data || []).forEach((row) => {
     const code = normalizeSalesmanCode(row.salesman_code);
-    if (!code) return;
-    byCode.set(code, {
+    const reportCode = normalizeReportSalesmanCode(code);
+    if (!reportCode) return;
+    const isCanonicalCode = code === reportCode;
+    const updatedAt = Date.parse(row.updated_at || "") || 0;
+    const previousPriority = targetPriorityByCode.get(reportCode);
+    if (previousPriority) {
+      if (previousPriority.isCanonical && !isCanonicalCode) return;
+      if (previousPriority.isCanonical === isCanonicalCode && previousPriority.updatedAt > updatedAt) return;
+    }
+    targetPriorityByCode.set(reportCode, { isCanonical: isCanonicalCode, updatedAt });
+    byCode.set(reportCode, {
       targets: normalizePerformanceTargets(row),
       updatedAt: row.updated_at || null,
       updatedByName: updaterNames.get(String(row.updated_by || "").trim()) || "",

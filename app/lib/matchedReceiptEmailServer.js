@@ -200,9 +200,9 @@ export async function runMatchedReceiptEmailCycle(admin, {
   });
   const salesmanGroups = [...groups.values()];
   const matchedCount = salesmanGroups.reduce((sum, group) => sum + group.rows.length, 0);
-  if (!matchedCount) return { ...emptyResult(dateLabel), matchedCount: 0, preview: isPreview };
 
   if (isPreview) {
+    if (!matchedCount) return { ...emptyResult(dateLabel), matchedCount: 0, preview: true };
     if (!testRecipients.length) throw new Error("A test recipient is required for preview mode.");
     const message = buildMatchedReceiptEmail({ dateLabel, salesmanGroups, preview: true });
     const delivery = await send({ ...message, to: testRecipients, cc: [] }, env);
@@ -219,10 +219,32 @@ export async function runMatchedReceiptEmailCycle(admin, {
   }
 
   const isDailyRun = parsedUploadDates.length === 0;
+  let bossSourceGroups = groups;
+  let bossProfiles = profiles;
+  let bossAuthUsers = authUsers;
+  if (isDailyRun) {
+    const today = getKsaDateString(now);
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const bossData = await loadData(admin, {
+      fromDate: monthStart,
+      toDate: today,
+      windowDays,
+      dateFilter: null,
+    });
+    bossSourceGroups = bossData.groups;
+    bossProfiles = bossData.profiles || profiles;
+    bossAuthUsers = bossData.authUsers || authUsers;
+  }
   const bossGroups = isDailyRun
-    ? groupMatchedRowsByBoss(groups, profiles, authUsers)
+    ? groupMatchedRowsByBoss(bossSourceGroups, bossProfiles, bossAuthUsers)
     : new Map();
   const bossIds = new Set(bossGroups.keys());
+  const bossReceiptCount = [...bossGroups.values()].reduce((sum, boss) => (
+    sum + [...boss.salesmen.values()].reduce((salesmanTotal, group) => salesmanTotal + group.rows.length, 0)
+  ), 0);
+  if (!matchedCount && !bossReceiptCount) {
+    return { ...emptyResult(dateLabel), matchedCount: 0, preview: false };
+  }
   const sentSalesmen = [];
   const sentBosses = [];
   const failures = [];

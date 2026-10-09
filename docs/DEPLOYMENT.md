@@ -39,6 +39,8 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 
+Product Catalogue currently needs no migration, image bucket, new environment variables or Android rebuild. The previously proposed photo migration was removed without being applied. Image-storage integration is deferred to the separate receipt/image-storage project. Verify existing products/packing and salesman browse/cart after release; admin/manager image selection is a temporary page-only preview, not an upload. The feature is not live merely because local code and tests are complete.
+
 Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
 
 ## Environment variable names

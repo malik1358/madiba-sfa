@@ -86,6 +86,10 @@ Constants in `app/lib/workdayActivity.js`:
 
 ## Pricing
 
+- Product Catalogue has the same field-role/module and customer visibility rules as New Order (collectors excluded). Products come from the existing merged item master/published price catalogue and keep its do-not-use/building-material exclusions. Items remain visible without photos or without a selected customer. Choose a customer before adding quantities; items without a positive published price cannot be added from cards. Prices are regional wholesale ex-VAT; discounts, schemes, glove VAT exemption and order blocking/approval remain in the shared order flow. Catalogue quantities directly update that flow, rather than posting a separate ecommerce order.
+- Packing is read-only: selling unit prefers `items_master.tally_unit`, then `products.unit`; conversion details use `stock_take_items.base_uom_pack_size` (base units per master) and `mid_uom_pack_size` (base units per intermediate). Unknown units or pack sizes are labelled unavailable, never inferred from product names. Quantities remain existing order quantities, not a new carton-to-piece conversion.
+- Active admin/manager catalogue users alone may select/remove temporary image previews (JPEG/PNG/WebP, at most 3 MB each); multiple selections demonstrate the carousel. No images are uploaded, processed on the server, saved, or shared. Previews live only in current-page memory and disappear on reload/navigation, with an explicit notice. Permanent image-storage integration is deferred to the separate receipt/image-storage project. Orders retain existing offline-first behavior.
+
 - Browser prices come from `price_catalog_cache` via `/api/pricing/cache`.
 - Sync (`/api/admin/price-sync`) writes a snapshot and the cache, and appends `item_price_history` when a price changes. History UI shows at least the last five prices.
 - VAT default on `products.vat_percent` is 15. Settlement line gross-up uses `regionalPricing.js` (category-aware), not a flat 15 for every line.

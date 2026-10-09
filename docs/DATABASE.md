@@ -130,6 +130,8 @@ When `outstanding_customerwise_dataset_v1` contains invoices or rows, that JSON 
 
 ## Catalog, prices, KPIs
 
+Product Catalogue reads existing `items_master`, `products.unit` and stock-take packing metadata only. No photo table or image-storage bucket is introduced. Image persistence is deferred to the separate receipt/image-storage project; current previews are page-only browser memory and do not write to any database. The proposed catalogue-photo migration was removed before application.
+
 | Table | Role |
 | --- | --- |
 | `items_master` | Item master. Unique `item_code`. Extra Tally columns: `tally_unit`, `tally_item_name`, `tally_unit_source`, `tally_unit_updated_at`. |

@@ -39,7 +39,7 @@ Constants in `app/lib/workdayActivity.js`:
 - One-way book shares are hardcoded in `SHARED_CUSTOMER_BOOKS` and can also be rows in `customer_book_shares`. Examples in code: Ahmed Nabil’s book is shared to Abdalla; Mohammed Mubeen’s book is shared to Moinudin Khaja and Junaid. Do not “clean up” these names as unused data.
 - “Do not use” customers (name matches `/do\s*not\s*use/i`) are excluded from visit status.
 - Building-material customers and items are filtered out of new-order item mixes (`app/lib/buildingMaterialCustomerFilter.js` and `customerEligibility.js`). Customer codes `1020C` and `1020` are excluded from that new-order path.
-- Inactive customers who still have an outstanding balance are blocked from some visit flows (`CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR` in `app/lib/outstanding.js`).
+- Customers with outstanding balances cannot be marked inactive (`CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR` in `app/lib/outstanding.js`). The visit-reports status PATCH checks the uploaded outstanding dataset after enforcing customer visibility. Its database update uses the exact stored customer code returned by lookup, preserving case and legacy name-containing codes; normalized codes remain in metadata keys and balance matching.
 
 ## Visits
 

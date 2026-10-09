@@ -33,7 +33,7 @@ import {
   MY_DAY_VISIT_REPORT_LIMIT,
   visitReportsSinceIso,
 } from "../../lib/myDayPlannerLoad";
-import { isVisitStatusCustomer } from "./customerEligibility";
+import { isVisitStatusCustomer, removeDuplicateNameCodeCustomers } from "./customerEligibility";
 import { daysSinceKsaDate } from "../../lib/latestCustomerVisits.js";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
 import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
@@ -978,7 +978,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
           });
         }
 
-        const customerVisitRows = scopedCustomerRows.filter(isVisitStatusCustomer).map(mapVisitStatusRow);
+        const customerVisitRows = removeDuplicateNameCodeCustomers(
+          scopedCustomerRows.filter(isVisitStatusCustomer),
+        ).map(mapVisitStatusRow);
         const seenVisitCodes = new Set(
           customerVisitRows.map((row) => String(row.customer_code || "").trim().toUpperCase()).filter(Boolean)
         );

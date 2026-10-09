@@ -181,6 +181,25 @@ test("credit notes do not count as buying customers", () => {
   );
 });
 
+test("repeat customers require a qualifying prior purchase, not only a return", async () => {
+  const rows = [
+    { transaction_date: "2026-09-02", salesman_code: "SM01", customer_code: "RETURN-ONLY", sales_amount: 100 },
+    { transaction_date: "2026-09-03", salesman_code: "SM01", customer_code: "REAL-HISTORY", sales_amount: 100 },
+    { transaction_date: "2026-08-15", customer_code: "RETURN-ONLY", voucher_type: "Credit Note", sales_amount: 100 },
+    { transaction_date: "2026-08-16", customer_code: "REAL-HISTORY", sales_amount: 100 },
+  ];
+  const actuals = await loadSalesActuals(activeSalesAdmin(rows), {
+    salesmanCode: "SM01",
+    reportDate: "2026-09-01",
+  });
+
+  assert.deepEqual(actuals.priorCustomerCodes, ["REAL-HISTORY"]);
+  assert.deepEqual(
+    classifyBuyingCustomers(actuals.monthCustomerCodes, actuals.priorCustomerCodes),
+    { newCustomers: 1, repeatCustomers: 1 },
+  );
+});
+
 test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
   const actualRows = [
     { transaction_date: "2026-09-02", salesman_code: "SM002", customer_code: "A", category: "Office Supplies", sales_amount: 100 },

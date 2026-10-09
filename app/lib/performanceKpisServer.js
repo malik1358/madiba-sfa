@@ -22,13 +22,14 @@ import { isKpiTargetProfile } from "./kpiTargetsTable.js";
 import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 const TARGET_SELECTS = [
-  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
-  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
+  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
+  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
+  "id,salesman_code,target_month,sales_target,local_item_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 1;
-const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v1:";
+const PERFORMANCE_KPI_CACHE_VERSION = 2;
+const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
 function isMissingColumnError(error) {
   return isMissingSchemaColumn(error);
@@ -82,7 +83,7 @@ export function monthWindow(reportDate) {
 export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) {
-    return { officeSupplies: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [] };
+    return { officeSupplies: 0, localItemSales: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [] };
   }
 
   const { from, to } = monthWindow(reportDate);
@@ -91,7 +92,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "transaction_date,customer_code,customer_name,sales_amount,category,item_name,voucher_type,voucher_number,reference,quantity",
+      "transaction_date,customer_code,customer_name,sales_amount,category,item_name,local_import,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
@@ -102,7 +103,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "transaction_date,customer_code,customer_name,sales_amount,voucher_type,voucher_number,reference,quantity",
+      "transaction_date,customer_code,customer_name,sales_amount,local_import,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
@@ -130,6 +131,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const split = splitSalesActuals(monthRows);
   return {
     officeSupplies: split.officeSupplies,
+    localItemSales: split.localItemSales,
     otherSales: split.otherSales,
     monthCustomerCodes,
     priorCustomerCodes,
@@ -252,6 +254,7 @@ function cacheActualsForSalesman(salesActuals, collectionActuals) {
   return {
     ...emptyPerformanceActuals(),
     officeSupplies: salesActuals.officeSupplies,
+    localItemSales: salesActuals.localItemSales,
     otherSales: salesActuals.otherSales,
     collection: collectionActuals.collection,
     cashCollection: collectionActuals.cashCollection,

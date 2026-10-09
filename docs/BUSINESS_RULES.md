@@ -138,6 +138,8 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 Implemented in `app/lib/salesmanIncentive.js` (pure) and `app/lib/salesmanIncentiveServer.js` (loaders). Screen: `/management/salesman-incentive`, API `/api/salesman-incentive`. Tests: `tests/salesmanIncentive.test.mjs`.
 
+- Incentive sales queries page by `transaction_date` plus the unique `id` tie-breaker. Dates are not unique; date-only offset pagination can skip or repeat invoice lines, producing different summaries when the email and screen apply different salesman scopes.
+
 - Collection incentive, measured from invoice date to receipt date:
   - Office supplies: **0.25%** when collected within **35 days**. Nothing after that.
   - Electronics: **0.40%** within **35 days**, **0.20%** within **60 days**.

@@ -7172,6 +7172,11 @@ button.moduleBiDashKpi:focus-visible {
   z-index: 4;
 }
 
+.moduleBiTable.modulePromoterCoverageTable thead tr:first-child th {
+  top: var(--sticky-table-top);
+  z-index: 8;
+}
+
 .moduleBiTable thead tr:nth-child(2) th,
 .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
   top: var(--module-stacked-header-row1);

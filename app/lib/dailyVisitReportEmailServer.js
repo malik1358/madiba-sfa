@@ -324,6 +324,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   userIds,
   reportEmails,
   digestOnlyTo = "",
+  potentialSalesTargetsOnlyTo = "",
   now = new Date(),
   env = process.env,
   send = sendEmail,
@@ -416,6 +417,32 @@ export async function runDailyVisitReportEmailCycle(admin, {
     }
   } catch (error) {
     console.error("Unable to load potential sales targets for visit report emails:", error);
+  }
+
+  const potentialTargetsOnlyInbox = normalizeDeliverableEmail(potentialSalesTargetsOnlyTo);
+  if (potentialTargetsOnlyInbox) {
+    if (!potentialSalesTargets) throw new Error("Unable to load potential sales targets for the requested trial email.");
+    const message = buildPotentialSalesTargetsDigest({
+      rows: potentialSalesTargets,
+      todayKey: staleAsOfKey,
+    });
+    const sent = await send({ ...message, to: [potentialTargetsOnlyInbox] }, env);
+    return {
+      date: reportDate,
+      skipped: false,
+      userCount: 0,
+      sentCount: 1,
+      failedCount: 0,
+      skippedCount: 0,
+      results: [{
+        userId: "potential-sales-targets-trial",
+        userName: "Potential Sales Targets",
+        status: "sent",
+        to: [potentialTargetsOnlyInbox],
+        kind: "potential_sales_targets_trial",
+        provider: sent?.provider || null,
+      }],
+    };
   }
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));

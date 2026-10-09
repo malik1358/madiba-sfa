@@ -87,6 +87,7 @@ export async function GET(request) {
     return Response.json({
       success: true,
       canSendVisitReportEmail: canSendVisitReportEmail(profile),
+      canSendPotentialSalesTargetsTrial: String(profile?.role || "").toLowerCase() === "admin",
       ...report,
     });
   } catch (error) {

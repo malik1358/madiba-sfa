@@ -121,6 +121,28 @@ test("failed checksum and missing Auth data never trigger retention cleanup", as
   }
 });
 
+test("post-dump file failures identify safe permission, missing-file and disk-full categories", async () => {
+  const cases = [
+    ["EACCES", /cannot read or write a private local backup file/],
+    ["EPERM", /cannot read or write a private local backup file/],
+    ["ENOENT", /expected local database dump or roles file is missing/],
+    ["ENOSPC", /ran out of disk space while finalizing/],
+  ];
+  for (const [code, expected] of cases) {
+    await assert.rejects(databaseStage("database dump checksum", async () => {
+      const error = new Error("private path and customer table");
+      error.code = code;
+      throw error;
+    }), (error) => {
+      assert.ok(error instanceof BackupDiagnosticError);
+      assert.match(error.message, expected);
+      assert.ok(!error.message.includes("private path"));
+      assert.ok(!error.message.includes("customer table"));
+      return true;
+    });
+  }
+});
+
 test("full orchestration exports configuration, Storage and verified git history", async () => {
   const fixture = await databaseFixture();
   const config = { ...fixture.config, mode: "full", supabaseUrl: "https://example.test", serviceKey: "fake",
@@ -225,4 +247,20 @@ test("database coverage failure reports safe section categories only", () => {
     return true;
   });
   assert.doesNotThrow(() => validateDatabaseArchiveCoverage("TABLE DATA public\nTABLE DATA auth users\nTABLE DATA storage objects"));
+});
+test("post-dump file access failures report safe categories without paths", async () => {
+  for (const [code, expected] of [["EACCES", /cannot read or write/], ["EPERM", /cannot read or write/],
+    ["ENOENT", /expected local database dump or roles file is missing/], ["ENOSPC", /ran out of disk space/]]) {
+    await assert.rejects(databaseStage("database dump checksum", async () => {
+      const error = new Error("private path and customer-table name");
+      error.code = code;
+      throw error;
+    }), (error) => {
+      assert.ok(error instanceof BackupDiagnosticError);
+      assert.match(error.message, expected);
+      assert.ok(!error.message.includes("private path"));
+      assert.ok(!error.message.includes("customer-table"));
+      return true;
+    });
+  }
 });

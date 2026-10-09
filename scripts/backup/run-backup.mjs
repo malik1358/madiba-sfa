@@ -61,7 +61,7 @@ export async function databaseStage(label, operation) {
   try {
     return await operation();
   } catch (error) {
-    const detail = error instanceof BackupDiagnosticError ? error.message : "Unexpected command failure; raw details suppressed.";
+    const detail = error instanceof BackupDiagnosticError ? error.message : classifyLocalFileFailure(error);
     throw new BackupDiagnosticError(`Database stage failed: ${label}. ${detail}`);
   }
 }
@@ -76,6 +76,15 @@ export function validateDatabaseArchiveCoverage(toc) {
   if (missing.length) {
     throw new BackupDiagnosticError(`Database archive is missing required sections: ${missing.join(", ")}. No backup was uploaded.`);
   }
+}
+
+function classifyLocalFileFailure(error) {
+  if (error?.code === "EACCES" || error?.code === "EPERM") {
+    return "Runner cannot read or write a private local backup file. Check Docker-created file ownership and runner permissions.";
+  }
+  if (error?.code === "ENOENT") return "An expected local database dump or roles file is missing.";
+  if (error?.code === "ENOSPC") return "Backup runner ran out of disk space while finalizing the archive.";
+  return "Local backup file operation failed; raw paths and operating-system details are suppressed.";
 }
 
 export async function execute(command, args, options = {}) {
@@ -265,14 +274,14 @@ export async function runBackup(config, options = {}) {
     const toc = await databaseStage("archive validation (pg_restore)", () => run("docker", ["run", "--rm", "--volume", `${workspace}:/backup:ro`,
       "postgres:17", "pg_restore", "--list", "/backup/payload/database.dump"]));
     validateDatabaseArchiveCoverage(toc);
-    await writeFile(path.join(payload, "database-toc.txt"), toc, { mode: 0o600 });
+    await databaseStage("archive inventory file", () => writeFile(path.join(payload, "database-toc.txt"), toc, { mode: 0o600 }));
     const manifest = {
       formatVersion: 1, mode: config.mode, startedAt: date.toISOString(), projectRef: config.projectRef,
       postgresTools: "17", databaseIncludes: "All accessible non-system schemas, including public, auth, storage and migration history",
       storageSnapshotAtomicWithDatabase: false,
       limitations: ["Unsynced phone data is not included", "Managed Supabase objects need selective restore", "Custom-role passwords and Supabase encryption root key require separate recovery custody"],
-      databaseSha256: await fileHash(path.join(payload, "database.dump")),
-      rolesSha256: await fileHash(path.join(payload, "roles.sql")),
+      databaseSha256: await databaseStage("database dump checksum", () => fileHash(path.join(payload, "database.dump"))),
+      rolesSha256: await databaseStage("roles dump checksum", () => fileHash(path.join(payload, "roles.sql"))),
     };
     if (config.mode === "full") {
       console.log("Exporting and checking all Storage buckets.");

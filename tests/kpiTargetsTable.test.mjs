@@ -7,6 +7,7 @@ import {
   hasExplicitTargets,
   isKpiTargetProfile,
   isTeamTargetSalesmanCode,
+  mergeKpiTargetProfiles,
   rowMatchesKpiFilters,
   sumFilteredKpiColumns,
   teamMemberRows,
@@ -41,6 +42,24 @@ test("inactive KPI exceptions stay visible without admitting other inactive prof
   assert.equal(isKpiTargetProfile({ salesman_code: "CL02", salesman_name: "Asrar Ahmed", role: "collector", is_active: false }), true);
   assert.equal(isKpiTargetProfile({ salesman_code: "SM03", salesman_name: "Inactive salesman", role: "salesman", is_active: false }), false);
   assert.equal(isKpiTargetProfile({ salesman_code: "CL05", salesman_name: "Inactive collector", role: "collector", is_active: false }), false);
+});
+
+test("KPI roster merges Thamer aliases and keeps the canonical profile and boss", () => {
+  const profiles = mergeKpiTargetProfiles([
+    { id: "legacy-short", salesman_code: "THAMER", salesman_name: "THAMER", bossCode: "" },
+    { id: "legacy-full", salesman_code: "THAMER MOHAMMAD AHMED QASEM", salesman_name: "THAMER MOHAMMAD AHMED QASEM", bossCode: "" },
+    { id: "canonical", salesman_code: "SM002", salesman_name: "Thamer", bossCode: "ABDUL REHMAN" },
+    { id: "other", salesman_code: "SM003", salesman_name: "Other", bossCode: "MANAGER" },
+  ]);
+
+  assert.equal(profiles.length, 2);
+  assert.deepEqual(profiles[0], {
+    id: "canonical",
+    salesman_code: "SM002",
+    salesman_name: "Thamer",
+    bossCode: "ABDUL REHMAN",
+  });
+  assert.equal(profiles[1].salesman_code, "SM003");
 });
 
 const ahmed = {

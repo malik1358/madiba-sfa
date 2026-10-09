@@ -149,7 +149,7 @@ export default function ReceiptsNotInTallyPage() {
   usePopupMessages({ error, message: info });
 
   const canAccess = access.canAccess("receiptsNotInTally");
-  const canMarkMistakes = ["admin", "manager", "collector"].includes(access.role);
+  const canMarkMistakes = ["admin", "manager", "collector", "invoice-maker"].includes(access.role);
 
   const missingRows = useMemo(
     () => (Array.isArray(report?.missingInTally) ? report.missingInTally : []),

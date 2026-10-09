@@ -54,7 +54,7 @@ export async function GET(request) {
     }
     const { data: profiles, error: rosterError } = await admin
       .from("profiles")
-      .select("salesman_code,salesman_name,role");
+      .select("salesman_code,salesman_name,role,is_active");
     if (rosterError) throw rosterError;
     const allowedCodes = new Set((profiles || [])
       .filter(isKpiTargetProfile)

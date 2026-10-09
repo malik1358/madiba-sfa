@@ -59,24 +59,27 @@ test("credit notes reduce sales without adding a sold SKU", () => {
   assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
 });
 
-test("current and future months stay neutral in monthly and aggregate trends", () => {
+test("aggregate trend follows the latest completed month and excludes current/future months", () => {
   const report = buildPromoterCoverageReport({
     customers: [{ customer_code: "C1" }],
     salesRows: [
-      { customer_code: "C1", transaction_date: "2026-08-10", sales_amount: 100, item_code: "A" },
-      { customer_code: "C1", transaction_date: "2026-09-10", sales_amount: 200, item_code: "A" },
-      { customer_code: "C1", transaction_date: "2026-10-01", sales_amount: 300, item_code: "B" },
+      { customer_code: "C1", transaction_date: "2026-08-10", sales_amount: 800, item_code: "A" },
+      { customer_code: "C1", transaction_date: "2026-08-15", sales_amount: 200, item_code: "B" },
+      { customer_code: "C1", transaction_date: "2026-09-10", sales_amount: 200, item_code: "C" },
+      { customer_code: "C1", transaction_date: "2026-10-01", sales_amount: 10000, item_code: "D" },
     ],
     monthKeys: ["2026-08", "2026-09", "2026-10", "2026-11"],
     currentMonth: "2026-10",
   });
 
-  assert.equal(report.rows[0].monthSalesChange["2026-09"].trend, "increasing");
-  assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "stable");
+  assert.equal(report.rows[0].monthSalesChange["2026-09"].trend, "decreasing");
+  assert.equal(report.rows[0].monthSkuChange["2026-09"].trend, "decreasing");
   assert.equal(report.rows[0].monthSalesChange["2026-10"], null);
   assert.equal(report.rows[0].monthSkuChange["2026-11"], null);
-  assert.equal(report.rows[0].trend, "increasing");
-  assert.equal(report.rows[0].changePercent, 100);
+  assert.equal(report.rows[0].trend, "decreasing");
+  assert.equal(report.rows[0].changePercent, -80);
+  assert.equal(report.rows[0].skuTrend, "decreasing");
+  assert.equal(report.rows[0].skuChangePercent, -50);
 });
 
 test("coverage includes unvisited team customers and separates repeat visits", () => {
@@ -104,19 +107,20 @@ test("coverage includes unvisited team customers and separates repeat visits", (
   assert.equal(report.rows.find((row) => row.customerCode === "A3").visitStatus, "repeated");
 });
 
-test("customer sales trend compares last three completed months with prior three", () => {
+test("customer sales trend compares the latest two completed months", () => {
   const report = buildPromoterCoverageReport({
     customers: [{ customer_code: "C1", customer_name: "Growing" }],
     salesRows: [
       ...months.slice(0, 3).map((transaction_date) => ({ customer_code: "C1", transaction_date: `${transaction_date}-15`, sales_amount: 100 })),
-      ...months.slice(3).map((transaction_date) => ({ customer_code: "C1", transaction_date: `${transaction_date}-15`, sales_amount: 200 })),
+      ...months.slice(3, 5).map((transaction_date) => ({ customer_code: "C1", transaction_date: `${transaction_date}-15`, sales_amount: 200 })),
+      { customer_code: "C1", transaction_date: "2026-06-15", sales_amount: 300 },
     ],
     monthKeys: months,
   });
 
-  assert.equal(report.rows[0].previousSales, 300);
-  assert.equal(report.rows[0].recentSales, 600);
-  assert.equal(report.rows[0].changePercent, 100);
+  assert.equal(report.rows[0].previousSales, 200);
+  assert.equal(report.rows[0].recentSales, 300);
+  assert.equal(report.rows[0].changePercent, 50);
   assert.equal(report.rows[0].trend, "increasing");
   assert.equal(report.increasingCustomerCount, 1);
 });
@@ -125,7 +129,8 @@ test("trend treats zero-base sales as new and negative sales as decreasing", () 
   const salesRows = [
     { customer_code: "NEW", transaction_date: "2026-06-01", sales_amount: 250 },
     ...months.slice(0, 3).map((transaction_date) => ({ customer_code: "DOWN", transaction_date: `${transaction_date}-15`, sales_amount: 100 })),
-    ...months.slice(3).map((transaction_date) => ({ customer_code: "DOWN", transaction_date: `${transaction_date}-15`, sales_amount: 50 })),
+    ...months.slice(3, 5).map((transaction_date) => ({ customer_code: "DOWN", transaction_date: `${transaction_date}-15`, sales_amount: 50 })),
+    { customer_code: "DOWN", transaction_date: "2026-06-15", sales_amount: 25 },
   ];
   const report = buildPromoterCoverageReport({ salesRows, monthKeys: months });
 
@@ -158,7 +163,7 @@ test("team customer 1553 matches active-sales account-code variants", () => {
   assert.equal(report.rows[0].monthSkuCount["2026-09"], 1);
 });
 
-test("aggregate trend uses the selected completed months when fewer than six are selected", () => {
+test("aggregate trend uses the latest two completed months in a short selected range", () => {
   const report = buildPromoterCoverageReport({
     customers: [{ customer_code: "SHORT", customer_name: "Short range" }],
     salesRows: [
@@ -173,12 +178,12 @@ test("aggregate trend uses the selected completed months when fewer than six are
   });
 
   assert.equal(report.rows[0].trend, "increasing");
-  assert.equal(report.rows[0].changePercent, 350);
+  assert.equal(report.rows[0].changePercent, 250);
   assert.equal(report.rows[0].skuTrend, "increasing");
-  assert.equal(report.rows[0].skuChangePercent, 50);
+  assert.equal(report.rows[0].skuChangePercent, 100);
 });
 
-test("odd selected ranges compare average monthly values between range halves", () => {
+test("aggregate trend uses the latest pair even in a longer selected range", () => {
   const report = buildPromoterCoverageReport({
     customers: [{ customer_code: "ODD" }],
     salesRows: [
@@ -192,6 +197,6 @@ test("odd selected ranges compare average monthly values between range halves", 
     currentMonth: "2026-10",
   });
 
-  assert.equal(report.rows[0].trend, "increasing");
-  assert.equal(report.rows[0].changePercent, 300);
+  assert.equal(report.rows[0].trend, "stable");
+  assert.equal(report.rows[0].changePercent, 0);
 });

@@ -60,8 +60,8 @@ const TEXT = {
   visitedOnce: { en: "Once", ar: "مرة واحدة" },
   repeatedStatus: { en: "Repeated", ar: "متكرر" },
   salesNote: {
-    en: "Visits cover the last 12 months. Monthly net sales and distinct SKUs cover team-book customers regardless of invoice salesman. Sales/SKU trend compares the selected completed months' earlier and later halves; the incomplete current month is excluded.",
-    ar: "تغطي الزيارات آخر 12 شهرًا. تعرض صافي المبيعات وعدد الأصناف الفريدة شهريًا لعملاء دفتر الفريق بغض النظر عن مندوب الفاتورة. يقارن اتجاه المبيعات والأصناف النصفين الأول والأخير من الأشهر المكتملة المحددة، مع استبعاد الشهر الحالي غير المكتمل.",
+    en: "Visits cover the last 12 months. Monthly net sales and distinct SKUs cover team-book customers regardless of invoice salesman. Sales/SKU trend compares the latest two completed months in the selected period; the incomplete current month is excluded.",
+    ar: "تغطي الزيارات آخر 12 شهرًا. تعرض صافي المبيعات وعدد الأصناف الفريدة شهريًا لعملاء دفتر الفريق بغض النظر عن مندوب الفاتورة. يقارن اتجاه المبيعات والأصناف أحدث شهرين مكتملين في الفترة المحددة، مع استبعاد الشهر الحالي غير المكتمل.",
   },
   noRows: { en: "No customers match this filter.", ar: "لا يوجد عملاء يطابقون هذا التصفية." },
   choosePromoterHint: { en: "Select a product promoter to view their team coverage.", ar: "اختر مروج منتجات لعرض تغطية فريقه." },

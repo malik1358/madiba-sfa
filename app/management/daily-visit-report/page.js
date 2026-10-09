@@ -115,6 +115,7 @@ const TEXT = {
   },
   selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   sendEmail: { en: "Send selected", ar: "إرسال المحددين" },
+  sendPotentialSalesTargetsTrial: { en: "Send target trial to me", ar: "إرسال تجربة الأهداف إليّ" },
   sendAllDate: { en: "Send this date to all", ar: "إرسال هذا التاريخ للجميع" },
   sendThursday: { en: "Send Thursday report", ar: "إرسال تقرير الخميس" },
   sendSaturday: { en: "Send Saturday report", ar: "إرسال تقرير السبت" },
@@ -132,6 +133,10 @@ const TEXT = {
   emailConfirmMidnight: {
     en: "Run the scheduled visit-report send now? Thursday goes out Saturday 06:00, and Saturday goes out Sunday 00:10 KSA.",
     ar: "تشغيل إرسال تقرير الزيارات المجدول الآن؟ يُرسل تقرير الخميس السبت 06:00، وتقرير السبت الأحد 00:10 بتوقيت السعودية.",
+  },
+  emailConfirmPotentialSalesTargetsTrial: {
+    en: "Send one full Potential Sales Targets email, grouped by salesman, to your admin login email only?",
+    ar: "إرسال بريد واحد كامل للأهداف المحتملة، مقسم حسب المندوب، إلى بريد دخول المدير فقط؟",
   },
   emailSent: {
     en: "Sent {sent} of {total} report emails for {date}.",
@@ -411,12 +416,13 @@ export default function DailyVisitReportPage() {
     userIds = [],
     allUsers = false,
     midnight = false,
+    potentialSalesTargetsOnly = false,
     confirmText,
   } = {}) {
     if (emailBusy) return;
 
     const userIdsToSend = [...new Set((userIds || []).filter(Boolean))];
-    if (!allUsers && !midnight && !userIdsToSend.length) {
+    if (!allUsers && !midnight && !potentialSalesTargetsOnly && !userIdsToSend.length) {
       setError(t("emailNoUsers"));
       return;
     }
@@ -446,11 +452,12 @@ export default function DailyVisitReportPage() {
             date: midnight ? undefined : date,
             allUsers,
             midnight,
+            potentialSalesTargetsOnly,
             userIds: allUsers || midnight ? undefined : userIdsToSend,
-            reportEmails: Object.fromEntries(
-              (allUsers || midnight ? emailUserOptions.map((user) => user.userId) : userIdsToSend)
-                .map((id) => [id, String(reportEmails[id] || "").trim()]),
-            ),
+            reportEmails: potentialSalesTargetsOnly ? undefined : Object.fromEntries(
+                (allUsers || midnight ? emailUserOptions.map((user) => user.userId) : userIdsToSend)
+                  .map((id) => [id, String(reportEmails[id] || "").trim()]),
+              ),
           }),
         },
         120000,
@@ -674,6 +681,21 @@ export default function DailyVisitReportPage() {
                   >
                     {t("sendMidnight")}
                   </button>
+                  {report.canSendPotentialSalesTargetsTrial ? (
+                    <button
+                      type="button"
+                      className="moduleInlineButton"
+                      onClick={() => sendVisitReportEmails({
+                        date: reportDate,
+                        allUsers: true,
+                        potentialSalesTargetsOnly: true,
+                        confirmText: t("emailConfirmPotentialSalesTargetsTrial"),
+                      })}
+                      disabled={emailBusy}
+                    >
+                      {t("sendPotentialSalesTargetsTrial")}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}

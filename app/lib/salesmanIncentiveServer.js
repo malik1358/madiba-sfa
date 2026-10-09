@@ -2,6 +2,11 @@ import { loadReceiptRowsByCustomer } from "./collectionAvgDays.js";
 import { customerAccountCodesMatch, resolveCustomerAccountCode } from "./outstanding.js";
 import { normalizeSalesmanCode } from "./performanceKpis.js";
 import {
+  normalizeReportSalesmanCode,
+  normalizeReportSalesmanName,
+  reportSalesmanCodeAliases,
+} from "./salesmanReportIdentity.js";
+import {
   buildSalesmanIncentiveReport,
   incentiveHistoryStartDate,
   incentiveMonthRange,
@@ -48,6 +53,7 @@ async function pageThrough(buildQuery) {
   while (true) {
     const { data, error } = await buildQuery()
       .order("transaction_date", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     const page = Array.isArray(data) ? data : [];
@@ -64,7 +70,7 @@ async function loadCustomerCodesForSalesmen(admin, salesmanCodes, historyStart) 
     .from("active_sales")
     .select("transaction_date,customer_code")
     .gte("transaction_date", historyStart)
-    .in("salesman_code", salesmanCodes));
+    .in("salesman_code", salesmanCodes.flatMap(reportSalesmanCodeAliases)));
   return [...new Set(rows.map((row) => String(row.customer_code || "").trim()).filter(Boolean))];
 }
 
@@ -108,9 +114,19 @@ export async function buildSalesmanIncentiveReportFromDb(admin, {
     ? await loadCustomerCodesForSalesmen(admin, requested, historyStart)
     : null;
 
-  const [salesRows, receiptsByCustomer] = await Promise.all([
+  const previousRange = incentiveMonthRange(shiftIncentiveMonth(monthKey, -1));
+  const range = incentiveMonthRange(monthKey);
+  const [salesRows, receiptsByCustomer, salesTransactions] = await Promise.all([
     loadSalesRows(admin, { historyStart, customerCodes }),
     loadReceiptRowsByCustomer(admin),
+    pageThrough(() => {
+      let query = admin.from("active_sales")
+        .select(SALES_SELECT)
+        .gte("transaction_date", previousRange.from)
+        .lte("transaction_date", range.to);
+      if (requested.length) query = query.in("salesman_code", requested.flatMap(reportSalesmanCodeAliases));
+      return query;
+    }),
   ]);
 
   const salesByCustomer = new Map();
@@ -137,9 +153,9 @@ export async function buildSalesmanIncentiveReportFromDb(admin, {
     month: monthKey,
     customers,
     salesmanCodes: requested.length ? requested : null,
+    salesTransactions,
   });
 
-  const range = incentiveMonthRange(monthKey);
   return {
     ...report,
     historyStart,
@@ -162,9 +178,9 @@ export async function listIncentiveSalesmen(admin, { month } = {}) {
 
   const names = new Map();
   rows.forEach((row) => {
-    const code = normalizeSalesmanCode(row.salesman_code);
+    const code = normalizeReportSalesmanCode(row.salesman_code);
     if (!code) return;
-    const name = String(row.salesman_name || "").trim();
+    const name = normalizeReportSalesmanName(row.salesman_name);
     if (!names.has(code) || (!names.get(code) && name)) names.set(code, name);
   });
 

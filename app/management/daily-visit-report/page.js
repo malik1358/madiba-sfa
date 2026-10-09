@@ -88,11 +88,13 @@ const TEXT = {
   workingHours: { en: "Working hours", ar: "ساعات العمل" },
   visitNumber: { en: "Visit #", ar: "رقم الزيارة" },
   coordinates: { en: "Coordinates", ar: "الإحداثيات" },
+  homeLocation: { en: "Home location", ar: "موقع المنزل" },
   daySplitTitle: { en: "Day split", ar: "تفصيل اليوم" },
   visitWithoutOrder: { en: "Visit without order", ar: "زيارة بدون طلب" },
   newCustomerOrders: { en: "New-customer orders", ar: "طلبات عملاء جدد" },
   repeatCustomerOrders: { en: "Repeat-customer orders", ar: "طلبات عملاء متكررين" },
   collectionsSplit: { en: "Collections", ar: "تحصيلات" },
+  collectionVisitsWithoutPayment: { en: "Collection visits without payment", ar: "زيارات تحصيل بدون دفع" },
   splitCount: { en: "Count", ar: "العدد" },
   splitValue: { en: "Value", ar: "القيمة" },
   idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
@@ -126,8 +128,8 @@ const TEXT = {
     ar: "إرسال تقرير الزيارات اليومي لجميع المستخدمين لتاريخ {date}؟",
   },
   emailConfirmMidnight: {
-    en: "Run the midnight visit-report send now? Thursday goes out Friday midnight, Saturday goes out Sunday 00:10.",
-    ar: "تشغيل إرسال تقرير الزيارات لمنتصف الليل الآن؟ يُرسل الخميس منتصف ليل الجمعة والسبت الأحد 00:10.",
+    en: "Run the scheduled visit-report send now? Thursday goes out Saturday 06:00, and Saturday goes out Sunday 00:10 KSA.",
+    ar: "تشغيل إرسال تقرير الزيارات المجدول الآن؟ يُرسل تقرير الخميس السبت 06:00، وتقرير السبت الأحد 00:10 بتوقيت السعودية.",
   },
   emailSent: {
     en: "Sent {sent} of {total} report emails for {date}.",
@@ -824,6 +826,19 @@ export default function DailyVisitReportPage() {
                       {t("waitingTotalShort")}: {formatDurationMinutes(userWaitingMinutes)}
                     </span>
                   </div>
+                  {entryUser.homeLocation ? (
+                    <p className="moduleHint">
+                      <strong>{t("homeLocation")}:</strong>{" "}
+                      {Number(entryUser.homeLocation.latitude).toFixed(5)}, {Number(entryUser.homeLocation.longitude).toFixed(5)}{" "}
+                      <a
+                        href={buildGoogleMapsPointUrl(entryUser.homeLocation.latitude, entryUser.homeLocation.longitude)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t("openMap")}
+                      </a>
+                    </p>
+                  ) : null}
 
                   {entryUser.activitySplit ? (
                     <table className="moduleTable visitDaySplitTable">
@@ -854,6 +869,11 @@ export default function DailyVisitReportPage() {
                           <td>{t("collectionsSplit")}</td>
                           <td>{entryUser.activitySplit.collectionCount}</td>
                           <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("collectionVisitsWithoutPayment")}</td>
+                          <td>{entryUser.activitySplit.collectionVisitWithoutPaymentCount || 0}</td>
+                          <td>-</td>
                         </tr>
                       </tbody>
                     </table>

@@ -1,0 +1,27 @@
+name: Customer GPS Change Email
+
+on:
+  schedule:
+    - cron: "40 21 * * *"
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: customer-gps-change-email
+  cancel-in-progress: false
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send previous KSA day GPS change digest
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 180 \
+            -X POST 'https://madiba-sfa.vercel.app/api/cron/customer-gps-change-email' \
+            -H "x-cron-secret: $CRON_SECRET"

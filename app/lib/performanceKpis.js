@@ -1,4 +1,5 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
+import { isCashSalesVoucher, isCreditNoteTransaction, matchPaymentsFifo } from "./paymentBehavior.js";
 import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
@@ -15,6 +16,7 @@ export const PERFORMANCE_KPI_KEYS = [
   "officeSupplies",
   "otherSales",
   "collection",
+  "cashCollection",
   "newCustomers",
   "repeatCustomers",
 ];
@@ -24,6 +26,7 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "otherSales",
   "totalSales",
   "collection",
+  "cashCollection",
   "newCustomers",
   "repeatCustomers",
 ];
@@ -33,11 +36,12 @@ export const PERFORMANCE_KPI_LABELS = {
   otherSales: "Others",
   totalSales: "Total sales",
   collection: "Collection",
+  cashCollection: "Cash collection (info)",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
 };
 
-const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "sales"]);
+const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "cashCollection", "sales"]);
 const TARGET_FIELD_ALIASES = {
   officeSupplies: ["officeSupplies", "office_supplies_sales_target", "office_supplies_target"],
   otherSales: ["otherSales", "other_sales_target"],
@@ -70,10 +74,16 @@ export function isOfficeSuppliesSale(row = {}) {
   );
 }
 
+export function netKpiSalesAmount(row = {}) {
+  const amount = Number(row?.sales_amount || 0);
+  if (!Number.isFinite(amount)) return 0;
+  return isCreditNoteTransaction(row) ? -Math.abs(amount) : amount;
+}
+
 export function splitSalesActuals(rows = []) {
   return (rows || []).reduce((totals, row) => {
-    const amount = Number(row?.sales_amount || 0);
-    if (!(amount > 0)) return totals;
+    const amount = netKpiSalesAmount(row);
+    if (amount === 0) return totals;
     if (isOfficeSuppliesSale(row)) totals.officeSupplies += amount;
     else totals.otherSales += amount;
     return totals;
@@ -140,8 +150,8 @@ export function averageCumulativeDayShares(salesRows = []) {
   (salesRows || []).forEach((row) => {
     const date = String(row?.transaction_date || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    const amount = Number(row?.sales_amount || 0);
-    if (!(amount > 0)) return;
+    const amount = netKpiSalesAmount(row);
+    if (amount === 0) return;
     const month = date.slice(0, 7);
     const day = Number(date.slice(8, 10));
     let bucket = months.get(month);
@@ -234,8 +244,11 @@ export function kpiStatus({
     };
   }
 
-  const paceDate = resolveKpiPaceDate(reportDate, todayIso || reportDate);
-  const expected = expectedPacePercent(paceDate, paceShares);
+  const monthEnd = currentMonthDateRange(reportDate).to;
+  const today = String(todayIso || reportDate || "").slice(0, 10);
+  const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
+  const paceDate = resolveKpiPaceDate(reportDate, today || reportDate);
+  const expected = monthIsComplete ? 100 : expectedPacePercent(paceDate, paceShares);
   const gap = achievement - expected;
 
   if (achievement >= 100) {
@@ -280,6 +293,7 @@ export function emptyPerformanceActuals() {
     otherSales: 0,
     totalSales: 0,
     collection: 0,
+    cashCollection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -291,6 +305,7 @@ export function emptyPerformanceTargets() {
     otherSales: 0,
     totalSales: 0,
     collection: 0,
+    cashCollection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -351,7 +366,7 @@ export function classifyBuyingCustomers(monthCustomerCodes = [], priorCustomerCo
 export function buyingCustomerCodesFromSales(rows = []) {
   const codes = [];
   (rows || []).forEach((row) => {
-    if (Number(row?.sales_amount || 0) <= 0) return;
+    if (netKpiSalesAmount(row) <= 0 || isCreditNoteTransaction(row)) return;
     const code = normalizeSalesmanCode(row.customer_code);
     if (code) codes.push(code);
   });
@@ -364,6 +379,30 @@ export function sumSalesAmount(rows = []) {
 
 export function sumCollectionAmount(rows = []) {
   return (rows || []).reduce((sum, row) => sum + Number(row?.amount_received || 0), 0);
+}
+
+export function splitCollectionActualsByInvoice(transactions = [], collectionVisits = [], {
+  fromDate = "",
+  toDate = "",
+} = {}) {
+  const receipts = (collectionVisits || []).map((visit) => ({
+    receipt_date: String(visit?.saved_at || "").slice(0, 10),
+    amount: Number(visit?.amount_received || 0),
+    vch_no: String(visit?.id || ""),
+  }));
+  const { allocations } = matchPaymentsFifo(transactions, receipts);
+
+  const totals = allocations.reduce((result, allocation) => {
+    const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);
+    if ((fromDate && receiptDate < fromDate) || (toDate && receiptDate > toDate)) return result;
+    if (isCashSalesVoucher(allocation?.voucher_number)) result.cashCollection += Number(allocation.amount || 0);
+    else result.collection += Number(allocation.amount || 0);
+    return result;
+  }, { collection: 0, cashCollection: 0 });
+  return {
+    collection: Math.round(totals.collection * 100) / 100,
+    cashCollection: Math.round(totals.cashCollection * 100) / 100,
+  };
 }
 
 export function buildPerformanceKpi(key, {

@@ -47,7 +47,7 @@ function scopeCacheKey(userId) {
 }
 
 function customersCacheKey(scope, enriched = false, includeInactive = false) {
-  const prefix = enriched ? "customers:visible:enriched:v8" : "customers:visible:basic:v5";
+  const prefix = enriched ? "customers:visible:enriched:v9" : "customers:visible:basic:v5";
   const inactiveSuffix = includeInactive ? ":with-inactive" : "";
   return `${prefix}${inactiveSuffix}:${buildScopeHash(scope)}`;
 }
@@ -108,6 +108,58 @@ export function subscribeOutstandingCacheCleared(handler) {
 
   return () => {
     window.removeEventListener(OUTSTANDING_CACHE_CLEARED_EVENT, onEvent);
+    try {
+      channel?.close();
+    } catch {
+      // Ignore channel close failures.
+    }
+  };
+}
+
+export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v5";
+export const CUSTOMER_HISTORY_CACHE_CLEARED_EVENT = "madiba-customer-history-cache-cleared";
+const CUSTOMER_HISTORY_CACHE_CHANNEL = "madiba-customer-history-cache";
+
+function notifyCustomerHistoryCacheCleared() {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(new CustomEvent(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT));
+  try {
+    const channel = new BroadcastChannel(CUSTOMER_HISTORY_CACHE_CHANNEL);
+    channel.postMessage({ type: "cleared" });
+    channel.close();
+  } catch {
+    // BroadcastChannel is optional; same-tab listeners still get the window event.
+  }
+}
+
+// Sales/outstanding/receipt uploads change every customer's FIFO settlement math, so the
+// per-customer history cache (used by Customer Audit / Payment Settlement) must be wiped
+// whenever any of those files is uploaded — otherwise a 24h-old snapshot keeps showing.
+export async function invalidateCustomerHistoryCache() {
+  const removed = await removeCacheEntriesByPrefix(CUSTOMER_HISTORY_CACHE_PREFIX);
+  notifyCustomerHistoryCacheCleared();
+  return removed;
+}
+
+export function subscribeCustomerHistoryCacheCleared(handler) {
+  if (typeof window === "undefined" || typeof handler !== "function") {
+    return () => {};
+  }
+
+  const onEvent = () => handler();
+  window.addEventListener(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT, onEvent);
+
+  let channel = null;
+  try {
+    channel = new BroadcastChannel(CUSTOMER_HISTORY_CACHE_CHANNEL);
+    channel.onmessage = onEvent;
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    window.removeEventListener(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT, onEvent);
     try {
       channel?.close();
     } catch {
@@ -210,7 +262,11 @@ async function fetchSalesScopeNetwork(accessToken) {
   return data;
 }
 
-async function fetchVisibleCustomersNetwork(accessToken, { enriched = false, includeInactive = false } = {}) {
+async function fetchVisibleCustomersNetwork(accessToken, {
+  enriched = false,
+  includeInactive = false,
+  includeLatestNearVisit = false,
+} = {}) {
   const params = new URLSearchParams();
   if (enriched) {
     params.set("includeRecentSales", "1");
@@ -218,6 +274,9 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false, inc
   }
   if (includeInactive) {
     params.set("includeInactive", "1");
+  }
+  if (includeLatestNearVisit) {
+    params.set("includeLatestNearVisit", "1");
   }
   const query = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(`/api/customers/visible${query}`, {
@@ -410,13 +469,18 @@ export async function findCachedVisibleCustomerByCode(scope, customerCode) {
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {
   const enriched = Boolean(options.enriched);
   const includeInactive = Boolean(options.includeInactive);
+  const includeLatestNearVisit = Boolean(options.includeLatestNearVisit);
   const ttlMs = enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs;
 
   return fetchWithLocalCache(
     customersCacheKey(scope, enriched, includeInactive),
     ttlMs,
-    () => fetchVisibleCustomersNetwork(accessToken, { enriched, includeInactive }),
-    { onUpdate: options.onUpdate },
+    () => fetchVisibleCustomersNetwork(accessToken, { enriched, includeInactive, includeLatestNearVisit }),
+    {
+      onUpdate: options.onUpdate,
+      forceRefresh: Boolean(options.forceRefresh),
+      revalidate: Boolean(options.revalidate),
+    },
   );
 }
 
@@ -432,6 +496,7 @@ export async function fetchCustomerHistoryCached(accessToken, scope, customerCod
       onUpdate: options.onUpdate,
       // Empty history was often a failed code-only lookup; always revalidate those.
       forceRefresh: Boolean(options.forceRefresh),
+      revalidate: Boolean(options.revalidate),
     },
   );
 }

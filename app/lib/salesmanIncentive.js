@@ -3,10 +3,14 @@ import {
   isCreditNoteTransaction,
   matchPaymentsFifo,
 } from "./paymentBehavior.js";
-import { isOfficeSuppliesSale, normalizeSalesmanCode } from "./performanceKpis.js";
+import { isOfficeSuppliesSale, netKpiSalesAmount, normalizeSalesmanCode } from "./performanceKpis.js";
 import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
 import { parseOutstandingSheetDate, toNumber } from "./outstanding.js";
 import { currentMonthDateRange } from "./salesInvoices.js";
+import {
+  normalizeReportSalesmanCode,
+  normalizeReportSalesmanName,
+} from "./salesmanReportIdentity.js";
 
 /** Day buckets measured from invoice date to receipt date. */
 export const INCENTIVE_FAST_DAYS = 35;
@@ -196,8 +200,8 @@ export function buildInvoiceCategoryProfiles(transactions = []) {
     current.total_incl += amountInclVatFromExcl(amountExclVat, vatRate);
 
     if (!current.salesman_code) {
-      current.salesman_code = normalizeSalesmanCode(row?.salesman_code);
-      current.salesman_name = String(row?.salesman_name || "").trim();
+      current.salesman_code = normalizeReportSalesmanCode(row?.salesman_code);
+      current.salesman_name = normalizeReportSalesmanName(row?.salesman_name);
     }
     map.set(key, current);
   });
@@ -272,8 +276,8 @@ export function buildCustomerIncentiveRows({
       return {
         customer_code: customerCode,
         customer_name: customerName,
-        salesman_code: profile?.salesman_code || "",
-        salesman_name: profile?.salesman_name || "",
+        salesman_code: normalizeReportSalesmanCode(profile?.salesman_code),
+        salesman_name: normalizeReportSalesmanName(profile?.salesman_name),
         invoice_date: dateOnly(allocation.invoice_date),
         voucher_number: String(allocation.voucher_number || ""),
         receipt_date: dateOnly(allocation.receipt_date),
@@ -307,11 +311,10 @@ export function buildMonthlyNetSalesBySalesman(transactions = [], target = new M
     const date = dateOnly(row?.transaction_date);
     if (!ISO_DATE.test(date)) return;
     const month = date.slice(0, 7);
-    const code = normalizeSalesmanCode(row?.salesman_code);
+    const code = normalizeReportSalesmanCode(row?.salesman_code);
     if (!code) return;
-    const amount = toNumber(row?.sales_amount);
-    if (!amount) return;
-    const signed = isCreditNoteTransaction(row) ? -Math.abs(amount) : amount;
+    const signed = netKpiSalesAmount(row);
+    if (!signed) return;
 
     const byMonth = target.get(code) || new Map();
     byMonth.set(month, toNumber(byMonth.get(month)) + signed);
@@ -412,26 +415,33 @@ export function buildSalesmanIncentiveReport({
   month,
   customers = [],
   salesmanCodes = null,
+  salesTransactions = null,
 } = {}) {
   const monthKey = parseIncentiveMonth(month);
   const range = incentiveMonthRange(monthKey);
   const previousMonth = shiftIncentiveMonth(monthKey, -1);
   const allowed = Array.isArray(salesmanCodes) && salesmanCodes.length
-    ? new Set(salesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean))
+    ? new Set(salesmanCodes.map((code) => normalizeReportSalesmanCode(code)).filter(Boolean))
     : null;
 
   const monthlySales = new Map();
   const names = new Map();
   let rows = [];
 
+  const transactionsForSales = Array.isArray(salesTransactions)
+    ? salesTransactions
+    : (Array.isArray(customers) ? customers : []).flatMap((customer) => (
+      Array.isArray(customer?.transactions) ? customer.transactions : []
+    ));
+  buildMonthlyNetSalesBySalesman(transactionsForSales, monthlySales);
+  transactionsForSales.forEach((row) => {
+    const code = normalizeReportSalesmanCode(row?.salesman_code);
+    const name = normalizeReportSalesmanName(row?.salesman_name);
+    if (code && name && !names.has(code)) names.set(code, name);
+  });
+
   (Array.isArray(customers) ? customers : []).forEach((customer) => {
     const transactions = Array.isArray(customer?.transactions) ? customer.transactions : [];
-    buildMonthlyNetSalesBySalesman(transactions, monthlySales);
-    transactions.forEach((row) => {
-      const code = normalizeSalesmanCode(row?.salesman_code);
-      const name = String(row?.salesman_name || "").trim();
-      if (code && name && !names.has(code)) names.set(code, name);
-    });
 
     rows = rows.concat(buildCustomerIncentiveRows({
       customerCode: customer?.customerCode || "",

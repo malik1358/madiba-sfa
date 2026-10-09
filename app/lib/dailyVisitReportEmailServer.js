@@ -22,8 +22,14 @@ import {
   filterCollectionStaleOverdueRowsForProfile,
   resolveOverdueAgingThresholdDays,
 } from "./collectionStaleOverdueEmail.js";
-import { enrichDueCustomersWithVisitWithoutOrder } from "./collectionStaleOverdueEmailServer.js";
+import {
+  enrichDueCustomersWithRecentCollectionVisits,
+  enrichDueCustomersWithVisitWithoutOrder,
+} from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
+import { buildPotentialSalesTargetsSection } from "./potentialSalesTargets.js";
+import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
+import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 import {
   addKsaCalendarDays,
   getKsaDateString,
@@ -51,8 +57,7 @@ export function resolveDailyVisitReportEmailSchedule(date, now = new Date()) {
   const previousDate = getPreviousKsaDateString(now);
   const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
 
-  // Friday is the KSA holiday. Thursday's report goes out at Friday midnight
-  // (Saturday 00:10 KSA), not at the start of Friday.
+  // Friday is the KSA holiday. Thursday's report goes out Saturday at 06:00 KSA.
   if (previousWeekday === 5) {
     return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
   }
@@ -288,6 +293,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadKpis = loadPerformanceSnapshotsForSalesmen,
   loadTeamTargets = loadKpiTargetsBySalesman,
   loadDueCollectionCustomers = null,
+  loadPotentialSalesTargets = loadPotentialSalesTargetCustomers,
 } = {}) {
   const schedule = resolveDailyVisitReportEmailSchedule(date, now);
   const reportDate = schedule.date;
@@ -329,11 +335,13 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const staleAsOfKey = getKsaDateString(now instanceof Date ? now : new Date(now));
   const staleAsOfIso = (now instanceof Date ? now : new Date(now)).toISOString();
   let dueCollectionCustomers = [];
+  let collectionRecords = [];
+  let potentialSalesTargets = null;
   try {
     let loader = loadDueCollectionCustomers;
     if (!loader) {
       const { fetchOutstandingAndCollectionRecords } = await import("../api/payment-collections/route.js");
-      loader = async (client) => {
+      loader = async (client, { todayKey = staleAsOfKey } = {}) => {
         const records = await fetchOutstandingAndCollectionRecords(client, {
           hasAllAccess: true,
           visibleSalesmanCodes: [],
@@ -343,15 +351,26 @@ export async function runDailyVisitReportEmailCycle(admin, {
           canSeeAllSchedulers: true,
           visibleSchedulerUserIds: null,
         });
+        collectionRecords = records;
         const queues = buildCollectionQueues(records, staleAsOfIso);
         const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
-        return enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
+        const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
+        return enrichDueCustomersWithRecentCollectionVisits(client, withVisitReports, todayKey);
       };
     }
-    dueCollectionCustomers = await loader(admin);
+    dueCollectionCustomers = await loader(admin, { todayKey: staleAsOfKey, todayIso: staleAsOfIso });
   } catch (error) {
     console.error("Unable to load stale overdue rows for visit report emails:", error);
     dueCollectionCustomers = [];
+  }
+
+  try {
+    potentialSalesTargets = await loadPotentialSalesTargets(admin, {
+      records: collectionRecords,
+      todayKey: staleAsOfKey,
+    });
+  } catch (error) {
+    console.error("Unable to load potential sales targets for visit report emails:", error);
   }
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
@@ -538,6 +557,18 @@ export async function runDailyVisitReportEmailCycle(admin, {
       todayIso: staleAsOfIso,
       agingThresholdDays: resolveOverdueAgingThresholdDays(profile),
     });
+    const scopeMatchers = buildSalesmanScopeMatchers([profile]);
+    const profileCode = normalizeSalesmanCode(profile.salesman_code);
+    const potentialSalesTargetsSection = potentialSalesTargets && !isCollectionOnlyAccess({
+      role: profile.role, salesmanCode: profileCode,
+    }) ? buildPotentialSalesTargetsSection({
+      todayKey: staleAsOfKey,
+      rows: potentialSalesTargets.filter((row) => (
+        Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
+          .some((code) => normalizeSalesmanCode(code) === profileCode)
+        || salesmanValueMatchesScope(row.salesman_name || row.salesman_code, scopeMatchers)
+      )),
+    }) : null;
     const message = buildUserVisitReportEmail({
       date: reportDate,
       user: userReport,
@@ -545,6 +576,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       team: teamPayload?.team || null,
       teamMembers: teamPayload?.members || [],
       staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
+      potentialSalesTargetsSection,
     });
     reportMessageByUserId.set(userReport.userId, {
       userId: userReport.userId,

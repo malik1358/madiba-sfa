@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useModuleAccess } from "../hooks/useModuleAccess";
-import { shouldEnableBackgroundGps, shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../lib/moduleAccess";
+import { shouldEnableBackgroundGps, shouldRequireGpsAccessGate } from "../lib/moduleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
@@ -20,7 +20,7 @@ import LunchInSuggestionPrompt from "./LunchInSuggestionPrompt";
 import LunchPunchNoonPrompt from "./LunchPunchNoonPrompt";
 import LoginAtFirstCustomerPrompt from "./LoginAtFirstCustomerPrompt";
 import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocationWithRetries, resolveGpsCapturePlatform } from "../lib/geo";
-import { hasMorningAttendanceToday, MORNING_ATTENDANCE_COMPLETE_EVENT, readGateReadyState, writeGateReadyState } from "../lib/morningAttendance";
+import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole, MORNING_ATTENDANCE_COMPLETE_EVENT, readGateReadyState, writeGateReadyState } from "../lib/morningAttendance";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 
 const TEXT = {
@@ -167,9 +167,8 @@ export default function MorningAttendanceGate({
   const { language, dir } = useAppLanguage();
   const { access, loading: accessLoading } = useModuleAccess();
   const t = translate(language, TEXT);
-  const attendanceRequired = requireMorningAttendance
-    && access.role !== "admin"
-    && shouldRequireTransactionGps(access.role);
+  const roleNeedsAttendance = isMorningAttendanceRequiredForRole(access.role);
+  const attendanceRequired = requireMorningAttendance && roleNeedsAttendance;
   const backgroundGpsEnabled = enableBackgroundGps && shouldEnableBackgroundGps(access.role);
   const batteryCheckRequired = shouldRequireGpsAccessGate(access.role);
   const locationCheckRequired = shouldRequireGpsAccessGate(access.role);
@@ -449,7 +448,7 @@ export default function MorningAttendanceGate({
 
       if (!attendanceRequired) {
         setAttendanceComplete(true);
-        writeGateReadyState(session.user.id, true);
+        if (!roleNeedsAttendance) writeGateReadyState(session.user.id, true);
         setReady(true);
         workdayCheckDoneRef.current = true;
         return;
@@ -680,11 +679,13 @@ export default function MorningAttendanceGate({
             setChecking(false);
             setBatteryReady(true);
             setLocationReady(true);
-            const supabase = getSupabaseClient();
-            supabase?.auth.getSession().then(({ data }) => {
-              const userId = data?.session?.user?.id;
-              if (userId) writeGateReadyState(userId, true);
-            }).catch(() => {});
+            if (!roleNeedsAttendance) {
+              const supabase = getSupabaseClient();
+              supabase?.auth.getSession().then(({ data }) => {
+                const userId = data?.session?.user?.id;
+                if (userId) writeGateReadyState(userId, true);
+              }).catch(() => {});
+            }
           }
           runAutoClose().catch(() => {});
           verifyApkVersion().catch(() => {});
@@ -730,11 +731,13 @@ export default function MorningAttendanceGate({
         if (!cancelled) {
           setReady(true);
           setChecking(false);
-          const supabase = getSupabaseClient();
-          supabase?.auth.getSession().then(({ data }) => {
-            const userId = data?.session?.user?.id;
-            if (userId) writeGateReadyState(userId, true);
-          }).catch(() => {});
+          if (!roleNeedsAttendance) {
+            const supabase = getSupabaseClient();
+            supabase?.auth.getSession().then(({ data }) => {
+              const userId = data?.session?.user?.id;
+              if (userId) writeGateReadyState(userId, true);
+            }).catch(() => {});
+          }
         }
       }
 
@@ -779,7 +782,7 @@ export default function MorningAttendanceGate({
       window.clearTimeout(safetyTimer);
       window.removeEventListener(MORNING_ATTENDANCE_COMPLETE_EVENT, handleAttendanceComplete);
     };
-  }, [attendanceRequired, accessPending, batteryCheckRequired]);
+  }, [attendanceRequired, accessPending, batteryCheckRequired, roleNeedsAttendance]);
 
   useEffect(() => {
     if (!nativeAndroidApp || apkVersionReady) return undefined;

@@ -19,6 +19,7 @@ This file lists objects found in the repo. It is not a live dump of production. 
 | `report_email` | Added in `20260904180000_profile_report_email.sql`. |
 | `activity_reminders_enabled` | Boolean, default true. `20260907120000_profile_activity_reminders.sql`. |
 | `stock_take_access` | Boolean, default false. `20260908140000_stock_take.sql`. |
+| `home_latitude`, `home_longitude` | Optional saved salesperson home point. Added by `20260929120000_salesman_home_locations.sql`; both coordinates must be set or null. |
 
 **Not in migrations:** `sql/fix_profiles_role_check_collector.sql` adds `collector` to `profiles_role_check`. The baseline migration does not include `collector`. Assigning that role fails until the script is applied.
 
@@ -64,6 +65,10 @@ RLS `customers_select` allows management, the current salesman, or the previous 
 
 `customer_gps_history`: `customer_code`, lat/long, previous lat/long, `source`, `updated_by`, `updated_by_name`, `created_at`.
 
+Confirmed field prompt overwrites additionally use text sources `salesman_accepted` and `visit_accepted`; no column change is required. `created_at` is server persistence time (including offline sync), not a separately recorded device acceptance time. Existing `20260831153000_customer_gps_history.sql` / `sql/setup_customer_gps_history.sql` must already be applied in Supabase for audit recording and digest delivery; deployment alone cannot create the table.
+
+`system_settings` keys `customer_gps_change_email:<YYYY-MM-DD>` atomically claim each GPS digest day using the unique `setting_key`. JSON values have `status: sending`, a claim token and `claimedAt`, then `status: sent`, `sentAt` and `changeCount`. Failed pre-delivery attempts release their own claim; post-delivery marker failures retain it to avoid duplicate mail. An interrupted `sending` claim requires operator review of provider delivery before clearing it; never delete a delivered day's claim just to rerun cron.
+
 `customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`.
 
 `prospects`: `prospect_code` unique, `salesman_code`, company and contact fields, lat/long, `potential` `SMALL|MEDIUM|LARGE`, `status` `PROSPECT|FOLLOW_UP|PENDING_APPROVAL|APPROVED|CONVERTED|REJECTED`, `converted_customer_code`, `created_by`.
@@ -94,7 +99,7 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 `salesman_code` / `salesman_name` are the order maker (authenticated profile at save/submit), not a copy of `customers.current_salesman_code`. `/api/sales-orders` overwrites both from the caller’s profile; the client still sends `customerSalesmanCode` only for pricing-region fallback.
 
-Field order numbers are allotted offline per salesman as a short letter prefix + sequence (e.g. `P01`; `PA01` when first letters collide — see `app/lib/salesmanOrderNumber.js` / `offlineOrderNumber.js`). The client sends `orderNumber` with the save payload; `/api/sales-orders` persists that value and must not replace it with the bigint `id` after sync. Legacy rows may still use the numeric id string or older `NAME-0001` values as `order_number`. Blank or id-equal accidental numbers are repaired to the salesman series via `repair_order_numbers` / `ensureStoredOrderNumber` (never write the bigint id as a new `order_number`). When re-saving such a legacy row, the client must keep that stored number (not allot a new short series value).
+Field order numbers are allotted offline per salesman as a short letter prefix + sequence (e.g. `P01`; `PA01` when first letters collide — see `app/lib/salesmanOrderNumber.js` / `offlineOrderNumber.js`). The client sends `orderNumber` with the save payload; `/api/sales-orders` persists it when available or allots the next series number if the device's number is stale or taken. Queued order PDFs mark the number as pending sync until the server confirms it. The API must not replace it with the bigint `id`. Legacy rows may still use the numeric id string or older `NAME-0001` values as `order_number`. Blank or id-equal accidental numbers are repaired to the salesman series via `repair_order_numbers` / `ensureStoredOrderNumber` (never write the bigint id as a new `order_number`). When re-saving such a legacy row, the client must keep that stored number (not allot a new short series value).
 
 `sales_order_items`: `order_id`, `item_code` unique per order, `item_name`, `category`, `quantity`, `rate`, `line_value`.
 
@@ -159,10 +164,11 @@ Schemes and quantity limits are settings, not tables:
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
-| `receipt_register_dataset_v1` | Receipt register upload |
+| `receipt_register_dataset_v1` | Receipt register upload (every row with a date and a positive Dr/Cr amount is kept regardless of voucher type — Receipt, JV-Collection, NSTC JV reclass entries, etc. — so uploads never silently drop a collection) |
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
+| `performance_kpi_actuals_v1:<YYYY-MM-01>` | Per-salesman KPI actuals and historical pace for the month, rebuilt after sales uploads and saved collection visits; read by `/api/performance` to avoid rescanning source transactions on each screen load |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |
 | `order_quantity_controls` | Per-customer quantity caps |
@@ -181,6 +187,7 @@ Schemes and quantity limits are settings, not tables:
 | `missing_invoice_email_last_sent_at` | Email dedupe |
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
+| `daily_receipt_email_last_sent:<YYYY-MM-DD>` | Daily app-entered receipt email dedupe, one marker per Riyadh report date |
 
 Do not create a new table for a small flag if the surrounding feature already uses one of these keys. Do not rename a key; clients and cron jobs compare the string exactly.
 
@@ -207,3 +214,5 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 3. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
 4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
+
+`20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Run the migration on local/dev first and production only through the normal approved release process; saving a home point in Salesman Hierarchy also clears matching customer pins through the GPS-audited API.

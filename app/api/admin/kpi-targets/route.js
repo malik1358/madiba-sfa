@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
 import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
-import { isTeamTargetSalesmanCode, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
+import { isKpiTargetProfile, isTeamTargetSalesmanCode, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -67,11 +67,7 @@ async function listFieldSalesmen(admin) {
 
   if (error) throw error;
 
-  return (data || []).filter((row) => {
-    const code = normalizeSalesmanCode(row.salesman_code);
-    if (!code) return false;
-    return !isCollectionOnlyAccess({ role: row.role, salesmanCode: code });
-  });
+  return (data || []).filter(isKpiTargetProfile);
 }
 
 async function attachBosses(admin, salesmen) {

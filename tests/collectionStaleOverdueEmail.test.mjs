@@ -13,7 +13,9 @@ import {
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
 import {
+  attachLastNearCollectionVisit,
   attachLastVisitWithoutOrder,
+  loadLastNearCollectionVisitByCustomer,
   resolveCollectionStaleOverdueEmailSchedule,
   resolveCollectionStaleOverdueRouteTrigger,
   runCollectionStaleOverdueEmailCycle,
@@ -44,10 +46,33 @@ test("isCollectionStaleOverdueRow requires overdue, zero 8d receipts, and stale 
     collection_history: [{ saved_at: "2026-09-22T10:00:00Z", amount_received: 50 }],
   }, { todayKey, todayIso: "2026-09-26T12:00:00+03:00" }), false);
 
-  // Recent collection alone does not exclude; near VWO age does.
+  // Recent near collection visits exclude customers even when no payment was received.
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
-    latest_collection: { saved_at: "2026-09-25T10:00:00Z" },
+    latest_collection: { saved_at: "2026-09-24T10:00:00Z" },
+  }, { todayKey }), false);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    latest_collection: {
+      saved_at: "2026-09-24T10:00:00Z",
+      latitude: 25.5,
+      longitude: 47.5,
+    },
+    latitude: 24.7,
+    longitude: 46.7,
+  }, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    recent_collection_visits_checked: true,
+    last_near_collection_visit_at: "",
+    collection_history: [{ saved_at: "2026-09-25T10:00:00Z" }],
+  }, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    latest_collection: { saved_at: "2026-09-22T10:00:00Z" },
   }, { todayKey }), true);
 
   assert.equal(isCollectionStaleOverdueRow({
@@ -105,6 +130,20 @@ test("Parvez and Junaid use over-30 outstanding while others use over-60", () =>
     salesman_name: "Junaid",
     salesman_code: "JUNAID",
   }, { todayKey }), true);
+
+  const reassignedCustomer = {
+    outstanding_30_60: 800,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+    collection_history: [],
+    latest_collection: null,
+    salesman_name: "Abdullah Salmeen Awad Al-Awathani",
+    salesman_code: "ABADALLA",
+    current_salesman_code: "PARVEZ",
+  };
+  assert.equal(isSoftAgingSalesman(reassignedCustomer), false);
+  assert.equal(isCollectionStaleOverdueRow(reassignedCustomer, { todayKey }), false);
 });
 
 test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", () => {
@@ -140,6 +179,51 @@ test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows",
   assert.equal(row.last_visit_without_order_at, "2026-09-05T09:00:00.000Z");
   assert.equal(row.last_visit_without_order_is_far, true);
   assert.equal(row.last_near_visit_without_order_at, "2026-08-01T09:00:00.000Z");
+});
+
+test("recent collection enrichment skips FAR visits and Friday", async () => {
+  const visits = [
+    {
+      customer_code: "C1",
+      saved_at: "2026-09-26T08:00:00Z",
+      latitude: 25.5,
+      longitude: 47.5,
+    },
+    {
+      customer_code: "C1",
+      saved_at: "2026-09-24T08:00:00Z",
+      latitude: 24.7,
+      longitude: 46.7,
+    },
+    {
+      customer_code: "C2",
+      saved_at: "2026-09-25T08:00:00Z",
+      latitude: 24.7,
+      longitude: 46.7,
+    },
+  ];
+  const query = {
+    rangeStart: 0,
+    select() { return this; },
+    in() { return this; },
+    gte() { return this; },
+    lte() { return this; },
+    order() { return this; },
+    range(start) { this.rangeStart = start; return this; },
+    then(resolve, reject) {
+      return Promise.resolve({ data: visits.slice(this.rangeStart), error: null }).then(resolve, reject);
+    },
+  };
+  const admin = { from: () => query };
+  const rows = [
+    { customer_code: "C1", latitude: 24.7, longitude: 46.7 },
+    { customer_code: "C2", latitude: 24.7, longitude: 46.7 },
+  ];
+  const found = await loadLastNearCollectionVisitByCustomer(admin, rows, "2026-09-26");
+  const [first, second] = attachLastNearCollectionVisit(rows, found);
+
+  assert.equal(first.last_near_collection_visit_at, "2026-09-24T08:00:00.000Z");
+  assert.equal(second.last_near_collection_visit_at, "");
 });
 
 test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {

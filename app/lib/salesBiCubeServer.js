@@ -148,7 +148,15 @@ async function writeCubeToTable(admin, facts) {
   const chunkSize = 500;
   for (let index = 0; index < facts.length; index += chunkSize) {
     const chunk = facts.slice(index, index + chunkSize);
-    const { error } = await admin.from(SALES_BI_TABLE).insert(chunk);
+    const tableChunk = chunk.map(({
+      cash_sales_amount,
+      credit_sales_amount,
+      local_sales_amount,
+      import_sales_amount,
+      unclassified_origin_sales_amount,
+      ...fact
+    }) => fact);
+    const { error } = await admin.from(SALES_BI_TABLE).insert(tableChunk);
     if (error) {
       if (isMissingTableError(error) || isMissingSchemaColumn(error)) return false;
       throw error;

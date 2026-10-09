@@ -105,7 +105,7 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         message: result.reason === "friday_holiday"
-          ? "Friday is a holiday. Thursday's report is sent at Friday midnight."
+          ? "Friday is a holiday. Thursday's report is sent Saturday at 06:00 KSA."
           : "No midnight visit report is due for this day.",
         ...result,
       });

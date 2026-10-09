@@ -51,3 +51,27 @@ test("sales-orders API rejects stale low preferred order numbers", () => {
   assert.match(source, /resolvePreferredOrderNumber/);
   assert.match(source, /Stale offline number/);
 });
+
+test("online new orders request a server-aware next number before offline fallback", () => {
+  const routeSource = fs.readFileSync(new URL("../app/api/sales-orders/route.js", import.meta.url), "utf8");
+  const allocatorSource = fs.readFileSync(new URL("../app/lib/offlineOrderNumber.js", import.meta.url), "utf8");
+  const hookSource = fs.readFileSync(
+    new URL("../app/management/customer-audit/hooks/useOrder.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(routeSource, /nextNumber/);
+  assert.match(routeSource, /allocateServerSalesmanOrderNumber\(admin, salesmanCode\)/);
+  assert.match(allocatorSource, /nextNumber=1/);
+  assert.match(hookSource, /accessToken: session\.access_token/);
+});
+
+test("useOrder cannot save a different customer's order over a stale draft", () => {
+  const source = fs.readFileSync(
+    new URL("../app/management/customer-audit/hooks/useOrder.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /function orderContextKey\(selectedCustomer, editOrderId\)/);
+  assert.match(source, /draftContextKey === orderContextKey\(selectedCustomer, editOrderId\)/);
+  assert.match(source, /let cancelled = false/);
+  assert.match(source, /cancelled = true/);
+});

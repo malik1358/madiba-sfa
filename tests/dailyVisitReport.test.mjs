@@ -7,6 +7,7 @@ import {
   countsTowardDailyVisitEntryStats,
   buildFieldVisitStats,
   mergeProspectsIntoCustomerMap,
+  resolveCodelessProspectFollowUps,
   resolveVisitCustomerName,
 } from "../app/lib/dailyVisitReportServer.js";
 import {
@@ -14,6 +15,31 @@ import {
   markVisitsWithAcceptedGpsHistory,
   shouldMarkVisitFarFromCustomer,
 } from "../app/lib/dailyVisitReportStats.js";
+
+test("codeless offline prospect follow-ups resolve to the prospect created by the same user", async () => {
+  const prospects = [
+    { id: 7, offline_id: "eaec4524d0b44342", company_name: "Care Sheets", created_by: "u1", created_at: "2026-09-29T07:00:00Z", follow_up_date: "2026-09-30" },
+    { id: 8, offline_id: "other", company_name: "Other", created_by: "u2", created_at: "2026-09-29T07:00:00Z", follow_up_date: "2026-09-30" },
+  ];
+  const query = {
+    select() { return query; },
+    in() { return query; },
+    then(resolve) { resolve({ data: prospects, error: null }); },
+  };
+  const admin = { from: () => query };
+  const entry = {
+    user_id: "u1",
+    saved_at: "2026-09-29T07:05:00Z",
+    customer_code: "",
+    transaction_type: "VISIT_REPORT",
+    meta: { prospectFollowUp: true, followUpDate: "2026-09-30", customerName: "" },
+  };
+
+  const [resolved] = await resolveCodelessProspectFollowUps(admin, [entry]);
+
+  assert.equal(resolved.customer_code, "PROSPECT-7");
+  assert.equal(resolved.meta.customerName, "Care Sheets");
+});
 
 test("accepted GPS update markers attach to collection visits without becoming timeline rows", () => {
   const visit = { id: "collection-42", transaction_type: "COLLECTION_VISIT", meta: {} };

@@ -92,8 +92,8 @@ export function indexReceiptsByCustomer(dataset) {
 }
 
 /**
- * Streams sales_raw ordered by customer so each customer's full history is handed over once
- * and released before the next one. Keeps memory flat over the whole table.
+ * Streams the active sales snapshot ordered by customer so each customer's history is handed
+ * over once and released before the next one. Keeps memory flat over the whole view.
  */
 export async function forEachCustomerSalesHistory(admin, onCustomer) {
   let from = 0;
@@ -102,7 +102,7 @@ export async function forEachCustomerSalesHistory(admin, onCustomer) {
 
   while (true) {
     const { data, error } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select(SALES_SELECT)
       .order("customer_code", { ascending: true })
       .order("transaction_date", { ascending: true })

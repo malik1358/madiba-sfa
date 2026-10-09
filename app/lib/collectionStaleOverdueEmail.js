@@ -2,7 +2,12 @@ import { isFarFromCustomer } from "./customerLocation.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./paymentCollections.js";
-import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
+import {
+  addKsaCalendarDays,
+  getKsaDateString,
+  getKsaWeekdayIndexForDateString,
+  isKsaOrderDay,
+} from "./workdayActivity.js";
 
 export const COLLECTION_STALE_OVERDUE_EMAIL_LAST_SENT_KEY = "collection_stale_overdue_email_last_sent";
 export const DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_TO = "malik@pinasz.com";
@@ -11,6 +16,7 @@ export const DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_CC = [
   "fazlur.rahiman@noorshukran.com",
 ];
 export const COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS = 7;
+export const COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS = 3;
 export const COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS = 8;
 export const COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS = 60;
 export const COLLECTION_STALE_OVERDUE_SOFT_AGING_DAYS = 30;
@@ -67,8 +73,9 @@ export function collectSalesmanIdentities(source = {}) {
 }
 
 export function isSoftAgingSalesman(source = {}) {
-  const identities = collectSalesmanIdentities(source);
-  return COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN.some((name) => identities.has(name));
+  const displayedSalesman = comparableSalesmanIdentity(getCollectionSalesmanLabel(source));
+  const displayedTokens = displayedSalesman.split(/\s+/);
+  return COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN.some((name) => displayedTokens.includes(name));
 }
 
 export function resolveOverdueAgingThresholdDays(source = {}) {
@@ -166,6 +173,51 @@ export function isCollectionVisitFar(row = {}) {
   );
 }
 
+export function resolveLastNearCollectionVisitDateKey(row = {}) {
+  if (row?.recent_collection_visits_checked) {
+    const savedAt = row?.last_near_collection_visit_at;
+    if (!savedAt) return "";
+    const parsed = new Date(savedAt);
+    return Number.isNaN(parsed.getTime()) ? "" : getKsaDateString(parsed);
+  }
+  const history = Array.isArray(row?.collection_history) ? row.collection_history : [];
+  const visits = history.length ? history : [row?.latest_collection].filter(Boolean);
+  const savedAt = row?.last_near_collection_visit_at
+    || visits
+      .filter((visit) => !isFarFromCustomer(
+        { latitude: visit?.latitude, longitude: visit?.longitude },
+        { latitude: row?.latitude, longitude: row?.longitude },
+      ))
+      .map((visit) => visit?.saved_at)
+      .filter(Boolean)
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
+  if (!savedAt) return "";
+  const parsed = new Date(savedAt);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+export function isCollectionVisitWithinWorkingDays(row = {}, {
+  todayKey = "",
+  workingDays = COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS,
+} = {}) {
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const visitKey = resolveLastNearCollectionVisitDateKey(row);
+  if (!visitKey || !isKsaOrderDay(visitKey)) return false;
+
+  let countedDays = 0;
+  let dateKey = today;
+  const limit = Math.max(1, Number(workingDays) || COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS);
+  while (countedDays < limit && dateKey >= visitKey) {
+    if (isKsaOrderDay(dateKey)) {
+      countedDays += 1;
+      if (dateKey === visitKey) return true;
+    }
+    dateKey = addKsaCalendarDays(dateKey, -1);
+  }
+  return false;
+}
+
 export function formatStaleVisitDateLabel(dateKey = "", isFar = false) {
   const key = String(dateKey || "").trim();
   if (!key) return "Never";
@@ -189,6 +241,7 @@ export function isCollectionStaleOverdueRow(row = {}, {
   if (resolveReceivedInLookbackDays(row, { todayIso: asOfIso, days: receiptLookbackDays }) > 0) {
     return false;
   }
+  if (isCollectionVisitWithinWorkingDays(row, { todayKey: today })) return false;
   // FAR visits do not count; only near visit-without-order age gates the row.
   return isVisitWithoutOrderOlderThanDays(row, { todayKey: today, minAgeDays: minVisitAgeDays });
 }
@@ -455,7 +508,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
   const html = `<div style="margin:18px 0 8px;">
     <h2 style="font-size:16px;margin:0 0 8px;color:#0f4c5c;">Stale overdue collections</h2>
     <p style="margin:0 0 10px;font-size:12px;color:#475569;">
-      ${escapeHtml(who)} · ${escapeHtml(agingLabel)} days · no receipt in last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days · last near visit w/o order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (FAR ignored)
+      ${escapeHtml(who)} · ${escapeHtml(agingLabel)} days · no receipt in last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days · no near collection visit in the last ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days · last near visit w/o order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (FAR ignored)
     </p>
     <div style="margin:0 0 8px;">
       <span style="font-size:12px;font-weight:700;color:#0e7490;background:#ecfeff;border:1px solid #67e8f9;border-radius:999px;padding:4px 10px;">
@@ -467,7 +520,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
 
   const text = [
     `Stale overdue collections — ${who}`,
-    `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · near VWO > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d (FAR ignored)`,
+    `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · near collection visit > ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days · near VWO > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d (FAR ignored)`,
     `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome`,
     ...rows.map((row) => [
       row.customer,

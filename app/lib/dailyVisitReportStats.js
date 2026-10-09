@@ -153,7 +153,7 @@ export function attachAcceptedGpsUpdateMarkers(entries = []) {
 
 export function markVisitsWithAcceptedGpsHistory(entries = [], history = []) {
   const validUpdates = (Array.isArray(history) ? history : []).filter((update) => (
-    String(update?.source || "").trim().toLowerCase() === "visit"
+    ["visit", "salesman_accepted", "visit_accepted"].includes(String(update?.source || "").trim().toLowerCase())
     && hasGpsCoordinates(update)
     && hasGpsCoordinates({ latitude: update.previous_latitude, longitude: update.previous_longitude })
   ));
@@ -219,6 +219,7 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
   const orderCodes = new Set();
   let collectionCount = 0;
   let collectionValue = 0;
+  let collectionVisitWithoutPaymentCount = 0;
 
   (entries || []).forEach((entry) => {
     const type = visitEntryType(entry);
@@ -228,6 +229,8 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
     if (type === "COLLECTION_VISIT" && isSuccessfulCollection(entry)) {
       collectionCount += 1;
       collectionValue += Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+    } else if (type === "COLLECTION_VISIT") {
+      collectionVisitWithoutPaymentCount += 1;
     }
   });
 
@@ -257,6 +260,7 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
     orderValue,
     collectionCount,
     collectionValue,
+    collectionVisitWithoutPaymentCount,
   };
 }
 

@@ -15,27 +15,28 @@ import {
   isRejectedByManagement,
   isTestCustomerName,
   isTestCustomerOrder,
-  isWithinMissingInvoiceEmailWindow,
+  getMissingInvoiceEmailMidnightKsaDate,
+  isMissingInvoiceEmailOfficeHoliday,
   missingInvoiceCreatedFromIso,
   wasMissingInvoiceEmailSentRecently,
   resolveMissingInvoiceEmailCc,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
 } from "../app/lib/missingInvoiceEmail.js";
-import { runMissingInvoiceEmailCycle } from "../app/lib/missingInvoiceEmailServer.js";
+import { runMissingInvoiceEmailCycle, saveLastMissingInvoiceEmailSentAt } from "../app/lib/missingInvoiceEmailServer.js";
 
 const now = new Date("2026-09-07T10:00:00.000Z");
 const createdOverdue = new Date(now.getTime() - MISSING_INVOICE_GRACE_MS - 60 * 1000).toISOString();
 const createdRecent = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
-function submittedOrder(id, createdAt = createdOverdue) {
+function submittedOrder(id, createdAt = createdOverdue, salesman = {}) {
   return {
     id,
     order_number: `SO-${id}`,
     customer_code: `C${id}`,
     customer_name: `Customer ${id}`,
-    salesman_code: "SM001",
-    salesman_name: "Ahmed",
+    salesman_code: salesman.code || "SM001",
+    salesman_name: salesman.name || "Ahmed",
     status: "SUBMITTED",
     created_at: createdAt,
     total_value: 1500,
@@ -62,14 +63,53 @@ test("resolveMissingInvoiceEmailCc includes Jenil and extra CC addresses", () =>
   );
 });
 
-test("missing invoice emails are limited to Saturday-Thursday 9am-8pm IST", () => {
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T03:29:00.000Z")), false);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T03:30:00.000Z")), true);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T10:00:00.000Z")), true);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T14:30:00.000Z")), true);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T14:45:00.000Z")), false);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-11T10:00:00.000Z")), false);
-  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-12T03:30:00.000Z")), true);
+test("missing invoice midnight digest is scheduled by KSA calendar date", () => {
+  assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T20:59:00.000Z")), null);
+  assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:00:00.000Z")), "2026-09-30");
+  assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:14:00.000Z")), "2026-09-30");
+  assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:15:00.000Z")), null);
+});
+
+test("missing invoice email is suppressed for the India Friday holiday", async () => {
+  const friday = new Date("2026-10-02T10:00:00.000Z");
+  assert.equal(isMissingInvoiceEmailOfficeHoliday(friday), true);
+  assert.equal(isMissingInvoiceEmailOfficeHoliday(new Date("2026-10-03T10:00:00.000Z")), false);
+
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: friday,
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    syncVault: async () => {
+      throw new Error("should not sync on the holiday");
+    },
+    loadOrders: async () => {
+      throw new Error("should not load orders on the holiday");
+    },
+    send: async () => {
+      throw new Error("should not send on the holiday");
+    },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "office_holiday");
+});
+
+test("saveLastMissingInvoiceEmailSentAt persists the KSA midnight date", async () => {
+  let savedRow;
+  const admin = {
+    from: () => ({
+      upsert: async (row) => {
+        savedRow = row;
+        return { error: null };
+      },
+    }),
+  };
+
+  await saveLastMissingInvoiceEmailSentAt(admin, new Date("2026-09-29T21:00:00.000Z"));
+
+  assert.deepEqual(JSON.parse(savedRow.setting_value), {
+    lastSentAt: "2026-09-29T21:00:00.000Z",
+    lastMidnightKsaDate: "2026-09-30",
+  });
 });
 
 test("only orders created from September 2026 KSA are considered", () => {
@@ -215,7 +255,7 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, waiting c
   assert.match(message.html, /Quotation submitted waiting for the payment/);
   assert.match(message.html, /Pending with salesman/);
   assert.doesNotMatch(message.html, /Stock unavailable/);
-  assert.match(message.html, /Saturday–Thursday, 9:00 AM–8:00 PM IST/);
+  assert.match(message.html, /every 15 minutes while Pending for approval or Pending for invoice creation has orders/);
   assert.match(message.text, /from September 2026 onward/);
   assert.match(
     message.text,
@@ -230,7 +270,34 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, waiting c
   assert.equal(message.pendingWithSalesmanCount, 1);
 });
 
-test("runMissingInvoiceEmailCycle skips when nothing is overdue", async () => {
+test("buildMissingInvoiceAlertEmail nests salesman tables inside each status", () => {
+  const message = buildMissingInvoiceAlertEmail({
+    now,
+    orders: [
+      submittedOrder(41, createdOverdue, { code: "SM002", name: "Osama" }),
+      submittedOrder(42, createdOverdue, { code: "SM001", name: "Ahmed" }),
+      submittedOrder(43, createdOverdue, { code: "SM002", name: "Osama" }),
+    ],
+    metaByOrder: new Map([
+      ["41", { status: "Pending for approval" }],
+      ["42", { status: "Pending for approval" }],
+      ["43", { status: "Waiting for credit application" }],
+    ]),
+  });
+
+  const approvalSection = message.html.indexOf(">Pending for approval (2)</h3>");
+  const creditSection = message.html.indexOf(">Waiting for credit application (1)</h3>");
+  const ahmedTable = message.html.indexOf("Ahmed (SM001) (1)</h4>");
+  const osamaTable = message.html.indexOf("Osama (SM002) (1)</h4>");
+  assert.ok(approvalSection < ahmedTable);
+  assert.ok(ahmedTable < osamaTable);
+  assert.ok(osamaTable < creditSection);
+  assert.match(message.html, /Ahmed \(SM001\) \(1\)[\s\S]*?SO-42/);
+  assert.match(message.html, /Osama \(SM002\) \(1\)[\s\S]*?SO-41/);
+  assert.match(message.text, /Pending for approval \(2\)[\s\S]*Ahmed \(SM001\) \(1\)[\s\S]*SO-42[\s\S]*Osama \(SM002\) \(1\)[\s\S]*SO-41/);
+});
+
+test("runMissingInvoiceEmailCycle skips daytime sends when the two reminder queues are empty", async () => {
   const result = await runMissingInvoiceEmailCycle({}, {
     now,
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
@@ -241,7 +308,7 @@ test("runMissingInvoiceEmailCycle skips when nothing is overdue", async () => {
   });
 
   assert.equal(result.skipped, true);
-  assert.equal(result.reason, "no_overdue_orders");
+  assert.equal(result.reason, "no_pending_approval_or_invoice_creation");
 });
 
 test("runMissingInvoiceEmailCycle sends one digest to the default list", async () => {
@@ -275,20 +342,63 @@ test("runMissingInvoiceEmailCycle sends one digest to the default list", async (
   assert.equal(saved.length, 1);
 });
 
-test("runMissingInvoiceEmailCycle skips outside India back-office hours", async () => {
+test("runMissingInvoiceEmailCycle skips other queue statuses outside midnight", async () => {
+  const otherQueueOrder = submittedOrder(8);
   const result = await runMissingInvoiceEmailCycle({}, {
-    now: new Date("2026-09-11T10:00:00.000Z"),
+    now: new Date("2026-09-07T03:30:00.000Z"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async () => {
       throw new Error("should not send");
     },
-    loadOrders: async () => {
-      throw new Error("should not load orders");
-    },
+    loadOrders: async () => ({
+      orders: [otherQueueOrder],
+      metaByOrder: new Map([["8", { status: "Waiting for credit application" }]]),
+    }),
   });
 
   assert.equal(result.skipped, true);
-  assert.equal(result.reason, "outside_india_back_office_hours");
+  assert.equal(result.reason, "no_pending_approval_or_invoice_creation");
+});
+
+test("runMissingInvoiceEmailCycle sends one zero-queue summary at KSA midnight", async () => {
+  const sent = [];
+  const saved = [];
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-09-29T21:00:00.000Z"),
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadOrders: async () => ({ orders: [], metaByOrder: new Map() }),
+    loadLastSentAt: async () => ({ lastSentAt: new Date("2026-09-29T20:45:00.000Z").toISOString() }),
+    saveLastSentAt: async (_admin, sentAt, state) => saved.push({ sentAt, state }),
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.orderCount, 0);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].subject, /0 orders pending invoice \/ approval/);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].state.lastMidnightKsaDate, null);
+});
+
+test("runMissingInvoiceEmailCycle does not send a second midnight digest for the same KSA date", async () => {
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-09-29T21:00:00.000Z"),
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async () => {
+      throw new Error("should not send");
+    },
+    loadOrders: async () => ({ orders: [], metaByOrder: new Map() }),
+    loadLastSentAt: async () => ({
+      lastSentAt: "2026-09-29T20:45:00.000Z",
+      lastMidnightKsaDate: "2026-09-30",
+    }),
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "midnight_digest_already_sent");
 });
 
 test("recent missing-invoice sends are suppressed for 15 minutes", () => {

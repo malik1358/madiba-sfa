@@ -1,5 +1,5 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
-import { formatKsaDateOnly } from "./workdayActivity.js";
+import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
 function formatMoney(value) {
@@ -36,6 +36,7 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryQueuePriority: "Queue priority",
   summaryProbability: "Payment probability",
   summarySalesman: "Salesman",
+  summaryVisitDateTime: "Visit date/time",
   summaryOutcome: "Outcome",
   summaryAmountReceived: "Amount received",
   summaryReceiptMode: "Receipt mode",
@@ -72,7 +73,7 @@ export function formatCollectionLastVisitWhatsappLines(
 ) {
   if (!lastVisit) return [];
 
-  const date = formatDateOnly(lastVisit.saved_at);
+  const date = formatKsaDateTime(lastVisit.saved_at);
   const outcomeRaw = String(lastVisit.visit_outcome || lastVisit.payment_status || "").trim();
   const arabicRemark = String(lastVisit.remark_arabic || "").trim();
   const englishRemark = String(lastVisit.remark_english || "").trim();
@@ -141,12 +142,14 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   const queuePriority = Number(options.queuePriority || 0);
   const probabilityLabel = String(options.probabilityLabel || row.probability_label || "").trim();
   const outcomeText = formatCollectionOutcomeLabel(form.visitOutcome, OUTCOME_LABELS);
+  const visitDateTime = formatKsaDateTime(options.visitAt || new Date().toISOString());
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(options.translatedRemark || form.remarkEnglish || "").trim();
   const lines = [
     `${labels.summaryCustomer}: ${row.customer_name || row.customer_code}`,
     `${labels.summaryCode}: ${row.customer_code || "-"}`,
     `${labels.summarySalesman}: ${row.salesman_name || row.salesman_code || "-"}`,
+    `${labels.summaryVisitDateTime}: ${visitDateTime}`,
     `${labels.summaryOutcome}: ${outcomeText || labels.summaryNotSpecified}`,
   ];
 
@@ -327,6 +330,7 @@ export function buildStoredCollectionVisitSummary(row, visit, options = {}, labe
   }, {
     ...options,
     translatedRemark: visit.remark_english || "",
+    visitAt: visit.saved_at || options.visitAt || "",
     queuePriority: visit.queue_priority ?? options.queuePriority ?? 0,
     probabilityLabel: visit.probability_label ?? options.probabilityLabel ?? "",
     visitNumberForDay: visit.visit_number_for_day ?? options.visitNumberForDay ?? 0,

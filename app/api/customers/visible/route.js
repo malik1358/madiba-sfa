@@ -29,6 +29,7 @@ import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
 import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
+import { loadLatestNearVisitDatesByCustomer } from "../../../lib/latestCustomerVisits.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -827,8 +828,9 @@ export async function GET(request) {
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
     const includeInactive = searchParams.get("includeInactive") === "1";
     const excludeBuildingMaterial = searchParams.get("excludeBuildingMaterial") === "1";
+    const includeLatestNearVisit = searchParams.get("includeLatestNearVisit") === "1";
 
-    const {
+    let {
       customers: responseCustomers,
       inactiveCustomers,
       warnings,
@@ -838,6 +840,23 @@ export async function GET(request) {
       includeInactive,
       excludeBuildingMaterial,
     });
+
+    if (includeLatestNearVisit) {
+      try {
+        const latestVisitByCode = await loadLatestNearVisitDatesByCustomer(admin, [
+          ...responseCustomers,
+          ...inactiveCustomers,
+        ]);
+        const attachLatestVisit = (customer) => ({
+          ...customer,
+          latest_near_visit_date: latestVisitByCode.get(normalizeCode(customer?.customer_code)) || null,
+        });
+        responseCustomers = responseCustomers.map(attachLatestVisit);
+        inactiveCustomers = inactiveCustomers.map(attachLatestVisit);
+      } catch {
+        warnings.push("latest-near-visit-unavailable");
+      }
+    }
 
     return NextResponse.json({
       success: true,

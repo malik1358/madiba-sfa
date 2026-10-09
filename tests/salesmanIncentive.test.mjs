@@ -316,3 +316,28 @@ test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {
   assert.equal(scoped.rows.length, 0);
   assert.equal(scoped.salesmen[0].growth_incentive, 2.5);
 });
+
+test("incentive report combines Thamer aliases for sales and collection rows", () => {
+  const legacyInvoice = salesLine({ salesman_code: "THAMER", salesman_name: "THAMER" });
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      customerName: "Alpha Trading",
+      transactions: [legacyInvoice],
+      receipts: [{ receipt_date: "2026-04-01", amount: 115, vch_no: "R/9" }],
+    }],
+    salesTransactions: [
+      { ...legacyInvoice, transaction_date: "2026-04-05", sales_amount: 100 },
+      { ...legacyInvoice, transaction_date: "2026-04-06", salesman_code: "THAMER MOHAMMAD AHMED QASEM", salesman_name: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 200 },
+      { ...legacyInvoice, transaction_date: "2026-03-05", salesman_code: "SM002", salesman_name: "Thamer", sales_amount: 50 },
+    ],
+  });
+
+  assert.equal(report.salesmen.length, 1);
+  assert.equal(report.salesmen[0].salesman_code, "SM002");
+  assert.equal(report.salesmen[0].salesman_name, "Thamer");
+  assert.equal(report.salesmen[0].current_month_sales, 300);
+  assert.equal(report.salesmen[0].previous_month_sales, 50);
+  assert.equal(report.rows[0].salesman_code, "SM002");
+});

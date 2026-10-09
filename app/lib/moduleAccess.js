@@ -32,8 +32,10 @@ export const MODULES = {
   workingHours: { href: "/management/working-hours", label: "Working Hours" },
   businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
   salesmanIncentive: { href: "/management/salesman-incentive", label: "Salesman Incentive" },
+  promoterCoverage: { href: "/management/promoter-coverage", label: "Promoter Coverage" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
+  customerGpsHistory: { href: "/management/customer-gps-history", label: "Customer GPS History" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
@@ -82,10 +84,12 @@ export const NAV_GROUPS = [
       "businessDashboard",
       "myPerformance",
       "salesmanIncentive",
+      "promoterCoverage",
       "dailyVisitReport",
       "userActivity",
       "workingHours",
       "outstandingNoGps",
+      "customerGpsHistory",
       "gpsMap",
     ],
   },
@@ -116,6 +120,11 @@ export function normalizeAccessRole(role) {
 export function isInvoiceMakerRole(role) {
   const normalized = normalizeAccessRole(role);
   return normalized === "invoice-maker";
+}
+
+export function canViewManagementReports(role) {
+  const normalized = normalizeAccessRole(role);
+  return normalized === "admin" || normalized === "manager" || isInvoiceMakerRole(normalized);
 }
 
 export function canManageOrderInvoice(role) {
@@ -164,6 +173,7 @@ export function buildModuleAccess(context = {}) {
   const isInvoiceMaker = isInvoiceMakerRole(role);
   const isProductPromoter = isProductPromoterRole(role);
   const isCollector = collectionOnly;
+  const hasManagementReportAccess = canViewManagementReports(role);
   const isFieldSales = isSalesman || isManager || isAdmin || isInvoiceMaker || isProductPromoter;
   const stockTakeAccess = isAdmin || Boolean(context.stockTakeAccess);
 
@@ -187,15 +197,17 @@ export function buildModuleAccess(context = {}) {
       // Legacy /management/my-collections path stays available via canAccessPath.
       myCollections: false,
       paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker || (isSalesman && !isCollector),
-      collectionReport: isAdmin || isManager || isCollector,
-      receiptsNotInTally: isAdmin || isManager || isCollector,
-      dailyVisitReport: isAdmin || isManager || isCollector || isSalesman,
-      userActivity: isAdmin || isManager || isCollector,
-      workingHours: isAdmin || isManager || isCollector,
-      businessDashboard: isAdmin || isManager,
-      salesmanIncentive: isAdmin || isManager || (isSalesman && !isCollector),
+      collectionReport: hasManagementReportAccess || isCollector,
+      receiptsNotInTally: hasManagementReportAccess || isCollector,
+      dailyVisitReport: hasManagementReportAccess || isCollector || isSalesman,
+      userActivity: hasManagementReportAccess || isCollector,
+      workingHours: hasManagementReportAccess || isCollector,
+      businessDashboard: hasManagementReportAccess,
+      salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
+      promoterCoverage: isProductPromoter,
       customerMaster: isAdmin || isManager,
-      outstandingNoGps: isAdmin || isManager,
+      outstandingNoGps: hasManagementReportAccess,
+      customerGpsHistory: isAdmin || isManager,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
       salesmanVisitPlan: isAdmin || (
         isSalesmanVisitPlanSalesmanAccessApproved()
@@ -277,8 +289,10 @@ export const MODULE_LABELS = {
   workingHours: { en: "Working Hours", ar: "ساعات العمل" },
   businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   salesmanIncentive: { en: "Salesman Incentive", ar: "حوافز المندوبين" },
+  promoterCoverage: { en: "Promoter Coverage", ar: "تغطية مروج المنتجات" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
+  customerGpsHistory: { en: "Customer GPS History", ar: "سجل مواقع العملاء" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
@@ -316,7 +330,7 @@ export const PINNED_MODULE_KEYS = {
   salesman: ["myDay", "customerAudit", "newOrder", "paymentCollections"],
   collector: ["paymentCollections", "collectionReport", "receiptsNotInTally", "dailyVisitReport", "userActivity"],
   "invoice-maker": ["customerAudit", "pendingOrders", "upload", "paymentCollections"],
-  "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap"],
+  "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap", "promoterCoverage"],
 };
 
 export function pinnedModuleKeysForAccess(access) {

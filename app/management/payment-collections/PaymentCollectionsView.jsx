@@ -2019,6 +2019,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
+          visitAt: new Date().toISOString(),
           avgDaysToPay,
           lastVisit: row?.latest_collection || null,
         },

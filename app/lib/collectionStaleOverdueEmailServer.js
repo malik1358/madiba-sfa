@@ -17,6 +17,9 @@ import {
   getKsaDateString,
   getKsaWeekdayIndex,
   getKsaWeekdayIndexForDateString,
+  isKsaOrderDay,
+  ksaDayBounds,
+  addKsaCalendarDays,
 } from "./workdayActivity.js";
 
 const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
@@ -45,6 +48,16 @@ function chunk(values, size = 80) {
     batches.push(list.slice(index, index + size));
   }
   return batches;
+}
+
+function recentCollectionVisitWindowStart(todayKey, workingDays = 3) {
+  let dateKey = todayKey;
+  let countedDays = 0;
+  while (countedDays < workingDays) {
+    if (isKsaOrderDay(dateKey)) countedDays += 1;
+    if (countedDays < workingDays) dateKey = addKsaCalendarDays(dateKey, -1);
+  }
+  return dateKey;
 }
 
 function laterIso(...values) {
@@ -276,6 +289,80 @@ export async function enrichDueCustomersWithVisitWithoutOrder(admin, rows = []) 
   return attachLastVisitWithoutOrder(rows, visitByCustomer);
 }
 
+export function attachLastNearCollectionVisit(rows = [], visitByCustomer = new Map()) {
+  return (rows || []).map((row) => {
+    let visitAt = "";
+    customerCodeAliases(row?.customer_code).forEach((alias) => {
+      visitAt = laterIso(visitAt, visitByCustomer.get(alias));
+    });
+    return {
+      ...row,
+      recent_collection_visits_checked: true,
+      last_near_collection_visit_at: laterIso(row?.last_near_collection_visit_at, visitAt),
+    };
+  });
+}
+
+export async function loadLastNearCollectionVisitByCustomer(admin, rows = [], todayKey = getKsaDateString()) {
+  const latestNearByCode = new Map();
+  const customerGpsByCode = new Map();
+  const codes = [...new Set((rows || []).flatMap((row) => {
+    const aliases = customerCodeAliases(row?.customer_code);
+    const gps = { latitude: row?.latitude, longitude: row?.longitude };
+    aliases.forEach((alias) => customerGpsByCode.set(alias, gps));
+    return aliases;
+  }).filter(Boolean))];
+  if (!codes.length || typeof admin?.from !== "function") return latestNearByCode;
+
+  const startKey = recentCollectionVisitWindowStart(todayKey);
+  const { startIso } = ksaDayBounds(startKey);
+  const { endIso } = ksaDayBounds(todayKey);
+  const pageSize = 1000;
+
+  for (const batch of chunk(codes, 80)) {
+    let offset = 0;
+    while (true) {
+      const { data, error } = await admin
+        .from("collection_visits")
+        .select("customer_code,saved_at,latitude,longitude")
+        .in("customer_code", batch)
+        .gte("saved_at", startIso)
+        .lte("saved_at", endIso)
+        .order("saved_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) {
+        const message = String(error?.message || error?.details || "").toLowerCase();
+        if (error?.code === "42P01" || message.includes("does not exist")) return latestNearByCode;
+        throw error;
+      }
+
+      const visits = Array.isArray(data) ? data : [];
+      visits.forEach((visit) => {
+        const customerCode = normalizeCustomerCode(visit?.customer_code);
+        const visitAt = String(visit?.saved_at || "").trim();
+        if (!customerCode || !visitAt || !isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
+        if (isFarFromCustomer(
+          { latitude: visit?.latitude, longitude: visit?.longitude },
+          customerGpsByCode.get(customerCode) || null,
+        )) return;
+        customerCodeAliases(customerCode).forEach((alias) => {
+          latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
+        });
+      });
+
+      if (visits.length < pageSize) break;
+      offset += pageSize;
+    }
+  }
+
+  return latestNearByCode;
+}
+
+export async function enrichDueCustomersWithRecentCollectionVisits(admin, rows = [], todayKey = getKsaDateString()) {
+  const visitByCustomer = await loadLastNearCollectionVisitByCustomer(admin, rows, todayKey);
+  return attachLastNearCollectionVisit(rows, visitByCustomer);
+}
+
 export function parseCollectionStaleOverdueReportDate(value, now = new Date()) {
   const date = String(value || "").trim();
   if (!date) return getKsaDateString(now);
@@ -345,6 +432,7 @@ export async function saveLastCollectionStaleOverdueEmailMarker(admin, {
 
 async function loadDueCollectionCustomers(admin, {
   fetchOutstandingAndCollectionRecords,
+  todayKey = getKsaDateString(),
 } = {}) {
   if (typeof fetchOutstandingAndCollectionRecords !== "function") {
     throw new Error("fetchOutstandingAndCollectionRecords is required.");
@@ -363,7 +451,8 @@ async function loadDueCollectionCustomers(admin, {
   const records = await fetchOutstandingAndCollectionRecords(admin, scope);
   const queues = buildCollectionQueues(records);
   const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
-  return enrichDueCustomersWithVisitWithoutOrder(admin, dueCustomers);
+  const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(admin, dueCustomers);
+  return enrichDueCustomersWithRecentCollectionVisits(admin, withVisitReports, todayKey);
 }
 
 export async function runCollectionStaleOverdueEmailCycle(admin, {
@@ -418,12 +507,13 @@ export async function runCollectionStaleOverdueEmailCycle(admin, {
     if (!fetchRecords) {
       ({ fetchOutstandingAndCollectionRecords: fetchRecords } = await import("../api/payment-collections/route.js"));
     }
-    loader = (client) => loadDueCollectionCustomers(client, {
+    loader = (client, options = {}) => loadDueCollectionCustomers(client, {
       fetchOutstandingAndCollectionRecords: fetchRecords,
+      todayKey: options.todayKey,
     });
   }
 
-  const dueCustomers = await loader(admin);
+  const dueCustomers = await loader(admin, { todayKey: reportDate });
   const matched = filterCollectionStaleOverdueRows(dueCustomers, {
     todayKey: reportDate,
     todayIso: asOfIso,

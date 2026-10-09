@@ -30,10 +30,8 @@ export const MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION = ORDER_STATUS_PEND
 export const MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WAITING_OVERDUE_COLLECTION;
 export const MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_PAYMENT;
 export const MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN = ORDER_STATUS_PENDING_WITH_SALESMAN;
-export const IST_TIMEZONE = "Asia/Kolkata";
-export const MISSING_INVOICE_EMAIL_START_MINUTES = 9 * 60;
-export const MISSING_INVOICE_EMAIL_END_MINUTES = 20 * 60;
-export const MISSING_INVOICE_EMAIL_FRIDAY = 5;
+export const MISSING_INVOICE_EMAIL_TIMEZONE = "Asia/Riyadh";
+export const MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE = "Asia/Kolkata";
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -55,45 +53,34 @@ const EXCLUDED_INVOICE_STATUSES = new Set([
   "invoice made",
 ]);
 
-const IST_WEEKDAY_INDEX = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-};
-
-export function getIstDateTimeParts(date = new Date()) {
+export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: IST_TIMEZONE,
-    weekday: "short",
+    timeZone: MISSING_INVOICE_EMAIL_TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   });
   const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
   return {
-    weekday: IST_WEEKDAY_INDEX[parts.weekday] ?? 0,
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-    second: Number(parts.second),
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: parts.hour,
+    minute: parts.minute,
   };
 }
 
-export function isWithinMissingInvoiceEmailWindow(date = new Date()) {
-  const parts = getIstDateTimeParts(date);
-  if (parts.weekday === MISSING_INVOICE_EMAIL_FRIDAY) return false;
-  const minutes = parts.hour * 60 + parts.minute;
-  return minutes >= MISSING_INVOICE_EMAIL_START_MINUTES && minutes <= MISSING_INVOICE_EMAIL_END_MINUTES;
+export function isMissingInvoiceEmailOfficeHoliday(date = new Date()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE,
+    weekday: "short",
+  }).format(date) === "Fri";
+}
+
+export function getMissingInvoiceEmailMidnightKsaDate(date = new Date()) {
+  const parts = getMissingInvoiceEmailKsaDateTimeParts(date);
+  return parts.hour === "00" && Number(parts.minute) < 15 ? parts.date : null;
 }
 
 export function parseLastSentAt(value) {
@@ -102,6 +89,27 @@ export function parseLastSentAt(value) {
     : String(value || "");
   const ts = Date.parse(raw.trim());
   return Number.isFinite(ts) ? ts : null;
+}
+
+export function parseMissingInvoiceEmailState(value) {
+  let payload = value;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      payload = null;
+    }
+  }
+  const state = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const midnightDate = String(state.lastMidnightKsaDate || "").trim();
+  return {
+    lastSentAt: typeof state.lastSentAt === "number"
+      ? state.lastSentAt
+      : typeof value === "number"
+        ? value
+        : parseLastSentAt(state) ?? parseLastSentAt(value),
+    lastMidnightKsaDate: /^\d{4}-\d{2}-\d{2}$/.test(midnightDate) ? midnightDate : null,
+  };
 }
 
 export function wasMissingInvoiceEmailSentRecently(lastSentAt, now = new Date(), minIntervalMs = MISSING_INVOICE_EMAIL_MIN_INTERVAL_MS) {
@@ -350,14 +358,13 @@ function orderRow(order, meta, now) {
 
 function renderOrderTableRows(rows) {
   if (!rows.length) {
-    return `<tr><td colspan="7" style="border:1px solid #c5d4de;padding:8px;">No orders in this queue.</td></tr>`;
+    return `<tr><td colspan="6" style="border:1px solid #c5d4de;padding:8px;">No orders in this queue.</td></tr>`;
   }
   return rows.map((row, index) => {
     const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
     return `<tr style="background:${rowBg};">
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.order)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.customer)}</td>
-        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.salesman)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.createdAt)}</td>
         <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.age)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.value)}</td>
@@ -366,14 +373,23 @@ function renderOrderTableRows(rows) {
   }).join("");
 }
 
-function renderOrderTableHtml(title, rows) {
-  return `<h3 style="margin: 20px 0 8px; color: #0f4c5c;">${escapeHtml(title)} (${rows.length})</h3>
+function groupOrderRowsBySalesman(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const salesman = row.salesman || "-";
+    if (!groups.has(salesman)) groups.set(salesman, []);
+    groups.get(salesman).push(row);
+  });
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+}
+
+function renderOrderTableHtml(salesman, rows) {
+  return `<h4 style="margin: 12px 0 6px; color: #1f5360;">${escapeHtml(salesman)} (${rows.length})</h4>
   <table style="border-collapse: collapse; font-size: 13px; width: 100%;">
     <thead>
       <tr style="background:#0f4c5c;color:#ffffff;">
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Order</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Customer</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Salesman</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Created (KSA)</th>
         <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Waiting</th>
         <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c5c;">Value</th>
@@ -384,20 +400,37 @@ function renderOrderTableHtml(title, rows) {
   </table>`;
 }
 
+function renderStatusTableHtml(title, rows) {
+  const salesmanTables = groupOrderRowsBySalesman(rows)
+    .map(([salesman, salesmanRows]) => renderOrderTableHtml(salesman, salesmanRows))
+    .join("");
+  const emptyTable = rows.length
+    ? ""
+    : `<table style="border-collapse: collapse; font-size: 13px; width: 100%;"><tbody>${renderOrderTableRows(rows)}</tbody></table>`;
+  return `<h3 style="margin: 20px 0 8px; color: #0f4c5c;">${escapeHtml(title)} (${rows.length})</h3>${salesmanTables || emptyTable}`;
+}
+
 function renderOrderTableText(title, rows) {
-  return [
-    `${title} (${rows.length})`,
-    "Order | Customer | Salesman | Created (KSA) | Waiting | Value | Invoice status",
-    ...rows.map((row) => [
+  const salesmanTables = groupOrderRowsBySalesman(rows).map(([salesman, salesmanRows]) => [
+    `  ${salesman} (${salesmanRows.length})`,
+    "  Order | Customer | Created (KSA) | Waiting | Value | Invoice status",
+    ...salesmanRows.map((row) => [
       row.order,
       row.customer,
-      row.salesman,
       row.createdAt,
       row.age,
       row.value,
       row.invoiceStatus,
     ].join(" | ")),
+  ].join("\n"));
+  return [
+    `${title} (${rows.length})`,
+    ...(salesmanTables.length ? salesmanTables : ["  No orders in this queue."]),
   ].join("\n");
+}
+
+function renderStatusTableText(title, rows) {
+  return renderOrderTableText(title, rows);
 }
 
 export function buildMissingInvoiceAlertEmail({
@@ -439,30 +472,30 @@ const text = [
   "Orders rejected by management, stock unavailable, waiting-stock-transfer, invoice-made, test-customer orders, and orders created before September 2026 are excluded.",
   `Checked at (KSA): ${formatKsaDateTime(now)}`,
     "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows),
     "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows),
     "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows),
   "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows),
   "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows),
   "",
-  renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows),
+  renderStatusTableText(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows),
 ].join("\n");
 
 const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
 <h2 style="margin: 0 0 12px; color: #0f4c5c;">Orders pending invoice action after 1 hour</h2>
 <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "still needs" : "still need"} invoice action more than 1 hour after creation. This email includes <strong>Pending for approval</strong> (${approvalRows.length}), <strong>Waiting for credit application</strong> (${waitingCreditApplicationRows.length}), <strong>Pending for invoice creation</strong> (${invoiceRows.length}), <strong>Waiting for overdue collection</strong> (${overdueCollectionRows.length}), <strong>Quotation submitted waiting for the payment</strong> (${quotationRows.length}), and <strong>Pending with salesman</strong> (${pendingWithSalesmanRows.length}) in separate tables.</p>
 <p style="margin: 0 0 16px; color: #52616b; font-size: 13px;">Checked at (KSA): ${escapeHtml(formatKsaDateTime(now))}. Rejected, stock-unavailable, waiting-stock-transfer, invoice-made, test-customer, and pre-September-2026 orders are excluded.</p>
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows)}
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows)}
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows)}
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
-${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
-<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes during India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST) while any qualifying order remains. Friday is a holiday.</p>
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows)}
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_WAITING_CREDIT_APPLICATION, waitingCreditApplicationRows)}
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows)}
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
+${renderStatusTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
+<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes while Pending for approval or Pending for invoice creation has orders. When both queues are empty, one summary is sent at midnight KSA.</p>
 </div>`;
 
 return {

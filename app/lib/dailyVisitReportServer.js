@@ -33,10 +33,14 @@ import {
   parseProspectIdFromCustomerCode,
   prospectCustomerCodes,
   prospectDisplayName,
+  resolveProspectCustomerCode,
 } from "./prospects.js";
+
+const PROSPECT_FOLLOW_UP_OUTCOME = "Order not received";
 
 const ACTIVITY_ENTRY_TYPES = [
   "VISIT_REPORT",
+  "PROSPECT_FOLLOW_UP",
   "ORDER_DRAFT",
   "ORDER_EDITED",
   "ORDER_SUBMITTED",
@@ -325,7 +329,12 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, rep
   const entries = filteredLogs.map((row) => {
     const parsed = parseActivityNote(row.note) || {};
     const gps = parseGpsFromActivityNote(row.note) || {};
-    const customerCode = parsed.customer_code || parsed.customerCode || "";
+    const entryType = String(row.entry_type || parsed.action || "ACTIVITY").toUpperCase();
+    // New-customer "Order not received" follow-ups are prospect visits without an order.
+    const prospectFollowUp = entryType === "PROSPECT_FOLLOW_UP";
+    const customerCode = parsed.customer_code || parsed.customerCode || (prospectFollowUp
+      ? resolveProspectCustomerCode({ id: parsed.prospect_id, offline_id: parsed.offline_id })
+      : "");
     const orderId = parsed.order_id || parsed.orderId || null;
     if (orderId) orderIds.push(Number(orderId));
 
@@ -334,12 +343,14 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, rep
       userId: row.user_id,
       savedAt: parsed.captured_at || parsed.capturedAt || row.created_at,
       customerCode,
-      transactionType: String(row.entry_type || parsed.action || "ACTIVITY").toUpperCase(),
+      transactionType: prospectFollowUp ? "VISIT_REPORT" : entryType,
       latitude: gps.latitude,
       longitude: gps.longitude,
       meta: {
         orderId,
-        outcome: parsed.outcome || null,
+        outcome: parsed.outcome || (prospectFollowUp ? PROSPECT_FOLLOW_UP_OUTCOME : null),
+        prospectFollowUp,
+        followUpDate: parsed.follow_up_date || null,
         activityNote: row.note,
         autoClosed: Boolean(parsed.autoClosed),
         customerName: parsed.customer_name || parsed.customerName || "",
@@ -352,6 +363,46 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, rep
   });
 
   return { entries, orderIds: [...new Set(orderIds.filter(Boolean))] };
+}
+
+// Older follow-up logs from offline prospects carry no prospect id or code.
+export async function resolveCodelessProspectFollowUps(admin, entries = []) {
+  const pending = (entries || []).filter((entry) => (
+    entry?.meta?.prospectFollowUp && !entry.customer_code && entry.user_id && entry.meta?.followUpDate
+  ));
+  if (!pending.length) return entries;
+
+  const userIds = [...new Set(pending.map((entry) => entry.user_id))];
+  const dates = [...new Set(pending.map((entry) => String(entry.meta.followUpDate).slice(0, 10)))];
+  const { data, error } = await admin
+    .from("prospects")
+    .select("id,offline_id,remarks,company_name,created_by,created_at,follow_up_date")
+    .in("created_by", userIds)
+    .in("follow_up_date", dates);
+  if (error || !Array.isArray(data) || !data.length) return entries;
+
+  const used = new Set();
+  return entries.map((entry) => {
+    if (!pending.includes(entry)) return entry;
+    const entryMs = new Date(entry.saved_at).getTime();
+    const match = data
+      .filter((prospect) => (
+        !used.has(prospect.id)
+        && prospect.created_by === entry.user_id
+        && String(prospect.follow_up_date || "").slice(0, 10) === String(entry.meta.followUpDate).slice(0, 10)
+      ))
+      .sort((left, right) => (
+        Math.abs(new Date(left.created_at).getTime() - entryMs)
+        - Math.abs(new Date(right.created_at).getTime() - entryMs)
+      ))[0];
+    if (!match) return entry;
+    used.add(match.id);
+    return {
+      ...entry,
+      customer_code: normalizeCode(resolveProspectCustomerCode(match)),
+      meta: { ...entry.meta, customerName: entry.meta.customerName || prospectDisplayName(match) },
+    };
+  });
 }
 
 async function loadCustomerGpsHistoryForVisits(admin, customerCodes, userIds, startIso, endIso) {
@@ -466,7 +517,9 @@ function enrichEntries(entries, customerMap, profileMap) {
       customerCode: entry.customer_code,
       customerName: resolveVisitCustomerName(customer, entry),
       transactionType: entry.transaction_type,
-      transactionLabel: TRANSACTION_LABELS[entry.transaction_type] || entry.transaction_type,
+      transactionLabel: entry.meta?.prospectFollowUp
+        ? "Prospect visit"
+        : TRANSACTION_LABELS[entry.transaction_type] || entry.transaction_type,
       visitOutcome: entry.meta?.visitOutcome || entry.meta?.outcome || null,
       amountReceived: Number(entry.meta?.amountReceived || 0),
       orderId: entry.meta?.orderId || null,
@@ -498,6 +551,10 @@ function emptyUserReport(userId, profile) {
   return {
     userId,
     userName: formatCollectorDisplayName(profile || {}),
+    homeLocation: hasGpsCoordinates(profile) ? {
+      latitude: Number(profile.home_latitude),
+      longitude: Number(profile.home_longitude),
+    } : null,
     email: String(profile?.report_email || profile?.email || "").trim(),
     reportEmail: String(profile?.report_email || "").trim(),
     visitCount: 0,
@@ -515,12 +572,15 @@ async function loadProfilesById(admin, userIds, { includeActive = false } = {}) 
   if (!ids.length) return [];
 
   const extra = includeActive ? ",is_active" : "";
-  const full = `id,salesman_code,salesman_name,role,email,report_email${extra}`;
-  const fallback = `id,salesman_code,salesman_name,role,email${extra}`;
+  const full = `id,salesman_code,salesman_name,role,email,report_email,home_latitude,home_longitude${extra}`;
+  const fallback = `id,salesman_code,salesman_name,role,email,report_email${extra}`;
 
   let result = await admin.from("profiles").select(full).in("id", ids);
   if (result.error && isMissingSchemaColumn(result.error)) {
     result = await admin.from("profiles").select(fallback).in("id", ids);
+  }
+  if (result.error && isMissingSchemaColumn(result.error)) {
+    result = await admin.from("profiles").select(`id,salesman_code,salesman_name,role,email${extra}`).in("id", ids);
   }
   if (result.error) throw result.error;
   return result.data || [];
@@ -540,7 +600,7 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     hydrateOrderCustomers(admin, activityResult.orderIds),
     hydrateOrderValues(admin, activityResult.orderIds),
   ]);
-  const activityEntries = activityResult.entries.map((entry) => {
+  const activityEntries = (await resolveCodelessProspectFollowUps(admin, activityResult.entries)).map((entry) => {
     const orderId = Number(entry.meta?.orderId);
     const order = orderId ? orderMap.get(orderId) : null;
     const orderValue = orderId ? Number(orderValueMap.get(orderId) || 0) : 0;
@@ -571,7 +631,9 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
   const rawEntries = attachAcceptedGpsUpdateMarkers(
     markVisitsWithAcceptedGpsHistory([...collectionEntries, ...activityEntries], acceptedGpsHistory),
   ).filter((entry) => (
-    entry.customer_code || WORKDAY_GPS_ENTRY_TYPES.has(entry.transaction_type)
+    entry.customer_code
+    || WORKDAY_GPS_ENTRY_TYPES.has(entry.transaction_type)
+    || entry.meta?.prospectFollowUp
   ));
   const userIds = [...new Set(rawEntries.map((entry) => entry.user_id).filter(Boolean))];
   const customerCodes = [...new Set(rawEntries.map((entry) => normalizeCode(entry.customer_code)).filter(Boolean))];
@@ -611,6 +673,13 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     return {
       userId: entryUserId,
       userName: formatCollectorDisplayName(profile),
+      homeLocation: hasGpsCoordinates({
+        latitude: profile.home_latitude,
+        longitude: profile.home_longitude,
+      }) ? {
+        latitude: Number(profile.home_latitude),
+        longitude: Number(profile.home_longitude),
+      } : null,
       email: String(profile.email || "").trim(),
       reportEmail: String(profile.report_email || "").trim(),
       visitCount: countDailyVisitEntries(enrichedEntries),

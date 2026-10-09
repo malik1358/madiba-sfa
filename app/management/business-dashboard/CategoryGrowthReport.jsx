@@ -5,6 +5,7 @@ import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
 import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
+import MadibaGpPeriodTable from "./MadibaGpPeriodTable";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
 import {
   buildPeriodChartModel,
@@ -105,6 +106,9 @@ const TEXT = {
   },
   monthly: { en: "Last 12 months", ar: "آخر 12 شهراً" },
   quarterly: { en: "Last 8 quarters", ar: "آخر 8 أرباع" },
+  gpQuarterly: { en: "MADIBA GP % by quarter", ar: "نسبة الربح الإجمالي لمديبا حسب الربع" },
+  gpMonthly: { en: "MADIBA GP % by month", ar: "نسبة الربح الإجمالي لمديبا حسب الشهر" },
+  gpHint: { en: "Gross profit / net sales for each period. No GP % when net sales are zero; Total is weighted across visible categories. Current periods are to date only.", ar: "الربح الإجمالي ÷ صافي المبيعات لكل فترة. لا تظهر النسبة عند انعدام صافي المبيعات؛ الإجمالي محسوب من الفئات الظاهرة. الفترة الحالية حتى اليوم فقط." },
   total: { en: "Total", ar: "الإجمالي" },
   monthlyHint: {
     en: "Green is higher than the previous month. Red is lower. The current month is month-to-date only.",
@@ -345,6 +349,9 @@ export default function CategoryGrowthReport({
   onApply,
   onClear,
   lockGroupBy = "",
+  title = "",
+  emptyMessage = "",
+  showGpPercent = false,
 }) {
   const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
   const t = translateForMeasure(language, TEXT, amountMeasure);
@@ -447,7 +454,7 @@ export default function CategoryGrowthReport({
     return (
       <>
         {filters}
-        <div className="moduleHint">{t("empty")}</div>
+        <div className="moduleHint">{emptyMessage || t("empty")}</div>
       </>
     );
   }
@@ -457,7 +464,7 @@ export default function CategoryGrowthReport({
       {filters}
       <section id={reportAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{heading("summary")}</h2>
+          <h2>{title || heading("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
         {report.meta?.preparedAt ? (
@@ -573,6 +580,7 @@ export default function CategoryGrowthReport({
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
+          <>
           <GrowthPeriodGrid
             filename={`sales-growth-${groupBy}-quarters`}
             sheetName="Last 8 Quarters"
@@ -587,6 +595,24 @@ export default function CategoryGrowthReport({
             totals={quarterTotals}
             totalLabel={t("total")}
           />
+          {showGpPercent ? (
+            <>
+              <h3 className="moduleBiFilterHeading">{t("gpQuarterly")}</h3>
+              <p className="moduleHint">{t("gpHint")}</p>
+              <MadibaGpPeriodTable
+                report={report}
+                rows={categories}
+                periods={recentQuarters}
+                currentPeriod={currentQuarter}
+                periodLabel={quarterLabel}
+                valuesKey="quarterValues"
+                filename="madiba-gp-quarters"
+                sheetName="MADIBA GP Quarters"
+                labels={{ category: t("category"), total: t("total") }}
+              />
+            </>
+          ) : null}
+          </>
         )}
       </section>
 
@@ -608,6 +634,7 @@ export default function CategoryGrowthReport({
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
+          <>
           <GrowthPeriodGrid
             filename={`sales-growth-${groupBy}-months`}
             sheetName="Last 12 Months"
@@ -621,6 +648,24 @@ export default function CategoryGrowthReport({
             totals={monthTotals}
             totalLabel={t("total")}
           />
+          {showGpPercent ? (
+            <>
+              <h3 className="moduleBiFilterHeading">{t("gpMonthly")}</h3>
+              <p className="moduleHint">{t("gpHint")}</p>
+              <MadibaGpPeriodTable
+                report={report}
+                rows={categories}
+                periods={recentMonths}
+                currentPeriod={currentMonth}
+                periodLabel={monthLabel}
+                valuesKey="monthValues"
+                filename="madiba-gp-months"
+                sheetName="MADIBA GP Months"
+                labels={{ category: t("category"), total: t("total") }}
+              />
+            </>
+          ) : null}
+          </>
         )}
       </section>
 

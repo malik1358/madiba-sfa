@@ -173,6 +173,21 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /24\.70000, 46\.70000/);
 });
 
+test("buildUserVisitReportEmail includes the saved home point and map link", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-29",
+    user: {
+      userName: "Osama (SM001)",
+      homeLocation: { latitude: 24.63063, longitude: 46.69947 },
+      entries: [],
+    },
+  });
+
+  assert.match(message.text, /Home location: 24\.63063, 46\.69947/);
+  assert.match(message.html, /Home location:<\/strong> 24\.63063, 46\.69947/);
+  assert.match(message.html, /google\.com\/maps/);
+});
+
 test("buildUserVisitReportEmail identifies a visit with an accepted GPS update", () => {
   const message = buildUserVisitReportEmail({
     date: "2026-09-28",
@@ -285,7 +300,8 @@ test("buildUserVisitReportEmail appends working hours after the day route", () =
 
   assert.match(message.html, /Day route/);
   // Morning 07:34→09:00 + afternoon 13:00→15:00 = 3h 26m
-  assert.match(message.html, /Working hours:<\/strong> 3h 26m/);
+  assert.match(message.html, /Working hours:<\/strong> 3h 26m \(10:34[^-]*- 12:00[^;]*; 16:00[^-]*- 18:00[^)]*\)/);
+  assert.match(message.text, /Working hours: 3h 26m \(10:34/);
 });
 
 test("buildUserVisitReportEmail shows collection outcome when nothing was collected", () => {
@@ -473,17 +489,17 @@ test("runDailyVisitReportEmailCycle sends personal emails plus one company diges
   assert.deepEqual(sent.find((message) => /Team digest — All teams/.test(message.subject)).to, ["manager@madiba.com"]);
 });
 
-test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and Saturday on Sunday", () => {
+test("resolveDailyVisitReportEmailSchedule sends Thursday Saturday morning and Saturday on Sunday", () => {
   const fridayStartKsa = new Date("2026-09-03T21:10:00.000Z");
   const fridayStart = resolveDailyVisitReportEmailSchedule("", fridayStartKsa);
   assert.equal(fridayStart.skipped, true);
   assert.equal(fridayStart.reason, "friday_holiday");
   assert.equal(fridayStart.date, "2026-09-03");
 
-  const fridayMidnightKsa = new Date("2026-09-04T21:10:00.000Z");
-  const fridayMidnight = resolveDailyVisitReportEmailSchedule("", fridayMidnightKsa);
-  assert.equal(fridayMidnight.skipped, false);
-  assert.equal(fridayMidnight.date, "2026-09-03");
+  const saturdayMorningKsa = new Date("2026-09-05T03:00:00.000Z");
+  const saturdayMorning = resolveDailyVisitReportEmailSchedule("", saturdayMorningKsa);
+  assert.equal(saturdayMorning.skipped, false);
+  assert.equal(saturdayMorning.date, "2026-09-03");
 
   const mondayMidnightKsa = new Date("2026-09-06T21:10:00.000Z");
   const mondaySchedule = resolveDailyVisitReportEmailSchedule("", mondayMidnightKsa);

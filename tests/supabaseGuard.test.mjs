@@ -65,6 +65,20 @@ test("allowed local/dev URL does not throw", () => {
   assert.doesNotThrow(() =>
     assertSupabaseUrlAllowed(LOCAL_URL, { NEXT_PUBLIC_APP_ENV: "local", NODE_ENV: "development" }),
   );
+  assert.doesNotThrow(() =>
+    assertSupabaseUrlAllowed("http://localhost:54321", { NODE_ENV: "development" }),
+  );
+});
+
+test("cloud staging is blocked from the local PC", () => {
+  assert.throws(
+    () => assertSupabaseUrlAllowed("https://another-dev-project.supabase.co", { NODE_ENV: "development" }),
+    /Supabase running on this PC/,
+  );
+  assert.throws(
+    () => assertSupabaseUrlAllowed("not-a-url", { NODE_ENV: "development" }),
+    /Supabase running on this PC/,
+  );
 });
 
 test("production URL is blocked in local/development", () => {

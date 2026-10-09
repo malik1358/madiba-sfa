@@ -1462,6 +1462,20 @@ export function buildOutstandingRow(raw) {
   };
 }
 
+export function buildOutstandingSummaryCustomer(raw) {
+  const row = buildOutstandingRow(raw);
+  const buckets = Object.fromEntries(
+    ["61-90", "91-120", ">120"].map((label) => [label, toNumber(row.buckets[label])]),
+  );
+
+  return {
+    customer_code: row.customer_code,
+    customer_name: row.customer_name,
+    total_outstanding: row.total_outstanding,
+    buckets,
+  };
+}
+
 function outstandingPartyAccountCode(customerCode, customerName) {
   return resolveOutstandingInvoiceCustomerCode({
     customer_code: customerCode,

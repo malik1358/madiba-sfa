@@ -4,9 +4,18 @@ import {
   normalizePerformanceTargets,
   normalizeSalesmanCode,
 } from "./performanceKpis.js";
+import { isCollectionOnlyAccess } from "./moduleAccess.js";
 
 export const NO_BOSS_KEY = "__NO_BOSS__";
 export const TEAM_TARGET_PREFIX = "TEAM:";
+
+export function isKpiTargetProfile(profile) {
+  const code = normalizeSalesmanCode(profile?.salesman_code);
+  if (!code) return false;
+  const name = String(profile?.salesman_name || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return ["ZIA", "ASRAR", "ASRAR AHMED"].includes(name)
+    || !isCollectionOnlyAccess({ role: profile?.role, salesmanCode: code });
+}
 
 export function teamTargetSalesmanCode(bossCode) {
   const code = normalizeSalesmanCode(bossCode);

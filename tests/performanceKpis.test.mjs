@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   achievementPercent,
   averageCumulativeDayShares,
+  buyingCustomerCodesFromSales,
   buildPerformanceSnapshot,
   expectedPacePercent,
   ksaWorkdayProgressRatio,
@@ -17,10 +18,16 @@ import {
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
   resolveKpiPaceDate,
+  splitCollectionActualsByInvoice,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
+import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
+import {
+  loadPerformanceSnapshotsForSalesmen,
+  loadSalesActuals,
+} from "../app/lib/performanceKpisServer.js";
 
 test("detects PostgREST schema-cache missing column errors", () => {
   assert.equal(isMissingSchemaColumn({
@@ -61,6 +68,23 @@ test("KPI status compares actual/target with expected pace by today", () => {
     kpiStatus({ actual: 40, target: 100, reportDate: "2026-09-30", todayIso: "2026-09-30" }).label,
     /behind pace/,
   );
+  const completedMonthStatus = kpiStatus({
+    actual: 89.8,
+    target: 100,
+    reportDate: "2026-09-30",
+    todayIso: "2026-10-01",
+    paceShares: { 30: 0.694 },
+  });
+  assert.equal(completedMonthStatus.key, "behind");
+  assert.equal(completedMonthStatus.expected, 100);
+  assert.match(completedMonthStatus.label, /10\.2% behind pace/);
+  assert.equal(kpiStatus({
+    actual: 100,
+    target: 100,
+    reportDate: "2026-09-30",
+    todayIso: "2026-10-01",
+    paceShares: { 30: 0.694 },
+  }).key, "achieved");
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
 });
 
@@ -114,7 +138,7 @@ test("pace shares use that salesman only, not the company average", () => {
   assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "NEWGUY")), ksaWorkdayProgressRatio("2026-09-09") * 100);
 });
 
-test("splits office supplies sales from other sales", () => {
+test("nets signed sales and positive or negative credit notes by category", () => {
   assert.equal(isOfficeSuppliesSale({ category: "Office" }), true);
   assert.equal(isOfficeSuppliesSale({ category: "Stationery" }), true);
   assert.equal(isOfficeSuppliesSale({ category: "Electronics" }), false);
@@ -123,9 +147,202 @@ test("splits office supplies sales from other sales", () => {
       { category: "Office Supplies", sales_amount: 80 },
       { category: "Fridge", sales_amount: 20 },
       { item_name: "A4 paper", category: "Stationery", sales_amount: 10 },
+      { category: "Office Supplies", sales_amount: -5 },
+      { category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 12 },
+      { category: "Fridge", voucher_type: "Sales Return", sales_amount: -4 },
     ]),
-    { officeSupplies: 90, otherSales: 20 },
+    { officeSupplies: 73, otherSales: 16 },
   );
+});
+
+test("credit notes do not count as buying customers", () => {
+  assert.deepEqual(
+    buyingCustomerCodesFromSales([
+      { customer_code: "SALE", sales_amount: 100 },
+      { customer_code: "RETURN", voucher_type: "Credit Note", sales_amount: 20 },
+      { customer_code: "NEGATIVE", sales_amount: -5 },
+    ]),
+    ["SALE"],
+  );
+});
+
+test("repeat customers require a qualifying prior purchase, not only a return", async () => {
+  const rows = [
+    { transaction_date: "2026-09-02", salesman_code: "SM01", customer_code: "RETURN-ONLY", sales_amount: 100 },
+    { transaction_date: "2026-09-03", salesman_code: "SM01", customer_code: "REAL-HISTORY", sales_amount: 100 },
+    { transaction_date: "2026-08-15", customer_code: "RETURN-ONLY", voucher_type: "Credit Note", sales_amount: 100 },
+    { transaction_date: "2026-08-16", customer_code: "REAL-HISTORY", sales_amount: 100 },
+  ];
+  const admin = {
+    from: () => ({
+      select: () => {
+        const filters = [];
+        const query = {
+          range: () => query,
+          eq: (column, value) => { filters.push((row) => row[column] === value); return query; },
+          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
+          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
+          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
+          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
+          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
+        };
+        return query;
+      },
+    }),
+  };
+
+  const actuals = await loadSalesActuals(admin, { salesmanCode: "SM01", reportDate: "2026-09-01" });
+  assert.deepEqual(actuals.priorCustomerCodes, ["REAL-HISTORY"]);
+  assert.deepEqual(
+    classifyBuyingCustomers(actuals.monthCustomerCodes, actuals.priorCustomerCodes),
+    { newCustomers: 1, repeatCustomers: 1 },
+  );
+});
+
+test("KPI actuals include sales imported under Thamer's legacy identities", async () => {
+  const rows = [
+    { transaction_date: "2026-09-02", salesman_code: "SM002", customer_code: "A", category: "Office Supplies", sales_amount: 100 },
+    { transaction_date: "2026-09-03", salesman_code: "THAMER", customer_code: "B", category: "Office Supplies", sales_amount: 200 },
+    { transaction_date: "2026-09-04", salesman_code: "THAMER MOHAMMAD AHMED QASEM", customer_code: "C", category: "Office Supplies", sales_amount: 300 },
+  ];
+  const admin = {
+    from: () => ({
+      select: () => {
+        const filters = [];
+        const query = {
+          range: () => query,
+          eq: (column, value) => { filters.push((row) => row[column] === value); return query; },
+          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
+          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
+          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
+          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
+          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
+        };
+        return query;
+      },
+    }),
+  };
+
+  const actuals = await loadSalesActuals(admin, { salesmanCode: "SM002", reportDate: "2026-09-01" });
+  assert.equal(actuals.officeSupplies, 600);
+  assert.equal(actuals.salesRows.length, 3);
+});
+
+test("performance snapshots reuse cached actuals without querying source data", async () => {
+  const cache = {
+    version: 1,
+    batchId: "batch-42",
+    actualsBySalesman: {
+      SM01: {
+        officeSupplies: 120,
+        otherSales: 30,
+        totalSales: 150,
+        collection: 40,
+        cashCollection: 10,
+        newCustomers: 2,
+        repeatCustomers: 1,
+      },
+    },
+    paceBySalesman: { SM01: { 1: 0.2 } },
+  };
+  const queriedTables = [];
+  const admin = {
+    from(table) {
+      queriedTables.push(table);
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq: (column, value) => { filters[column] = value; return query; },
+        in: () => query,
+        maybeSingle: async () => ({
+          data: filters.setting_key === "active_sales_batch_id"
+            ? { setting_value: "batch-42" }
+            : { setting_value: JSON.stringify(cache) },
+          error: null,
+        }),
+        then: (resolve) => resolve({ data: [], error: null }),
+      };
+      return query;
+    },
+  };
+
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM01", salesmanName: "Ali" }],
+    reportDate: "2026-09-01",
+  });
+
+  assert.equal(snapshot.actuals.officeSupplies, 120);
+  assert.equal(snapshot.actuals.collection, 40);
+  assert.equal(snapshot.kpis.find((kpi) => kpi.key === "totalSales").actual, 150);
+  assert.equal(queriedTables.includes("active_sales"), false);
+  assert.equal(queriedTables.includes("collection_visits"), false);
+});
+
+test("splits monthly collection visits between FIFO credit and cash invoices", () => {
+  const actuals = splitCollectionActualsByInvoice([
+    {
+      transaction_date: "2026-09-01",
+      voucher_number: "RC/100",
+      sales_amount: 100,
+      quantity: 1,
+      rate: 100,
+    },
+    {
+      transaction_date: "2026-09-02",
+      voucher_number: "NFD/200",
+      sales_amount: 200,
+      quantity: 1,
+      rate: 200,
+    },
+  ], [
+    { id: 1, saved_at: "2026-09-03T10:00:00Z", amount_received: 115 },
+    { id: 2, saved_at: "2026-09-04T10:00:00Z", amount_received: 230 },
+  ], { fromDate: "2026-09-01", toDate: "2026-09-30" });
+
+  assert.deepEqual(actuals, { collection: 230, cashCollection: 115 });
+});
+
+test("KPI transaction details reconcile sales, distinct customer counts and FIFO collections", () => {
+  const salesRows = [
+    { transaction_date: "2026-09-01", voucher_number: "INV-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", sales_amount: 100 },
+    { transaction_date: "2026-09-02", voucher_number: "INV-2", customer_code: "B", customer_name: "Beta", item_name: "Chair", category: "Furniture", sales_amount: 50 },
+    { transaction_date: "2026-09-03", voucher_number: "CN-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 10 },
+  ];
+  const office = buildKpiActualDetails({ kpiKey: "officeSupplies", salesmanCode: "SM01", salesRows });
+  const other = buildKpiActualDetails({ kpiKey: "otherSales", salesmanCode: "SM01", salesRows });
+  const total = buildKpiActualDetails({ kpiKey: "totalSales", salesmanCode: "SM01", salesRows });
+  assert.equal(office.actual, 90);
+  assert.equal(other.actual, 50);
+  assert.equal(total.actual, 140);
+
+  const newCustomers = buildKpiActualDetails({ kpiKey: "newCustomers", salesmanCode: "SM01", salesRows });
+  const repeatCustomers = buildKpiActualDetails({
+    kpiKey: "repeatCustomers",
+    salesmanCode: "SM01",
+    salesRows,
+    priorCustomerCodes: ["A"],
+  });
+  assert.equal(newCustomers.actual, 2);
+  assert.equal(repeatCustomers.actual, 1);
+
+  const collectionSalesRows = [
+    { transaction_date: "2026-07-31", voucher_number: "B-CREDIT", customer_code: "B", sales_amount: 100, quantity: 1, rate: 100 },
+    { transaction_date: "2026-08-01", voucher_number: "RC/100", customer_code: "A", sales_amount: 100, quantity: 1, rate: 100 },
+    { transaction_date: "2026-08-02", voucher_number: "NFD/200", customer_code: "A", sales_amount: 200, quantity: 1, rate: 200 },
+  ];
+  const collectionVisits = [{ id: 21, saved_at: "2026-09-04T10:00:00Z", customer_code: "A", amount_received: 230 }];
+  const creditCollection = buildKpiActualDetails({
+    kpiKey: "collection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
+    fromDate: "2026-09-01", toDate: "2026-09-30",
+  });
+  const cashCollection = buildKpiActualDetails({
+    kpiKey: "cashCollection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
+    fromDate: "2026-09-01", toDate: "2026-09-30",
+  });
+  assert.equal(creditCollection.actual, 115);
+  assert.equal(cashCollection.actual, 115);
+  assert.deepEqual(creditCollection.rows.map((row) => row.invoiceReference), ["NFD/200"]);
+  assert.deepEqual(cashCollection.rows.map((row) => row.invoiceReference), ["RC/100"]);
 });
 
 test("does not move Others target into office supplies after save", () => {
@@ -172,12 +389,16 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 6);
+  assert.equal(snapshot.kpis.length, 7);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
   assert.equal(snapshot.kpis[1].label, "Others");
   assert.equal(snapshot.kpis[2].label, "Total sales");
   assert.equal(snapshot.kpis[2].actual, 55);
   assert.equal(snapshot.kpis[2].target, 150);
+  const cashCollection = snapshot.kpis.find((kpi) => kpi.key === "cashCollection");
+  assert.equal(cashCollection.actual, 0);
+  assert.equal(cashCollection.target, 0);
+  assert.equal(cashCollection.achievement, null);
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
@@ -211,7 +432,7 @@ test("daily visit email includes monthly KPI status", () => {
   const snapshot = buildPerformanceSnapshot({
     reportDate: "2026-09-02",
     salesmanCode: "SM001",
-    actuals: { officeSupplies: 25000, otherSales: 5000, collection: 8000, newCustomers: 1, repeatCustomers: 3 },
+    actuals: { officeSupplies: 25000, otherSales: 5000, collection: 8000, cashCollection: 2500, newCustomers: 1, repeatCustomers: 3 },
     targets: { officeSupplies: 50000, otherSales: 10000, collection: 10000, newCustomers: 2, repeatCustomers: 6 },
     updatedAt: "2026-09-01T08:00:00.000Z",
     updatedByName: "Boss",
@@ -234,9 +455,11 @@ test("daily visit email includes monthly KPI status", () => {
   assert.match(message.text, /Others:/);
   assert.match(message.text, /Total sales:/);
   assert.match(message.text, /Collection:/);
+  assert.match(message.text, /Cash collection \(info\): 2,500/);
   assert.match(message.text, /New customers:/);
   assert.match(message.text, /Repeat customers:/);
   assert.match(message.html, /Monthly KPI status/);
   assert.match(message.html, /Achievement/);
+  assert.match(message.html, /Cash collection \(info\)/);
   assert.match(message.text, /Boss/);
 });

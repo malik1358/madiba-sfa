@@ -56,6 +56,8 @@ const TEXT = {
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
+  cashCollection: { en: "Cash collection (info)", ar: "تحصيل النقد (معلومات)" },
+  informationOnly: { en: "Information only", ar: "للمعلومات فقط" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
   actual: { en: "Actual", ar: "الفعلي" },
@@ -110,6 +112,13 @@ function withLiveTeamActuals(rows) {
       })),
     };
   });
+}
+
+function actualDetailsHref(month, kpiKey, salesmanCodes) {
+  const codes = [...new Set((salesmanCodes || []).map(normalizeSalesmanCode).filter(Boolean))];
+  if (!codes.length) return "";
+  const params = new URLSearchParams({ month, kpi: kpiKey, salesmanCodes: codes.join(",") });
+  return `/management/kpi-targets/details?${params.toString()}`;
 }
 
 export default function KpiTargetsPage() {
@@ -426,12 +435,13 @@ export default function KpiTargetsPage() {
                       {columns.map((key) => {
                         const kpi = (row.kpis || []).find((item) => item.key === key);
                         const isTotalSales = key === "totalSales";
+                        const isInformationOnly = key === "cashCollection";
                         const targetValue = isTotalSales
                           ? String(
                             (Number(row.officeSupplies || 0) || 0) + (Number(row.otherSales || 0) || 0)
                             || Number(row.totalSales || 0),
                           )
-                          : row[key];
+                          : (isInformationOnly ? "" : row[key]);
                         const liveKpi = buildPerformanceKpi(key, {
                           actual: kpi?.actual || 0,
                           target: Number(targetValue || 0),
@@ -443,17 +453,21 @@ export default function KpiTargetsPage() {
                         const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
                           ? ""
                           : `${t("expectedByToday")} ${formatAchievementPercent(liveKpi.expected)}`;
+                        const detailSalesmen = row.isTeam
+                          ? teamMemberRows(liveRows, row.bossCode).map((member) => member.salesmanCode)
+                          : [row.salesmanCode];
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
+                            actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(liveKpi.achievement)}
                             ofTarget={t("ofTarget")}
-                            status={liveKpi.status?.label || "No target"}
+                            status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
                             statusKey={statusKey}
                             expected={expectedLabel}
                             value={targetValue}
-                            readOnly={isTotalSales}
+                            readOnly={isTotalSales || isInformationOnly}
                             onChange={(value) => {
                               setRows((current) => current.map((item) => {
                                 if (item.salesmanCode !== row.salesmanCode) return item;
@@ -487,16 +501,21 @@ export default function KpiTargetsPage() {
                           todayIso: getKsaDateString(),
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
+                        const isInformationOnly = key === "cashCollection";
+                        const detailSalesmen = visibleRows
+                          .filter((row) => !row.isTeam)
+                          .map((row) => row.salesmanCode);
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, column.actual)}
+                            actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(column.achievement)}
                             ofTarget={t("ofTarget")}
-                            status={liveKpi.status?.label || "No target"}
+                            status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
                             statusKey={statusKey}
                             expected=""
-                            value={String(Math.round(column.target || 0))}
+                            value={isInformationOnly ? "" : String(Math.round(column.target || 0))}
                             readOnly
                             onChange={() => {}}
                           />
@@ -590,6 +609,7 @@ function kpiStatusClass(statusKey) {
 
 function KpiTargetCells({
   actual,
+  actualHref,
   achievement,
   ofTarget,
   status,
@@ -601,7 +621,7 @@ function KpiTargetCells({
 }) {
   return (
     <>
-      <td>{actual}</td>
+      <td>{actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}</td>
       <td>
         <input
           className="moduleInput moduleKpiTargetInput"

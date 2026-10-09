@@ -131,6 +131,7 @@ async function maxSequenceFromPendingQueue(salesmanCode, peerCodes, prefix) {
 export async function allocateLocalSalesOrderNumber(salesmanCode, {
   existingOrderNumber = "",
   peerCodes = [],
+  accessToken = "",
 } = {}) {
   const existing = String(existingOrderNumber || "").trim();
   if (existing && !isPlaceholderSalesOrderNumber(existing)) {
@@ -143,6 +144,22 @@ export async function allocateLocalSalesOrderNumber(salesmanCode, {
   const letters = normalizeSalesmanLetters(salesmanCode);
   if (!letters) {
     throw new Error("Salesman code is required to allot an order number offline.");
+  }
+
+  if (accessToken && typeof fetch === "function") {
+    try {
+      const response = await fetch(
+        `/api/sales-orders?nextNumber=1&salesmanCode=${encodeURIComponent(salesmanCode)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && payload.orderNumber) {
+        await rememberSalesmanOrderSequence(salesmanCode, payload.orderNumber, { peerCodes });
+        return payload.orderNumber;
+      }
+    } catch {
+      // Offline or unavailable server: continue with the device sequence.
+    }
   }
 
   const peers = await readSalesmanOrderPeers(peerCodes);

@@ -33,7 +33,8 @@ import {
   MY_DAY_VISIT_REPORT_LIMIT,
   visitReportsSinceIso,
 } from "../../lib/myDayPlannerLoad";
-import { isVisitStatusCustomer } from "./customerEligibility";
+import { isVisitStatusCustomer, removeDuplicateNameCodeCustomers } from "./customerEligibility";
+import { daysSinceKsaDate } from "../../lib/latestCustomerVisits.js";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
 import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
@@ -152,6 +153,7 @@ const PAGE_TEXT = {
   averageMonthlyPurchase: { en: "Avg Monthly Purchase", ar: "متوسط المشتريات الشهرية" },
   highestMonthlySales: { en: "Highest Monthly Sales", ar: "أعلى مبيعات شهرية" },
   customer: { en: "Customer", ar: "العميل" },
+  customerCode: { en: "Customer Code", ar: "رمز العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   daysSinceLastInvoice: { en: "Days From Last Invoice", ar: "الأيام منذ آخر فاتورة" },
   daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
@@ -678,7 +680,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
           pendingOrdersQuery,
           submittedOrdersQuery,
           todayOrdersQuery,
-          fetchVisibleCustomersCached(session.access_token, scope, { enriched: true }).then((result) => result.data),
+          fetchVisibleCustomersCached(session.access_token, scope, {
+            enriched: true,
+            includeLatestNearVisit: true,
+            forceRefresh: true,
+          }).then((result) => result.data),
           routeQuery,
           loadOpenProspectCustomers(session.access_token).catch(() => []),
         ]);
@@ -945,8 +951,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
             last_invoice_date: row.latest_transaction_date || null,
             latest_transaction_date: row.latest_transaction_date || null,
             mobile: row.mobile || "",
-            last_visit_date: latestVisitByCustomer.get(customerCode) || null,
-            days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(customerCode) || null),
+            last_visit_date: row.latest_near_visit_date || null,
+            days_since_last_visit: daysSinceKsaDate(row.latest_near_visit_date),
             next_visit_at: activeScheduledVisitDate(
               nextVisitByCustomer.get(customerCode),
               latestVisitByCustomer.get(customerCode),
@@ -972,7 +978,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
           });
         }
 
-        const customerVisitRows = scopedCustomerRows.filter(isVisitStatusCustomer).map(mapVisitStatusRow);
+        const customerVisitRows = removeDuplicateNameCodeCustomers(
+          scopedCustomerRows.filter(isVisitStatusCustomer),
+        ).map(mapVisitStatusRow);
         const seenVisitCodes = new Set(
           customerVisitRows.map((row) => String(row.customer_code || "").trim().toUpperCase()).filter(Boolean)
         );
@@ -1423,6 +1431,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
+        visitAt: capturedAt,
         avgDaysToPay,
       });
       void copyTextToClipboard(summaryText);
@@ -2588,6 +2597,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <thead>
                 <tr>
                   <th>{t("customer")}</th>
+                  <th>{t("customerCode")}</th>
                   <th>{t("cityArea")}</th>
                   <th>{t("daysSinceLastInvoice")}</th>
                   <th>{t("daysSinceLastVisit")}</th>
@@ -2615,6 +2625,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                         </button>
                       </div>
                     </td>
+                    <td>{row.customer_code || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>

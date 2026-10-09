@@ -1,0 +1,52 @@
+name: Daily Receipt Email
+
+on:
+  schedule:
+    # 21:30 UTC = 00:30 KSA; report the previous Riyadh calendar day.
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (KSA). Empty = previous KSA calendar day."
+        required: false
+        default: ""
+      to:
+        description: "Optional test recipient; overrides salesman recipients and skips dedupe."
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily receipt email endpoint
+        env:
+          DAILY_RECEIPT_EMAIL_URL: ${{ secrets.DAILY_RECEIPT_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+        run: |
+          DEFAULT_URL='https://madiba-sfa.vercel.app/api/cron/daily-receipt-email'
+          URL="$(printf '%s' "$DAILY_RECEIPT_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -z "$URL" || ! "$URL" =~ /api/cron/daily-receipt-email([/?].*)?$ ]]; then URL="$DEFAULT_URL"; fi
+          if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
+          DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export EVENT_NAME DATE_VALUE TO_VALUE
+          python3 - <<'PY' > payload.json
+          import json, os
+          payload = {}
+          date = os.environ.get("DATE_VALUE", "").strip()
+          to = os.environ.get("TO_VALUE", "").strip()
+          if date: payload["date"] = date
+          if to: payload["to"] = to
+          print(json.dumps(payload))
+          PY
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          status_code="$(curl -sS -L --max-time 180 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" --data @payload.json)"
+          cat response.json
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then echo "Receipt email endpoint returned HTTP $status_code"; exit 1; fi

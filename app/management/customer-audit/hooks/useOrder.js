@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import {
   captureGpsLocationWithFallbackConfirm,
@@ -26,6 +26,12 @@ function isPendingOrderId(orderId) {
 
 function buildPendingOrderId(queueId) {
   return buildQueuedPendingOrderId(queueId);
+}
+
+function orderContextKey(selectedCustomer, editOrderId) {
+  if (editOrderId) return `order:${String(editOrderId)}`;
+  const customerCode = String(selectedCustomer?.customer_code || '').trim().toUpperCase();
+  return customerCode ? `customer:${customerCode}` : '';
 }
 
 function buildOrderPayload({
@@ -115,6 +121,8 @@ export function useOrder({
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [draftOrderNumber, setDraftOrderNumber] = useState('');
+  const [draftContextKey, setDraftContextKey] = useState('');
+  const draftContextRef = useRef('');
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -141,12 +149,20 @@ export function useOrder({
   const orderSummary = useMemo(() => buildOrderSummary(orderItems), [orderItems]);
 
   useEffect(() => {
+    let cancelled = false;
+    const contextKey = orderContextKey(selectedCustomer, editOrderId);
+    if (draftContextRef.current !== contextKey) {
+      draftContextRef.current = contextKey;
+      setDraftContextKey(contextKey);
+      setDraftOrderId(null);
+      setDraftOrderNumber('');
+      setOrderQuantities({});
+      setLoadedOrderStatus('DRAFT');
+      setOrderHistory([]);
+    }
+
     async function loadDraftOrderOrEditOrder() {
       if (!selectedCustomer && !editOrderId) {
-        setDraftOrderId(null);
-        setDraftOrderNumber('');
-        setOrderQuantities({});
-        setOrderHistory([]);
         return;
       }
 
@@ -160,6 +176,7 @@ export function useOrder({
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
         if (!session) return;
 
         let order = null;
@@ -171,6 +188,7 @@ export function useOrder({
             .eq('id', editOrderId)
             .maybeSingle();
 
+          if (cancelled) return;
           if (requestedError) throw requestedError;
           if (!requestedOrder) {
             throw new Error(`Order #${editOrderId} not found.`);
@@ -203,16 +221,12 @@ export function useOrder({
           }
 
           const { data: draft, error: draftError } = await draftQuery.maybeSingle();
+          if (cancelled) return;
           if (draftError) throw draftError;
           order = draft;
         }
 
         if (!order) {
-          setDraftOrderId(null);
-          setDraftOrderNumber('');
-          setOrderQuantities({});
-          setLoadedOrderStatus('DRAFT');
-          setOrderHistory([]);
           return;
         }
 
@@ -228,6 +242,7 @@ export function useOrder({
           .select('item_code, quantity')
           .eq('order_id', order.id);
 
+        if (cancelled) return;
         if (lineError) throw lineError;
 
         const loadedQuantities = {};
@@ -243,7 +258,9 @@ export function useOrder({
           },
         });
 
+        if (cancelled) return;
         const historyPayload = await historyResponse.json().catch(() => ({}));
+        if (cancelled) return;
         if (!historyResponse.ok || !historyPayload.success) {
           setOrderHistory([]);
         } else {
@@ -259,12 +276,15 @@ export function useOrder({
           }
         }
       } catch (err) {
-        setError(friendlyErrorMessage(err, 'Unable to restore draft order.'));
+        if (!cancelled) setError(friendlyErrorMessage(err, 'Unable to restore draft order.'));
       }
     }
 
     loadDraftOrderOrEditOrder();
-  }, [accessScope, editOrderId, selectedCustomer, setError]);
+    return () => {
+      cancelled = true;
+    };
+  }, [accessScope, editOrderId, selectedCustomer?.customer_code, setError]);
 
   const updateQty = useCallback((itemCode, value) => {
     setOrderQuantities((current) => changeOrderQty(current, itemCode, value));
@@ -280,6 +300,9 @@ export function useOrder({
 
   const saveDraft = useCallback(async (options = {}) => {
     if (!selectedCustomer) return null;
+    const contextMatches = draftContextKey === orderContextKey(selectedCustomer, editOrderId);
+    const currentDraftOrderId = contextMatches ? draftOrderId : null;
+    const currentDraftOrderNumber = contextMatches ? draftOrderNumber : '';
     if (orderItems.length === 0) {
       if (selectedQuantityCount > 0) {
         setError('Selected items are not allowed for ordering. Please choose active items and try again.');
@@ -338,8 +361,9 @@ export function useOrder({
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
         orderMaker.salesmanCode,
         {
-          existingOrderNumber: draftOrderNumber,
+          existingOrderNumber: currentDraftOrderNumber,
           peerCodes,
+          accessToken: session.access_token,
         },
       );
       setDraftOrderNumber(allottedOrderNumber);
@@ -359,8 +383,8 @@ export function useOrder({
           valueDiscountMap,
           schemes,
           pricingRegion,
-          draftOrderId,
-          loadedOrderStatus,
+          draftOrderId: currentDraftOrderId,
+          loadedOrderStatus: contextMatches ? loadedOrderStatus : 'DRAFT',
           location,
           capturedAt,
           platform,
@@ -379,10 +403,10 @@ export function useOrder({
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
-        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
-          ? draftOrderId
+        const existingServerOrderId = currentDraftOrderId && !isPendingOrderId(currentDraftOrderId)
+          ? currentDraftOrderId
           : null;
-        if (!draftOrderId) {
+        if (!currentDraftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
         // Only invent a local pending row for brand-new offline drafts. Re-saves of
@@ -443,9 +467,12 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
+    const contextMatches = draftContextKey === orderContextKey(selectedCustomer, editOrderId);
+    const currentDraftOrderId = contextMatches ? draftOrderId : null;
+    const currentDraftOrderNumber = contextMatches ? draftOrderNumber : '';
     if (orderItems.length === 0) {
       if (selectedQuantityCount > 0) {
         setError('Selected items are not allowed for ordering. Please choose active items and try again.');
@@ -511,8 +538,9 @@ export function useOrder({
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
         orderMaker.salesmanCode,
         {
-          existingOrderNumber: draftOrderNumber,
+          existingOrderNumber: currentDraftOrderNumber,
           peerCodes,
+          accessToken: session.access_token,
         },
       );
       setDraftOrderNumber(allottedOrderNumber);
@@ -532,8 +560,8 @@ export function useOrder({
           valueDiscountMap,
           schemes,
           pricingRegion,
-          draftOrderId,
-          loadedOrderStatus,
+          draftOrderId: currentDraftOrderId,
+          loadedOrderStatus: contextMatches ? loadedOrderStatus : 'DRAFT',
           location,
           capturedAt,
           platform,
@@ -554,10 +582,10 @@ export function useOrder({
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
-        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
-          ? draftOrderId
+        const existingServerOrderId = currentDraftOrderId && !isPendingOrderId(currentDraftOrderId)
+          ? currentDraftOrderId
           : null;
-        if (!draftOrderId) {
+        if (!currentDraftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
         // Only invent a local pending row for brand-new offline submits. Re-submits of
@@ -621,7 +649,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../../lib/moduleAccess.js";
 import {
   buildAggregateCollectionDaySummary,
   buildCollectionDaySummary,
@@ -98,7 +99,7 @@ async function getProfile(admin, userId) {
 
 function canViewAllCollectors(profile) {
   const role = String(profile?.role || "").toLowerCase();
-  return role === "admin" || role === "manager" || role === "collector";
+  return canViewManagementReports(role) || role === "collector";
 }
 
 function parseReportDate(value) {

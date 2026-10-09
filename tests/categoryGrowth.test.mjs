@@ -10,6 +10,7 @@ import {
   createCategoryGrowthAccumulator,
   enumerateMonths,
   buildContributionGridRows,
+  dimensionValue,
   formatAmountWithDelta,
   formatContributionPercent,
   formatGrowthPercent,
@@ -22,6 +23,7 @@ import {
   monthChangeTone,
   monthGridTotals,
   monthsInQuarter,
+  normalizeGrowthFilters,
   normalizeCategoryName,
   quarterGridTotals,
   yearGridTotals,
@@ -156,6 +158,52 @@ test("filters and group-by slice the same sales into different rows", () => {
   ingestCategoryGrowthRows(dateAcc, rows, { filters: { dateFrom: "2026-01-01" } });
   const dateReport = buildCategoryGrowthReport(dateAcc, { asOfDate: "2026-09-11" });
   assert.equal(dateReport.lifetimeTotal, 80);
+});
+
+test("salesman report dimensions merge Thamer's imported identity variants", () => {
+  const rows = [
+    { transaction_date: "2026-09-01", salesman_name: "Thamer", salesman_code: "SM002", sales_amount: 100 },
+    { transaction_date: "2026-09-02", salesman_name: "THAMER", salesman_code: "THAMER", sales_amount: 200 },
+    { transaction_date: "2026-09-03", salesman_name: "THAMER MOHAMMAD AHMED QASEM", salesman_code: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 300 },
+  ];
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, rows, { groupBy: "salesman" });
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-10-01" });
+
+  assert.equal(report.groups.length, 1);
+  assert.equal(report.groups[0].label, "Thamer · SM002");
+  assert.equal(report.groups[0].lifetime, 600);
+
+  assert.deepEqual(
+    [...new Set(rows.flatMap((row) => [dimensionValue(row, "salesman_code"), dimensionValue(row, "salesman_name")]))],
+    ["SM002", "Thamer"],
+  );
+
+  const legacyFilter = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(legacyFilter, rows, {
+    filters: { groupBy: "salesman", values: { salesman: ["THAMER MOHAMMAD AHMED QASEM · THAMER MOHAMMAD AHMED QASEM"] } },
+  });
+  assert.equal(buildCategoryGrowthReport(legacyFilter, { asOfDate: "2026-10-01" }).groups[0].lifetime, 600);
+});
+
+test("MADIBA item-name slice isolates category sales and profit over time", () => {
+  const rows = [
+    { transaction_date: "2025-05-10", category: "Gloves", item_name: "MADIBA VINYL", sales_amount: 100, profit_amount: 25 },
+    { transaction_date: "2026-05-10", category: "Gloves", item_name: "A1_Madiba Latex", sales_amount: 180, profit_amount: 45 },
+    { transaction_date: "2026-05-10", category: "Gloves", item_name: "Other Latex", sales_amount: 300, profit_amount: 80 },
+    { transaction_date: "2026-06-10", category: "Stationery", item_name: "MADIBA NOTEBOOK", sales_amount: 50, profit_amount: 10 },
+  ];
+  const filters = normalizeGrowthFilters({ itemNameContains: " MADIBA " });
+  assert.equal(filters.itemNameContains, "madiba");
+  for (const [measure, expected] of [["sales", 280], ["profit", 70]]) {
+    const acc = createCategoryGrowthAccumulator();
+    ingestCategoryGrowthRows(acc, rows, { filters, measure });
+    const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-10-02" });
+    assert.equal(report.lifetimeTotal, expected + (measure === "sales" ? 50 : 10));
+    assert.equal(report.categories.find((row) => row.category === "Gloves").yearValues["2025"], measure === "sales" ? 100 : 25);
+    assert.equal(report.categories.find((row) => row.category === "Gloves").yearValues["2026"], measure === "sales" ? 180 : 45);
+    assert.equal(report.meta.rowCount, 3);
+  }
 });
 
 test("silent and declining helpers count gaps and losing streaks", () => {

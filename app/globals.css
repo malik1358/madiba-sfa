@@ -4350,6 +4350,10 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.paymentSettleInvoiceTable thead th {
+  top: calc(var(--sticky-table-top) + 24px);
+}
+
 .moduleTable tbody tr:nth-child(even) td {
   background: #f3fbfb;
 }
@@ -5245,6 +5249,13 @@ th:has(.moduleTableColumnFilterInput) {
   color: #5b7178;
   font-size: 12px;
   font-weight: 600;
+}
+
+.moduleKpiActualLink {
+  color: #075e75;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .moduleKpiUpdatedStatus {
@@ -6146,6 +6157,10 @@ th:has(.moduleTableColumnFilterInput) {
 
   .moduleBiTable th,
   .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+    top: 0;
+  }
+
+  .paymentSettleInvoiceTable thead th {
     top: 0;
   }
 

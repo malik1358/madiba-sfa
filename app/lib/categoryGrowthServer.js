@@ -10,10 +10,19 @@ import {
 import { applyCustomerSalesmanOwnershipToRows } from "./customerSalesmanOwnership.js";
 import { loadCustomerSalesmanOwnershipMap } from "./customerSalesmanOwnershipServer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
+import { buildCustomerCohortReport } from "./customerCohorts.js";
+import { buildSalesMixReport } from "./salesMix.js";
 import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
 import { rollupTeamGrowthFromRows, rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
 import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
+
+const SALES_SELECTS = [
+  "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
+  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
+  "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference",
+  "transaction_date,category,sales_amount,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference",
+];
 
 function isMissingTableError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();
@@ -85,6 +94,11 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   const profit = build("profit");
   return {
     ...sales,
+    ...(filters.groupBy === "customer" ? {
+      customerCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate }),
+      customerMonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "month" }),
+    } : {}),
+    salesMix: buildSalesMixReport(rows, applied),
     measures: {
       sales: measureSlice(sales),
       profit: measureSlice(profit),

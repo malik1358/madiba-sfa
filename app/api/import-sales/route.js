@@ -7,6 +7,7 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offl
 import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
+import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
 import {
   findImportValue,
   findProfitAmount,
@@ -1155,6 +1156,20 @@ export async function POST(request) {
         });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const kpiAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const cache = await rebuildPerformanceKpiCache(kpiAdmin);
+        console.info("Performance KPI cache rebuilt after sales upload:", {
+          salesmanCount: Object.keys(cache.actualsBySalesman).length,
+          reportMonth: cache.reportMonth,
+        });
+      } catch (kpiError) {
+        console.error("Performance KPI cache rebuild after sales upload failed:", kpiError);
       }
 
       try {

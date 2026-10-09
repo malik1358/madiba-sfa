@@ -53,6 +53,19 @@ export function resolveOrderBlockStatus({
   };
 }
 
+export function resolveOrderSubmissionBlockStatus({
+  avgDaysToPay,
+  avgDaysToPay6m = null,
+  override = null,
+} = {}) {
+  return resolveOrderBlockStatus({
+    avgDaysToPay,
+    avgDaysToPay6m,
+    override,
+    threshold: ORDER_BLOCK_AVG_DAYS_THRESHOLD,
+  });
+}
+
 export function blockedByAvgDaysMessage({
   threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   avgDaysToPay = null,

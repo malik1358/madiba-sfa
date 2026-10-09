@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildModuleAccess,
+  canViewManagementReports,
   canManageOrderInvoice,
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
@@ -46,8 +47,19 @@ test("salesmen see field modules and payment collections", () => {
   assert.equal(access.canAccess("mySalesInvoices"), true);
   assert.equal(access.canAccess("dailyVisitReport"), true);
   assert.equal(access.canAccess("gpsMap"), false);
+  assert.equal(access.canAccess("promoterCoverage"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
+});
+
+test("promoter coverage is limited to product promoters", () => {
+  const promoter = buildModuleAccess({ role: "product_promoter" });
+  const manager = buildModuleAccess({ role: "manager" });
+
+  assert.equal(promoter.canAccess("promoterCoverage"), true);
+  assert.equal(manager.canAccess("promoterCoverage"), false);
+  assert.equal(moduleLabelForPath("/management/promoter-coverage", "en"), "Promoter Coverage");
+  assert.ok(pinnedModuleKeysForAccess(promoter).includes("promoterCoverage"));
 });
 
 test("collectors cannot open item price history", () => {
@@ -67,21 +79,22 @@ test("admin manager and invoice-maker can set pending order invoice status", () 
   assert.equal(canManageOrderInvoice("salesman"), false);
 });
 
-test("invoice-makers can access hierarchy upload and gps map", () => {
+test("invoice-makers can access hierarchy upload, reports, and gps map", () => {
   const access = buildModuleAccess({ role: "invoice-maker" });
 
   assert.equal(access.canAccess("salesmanHierarchy"), true);
   assert.equal(access.canAccess("customerBookShares"), false);
   assert.equal(access.canAccess("upload"), true);
   assert.equal(access.canAccess("gpsMap"), true);
-  assert.equal(access.canAccess("userActivity"), false);
-  assert.equal(access.canAccess("workingHours"), false);
+  assert.equal(access.canAccess("userActivity"), true);
+  assert.equal(access.canAccess("workingHours"), true);
 });
 
-test("admins and managers can open working hours attendance", () => {
+test("admins, managers, invoice-makers, and collectors can open working hours attendance", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("workingHours"), true);
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("workingHours"), true);
   assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("workingHours"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("workingHours"), true);
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("workingHours"), false);
   assert.equal(localizedModuleLabel("workingHours", "en"), "Working Hours");
   assert.equal(localizedModuleLabel("workingHours", "ar"), "ساعات العمل");
@@ -153,18 +166,47 @@ test("managers still get background GPS like other field users", () => {
   assert.equal(shouldEnableBackgroundGps("invoice-maker"), false);
 });
 
-test("business dashboard is limited to admin and manager", () => {
+test("business dashboard is available to management report viewers", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("businessDashboard"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), false);
   assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
 });
 
-test("outstanding without GPS is limited to admin and manager", () => {
+test("outstanding without GPS is available to management report viewers", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("outstandingNoGps"), true);
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("outstandingNoGps"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("outstandingNoGps"), true);
   assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("outstandingNoGps"), false);
   assert.equal(localizedModuleLabel("outstandingNoGps", "en"), "Outstanding Without GPS");
+});
+
+test("invoice makers can view every management report without setup access", () => {
+  for (const role of ["invoice-maker", "invoice_maker"]) {
+    const access = buildModuleAccess({ role });
+    for (const moduleKey of [
+      "businessDashboard",
+      "myPerformance",
+      "salesmanIncentive",
+      "dailyVisitReport",
+      "userActivity",
+      "workingHours",
+      "outstandingNoGps",
+      "gpsMap",
+      "collectionReport",
+      "receiptsNotInTally",
+      "paymentSettlement",
+      "outstandingCompare",
+    ]) {
+      assert.equal(access.canAccess(moduleKey), true, `${role} should access ${moduleKey}`);
+    }
+    for (const moduleKey of ["customerMaster", "customerBookShares", "kpiTargets", "schemes", "orderQuantityControls"]) {
+      assert.equal(access.canAccess(moduleKey), false, `${role} should not access ${moduleKey}`);
+    }
+  }
+  assert.equal(canViewManagementReports("invoice_maker"), true);
+  assert.equal(canViewManagementReports("salesman"), false);
 });
 
 test("salesman visit plan is available to admin and field sales after promotion", () => {

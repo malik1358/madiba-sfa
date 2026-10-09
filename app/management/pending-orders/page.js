@@ -1388,6 +1388,7 @@ export default function PendingOrdersPage() {
         orderId: orderNumber,
         customerCode: liveSnapshot.customerCode || order.customer_code,
         savedAtIso: new Date().toISOString(),
+        pendingSync: isQueuedPendingOrderId(liveSnapshot.orderId),
       });
       await saveOrShareOrderPdf(doc, fileName, {
         title: `Order #${orderNumber}`,

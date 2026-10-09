@@ -99,11 +99,10 @@ export async function loadSalesRowsByCustomer(admin, customerCodes = []) {
       let from = 0;
       while (true) {
         const { data, error } = await admin
-          .from("sales_raw")
+          .from("active_sales")
           .select(SALES_SELECT)
           .in("customer_code", chunk)
           .order("transaction_date", { ascending: false })
-          .order("id", { ascending: false })
           .range(from, from + SALES_PAGE_SIZE - 1);
         if (error) throw error;
 

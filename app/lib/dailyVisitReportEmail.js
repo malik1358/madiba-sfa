@@ -281,6 +281,7 @@ export function buildUserVisitReportEmail({
   team = null,
   teamMembers = [],
   staleOverdueSection = null,
+  potentialSalesTargetsSection = null,
 } = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
   const subject = `Daily Visit Report — ${userName} — ${date}`;
@@ -318,28 +319,45 @@ export function buildUserVisitReportEmail({
     : buildDayRoutePoints(entries, idleGaps);
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
-  const workingHoursValue = resolveDayRouteWorkingHours(entries.length ? entries : routePoints).value;
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints);
+  const workingHoursRanges = (workingHours.ranges || [])
+    .map((range) => `${formatReportTime(range.fromAt)} - ${formatReportTime(range.toAt)}`)
+    .join("; ");
+  const workingHoursValue = workingHoursRanges
+    ? `${workingHours.value} (${workingHoursRanges})`
+    : workingHours.value;
   const workingHoursHtml = `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`;
   const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
     ? user.locationNotes
     : loginLogoutLocationNotes(entries, thresholdKm);
+  const homeLocation = user?.homeLocation || null;
+  const homeLocationCoordinates = homeLocation
+    ? `${Number(homeLocation.latitude).toFixed(5)}, ${Number(homeLocation.longitude).toFixed(5)}`
+    : "";
+  const homeLocationMapUrl = homeLocation
+    ? buildGoogleMapsPointUrl(homeLocation.latitude, homeLocation.longitude)
+    : "";
 
   const summaryText = [
     `Daily visit report for ${userName}`,
     `Date: ${date} (KSA)`,
+    ...(homeLocationCoordinates ? [`Home location: ${homeLocationCoordinates}`] : []),
     `Entries: ${user?.visitCount || 0}`,
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
+    `Working hours: ${workingHoursValue}`,
     `Visit without order: ${activitySplit.visitWithoutOrderCount}`,
     `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} SAR`,
     `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} SAR`,
     `Collections: ${activitySplit.collectionCount} / ${formatSplitMoney(activitySplit.collectionValue)} SAR`,
+    `Collection visits without payment: ${activitySplit.collectionVisitWithoutPaymentCount || 0}`,
     ...locationNotes,
     "",
     ...kpiText,
     ...teamKpiText,
     ...(staleOverdueSection?.text ? [staleOverdueSection.text] : []),
+    ...(potentialSalesTargetsSection?.text ? [potentialSalesTargetsSection.text] : []),
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
         ? "-"
@@ -366,6 +384,7 @@ export function buildUserVisitReportEmail({
       <tr><td>New-customer orders</td><td>${activitySplit.newCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.newCustomerOrderValue))} SAR</td></tr>
       <tr><td>Repeat-customer orders</td><td>${activitySplit.repeatCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.repeatCustomerOrderValue))} SAR</td></tr>
       <tr><td>Collections</td><td>${activitySplit.collectionCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.collectionValue))} SAR</td></tr>
+      <tr><td>Collection visits without payment</td><td>${activitySplit.collectionVisitWithoutPaymentCount || 0}</td><td>-</td></tr>
     </tbody>
   </table>`;
 
@@ -431,6 +450,7 @@ export function buildUserVisitReportEmail({
 <body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4;">
   <h1 style="font-size: 20px; margin-bottom: 8px;">Daily Visit Report</h1>
   <p style="margin: 0 0 16px;">${escapeHtml(userName)} · ${escapeHtml(date)} (KSA)</p>
+  ${homeLocationCoordinates ? `<p><strong>Home location:</strong> ${escapeHtml(homeLocationCoordinates)} · <a href="${escapeHtml(homeLocationMapUrl)}">Open map</a></p>` : ""}
   <p>
     Entries: <strong>${Number(user?.visitCount || 0)}</strong>
     · Far from customer: <strong>${Number(user?.farFromCustomerCount || 0)}</strong>
@@ -441,6 +461,7 @@ export function buildUserVisitReportEmail({
   ${kpiHtml}
   ${teamKpiHtml}
   ${staleOverdueSection?.html || ""}
+  ${potentialSalesTargetsSection?.html || ""}
   ${routeHtml}
   ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

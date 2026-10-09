@@ -69,7 +69,9 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
 test("serialized cube round-trips compact keys", () => {
   const cube = createSalesBiCube();
   ingestSalesRowsIntoCube(cube, [
-    { transaction_date: "2026-01-15", category: "Office", salesman_name: "Noor", sales_amount: 40 },
+    { transaction_date: "2026-01-15", category: "Office", salesman_name: "Noor", voucher_number: "RC/100", local_import: "Local", sales_amount: 40 },
+    { transaction_date: "2026-01-16", category: "Office", salesman_name: "Noor", voucher_number: "NFD/101", local_import: "Import", sales_amount: 60 },
+    { transaction_date: "2026-01-17", category: "Office", salesman_name: "Noor", voucher_number: "CN/102", voucher_type: "Credit Note", local_import: "Local", sales_amount: 15 },
   ]);
   const packed = serializeSalesBiCube({
     facts: salesBiFactsFromCube(cube),
@@ -82,7 +84,12 @@ test("serialized cube round-trips compact keys", () => {
   assert.equal(restored.facts[0].month, "2026-01");
   assert.equal(restored.facts[0].category, "Office");
   assert.equal(restored.facts[0].salesman_name, "Noor");
-  assert.equal(restored.facts[0].sales_amount, 40);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.sales_amount, 0), 115);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.cash_sales_amount, 0), 40);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.credit_sales_amount, 0), 60);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.local_sales_amount, 0), 40);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.import_sales_amount, 0), 60);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.unclassified_origin_sales_amount, 0), 0);
 });
 
 test("cube facts produce the same yearly totals as raw invoice lines", () => {
@@ -131,7 +138,16 @@ test("cube rebuilds when it is older than the last sales upload or missing live 
   assert.equal(salesBiCubeNeedsRebuild({
     ...cube,
     builtAt: "2026-09-12T08:10:00.000Z",
-    facts: [{ month: "2026-02", sales_amount: 100, profit_amount: 12 }],
+    facts: [{
+      month: "2026-02",
+      sales_amount: 100,
+      profit_amount: 12,
+      cash_sales_amount: 0,
+      credit_sales_amount: 100,
+      local_sales_amount: 0,
+      import_sales_amount: 0,
+      unclassified_origin_sales_amount: 100,
+    }],
   }, { liveHasProfit: true, lastImportAt: "2026-09-12T08:04:27.376Z" }), false);
 });
 

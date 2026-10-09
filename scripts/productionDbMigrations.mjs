@@ -315,6 +315,13 @@ function checkMigrationRole(dbUrl, schema) {
   return issues;
 }
 
+export function migrationActionForState(status) {
+  if (status === "applied") return "skip";
+  if (status === "schema-present-history-missing") return "record-history";
+  if (status === "pending") return "execute";
+  return "block";
+}
+
 function executeExactMigration(dbUrl, migration) {
   const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-migration-"));
   const tempFile = path.join(tempDirectory, migration.file);
@@ -399,13 +406,14 @@ export async function runMigrationWorkflow(env = process.env) {
     report.execution = "in progress; allowlisted versions only";
     for (const migration of ALLOWLISTED_MIGRATIONS) {
       const state = report.states.find((item) => item.version === migration.version);
-      if (state.status === "applied") continue;
-      if (state.status === "schema-present-history-missing") {
+      const action = migrationActionForState(state.status);
+      if (action === "skip") continue;
+      if (action === "record-history") {
         markVersionApplied(env.PRODUCTION_DB_MIGRATION_URL, migration.version);
         state.status = "history recorded for verified schema";
         continue;
       }
-      if (state.status !== "pending") throw new Error(`${migration.version} is not in a safe pending state`);
+      if (action !== "execute") throw new Error(`${migration.version} is not in a safe pending state`);
       executeExactMigration(env.PRODUCTION_DB_MIGRATION_URL, migration);
       markVersionApplied(env.PRODUCTION_DB_MIGRATION_URL, migration.version);
       state.status = "executed exact file and recorded";

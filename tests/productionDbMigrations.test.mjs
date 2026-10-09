@@ -8,6 +8,7 @@ import {
   PRODUCTION_PROJECT_REF,
   assessMigrationSchema,
   hasOnlyAllowlistedMigrationSql,
+  migrationActionForState,
   migrationScope,
   readonlyPrivilegeIssues,
   validateProductionDatabaseUrl,
@@ -85,6 +86,13 @@ test("preflight recognizes an applied partial unique index with PostgreSQL paren
   assert.equal(states[0].status, "applied");
 });
 
+test("a committed migration with failed ledger recording retries history only", () => {
+  assert.equal(migrationActionForState("schema-present-history-missing"), "record-history");
+  assert.equal(migrationActionForState("applied"), "skip");
+  assert.equal(migrationActionForState("pending"), "execute");
+  assert.equal(migrationActionForState("conflict"), "block");
+});
+
 test("preflight separates allowlisted work from older and newer unrelated pending migrations", () => {
   const scope = migrationScope([
     "20260930190000", "20261002120000", "20261002130000", "20261003120000", "20261101120000",
@@ -121,6 +129,7 @@ test("read-only preflight is the default and apply fails closed on every missing
   assert.deepEqual(validateWorkflowContext({ mode: "preflight", ...base }), []);
   assert.match(validateWorkflowContext({ mode: "apply", ...base }).join(" "), /apply disabled/);
   assert.match(validateWorkflowContext({ mode: "apply", ...base, migrationsEnabled: "true", confirmation: `APPLY ${"a".repeat(40)}` }).join(" "), /successful preflight/);
+  assert.match(validateWorkflowContext({ mode: "apply", ...base, migrationsEnabled: "true", previousPreflightVerified: "true" }).join(" "), /confirmation/);
   assert.match(validateWorkflowContext({ mode: "apply", ...base, migrationsEnabled: "true", confirmation: `APPLY ${"a".repeat(40)}`, previousPreflightVerified: "true" }).join(" "), /^$/);
   assert.match(validateWorkflowContext({ mode: "preflight", ...base, workflowRef: "refs/heads/feature" }).join(" "), /main/);
   assert.match(validateWorkflowContext({ mode: "preflight", ...base, checkedOutSha: "b".repeat(40) }).join(" "), /SHA/);

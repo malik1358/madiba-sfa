@@ -130,6 +130,41 @@ test("expected pace uses historical share of month sales by that date", () => {
   assert.match(status.label, /50\.0% behind pace/);
 });
 
+test("historical sales pace applies only to sales KPIs", () => {
+  const reportDate = "2026-10-01";
+  const todayIso = "2026-10-09";
+  const workdayPace = ksaWorkdayProgressRatio(todayIso) * 100;
+  const snapshot = buildPerformanceSnapshot({
+    reportDate,
+    todayIso,
+    paceShares: { 9: 0.7 },
+    actuals: {
+      officeSupplies: 50,
+      localItemSales: 50,
+      otherSales: 50,
+      collection: 50,
+      newCustomers: 5,
+      repeatCustomers: 5,
+    },
+    targets: {
+      officeSupplies: 100,
+      localItemSales: 100,
+      otherSales: 100,
+      collection: 100,
+      newCustomers: 10,
+      repeatCustomers: 10,
+    },
+  });
+  const expectedByKey = Object.fromEntries(snapshot.kpis.map((kpi) => [kpi.key, kpi.expected]));
+
+  for (const key of ["officeSupplies", "localItemSales", "otherSales", "totalSales"]) {
+    assert.equal(expectedByKey[key], 70, `${key} should use historical sales pace`);
+  }
+  for (const key of ["collection", "newCustomers", "repeatCustomers"]) {
+    assert.equal(expectedByKey[key], workdayPace, `${key} should use elapsed KSA workdays`);
+  }
+});
+
 test("expected pace ignores a 0% historical start and uses working days instead", () => {
   const workday = ksaWorkdayProgressRatio("2026-09-08") * 100;
   assert.ok(workday > 0);

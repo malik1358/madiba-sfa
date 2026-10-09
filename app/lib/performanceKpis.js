@@ -33,6 +33,13 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "repeatCustomers",
 ];
 
+const SALES_PACE_KPI_KEYS = new Set([
+  "officeSupplies",
+  "localItemSales",
+  "otherSales",
+  "totalSales",
+]);
+
 export const PERFORMANCE_KPI_LABELS = {
   officeSupplies: "Sales of office supplies",
   localItemSales: "Local item sales",
@@ -430,7 +437,13 @@ export function buildPerformanceKpi(key, {
   paceShares = null,
 } = {}) {
   const achievement = achievementPercent(actual, target);
-  const status = kpiStatus({ actual, target, reportDate, todayIso, paceShares });
+  const status = kpiStatus({
+    actual,
+    target,
+    reportDate,
+    todayIso,
+    paceShares: SALES_PACE_KPI_KEYS.has(key) ? paceShares : null,
+  });
   return {
     key,
     label: PERFORMANCE_KPI_LABELS[key] || key,

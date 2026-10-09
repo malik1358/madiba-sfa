@@ -252,6 +252,7 @@ test("read-only preflight rejects effective write privileges and tolerates missi
   assert.match(runner, /has_database_privilege\(current_user, current_database\(\), 'CREATE'\)/);
   assert.match(runner, /has_database_privilege\(current_user, current_database\(\), 'TEMP'\)/);
   assert.match(runner, /WITH ADMIN OPTION/);
+  assert.match(runner, /administered_role\.oid <> pg_roles\.oid/);
   assert.match(runner, /pg_shdepend/);
   assert.match(runner, /ledger_column_write/);
   assert.match(runner, /write_any_relation/);

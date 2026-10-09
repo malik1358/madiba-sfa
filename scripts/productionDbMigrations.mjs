@@ -196,6 +196,9 @@ export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
   return `WITH protected_roles AS (
       SELECT oid FROM pg_roles
       WHERE rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole OR rolreplication
+        OR EXISTS (SELECT 1 FROM pg_roles AS administered_role
+          WHERE administered_role.oid <> pg_roles.oid
+            AND pg_has_role(pg_roles.oid, administered_role.oid, 'MEMBER WITH ADMIN OPTION'))
         OR has_database_privilege(oid, current_database(), 'CREATE')
         OR has_database_privilege(oid, current_database(), 'TEMP')
         OR EXISTS (SELECT 1 FROM pg_namespace AS namespace

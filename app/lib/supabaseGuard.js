@@ -56,15 +56,22 @@ export function assertSupabaseUrlAllowed(url, env = process.env) {
   if (!shouldEnforceLocalSupabaseGuard(env)) {
     return;
   }
-  if (!isProductionSupabaseUrl(url)) {
-    return;
+  if (isProductionSupabaseUrl(url)) {
+    throw new Error(
+      "Production Supabase is blocked in local/development. " +
+        "Use local Supabase credentials in .env.local (see .env.example). " +
+        "Do not point NEXT_PUBLIC_SUPABASE_URL at the production project.",
+    );
   }
 
-  throw new Error(
-    "Production Supabase is blocked in local/development. " +
-      "Use local Supabase credentials in .env.local (see .env.example). " +
-      "Do not point NEXT_PUBLIC_SUPABASE_URL at the production project.",
-  );
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return;
+  } catch {
+    // Invalid URLs are never valid local Supabase endpoints.
+  }
+
+  throw new Error("Local development requires Supabase running on this PC (localhost). Cloud staging is not supported.");
 }
 
 export function assertConfiguredSupabaseUrlAllowed(env = process.env) {

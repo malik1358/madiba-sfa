@@ -13,6 +13,7 @@ import {
   consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
   isOfficeSuppliesSale,
+  isLocalItemSale,
   kpiStatus,
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
@@ -23,7 +24,12 @@ import {
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
-import { loadSalesActuals, loadSalesPaceShares } from "../app/lib/performanceKpisServer.js";
+import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
+import {
+  loadPerformanceSnapshotsForSalesmen,
+  loadSalesActuals,
+  loadSalesPaceShares,
+} from "../app/lib/performanceKpisServer.js";
 
 function activeSalesAdmin(rows) {
   return {
@@ -166,8 +172,20 @@ test("nets signed sales and positive or negative credit notes by category", () =
       { category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 12 },
       { category: "Fridge", voucher_type: "Sales Return", sales_amount: -4 },
     ]),
-    { officeSupplies: 73, otherSales: 16 },
+    { officeSupplies: 73, localItemSales: 0, otherSales: 16 },
   );
+});
+
+test("classifies Local item sales after office supplies and excludes mixed origin", () => {
+  assert.equal(isLocalItemSale({ local_import: "Local" }), true);
+  assert.equal(isLocalItemSale({ local_import: "Local / Import" }), false);
+  assert.deepEqual(splitSalesActuals([
+    { category: "Office Supplies", local_import: "Local", sales_amount: 100 },
+    { category: "Electronics", local_import: "Local", sales_amount: 60 },
+    { category: "Electronics", local_import: "Import", sales_amount: 40 },
+    { category: "Electronics", local_import: "Local / Import", sales_amount: 10 },
+    { category: "Electronics", local_import: "Local", voucher_type: "Credit Note", sales_amount: 5 },
+  ]), { officeSupplies: 100, localItemSales: 55, otherSales: 50 });
 });
 
 test("credit notes do not count as buying customers", () => {
@@ -248,6 +266,89 @@ test("splits monthly collection visits between FIFO credit and cash invoices", (
   assert.deepEqual(actuals, { collection: 230, cashCollection: 115 });
 });
 
+test("KPI detail contributions reconcile net sales, buyers, and per-customer FIFO", () => {
+  const salesRows = [
+    { transaction_date: "2026-09-01", voucher_number: "INV-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", sales_amount: 100 },
+    { transaction_date: "2026-09-02", voucher_number: "INV-2", customer_code: "B", customer_name: "Beta", item_name: "Chair", category: "Furniture", local_import: "Local", sales_amount: 50 },
+    { transaction_date: "2026-09-03", voucher_number: "CN-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 10 },
+  ];
+  const office = buildKpiActualDetails({ kpiKey: "officeSupplies", salesmanCode: "SM01", salesRows });
+  const local = buildKpiActualDetails({ kpiKey: "localItemSales", salesmanCode: "SM01", salesRows });
+  const buyers = buildKpiActualDetails({ kpiKey: "newCustomers", salesmanCode: "SM01", salesRows });
+  assert.equal(office.actual, 90);
+  assert.equal(local.actual, 50);
+  assert.equal(buyers.actual, 2);
+
+  const collectionSalesRows = [
+    { transaction_date: "2026-07-31", voucher_number: "B-CREDIT", customer_code: "B", sales_amount: 100, quantity: 1, rate: 100 },
+    { transaction_date: "2026-08-01", voucher_number: "RC/100", customer_code: "A", sales_amount: 100, quantity: 1, rate: 100 },
+    { transaction_date: "2026-08-02", voucher_number: "NFD/200", customer_code: "A", sales_amount: 200, quantity: 1, rate: 200 },
+  ];
+  const collectionVisits = [{ id: 21, saved_at: "2026-09-04T10:00:00Z", customer_code: "A", amount_received: 230 }];
+  const credit = buildKpiActualDetails({
+    kpiKey: "collection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
+    fromDate: "2026-09-01", toDate: "2026-09-30",
+  });
+  const cash = buildKpiActualDetails({
+    kpiKey: "cashCollection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
+    fromDate: "2026-09-01", toDate: "2026-09-30",
+  });
+  assert.equal(credit.actual, 115);
+  assert.equal(cash.actual, 115);
+  assert.deepEqual(credit.rows.map((row) => row.invoiceReference), ["NFD/200"]);
+  assert.deepEqual(cash.rows.map((row) => row.invoiceReference), ["RC/100"]);
+});
+
+test("performance snapshots reuse source actuals cached for the active batch", async () => {
+  const queriedTables = [];
+  const cache = {
+    version: 2,
+    batchId: "42",
+    actualsBySalesman: {
+      SM001: {
+        officeSupplies: 10,
+        localItemSales: 3,
+        otherSales: 7,
+        collection: 5,
+        cashCollection: 2,
+        newCustomers: 1,
+        repeatCustomers: 2,
+      },
+    },
+    paceBySalesman: {},
+  };
+  const admin = {
+    from(table) {
+      queriedTables.push(table);
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq: (key, value) => { filters[key] = value; return query; },
+        in: () => query,
+        maybeSingle: async () => ({
+          data: {
+            setting_value: filters.setting_key === "active_sales_batch_id" ? "42" : JSON.stringify(cache),
+          },
+          error: null,
+        }),
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return query;
+    },
+  };
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
+    reportDate: "2026-09-01",
+  });
+
+  assert.equal(snapshot.actuals.totalSales, 20);
+  assert.equal(snapshot.actuals.localItemSales, 3);
+  assert.equal(snapshot.actuals.collection, 5);
+  assert.equal(queriedTables.includes("active_sales"), false);
+  assert.equal(queriedTables.includes("customers"), false);
+  assert.equal(queriedTables.includes("collection_visits"), false);
+});
+
 test("does not move Others target into office supplies after save", () => {
   const saved = normalizePerformanceTargets({
     salesmanCode: "SM001",
@@ -292,12 +393,13 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 7);
+  assert.equal(snapshot.kpis.length, 8);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
-  assert.equal(snapshot.kpis[1].label, "Others");
-  assert.equal(snapshot.kpis[2].label, "Total sales");
-  assert.equal(snapshot.kpis[2].actual, 55);
-  assert.equal(snapshot.kpis[2].target, 150);
+  assert.equal(snapshot.kpis[1].label, "Local item sales");
+  assert.equal(snapshot.kpis[2].label, "Others");
+  assert.equal(snapshot.kpis[3].label, "Total sales");
+  assert.equal(snapshot.kpis[3].actual, 55);
+  assert.equal(snapshot.kpis[3].target, 150);
   const cashCollection = snapshot.kpis.find((kpi) => kpi.key === "cashCollection");
   assert.equal(cashCollection.actual, 0);
   assert.equal(cashCollection.target, 0);

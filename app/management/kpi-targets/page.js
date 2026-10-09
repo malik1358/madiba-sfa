@@ -53,6 +53,7 @@ const TEXT = {
   teamHint: { en: "Team target", ar: "هدف الفريق" },
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
@@ -88,6 +89,7 @@ function emptyDraft(snapshot) {
     bossName: String(snapshot.bossName || "").trim(),
     isTeam: Boolean(snapshot.isTeam),
     officeSupplies: String(snapshot.targets?.officeSupplies ?? 0),
+    localItemSales: String(snapshot.targets?.localItemSales ?? 0),
     otherSales: String(snapshot.targets?.otherSales ?? 0),
     totalSales: String(snapshot.targets?.totalSales ?? 0),
     collection: String(snapshot.targets?.collection ?? 0),
@@ -112,6 +114,13 @@ function withLiveTeamActuals(rows) {
       })),
     };
   });
+}
+
+function actualDetailsHref(month, kpiKey, salesmanCodes) {
+  const codes = [...new Set((salesmanCodes || []).map(normalizeSalesmanCode).filter(Boolean))];
+  if (!codes.length) return "";
+  const params = new URLSearchParams({ month, kpi: kpiKey, salesmanCodes: codes.join(",") });
+  return `/management/kpi-targets/details?${params.toString()}`;
 }
 
 export default function KpiTargetsPage() {
@@ -198,8 +207,11 @@ export default function KpiTargetsPage() {
               salesmanCode: row.salesmanCode,
               targets: {
                 officeSupplies: Number(row.officeSupplies || 0),
+                localItemSales: Number(row.localItemSales || 0),
                 otherSales: Number(row.otherSales || 0),
-                totalSales: (Number(row.officeSupplies || 0) || 0) + (Number(row.otherSales || 0) || 0)
+                totalSales: (Number(row.officeSupplies || 0) || 0)
+                  + (Number(row.localItemSales || 0) || 0)
+                  + (Number(row.otherSales || 0) || 0)
                   || Number(row.totalSales || 0),
                 collection: Number(row.collection || 0),
                 newCustomers: Number(row.newCustomers || 0),
@@ -431,10 +443,15 @@ export default function KpiTargetsPage() {
                         const isInformationOnly = key === "cashCollection";
                         const targetValue = isTotalSales
                           ? String(
-                            (Number(row.officeSupplies || 0) || 0) + (Number(row.otherSales || 0) || 0)
+                            (Number(row.officeSupplies || 0) || 0)
+                              + (Number(row.localItemSales || 0) || 0)
+                              + (Number(row.otherSales || 0) || 0)
                             || Number(row.totalSales || 0),
                           )
                           : (isInformationOnly ? "" : row[key]);
+                        const detailSalesmen = row.isTeam
+                          ? teamMemberRows(liveRows, row.bossCode).map((member) => member.salesmanCode)
+                          : [row.salesmanCode];
                         const liveKpi = buildPerformanceKpi(key, {
                           actual: kpi?.actual || 0,
                           target: Number(targetValue || 0),
@@ -450,6 +467,7 @@ export default function KpiTargetsPage() {
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
+                            actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(liveKpi.achievement)}
                             ofTarget={t("ofTarget")}
                             status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
@@ -462,7 +480,9 @@ export default function KpiTargetsPage() {
                                 if (item.salesmanCode !== row.salesmanCode) return item;
                                 const next = { ...item, [key]: value };
                                 next.totalSales = String(
-                                  (Number(next.officeSupplies || 0) || 0) + (Number(next.otherSales || 0) || 0),
+                                  (Number(next.officeSupplies || 0) || 0)
+                                    + (Number(next.localItemSales || 0) || 0)
+                                    + (Number(next.otherSales || 0) || 0),
                                 );
                                 return next;
                               }));
@@ -491,10 +511,14 @@ export default function KpiTargetsPage() {
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const isInformationOnly = key === "cashCollection";
+                        const detailSalesmen = visibleRows
+                          .filter((row) => !row.isTeam)
+                          .map((row) => row.salesmanCode);
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, column.actual)}
+                            actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(column.achievement)}
                             ofTarget={t("ofTarget")}
                             status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
@@ -594,6 +618,7 @@ function kpiStatusClass(statusKey) {
 
 function KpiTargetCells({
   actual,
+  actualHref,
   achievement,
   ofTarget,
   status,
@@ -605,7 +630,7 @@ function KpiTargetCells({
 }) {
   return (
     <>
-      <td>{actual}</td>
+      <td>{actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}</td>
       <td>
         <input
           className="moduleInput moduleKpiTargetInput"

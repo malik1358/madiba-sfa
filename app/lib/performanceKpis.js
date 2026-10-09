@@ -14,6 +14,7 @@ export function isMissingSchemaColumn(error) {
 
 export const PERFORMANCE_KPI_KEYS = [
   "officeSupplies",
+  "localItemSales",
   "otherSales",
   "collection",
   "cashCollection",
@@ -23,6 +24,7 @@ export const PERFORMANCE_KPI_KEYS = [
 
 export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "officeSupplies",
+  "localItemSales",
   "otherSales",
   "totalSales",
   "collection",
@@ -33,6 +35,7 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
 
 export const PERFORMANCE_KPI_LABELS = {
   officeSupplies: "Sales of office supplies",
+  localItemSales: "Local item sales",
   otherSales: "Others",
   totalSales: "Total sales",
   collection: "Collection",
@@ -41,9 +44,10 @@ export const PERFORMANCE_KPI_LABELS = {
   repeatCustomers: "Repeat customers",
 };
 
-const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "cashCollection", "sales"]);
+const MONEY_KPI_KEYS = new Set(["officeSupplies", "localItemSales", "otherSales", "totalSales", "collection", "cashCollection", "sales"]);
 const TARGET_FIELD_ALIASES = {
   officeSupplies: ["officeSupplies", "office_supplies_sales_target", "office_supplies_target"],
+  localItemSales: ["localItemSales", "local_item_sales_target"],
   otherSales: ["otherSales", "other_sales_target"],
 };
 
@@ -74,7 +78,12 @@ export function isOfficeSuppliesSale(row = {}) {
   );
 }
 
-function netKpiSalesAmount(row = {}) {
+export function isLocalItemSale(row = {}) {
+  const origin = String(row?.local_import || "").trim().toLowerCase();
+  return /\blocal\b/.test(origin) && !/\bimport(?:ed)?\b/.test(origin);
+}
+
+export function netKpiSalesAmount(row = {}) {
   const amount = Number(row?.sales_amount || 0);
   if (!Number.isFinite(amount)) return 0;
   return isCreditNoteTransaction(row) ? -Math.abs(amount) : amount;
@@ -85,9 +94,10 @@ export function splitSalesActuals(rows = []) {
     const amount = netKpiSalesAmount(row);
     if (amount === 0) return totals;
     if (isOfficeSuppliesSale(row)) totals.officeSupplies += amount;
+    else if (isLocalItemSale(row)) totals.localItemSales += amount;
     else totals.otherSales += amount;
     return totals;
-  }, { officeSupplies: 0, otherSales: 0 });
+  }, { officeSupplies: 0, localItemSales: 0, otherSales: 0 });
 }
 
 export function normalizeSalesmanCode(value) {
@@ -290,6 +300,7 @@ export function kpiStatus({
 export function emptyPerformanceActuals() {
   return {
     officeSupplies: 0,
+    localItemSales: 0,
     otherSales: 0,
     totalSales: 0,
     collection: 0,
@@ -302,6 +313,7 @@ export function emptyPerformanceActuals() {
 export function emptyPerformanceTargets() {
   return {
     officeSupplies: 0,
+    localItemSales: 0,
     otherSales: 0,
     totalSales: 0,
     collection: 0,
@@ -313,25 +325,30 @@ export function emptyPerformanceTargets() {
 
 export function withTotalSales(values = {}) {
   const officeSupplies = Number(values.officeSupplies || 0) || 0;
+  const localItemSales = Number(values.localItemSales || 0) || 0;
   const otherSales = Number(values.otherSales || 0) || 0;
   return {
     ...values,
     officeSupplies,
+    localItemSales,
     otherSales,
-    totalSales: officeSupplies + otherSales,
+    totalSales: officeSupplies + localItemSales + otherSales,
   };
 }
 
 export function normalizePerformanceTargets(row = {}) {
   const splitOffice = firstPresentNumber(row, TARGET_FIELD_ALIASES.officeSupplies);
+  const splitLocal = firstPresentNumber(row, TARGET_FIELD_ALIASES.localItemSales);
   const splitOther = firstPresentNumber(row, TARGET_FIELD_ALIASES.otherSales);
-  const hasSplitSales = splitOffice != null || splitOther != null;
+  const hasSplitSales = splitOffice != null || splitLocal != null || splitOther != null;
   const officeSupplies = hasSplitSales ? (splitOffice || 0) : 0;
+  const localItemSales = hasSplitSales ? (splitLocal || 0) : 0;
   const otherSales = hasSplitSales ? (splitOther || 0) : 0;
-  const splitTotal = officeSupplies + otherSales;
+  const splitTotal = officeSupplies + localItemSales + otherSales;
 
   return {
     officeSupplies,
+    localItemSales,
     otherSales,
     totalSales: splitTotal > 0 ? splitTotal : (Number(row.totalSales ?? row.sales ?? row.sales_target ?? 0) || 0),
     collection: Number(row.collection ?? row.collection_target ?? 0) || 0,

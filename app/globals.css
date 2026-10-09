@@ -5279,6 +5279,13 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 600;
 }
 
+.moduleKpiActualLink {
+  color: #075e75;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .moduleKpiUpdatedStatus {
   margin: 0 0 14px;
   padding: 10px 12px;

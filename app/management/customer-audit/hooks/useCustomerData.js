@@ -157,6 +157,9 @@ export function useCustomerData({ setError, setMessage }) {
         customer.customer_code,
         {
           customerName: customer.customer_name || "",
+          // Settlement math (FIFO paid/open) must never show a stale cached snapshot
+          // after an upload; always hit the network here, like Payment Settlement does.
+          revalidate: true,
           onUpdate: (freshHistory) => {
             setTransactions(freshHistory.transactions || []);
             setPeerTransactions(freshHistory.peerTransactions || []);

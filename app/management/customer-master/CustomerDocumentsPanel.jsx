@@ -255,25 +255,37 @@ export default function CustomerDocumentsPanel({ customer, t, onClose }) {
                 </label>
               ) : null}
 
-              <input
-                id={`customer-doc-${slot.id}`}
-                type="file"
-                accept="application/pdf,image/*"
-                disabled={Boolean(uploadingType)}
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) uploadDocument(slot.id, file);
-                }}
-              />
-              <label
-                htmlFor={`customer-doc-${slot.id}`}
-                className="moduleInlineButton moduleActionButton"
-                style={{ marginTop: "8px", cursor: uploadingType ? "not-allowed" : "pointer" }}
-              >
-                {uploadingType === slot.id ? t("uploadingDocument") : t("uploadDocument")}
-              </label>
+              <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
+                <label className="moduleInlineButton moduleActionButton" style={{ cursor: uploadingType ? "not-allowed" : "pointer" }}>
+                  {t("capturePhoto")}
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    disabled={Boolean(uploadingType)}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) uploadDocument(slot.id, file);
+                    }}
+                  />
+                </label>
+                <label className="moduleInlineButton moduleActionButton" style={{ cursor: uploadingType ? "not-allowed" : "pointer" }}>
+                  {uploadingType === slot.id ? t("uploadingDocument") : t("chooseFile")}
+                  <input
+                    hidden
+                    type="file"
+                    accept="application/pdf,image/*"
+                    disabled={Boolean(uploadingType)}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) uploadDocument(slot.id, file);
+                    }}
+                  />
+                </label>
+              </div>
             </div>
           );
         })}

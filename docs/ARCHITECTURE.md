@@ -2,7 +2,7 @@
 
 ## Backup Automation
 
-Standalone scripts under `scripts/backup/` run in gated, main-only GitHub Actions workflows, separate from Next.js and the local Supabase guard. They make read-only PostgreSQL, Supabase Storage/Management, and Vercel requests; archive Git history; encrypt with age; and upload to a private personal Google Drive folder through rclone. Vercel environment values are not decrypted/exported, Auth secrets are redacted, and operator recovery data contains only a vault reference and secret names. A separate workflow monitors failed or overdue backups. Offline verification does not write to a database. Database and Storage snapshots are not atomic. Activation, custody, and selective Supabase restore requirements are in `docs/BACKUP_RECOVERY.md`; code on a branch does not mean backups are active or restore-tested.
+Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub Actions workflow, separate from Next.js and its local Supabase guard. They use read-only PostgreSQL exports, read-only Supabase Storage/Management and Vercel reads, verified Git bundles, age public-key encryption, and rclone uploads to a private personal Google Drive folder. Only the dedicated cloud backup environment receives production credentials. A separate health workflow detects failed/missed exports; offline verification never writes a database. Database and Storage snapshots are not atomic. Activation and selective Supabase recovery requirements are documented in `docs/BACKUP_RECOVERY.md`; implemented tooling alone does not mean backups are active or restore-tested.
 
 ## Stack
 
@@ -45,8 +45,6 @@ The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/h
 
 Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
 
-Report tables use the shared `ReportTableSorter` app-shell component for sortable report headers, including tables not wrapped for Excel export. It covers the shared `moduleTable` class and read-only Customer Audit matrix/history tables. Sorting uses `app/lib/tableColumnFilter.js` row groups so expanded detail rows remain attached and total rows stay last; tables with editable body controls are excluded.
-
 ## Role system and `moduleAccess.js`
 
 Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.mjs`).
@@ -57,7 +55,6 @@ Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.
 - GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers).
 - Invoice management: `canManageOrderInvoice` for invoice-maker, admin, manager.
 - Management report viewing: invoice makers can view the Reports group and collection reports, including cross-user data where the report API grants that scope. Report email sending and setup/configuration remain separately gated.
-- Exception: `customerGpsHistory` (`/management/customer-gps-history`) is admin/manager only, enforced by both module access and the GPS-history API.
 - Stock take: admin or `profiles.stock_take_access`.
 - Salesman visit plan for field roles depends on `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` (default enabled).
 - `myCollections` module flag is always `false`; `/management/my-collections` remains reachable via `canAccessPath` when payment collections are allowed.
@@ -111,11 +108,11 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/import-sales`, `/api/upload-files`, `/api/pricing/cache`, `/api/admin/price-sync`
 - `/api/business-dashboard`, `/api/business-dashboard/category-growth`
 - `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth)
-- `/api/promoter-coverage` — authenticated report access; validates the selected product promoter and loads that promoter's team coverage, visit history, and monthly customer sales trend
+- `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
-- `/api/admin/customers/gps-history` retains the existing per-customer latest-50 history response; report mode adds `from`/`to` KSA date bounds, `page` (50 rows), optional exact normalized `customerCode`, and `acceptedOnly=true` (source `salesman_accepted`). Report dates default to the current KSA month through today. `app/lib/customerGpsReport.js` hydrates names and computes displacement/maps/explicit approval; exports use only the displayed page.
+- `/management/customer-gps-history` uses `.../gps-history?from=...&to=...` for paginated cross-customer audit reporting; the legacy `customerCode`-only API remains unchanged. `customerGpsReport.js` supplies KSA bounds, coordinate validation, displacement and explicit approval classification.
 - `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
-- `/api/cron/kpi-targets-email` — manually dispatches a selected month’s complete KPI snapshot to each active KPI-eligible salesperson, with all reporting-chain bosses on CC; authorized by `CRON_SECRET`.
+- `/api/admin/kpi-targets/details` — role- and sales-scope-protected transaction detail rows behind KPI actual links.
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
 - `/api/admin/push-notifications`, `/api/tally-item-units`, `/api/stock-take`
@@ -125,18 +122,19 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/mobile-snapshot`, `/api/offline-data-version`, `/api/push-tokens`
 - `/api/app-config`, `/api/build-info`, `/api/user-activity`
 - `/api/working-hours` — attendance columns plus daily salesman working hours from near-visit lunch segments; the daily salesman resume reuses this report calculation
-- `/api/daily-visit-report`, `/api/daily-visit-report/email` (admin/manager manual send; `digestOnly: true` + `date` is admin-only and sends just the all-teams digest to the caller's login email — no salesman or team-leader emails), `/api/inactivity-email-log`
+- `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)
 
-- `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`
+- `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`, `daily-receipt-email`
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
+- `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`.
 - `salesman-visit-plan-email`, `mobile-snapshot`
-- `customer-gps-change-email` - `app/lib/customerGpsChangeEmailServer.js` loads salesman-accepted changes for the previous completed KSA calendar day, sends via the existing mailer, and atomically claims each date in `system_settings` before delivery. See deployment recovery rules before clearing a claim.
 
 ## Authentication
 
 1. Home page signs in with `supabase.auth.signInWithPassword`.
+  Network/auth-host failures show a connection error rather than claiming the password is wrong. A reachable PC-local Supabase backend is required for local sign-in; neither the legacy cloud staging project nor production belongs in local config.
 2. Profile row is `public.profiles` where `id` is `auth.users.id`.
 3. `app/lib/authSession.js` caches the session for a few seconds and times out slow `getSession` calls.
 4. API routes expect `Authorization: Bearer <access token>`, then `auth.getUser`.
@@ -186,7 +184,7 @@ Do not assume a page always has a live network read. Several screens render from
 ## GPS
 
 - Background and idle pings: `app/lib/nativeFieldTracking.js` and `POST /api/gps-ping`. Pings are `daily_activity_logs` rows with `entry_type = GPS_PING` and a JSON note. They are allowed only inside an open KSA work session (after morning attendance, before end of day).
-- Salesman home points are stored on `profiles` and shown in the Daily Visit Report and its email. A database trigger rejects login/logout attendance within 500 m of the user's home, and another prevents customer pins within 25 m of any saved home point. Shared customer GPS writes check the actor's 500 m home radius, including automatic visit promotion and imports. Saving a home from Salesman Hierarchy clears pins within 25 m through the audited GPS-history helper.
+- Salesman home points are stored on `profiles` and shown in the Daily Visit Report and its email. A database trigger rejects login/logout attendance within 500 m of the user's home, and another prevents customer pins within 25 m of any saved home point. Shared customer GPS writes also check the actor's 500 m home radius, including automatic visit promotion and imports. Saving a home from Salesman Hierarchy clears pins within 25 m through the audited GPS-history helper.
 - Customer coordinates: `PATCH /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`. Field visits auto-promote GPS onto the customer when none is saved yet — server-side in `/api/visit-reports` and collection saves (`promoteEntryGpsToCustomerIfMissing`), and client-side in `customerLocation.js`. Outstanding Without GPS also backfills from `visit_report_latest` / collection visit GPS when the master pin is still empty. Far-from-saved still prompts.
 - Collection visits store their own lat/long on `collection_visits` when those columns exist.
 - Daily Visit Report associates accepted GPS-update prompts with the visit: My Day stores the acceptance in its activity-note JSON, collection saves link a GPS activity note by visit id, and older accepted overwrites are recognized from matching `customer_gps_history` rows. These visits show an accepted-update label and are excluded from Far status/counts; no new database column is required.
@@ -194,15 +192,18 @@ Do not assume a page always has a live network read. Several screens render from
 
 ## Reporting pipeline
 
+- Customer cohort aggregation accepts `period: "month"` for the monthly matrix. The protected customer-growth payload includes `customerCohorts` and `customerMonthlyCohorts`, derived from the same full-history rows. Quarter/Month switching is client-side and exports the selected grid. Dates choose whole column periods; purchase sets are not trimmed by partial dates or year/month filters. No new endpoint, dataset key, or migration.
+
 BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-growth`.
 
-- Customer retention is a bilingual quarterly/bimonthly/monthly cohort matrix at the top of BI Customer Growth. `app/lib/customerCohorts.js` fixes first-invoice periods from full active-upload history; the protected category-growth loader attaches all three cohort datasets from prepared cube rows or paginated `active_sales`. Date filters select whole displayed periods. The footer has separate period-level **Retained customers** (only earlier cohorts) and **Total customers** (all distinct period buyers including new acquisitions) rows; retention percentages use only the earlier cohort base. Acquisition-period cells are marked New. Values mode shows ex-VAT sales beside distinct buyer counts. Monetary labels use `﷼`; parsers still accept `SAR` source data. Client search/signal filters apply only to the existing growth report. `CustomerCohortReport.jsx` uses colored BI tables and Excel export. No additional scan, endpoint, settings key, or database migration.
+- Customer retention is a bilingual quarterly cohort matrix at the top of BI Customer Growth. `app/lib/customerCohorts.js` fixes first-invoice quarters from full active-upload history before applying filters; the protected category-growth loader attaches `customerCohorts` from prepared cube rows or paginated `active_sales`. The matrix follows customer-applied field filters and the global BI period; client search/signal filters apply only to the existing growth report. `CustomerCohortReport.jsx` uses colored BI tables and Excel export with count-only or count-plus-retention-% cells such as `70 (70.0%)`. No additional scan, endpoint, settings key, or database migration.
 
 - Facts come from `active_sales` (including `profit_amount` when the column exists).
-- The Business Intelligence Sales mix tab compares monthly and quarterly cash/credit and local/import gross invoice sales from additional measures in `sales_bi_cube_v1`; monthly and quarterly reconciliation tables show gross invoices, credit-note/return adjustments, and net sales side by side. Ratio movement uses period totals. It uses the current BI date filters and has no new endpoint or database schema requirement. The cube is version 6; older prepared models rebuild with the new measures.
+- `/api/performance` reuses per-month actuals and six-month salesperson pace curves stored at `system_settings.performance_kpi_actuals_v1:<month-start>`. Sales-upload completion and collection-visit saves rebuild the current month's cache in post-response work. Each request still performs authentication/scope checks and reads current KPI targets; a missing or batch-mismatched cache is rebuilt on demand. Cache values contain calculated actuals/pace, not transaction-detail rows; details remain loaded by the separate scoped KPI details API.
+- The Business Intelligence Sales mix tab compares monthly cash/credit and local/import invoice sales from additional measures in `sales_bi_cube_v1`; it uses the current BI date filters, excludes credit notes/returns, and has no new endpoint or database schema requirement. The cube version is bumped so an older prepared model rebuilds with the new measures.
 - The Business Intelligence MADIBA tab uses the existing category-growth API with an item-name filter on the monthly cube (or its live-sales fallback). It presents category and matching item trends using the shared period and sales/profit controls; no new table or endpoint is required.
 - MADIBA category GP % grids pair the prepared sales and profit measure groups by category in `app/lib/madibaBrandGp.js`; they keep the existing quarterly/monthly windows and table filters without another API request.
-- `app/lib/salesBiCube.js` aggregates monthly facts. The compact cube is stored at `sales_bi_cube_v1`. Version constant is `SALES_BI_CUBE_VERSION` (currently 6). A rebuild is required when composition measures are added, profit data appears, or the import time changes.
+- `app/lib/salesBiCube.js` aggregates monthly facts. The compact cube is stored at `sales_bi_cube_v1`. Version constant is `SALES_BI_CUBE_VERSION` (currently 4). A rebuild is required when profit data appears or the import time changes.
 - Optional table `sales_bi_monthly` is created only by `sql/setup_sales_bi_monthly.sql`. The app is written to keep working from the settings blob if the table is absent.
 - Period presets are `app/lib/biReportPeriod.js` (`mtd`, `qtd`, `ytd`, last month, last 3/6/12 months, custom).
 - Month-over-month coloring is `app/lib/salesmanMom.js` and `categoryGrowth.js`. Current incomplete month is not treated as a closed comparison month.

@@ -96,6 +96,8 @@ const TEXT = {
   allProspects: { en: "All Prospects", ar: "كل العملاء المحتملين" },
   allProspectsHint: { en: "All registered prospects in your scope, newest first.", ar: "كل العملاء المحتملين المسجلين ضمن صلاحياتك، الأحدث أولاً." },
   searchProspects: { en: "Search prospects", ar: "بحث في العملاء المحتملين" },
+  capturePhoto: { en: "Take Photo", ar: "التقاط صورة" },
+  chooseDocument: { en: "Choose File / PDF", ar: "اختيار ملف / PDF" },
   orderNumber: { en: "Order #", ar: "رقم الطلب" },
   noOrders: { en: "No order", ar: "لا يوجد طلب" },
 };
@@ -1292,7 +1294,25 @@ export default function NewCustomerPage() {
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
-                <input className="moduleInput" type="file" onChange={handleDocumentPick} />
+                <label className="moduleInlineButton moduleActionButton">
+                  {t("capturePhoto")}
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleDocumentPick}
+                  />
+                </label>
+                <label className="moduleInlineButton moduleActionButton">
+                  {t("chooseDocument")}
+                  <input
+                    hidden
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handleDocumentPick}
+                  />
+                </label>
               </div>
               {documents.length > 0 && (
                 <ul className="moduleList">

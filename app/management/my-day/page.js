@@ -153,6 +153,7 @@ const PAGE_TEXT = {
   averageMonthlyPurchase: { en: "Avg Monthly Purchase", ar: "متوسط المشتريات الشهرية" },
   highestMonthlySales: { en: "Highest Monthly Sales", ar: "أعلى مبيعات شهرية" },
   customer: { en: "Customer", ar: "العميل" },
+  customerCode: { en: "Customer Code", ar: "رمز العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   daysSinceLastInvoice: { en: "Days From Last Invoice", ar: "الأيام منذ آخر فاتورة" },
   daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
@@ -2594,6 +2595,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <thead>
                 <tr>
                   <th>{t("customer")}</th>
+                  <th>{t("customerCode")}</th>
                   <th>{t("cityArea")}</th>
                   <th>{t("daysSinceLastInvoice")}</th>
                   <th>{t("daysSinceLastVisit")}</th>
@@ -2621,6 +2623,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                         </button>
                       </div>
                     </td>
+                    <td>{row.customer_code || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>

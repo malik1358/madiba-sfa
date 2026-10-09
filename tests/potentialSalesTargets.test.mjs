@@ -9,6 +9,7 @@ import {
   isPotentialSalesTarget,
   potentialSalesTargetMatchesSalesman,
   potentialSalesTargetMonthKeys,
+  potentialSalesTargetVisitedWithinDays,
   sumPotentialSalesByCustomerAndMonth,
 } from "../app/lib/potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "../app/lib/potentialSalesTargetsServer.js";
@@ -225,4 +226,24 @@ test("last visit dates are keyed by customer and the visiting salesman's profile
   assert.equal(dates.get("1001::SM002"), "2026-10-03");
   assert.equal(potentialSalesTargetMatchesSalesman({ current_salesman_code: "SM001" }, "SM001"), true);
   assert.equal(potentialSalesTargetMatchesSalesman({ salesman_code: "SM002" }, "SM001"), false);
+});
+
+test("standalone targets exclude visits today through eight days ago by the same salesman", () => {
+  const row = {
+    salesman_code: "SM001",
+    last_visit_by_salesman: {
+      SM001: "2026-10-01",
+      SM002: "2026-10-09",
+    },
+  };
+  assert.equal(potentialSalesTargetVisitedWithinDays(row, { todayKey: "2026-10-09" }), true);
+  assert.equal(potentialSalesTargetVisitedWithinDays({
+    ...row,
+    last_visit_by_salesman: { ...row.last_visit_by_salesman, SM001: "2026-09-30" },
+  }, { todayKey: "2026-10-09" }), false);
+  assert.equal(potentialSalesTargetVisitedWithinDays(row, { todayKey: "2026-10-09", salesmanCode: "SM002" }), true);
+  assert.equal(potentialSalesTargetVisitedWithinDays({
+    salesman_code: "SM001",
+    last_visit_by_salesman: { SM001: "2026-10-09" },
+  }, { todayKey: "2026-10-09", salesmanCode: "SM002" }), false);
 });

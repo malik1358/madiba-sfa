@@ -5,6 +5,7 @@ import {
   potentialSalesTargetMatchesSalesman,
   potentialSalesTargetMonthKeys,
   potentialSalesTargetSalesmanCode,
+  potentialSalesTargetVisitedWithinDays,
 } from "../../lib/potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "../../lib/potentialSalesTargetsServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
@@ -137,7 +138,9 @@ export async function GET(request) {
       includeBrowserDetails: true,
       profiles: allowedProfiles,
     });
-    const eligibleTargets = targets.filter((row) => isPotentialSalesTarget(row, { todayKey }));
+    const eligibleTargets = targets
+      .filter((row) => isPotentialSalesTarget(row, { todayKey }))
+      .filter((row) => !potentialSalesTargetVisitedWithinDays(row, { todayKey, days: 8 }));
     const allowedCodeArray = managementAccess ? null : [...allowedCodes];
     const salesmanOptions = salesmanOptionsForTargets(
       eligibleTargets,

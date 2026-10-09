@@ -82,7 +82,11 @@ async function databaseFixture(options = {}) {
     }
     if (command === "age") await writeFile(args[args.indexOf("--output") + 1], "encrypted");
     if (command === "rclone" && args[0] === "lsjson") {
-      if (args.includes("--stat")) return JSON.stringify({ Size: 9, Hashes: { MD5: options.badChecksum ? "bad" : createHash("md5").update("encrypted").digest("hex") } });
+      if (args.includes("--stat")) {
+        const hash = options.badChecksum ? "bad" : createHash("md5").update("encrypted").digest("hex");
+        return JSON.stringify({ Size: options.badSize ? 8 : 9,
+          Hashes: options.noRemoteHash ? {} : options.lowercaseMd5 ? { md5: hash } : { MD5: hash } });
+      }
       return JSON.stringify([
         { Name: "madiba-sfa-database-20200101T000000Z-old.tar.gz.age" },
         { Name: "madiba-sfa-database-20261005T001700Z-new.tar.gz.age" },
@@ -276,5 +280,21 @@ test("post-dump file access failures report safe categories without paths", asyn
       assert.ok(!error.message.includes("customer-table"));
       return true;
     });
+  }
+});
+
+test("Drive upload verification accepts lowercase MD5 key and refuses unverifiable uploads", async () => {
+  const lowercase = await databaseFixture({ lowercaseMd5: true });
+  try {
+    const result = await runBackup(lowercase.config, { run: lowercase.fakeRun, tempRoot: lowercase.root });
+    assert.equal(result.manifest.mode, "database");
+  } finally { await rm(lowercase.root, { recursive: true, force: true }); }
+  for (const options of [{ noRemoteHash: true }, { badSize: true }]) {
+    const fixture = await databaseFixture(options);
+    try {
+      await assert.rejects(runBackup(fixture.config, { run: fixture.fakeRun, tempRoot: fixture.root }), /Backup stage failed: Google Drive upload verification.*size_match=/);
+      assert.ok(fixture.calls.some((call) => call.args[0] === "copyto"));
+      assert.ok(!fixture.calls.some((call) => call.args[0] === "deletefile"));
+    } finally { await rm(fixture.root, { recursive: true, force: true }); }
   }
 });

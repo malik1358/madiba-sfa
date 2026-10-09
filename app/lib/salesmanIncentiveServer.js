@@ -53,6 +53,7 @@ async function pageThrough(buildQuery) {
   while (true) {
     const { data, error } = await buildQuery()
       .order("transaction_date", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     const page = Array.isArray(data) ? data : [];

@@ -39,6 +39,13 @@ test("potential sales targets require positive outstanding strictly below SAR 15
   }
 });
 
+test("outstanding at or above SAR 15000 qualifies only below highest completed-month sales", () => {
+  const sales_by_month = { "2026-07": 18000, "2026-08": 12000, "2026-09": 14000, "2026-10": 99000 };
+  assert.equal(isPotentialSalesTarget({ ...customer, total_outstanding: 17999, sales_by_month }, options), true);
+  assert.equal(isPotentialSalesTarget({ ...customer, total_outstanding: 18000, sales_by_month }, options), false);
+  assert.equal(isPotentialSalesTarget({ ...customer, total_outstanding: 18001, sales_by_month }, options), false);
+});
+
 test("potential sales targets exclude inactive customers and recent or missing invoices", () => {
   assert.equal(isPotentialSalesTarget({ ...customer, is_active: false }, options), false);
   for (const last_invoice_date of ["2026-09-22", "2026-10-07", "2026-10-08", "", "bad"]) {
@@ -76,6 +83,8 @@ test("loader uses active customers and latest actual invoice, not credit notes o
       select(fields) { queries.push({ table, fields, filters }); return this; },
       eq(...args) { filters.push(args); return this; },
       gt() { return this; }, lte() { return this; }, in() { return this; }, order() { return this; },
+      gte(...args) { filters.push(["gte", ...args]); return this; },
+      lt(...args) { filters.push(["lt", ...args]); return this; },
       async range() {
         return { data: table === "customers" ? [
           { customer_code: "C1", customer_name: "Shop", current_salesman_code: "SM001", is_active: true, latest_transaction_date: "2026-09-01" },
@@ -96,6 +105,54 @@ test("loader uses active customers and latest actual invoice, not credit notes o
   assert.equal(rows[0].total_outstanding, total_outstanding);
   assert.equal(rows[0].last_invoice_date, "2026-09-25");
   assert.equal(isPotentialSalesTarget(rows[0], options), false);
+});
+
+test("email target loader uses net sales from the three completed months for higher balances", async () => {
+  const dataByTable = {
+    customers: [{
+      customer_code: "C1", customer_name: "Shop", current_salesman_code: "SM001",
+      is_active: true, latest_transaction_date: "2026-09-21",
+    }],
+    active_sales: [
+      { customer_code: "C1", transaction_date: "2026-07-15", sales_amount: 25000, voucher_type: "Sales" },
+      { customer_code: "C1", transaction_date: "2026-07-20", sales_amount: 3000, voucher_type: "Credit Note" },
+      { customer_code: "C1", transaction_date: "2026-08-18", sales_amount: 19000, voucher_type: "Sales" },
+      { customer_code: "C1", transaction_date: "2026-09-18", sales_amount: 20000, voucher_type: "Sales" },
+      { customer_code: "C1", transaction_date: "2026-10-02", sales_amount: 50000, voucher_type: "Sales" },
+    ],
+  };
+  const admin = { from(table) {
+    const filters = [];
+    const query = {
+      select() { return this; }, eq() { return this; }, gt() { return this; }, lte() { return this; },
+      in() { return this; }, order() { return this; }, gte(...args) { filters.push(["gte", ...args]); return this; },
+      lt(...args) { filters.push(["lt", ...args]); return this; },
+      async range() {
+        const rows = dataByTable[table] || [];
+        if (table === "customers") return { data: rows, error: null };
+        const startDate = filters.find(([operator]) => operator === "gte")?.[2];
+        const endDate = filters.find(([operator]) => operator === "lt")?.[2];
+        return {
+          data: startDate && endDate
+            ? rows.filter((row) => row.transaction_date >= startDate && row.transaction_date < endDate)
+            : [],
+          error: null,
+        };
+      },
+    };
+    return query;
+  } };
+  const { total_outstanding, ...collectionRecord } = customer;
+  const rows = await loadPotentialSalesTargetCustomers(admin, {
+    records: [{
+      ...collectionRecord,
+      total_outstanding: 21000,
+      invoices: [{ pending_amount: 21000, invoice_day: 16, invoice_date: "2026-09-21" }],
+    }],
+    ...options,
+  });
+  assert.deepEqual(rows[0].sales_by_month, { "2026-07": 22000, "2026-08": 19000, "2026-09": 20000, "2026-10": 0 });
+  assert.equal(isPotentialSalesTarget(rows[0], options), true);
 });
 
 test("browser target loader returns order date, salesperson visit, three completed sales months and current MTD", async () => {

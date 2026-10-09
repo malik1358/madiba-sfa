@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup } from "../scripts/backup/run-backup.mjs";
+import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -204,4 +204,13 @@ test("database diagnostics classify failures without copying identifiers or cred
   }), (error) => !error.message.includes("private-password") && error.message.includes("database archive"));
   await assert.rejects(execute(process.execPath, ["-e", "console.error('password authentication failed private-password');process.exit(1)"]),
     (error) => error instanceof BackupDiagnosticError && /authentication rejected/.test(error.message) && !error.message.includes("private-password"));
+});
+
+test("configuration validation reports fixed safe reasons but hides arbitrary input", () => {
+  assert.equal(safeBackupConfigError(new Error("Use the selected project's direct or SESSION pooler URL on port 5432 with sslmode=require")),
+    "Use the selected project's direct or SESSION pooler URL on port 5432 with sslmode=require");
+  assert.equal(safeBackupConfigError(new Error("Missing required setting: BACKUP_DATABASE_URL")),
+    "Missing required setting: BACKUP_DATABASE_URL");
+  assert.equal(safeBackupConfigError(new Error("Invalid URL containing private-password")), null);
+  assert.equal(safeBackupConfigError(new Error("BACKUP_DATABASE_URL=private-password")), null);
 });

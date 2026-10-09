@@ -465,8 +465,7 @@ export async function rebuildPerformanceKpiCache(admin, {
   if (!roster) {
     const { data, error } = await admin
       .from("profiles")
-      .select("salesman_code,salesman_name,role,is_active")
-      .eq("is_active", true);
+      .select("salesman_code,salesman_name,role,is_active");
     if (error) throw error;
     roster = (data || []).filter(isKpiTargetProfile).map((profile) => ({
       salesmanCode: normalizeSalesmanCode(profile.salesman_code),

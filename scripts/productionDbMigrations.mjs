@@ -30,6 +30,54 @@ const PREFLIGHT_CATALOG_RELATIONS = Object.freeze([
   "pg_catalog.pg_shdepend", "pg_catalog.pg_stat_ssl", "pg_catalog.pg_indexes", "pg_catalog.pg_policies",
 ]);
 
+/** Fixed duplicate/orphan aggregate SELECTs only. Never accept caller SQL, paths, or templates. */
+export const INTEGRITY_SCANS = Object.freeze([
+  {
+    key: "sales_orders.request_id",
+    tables: Object.freeze(["sales_orders"]),
+    requiresColumns: Object.freeze(["sales_orders.request_id"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT request_id FROM public.sales_orders WHERE request_id IS NOT NULL GROUP BY request_id HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "collection_visits.client_submission_id",
+    tables: Object.freeze(["collection_visits"]),
+    requiresColumns: Object.freeze(["collection_visits.client_submission_id"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT client_submission_id FROM public.collection_visits WHERE client_submission_id IS NOT NULL GROUP BY client_submission_id HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "attachments.storage_provider,object_key",
+    tables: Object.freeze(["attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["attachments.storage_provider", "attachments.object_key"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT storage_provider, object_key FROM public.attachments GROUP BY storage_provider, object_key HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "orphan:collection_visits.receipt_attachment_id",
+    tables: Object.freeze(["collection_visits", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["collection_visits.receipt_attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.collection_visits AS source WHERE source.receipt_attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.receipt_attachment_id)",
+  },
+  {
+    key: "orphan:collection_visits.payment_attachment_id",
+    tables: Object.freeze(["collection_visits", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["collection_visits.payment_attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.collection_visits AS source WHERE source.payment_attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.payment_attachment_id)",
+  },
+  {
+    key: "orphan:customer_documents.attachment_id",
+    tables: Object.freeze(["customer_documents", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["customer_documents.attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.customer_documents AS source WHERE source.attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.attachment_id)",
+  },
+]);
+
+const INTEGRITY_SCAN_BY_KEY = Object.freeze(Object.fromEntries(INTEGRITY_SCANS.map((scan) => [scan.key, scan])));
+
+let mutationGate = "closed";
+
 const SQL = {
   identity: `SELECT current_database() AS database,
     session_user::text AS session_role_name,
@@ -131,9 +179,6 @@ export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
       WHERE attribute.attrelid = to_regclass('public.${table}') AND attribute.attname = '${column}'
         AND attribute.attnum > 0 AND NOT attribute.attisdropped
     ) THEN true ELSE has_column_privilege(current_user, to_regclass('public.${table}'), '${column}', 'SELECT') END AS select_${table}_${column}`);
-  const rowSecurityChecks = TARGET_TABLES.map((table) =>
-    `CASE WHEN to_regclass('public.${table}') IS NULL THEN false
-      ELSE row_security_active(to_regclass('public.${table}')) END AS row_security_active_${table}`);
   const targetOwnerChecks = TARGET_TABLES.map((table) =>
     `current_user = (SELECT pg_get_userbyid(relation.relowner) FROM pg_class AS relation
       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
@@ -285,7 +330,6 @@ export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
       ${targetOwnerChecks.join(",\n      ")},
       ${catalogChecks.join(",\n      ")},
       ${dataColumnChecks.join(",\n      ")},
-      ${rowSecurityChecks.join(",\n      ")},
       ${targetWriteChecks.join(",\n      ")},
       ${sequenceWriteCheck},
       has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT') AS ledger_insert,
@@ -357,7 +401,7 @@ export function readonlyPrivilegeIssues(privileges = {}) {
     "write_target_sequences", "ledger_column_write",
     "owns_public_schema", "owns_migration_schema", "ledger_insert", "ledger_update",
     "ledger_delete", "ledger_truncate", "ledger_insert_grant", "ledger_update_grant", "ledger_delete_grant",
-    ...TARGET_TABLES.flatMap((table) => [`owns_${table}`, `write_${table}`, `row_security_active_${table}`]),
+    ...TARGET_TABLES.flatMap((table) => [`owns_${table}`, `write_${table}`]),
   ];
   const mustBeTrue = [
     "same_login_role", "current_role_safe", "no_settable_privileged_roles", "no_admin_on_privileged_roles",
@@ -376,6 +420,114 @@ export function readonlyPrivilegeIssues(privileges = {}) {
     else if (!bool(privileges[name])) issues.push(`${name} is required`);
   }
   return issues;
+}
+
+export function selectIntegrityScanKeys(tableSet, columnSet) {
+  return INTEGRITY_SCANS
+    .filter((scan) => {
+      if ((scan.requiresTables || []).some((table) => !tableSet.has(table))) return false;
+      return scan.requiresColumns.every((column) => columnSet.has(column));
+    })
+    .map((scan) => scan.key);
+}
+
+export function tablesForIntegrityScans(keys) {
+  const tables = new Set();
+  for (const key of keys) {
+    const scan = INTEGRITY_SCAN_BY_KEY[key];
+    if (!scan) throw new Error(`integrity scan key is not allowlisted: ${key}`);
+    for (const table of scan.tables) tables.add(table);
+  }
+  return [...tables].sort();
+}
+
+export function integrityVisibilitySql(tables) {
+  if (!Array.isArray(tables) || tables.some((table) => !TARGET_TABLES.includes(table))) {
+    throw new Error("integrity visibility tables must be an allowlisted target subset");
+  }
+  if (!tables.length) return "SELECT true AS integrity_visibility_ready";
+  const checks = tables.flatMap((table) => [
+    `(to_regclass('public.${table}') IS NOT NULL) AS exists_${table}`,
+    `(current_user = (SELECT pg_get_userbyid(relation.relowner) FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}')) AS owns_${table}`,
+    `COALESCE((SELECT relation.relrowsecurity FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}'), false) AS rls_enabled_${table}`,
+    `COALESCE((SELECT relation.relforcerowsecurity FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}'), false) AS force_rls_${table}`,
+    `CASE WHEN to_regclass('public.${table}') IS NULL THEN false
+      ELSE row_security_active(to_regclass('public.${table}')) END AS row_security_active_${table}`,
+    `has_table_privilege(current_user, to_regclass('public.${table}'), 'SELECT') AS select_${table}`,
+  ]);
+  return `SELECT ${checks.join(",\n      ")};`;
+}
+
+export function integrityVisibilityIssues(privileges = {}, tables = []) {
+  const issues = [];
+  for (const table of tables) {
+    if (!TARGET_TABLES.includes(table)) {
+      issues.push(`integrity visibility table is not allowlisted: ${table}`);
+      continue;
+    }
+    for (const name of [`exists_${table}`, `owns_${table}`, `rls_enabled_${table}`, `force_rls_${table}`, `row_security_active_${table}`, `select_${table}`]) {
+      if (!Object.hasOwn(privileges, name)) issues.push(`${name} was not verified`);
+    }
+    if (Object.hasOwn(privileges, `exists_${table}`) && !bool(privileges[`exists_${table}`])) {
+      issues.push(`public.${table} is missing for integrity scan visibility`);
+      continue;
+    }
+    if (Object.hasOwn(privileges, `owns_${table}`) && !bool(privileges[`owns_${table}`])) {
+      issues.push(`migration role must own public.${table} for full-row integrity visibility`);
+    }
+    if (Object.hasOwn(privileges, `force_rls_${table}`) && bool(privileges[`force_rls_${table}`])) {
+      issues.push(`public.${table} has FORCE ROW LEVEL SECURITY; owner visibility cannot be assumed`);
+    }
+    if (Object.hasOwn(privileges, `row_security_active_${table}`) && bool(privileges[`row_security_active_${table}`])) {
+      issues.push(`row_security_active is true for public.${table}; integrity scans would be filtered`);
+    }
+    if (Object.hasOwn(privileges, `select_${table}`) && !bool(privileges[`select_${table}`])) {
+      issues.push(`SELECT on public.${table} is required for integrity scans`);
+    }
+  }
+  return issues;
+}
+
+export function assertIntegrityScanSql(sql) {
+  const text = String(sql || "");
+  if (!/^\s*SELECT\b/i.test(text)) throw new Error("integrity scan SQL must be a SELECT");
+  if (/\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|GRANT|REVOKE|CALL|DO|COPY|REINDEX|VACUUM|CLUSTER|REFRESH|SECURITY\s+LABEL|LISTEN|NOTIFY|LOAD|RESET|SET\b|BEGIN|COMMIT|ROLLBACK|repair)\b/i.test(text)) {
+    throw new Error("integrity scan SQL contains disallowed statements");
+  }
+  return text;
+}
+
+export function buildIntegrityScanScript(keys) {
+  if (!Array.isArray(keys)) throw new Error("integrity scan keys must be an allowlisted array");
+  const unique = new Set(keys);
+  if (unique.size !== keys.length) throw new Error("integrity scan keys must not contain duplicates");
+  for (const key of keys) {
+    if (!INTEGRITY_SCAN_BY_KEY[key]) throw new Error(`integrity scan key is not allowlisted: ${key}`);
+  }
+  const statements = keys.map((key) => assertIntegrityScanSql(INTEGRITY_SCAN_BY_KEY[key].sql));
+  return `BEGIN READ ONLY;\nSET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '5min';\n${statements.join(";\n")};\nCOMMIT;\n`;
+}
+
+export function parseIntegrityScanCounts(stdout, keys) {
+  const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length !== keys.length) throw new Error(`integrity scan returned ${lines.length} rows; expected ${keys.length}`);
+  const duplicates = new Map();
+  for (let index = 0; index < keys.length; index += 1) {
+    const count = Number(lines[index]);
+    if (!Number.isInteger(count) || count < 0) throw new Error(`integrity scan count for ${keys[index]} is invalid`);
+    duplicates.set(keys[index], count);
+  }
+  return duplicates;
+}
+
+export function assertMutationAllowed(stage) {
+  if (mutationGate !== "apply") throw new Error(`preflight mode forbids mutation: ${stage}`);
 }
 
 export function migrationScope(repoVersions, ledgerVersions) {
@@ -531,11 +683,7 @@ function query(dbUrl, sql, stage) {
   return runCli(["db", "query", "--db-url", dbUrl, "--agent", "no", "--output", "json", sql], stage);
 }
 
-function countQuery(dbUrl, sql, stage) {
-  return Number(query(dbUrl, sql, stage)[0]?.count ?? 0);
-}
-
-function collectPreflight(dbUrl) {
+function collectReadonlyPreflight(dbUrl) {
   const identity = query(dbUrl, SQL.identity, "database identity")[0];
   if (!identity) throw new Error("database identity query returned no row");
   if (identity.database !== "postgres") throw new Error("connected database is not postgres");
@@ -561,26 +709,48 @@ function collectPreflight(dbUrl) {
   }
   for (const table of ["sales_orders", "collection_visits", "customer_documents"]) if (!tableSet.has(table)) throw new Error(`required public.${table} base table is missing`);
 
-  const duplicates = new Map();
-  const uuidChecks = [
-    ["sales_orders.request_id", "sales_orders.request_id", "SELECT count(*)::int AS count FROM (SELECT request_id FROM public.sales_orders WHERE request_id IS NOT NULL GROUP BY request_id HAVING count(*) > 1) AS duplicate_values"],
-    ["collection_visits.client_submission_id", "collection_visits.client_submission_id", "SELECT count(*)::int AS count FROM (SELECT client_submission_id FROM public.collection_visits WHERE client_submission_id IS NOT NULL GROUP BY client_submission_id HAVING count(*) > 1) AS duplicate_values"],
-  ];
-  for (const [key, column, sql] of uuidChecks) if (columnSet.has(column)) duplicates.set(key, countQuery(dbUrl, sql, `duplicate check ${key}`));
-  if (tableSet.has("attachments")) {
-    duplicates.set("attachments.storage_provider,object_key", countQuery(dbUrl,
-      "SELECT count(*)::int AS count FROM (SELECT storage_provider, object_key FROM public.attachments GROUP BY storage_provider, object_key HAVING count(*) > 1) AS duplicate_values",
-      "attachment duplicate check"));
-    for (const [table, column] of [["collection_visits", "receipt_attachment_id"], ["collection_visits", "payment_attachment_id"], ["customer_documents", "attachment_id"]]) {
-      if (!columnSet.has(`${table}.${column}`)) continue;
-      duplicates.set(`orphan:${table}.${column}`, countQuery(dbUrl,
-        `SELECT count(*)::int AS count FROM public.${table} AS source WHERE source.${column} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.${column})`,
-        `orphan reference check ${table}.${column}`));
-    }
-  }
   const repoVersions = readdirSync(path.join(ROOT, "supabase", "migrations"))
     .map((file) => /^([0-9]{14})_.+\.sql$/.exec(file)?.[1]).filter(Boolean).sort();
-  return { identity, ledgerVersions, repoVersions, tables, columns, indexes, constraints, policies, duplicates };
+  return { identity, ledgerVersions, repoVersions, tables, columns, indexes, constraints, policies, tableSet, columnSet, duplicates: new Map() };
+}
+
+function assertIntegrityVisibility(dbUrl, tables) {
+  if (!tables.length) return {};
+  const sql = integrityVisibilitySql(tables);
+  const privileges = query(dbUrl, sql, "integrity scan visibility")[0] || {};
+  const issues = integrityVisibilityIssues(privileges, tables);
+  if (issues.length) throw new Error(`integrity visibility check failed: ${issues.join("; ")}`);
+  return privileges;
+}
+
+function collectIntegrityCounts(dbUrl, tableSet, columnSet) {
+  const keys = selectIntegrityScanKeys(tableSet, columnSet);
+  const tables = tablesForIntegrityScans(keys);
+  assertIntegrityVisibility(dbUrl, tables);
+  if (!keys.length) return new Map();
+  const script = buildIntegrityScanScript(keys);
+  if (!script.startsWith("BEGIN READ ONLY;")) throw new Error("integrity scan script must begin with BEGIN READ ONLY");
+  const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-integrity-"));
+  const tempFile = path.join(tempDirectory, "integrity-scans.sql");
+  try {
+    writeFileSync(tempFile, script, { flag: "wx" });
+    const result = spawnSync("psql", ["--no-psqlrc", "--set=ON_ERROR_STOP=1", "--no-align", "--tuples-only", "--file", tempFile, dbUrl], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env },
+    });
+    if (result.error || result.status !== 0) throw new Error(`integrity scan failed (exit ${result.status ?? "unavailable"}); raw psql output suppressed`);
+    return parseIntegrityScanCounts(result.stdout, keys);
+  } finally {
+    rmSync(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+function collectPreflight(readUrl, migrationUrl) {
+  const schema = collectReadonlyPreflight(readUrl);
+  schema.duplicates = collectIntegrityCounts(migrationUrl, schema.tableSet, schema.columnSet);
+  return schema;
 }
 
 function blockersFor(schema) {
@@ -652,6 +822,7 @@ export function executionFailureStatus(report) {
 }
 
 function executeExactMigration(dbUrl, migration) {
+  assertMutationAllowed(`execute migration file ${migration.file}`);
   const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-migration-"));
   const tempFile = path.join(tempDirectory, migration.file);
   try {
@@ -665,6 +836,7 @@ function executeExactMigration(dbUrl, migration) {
 }
 
 function markVersionApplied(dbUrl, version) {
+  assertMutationAllowed(`migration repair ${version}`);
   runCli(["migration", "repair", version, "--status", "applied", "--db-url", dbUrl], `record ${version}`, false);
 }
 
@@ -700,6 +872,7 @@ function writeAudit(report) {
 
 export async function runMigrationWorkflow(env = process.env) {
   const mode = env.PRODUCTION_DB_MIGRATION_MODE || "preflight";
+  mutationGate = "closed";
   const report = { actor: env.GITHUB_ACTOR, commit: env.REVIEWED_COMMIT, mode, preflight: "running", execution: mode === "preflight" ? "not requested (read-only)" : "not started", executionStarted: false, postVerification: "not run" };
   try {
     const contextErrors = validateWorkflowContext({
@@ -713,7 +886,9 @@ export async function runMigrationWorkflow(env = process.env) {
     if (!env.PGSSLROOTCERT) throw new Error("PGSSLROOTCERT must point to the trusted Supabase root CA certificate");
     const readUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_READONLY_URL);
     if (!readUrl.ok) throw new Error(`read-only connection rejected: ${readUrl.reason}`);
-    const schema = collectPreflight(env.PRODUCTION_DB_READONLY_URL);
+    const migrationUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_MIGRATION_URL);
+    if (!migrationUrl.ok) throw new Error(`migration connection rejected: ${migrationUrl.reason}`);
+    const schema = collectPreflight(env.PRODUCTION_DB_READONLY_URL, env.PRODUCTION_DB_MIGRATION_URL);
     const { scope, states, blockers } = blockersFor(schema);
     report.database = schema.identity.database;
     report.tls = bool(schema.identity.tls);
@@ -728,11 +903,10 @@ export async function runMigrationWorkflow(env = process.env) {
     report.preflight = "PASS";
     if (mode === "preflight") return report;
 
-    const migrationUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_MIGRATION_URL);
-    if (!migrationUrl.ok) throw new Error(`migration connection rejected: ${migrationUrl.reason}`);
     const privilegeErrors = checkMigrationRole(env.PRODUCTION_DB_MIGRATION_URL, schema);
     if (privilegeErrors.length) throw new Error(`migration-role check failed: ${privilegeErrors.join("; ")}`);
 
+    mutationGate = "apply";
     report.execution = "in progress; allowlisted versions only";
     for (const migration of ALLOWLISTED_MIGRATIONS) {
       const state = report.states.find((item) => item.version === migration.version);
@@ -754,7 +928,8 @@ export async function runMigrationWorkflow(env = process.env) {
       state.status = "executed exact file and recorded";
     }
     report.execution = "completed; exact allowlist only";
-    const postSchema = collectPreflight(env.PRODUCTION_DB_READONLY_URL);
+    mutationGate = "closed";
+    const postSchema = collectPreflight(env.PRODUCTION_DB_READONLY_URL, env.PRODUCTION_DB_MIGRATION_URL);
     const postStates = assessMigrationSchema(postSchema);
     report.states = postStates.map((state) => ({ ...state, status: state.status === "applied" ? "verified applied" : state.status }));
     report.postVerification = postStates.every((state) => state.status === "applied") ? "PASS" : "FAILED";
@@ -767,6 +942,7 @@ export async function runMigrationWorkflow(env = process.env) {
     report.error = true;
     return report;
   } finally {
+    mutationGate = "closed";
     writeAudit(report);
   }
 }

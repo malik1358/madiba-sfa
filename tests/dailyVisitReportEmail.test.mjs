@@ -708,6 +708,43 @@ test("runDailyVisitReportEmailCycle sends full customer-wise potential target di
   assert.match(sent[0].text, /C2 \| Shop Two/);
 });
 
+test("potential-sales-targets trial sends exactly one grouped email to the specified admin inbox", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-10-08",
+    now: new Date("2026-10-09T12:00:00Z"),
+    potentialSalesTargetsOnlyTo: "malik@pinasz.com",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "company@example.com",
+      DAILY_POTENTIAL_SALES_TARGETS_TO: "another@example.com",
+    },
+    send: async (message) => { sent.push(message); return { provider: "test" }; },
+    loadReport: async () => ({ date: "2026-10-08", thresholdKm: 0.5, users: [] }),
+    loadProfiles: async () => [],
+    loadAuthUsers: async () => [],
+    loadSummary: async () => ({ daySummary: { lines: [] } }),
+    loadKpis: async () => [],
+    loadTeamTargets: async () => new Map(),
+    loadDueCollectionCustomers: async () => [],
+    loadPotentialSalesTargets: async () => [
+      {
+        customer_code: "C1", customer_name: "Shop One", salesman_code: "SM001", salesman_name: "Sales One",
+        is_active: true, total_outstanding: 1000, last_invoice_date: "2026-09-20",
+        invoices: [{ pending_amount: 1000, invoice_date: "2026-09-20" }], potential_sale_expected: 2000,
+      },
+    ],
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].to, ["malik@pinasz.com"]);
+  assert.equal(result.results[0].kind, "potential_sales_targets_trial");
+  assert.match(sent[0].html, /Sales One \(SM001\)/);
+  assert.match(sent[0].text, /C1 \| Shop One/);
+});
+
 test("runDailyVisitReportEmailCycle skips when email is not configured", async () => {
   const result = await runDailyVisitReportEmailCycle({}, {
     date: "2026-09-02",

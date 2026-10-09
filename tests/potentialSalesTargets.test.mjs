@@ -385,15 +385,17 @@ test("full potential target digest separates every salesman and their customer r
   const digest = buildPotentialSalesTargetsDigest({
     rows: [
       { ...customer, salesman_code: "SM001", salesman_name: "Sales One", customer_code: "C1", potential_sale_expected: 20000 },
+      { ...customer, salesman_code: "SM001", salesman_name: "Sales One", customer_code: "C3", customer_name: "Highest Shop", potential_sale_expected: 25000 },
       { ...customer, salesman_code: "SM002", salesman_name: "Sales Two", customer_code: "C2", customer_name: "Second Shop", potential_sale_expected: 18000 },
     ],
     ...options,
   });
-  assert.equal(digest.customerCount, 2);
-  assert.equal(digest.totalOutstanding, 29999.98);
-  assert.equal(digest.totalExpectedSale, 38000);
+  assert.equal(digest.customerCount, 3);
+  assert.equal(digest.totalOutstanding, 44999.97);
+  assert.equal(digest.totalExpectedSale, 63000);
   assert.match(digest.html, /Sales One \(SM001\)/);
   assert.match(digest.html, /Sales Two \(SM002\)/);
   assert.match(digest.text, /C1 \| Shop <One>/);
   assert.match(digest.text, /C2 \| Second Shop/);
+  assert.ok(digest.text.indexOf("C3 | Highest Shop") < digest.text.indexOf("C1 | Shop <One>"));
 });

@@ -62,9 +62,22 @@ export async function POST(request) {
 
     const body = await request.json().catch(() => ({}));
     const digestOnly = body?.digestOnly === true;
+    const potentialSalesTargetsOnly = body?.potentialSalesTargetsOnly === true;
+    if (digestOnly && potentialSalesTargetsOnly) {
+      return NextResponse.json(
+        { success: false, error: "Choose one digest-only email mode." },
+        { status: 400 },
+      );
+    }
     if (digestOnly && String(access.profile?.role || "").toLowerCase() !== "admin") {
       return NextResponse.json(
         { success: false, error: "Only admin can send the digest-only report." },
+        { status: 403 },
+      );
+    }
+    if (potentialSalesTargetsOnly && String(access.profile?.role || "").toLowerCase() !== "admin") {
+      return NextResponse.json(
+        { success: false, error: "Only admin can send the potential sales targets trial email." },
         { status: 403 },
       );
     }
@@ -76,8 +89,15 @@ export async function POST(request) {
         { status: 400 },
       );
     }
+    const potentialSalesTargetsOnlyTo = potentialSalesTargetsOnly ? String(access.user?.email || "").trim() : "";
+    if (potentialSalesTargetsOnly && !potentialSalesTargetsOnlyTo) {
+      return NextResponse.json(
+        { success: false, error: "Your login has no email address." },
+        { status: 400 },
+      );
+    }
     const midnight = body?.midnight === true || body?.mode === "midnight";
-    const allUsers = digestOnly || midnight || body?.allUsers === true || body?.scope === "all";
+    const allUsers = digestOnly || potentialSalesTargetsOnly || midnight || body?.allUsers === true || body?.scope === "all";
     const userIds = allUsers ? [] : normalizeVisitReportEmailUserIds(body?.userIds || body?.userId);
     if (!allUsers && !userIds.length) {
       return NextResponse.json(
@@ -110,6 +130,7 @@ export async function POST(request) {
       userIds,
       reportEmails: digestOnly ? undefined : body?.reportEmails,
       digestOnlyTo,
+      potentialSalesTargetsOnlyTo,
     });
     if (result.skipped) {
       if (result.reason === "email_not_configured") {

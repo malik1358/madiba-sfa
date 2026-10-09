@@ -76,8 +76,9 @@ export function buildPotentialSalesTargetsSection({
   title = "Potential Sales Target Customers",
 } = {}) {
   const targets = rows.filter((row) => isPotentialSalesTarget(row, { todayKey }))
-    .sort((left, right) => String(left.last_invoice_date || left.latest_transaction_date)
-      .localeCompare(String(right.last_invoice_date || right.latest_transaction_date))
+    .sort((left, right) => (Number(right.potential_sale_expected) || 0) - (Number(left.potential_sale_expected) || 0)
+      || String(left.last_invoice_date || left.latest_transaction_date)
+        .localeCompare(String(right.last_invoice_date || right.latest_transaction_date))
       || String(left.customer_code).localeCompare(String(right.customer_code)));
   const money = (value) => Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const total = targets.reduce((sum, row) => sum + Number(row.total_outstanding), 0);

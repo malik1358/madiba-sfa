@@ -8,6 +8,7 @@ import {
   reportSalesmanCodeAliases,
 } from "./salesmanReportIdentity.js";
 import {
+  buildMonthlyNetSalesBySalesman,
   buildSalesmanIncentiveReport,
   incentiveMonthRange,
   parseIncentiveMonth,
@@ -94,12 +95,10 @@ async function loadSalesRows(admin, { customerCodes = null } = {}) {
 }
 
 /**
- * All-history `salesman -> month -> net sales` from the BI cube.
- * Cube amounts are already net (credit notes carry a negative amount).
- * Returns an empty map when the cube is unavailable, and the caller then falls
- * back to aggregating the loaded sales rows.
+ * Historical `salesman -> month -> net sales` from the BI cube, with the
+ * selected report month refreshed from active_sales so it matches KPI actuals.
  */
-export async function loadMonthlyNetSalesBySalesman(admin) {
+export async function loadMonthlyNetSalesBySalesman(admin, { month, salesmanCodes = [] } = {}) {
   const byCode = new Map();
   try {
     const cube = await loadSalesBiCube(admin, { allowStale: true });
@@ -114,6 +113,32 @@ export async function loadMonthlyNetSalesBySalesman(admin) {
   } catch (error) {
     console.error("Unable to load sales BI cube for incentive growth:", error);
   }
+
+  if (!month) return byCode;
+
+  const monthKey = parseIncentiveMonth(month);
+  const range = incentiveMonthRange(monthKey);
+  const requested = [...new Set((salesmanCodes || [])
+    .map((code) => normalizeReportSalesmanCode(code))
+    .filter(Boolean))];
+  const rows = await pageThrough(() => {
+    let query = admin.from("active_sales")
+      .select(SALES_SELECT)
+      .gte("transaction_date", range.from)
+      .lte("transaction_date", range.to);
+    if (requested.length) {
+      query = query.in("salesman_code", requested.flatMap(reportSalesmanCodeAliases));
+    }
+    return query;
+  });
+
+  const scopedCodes = new Set(requested);
+  byCode.forEach((byMonth, code) => {
+    if (!scopedCodes.size || scopedCodes.has(normalizeReportSalesmanCode(code))) {
+      byMonth.delete(monthKey);
+    }
+  });
+  buildMonthlyNetSalesBySalesman(rows, byCode);
   return byCode;
 }
 
@@ -136,7 +161,7 @@ export async function buildSalesmanIncentiveReportFromDb(admin, {
   const [salesRows, receiptsByCustomer, monthlySalesBySalesman] = await Promise.all([
     loadSalesRows(admin, { customerCodes }),
     loadReceiptRowsByCustomer(admin),
-    loadMonthlyNetSalesBySalesman(admin),
+    loadMonthlyNetSalesBySalesman(admin, { month: monthKey, salesmanCodes: requested }),
   ]);
 
   const salesByCustomer = new Map();

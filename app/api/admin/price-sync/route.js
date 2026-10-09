@@ -312,10 +312,10 @@ async function fetchCostingSheetPayload() {
 
   const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${sheetGid || "0"}`;
   const response = await fetch(exportUrl, { cache: "no-store", redirect: "follow" });
-  if (!response.ok) return null;
+  if (!response.ok) throw new Error(`Costing sheet request failed (${response.status}).`);
 
   const text = await response.text();
-  if (!text || /<!DOCTYPE html|<html/i.test(text.slice(0, 200))) return null;
+  if (!text || /<!DOCTYPE html|<html/i.test(text.slice(0, 200))) throw new Error("Costing sheet returned no CSV data.");
 
   const rows = parseCsvToRows(text);
   return rows.length > 1 ? rows : null;
@@ -331,6 +331,11 @@ function mergeParsedCatalog(base, extra) {
       riyadh: { ...(base.regionPriceMaps?.riyadh || {}), ...(extra.regionPriceMaps?.riyadh || {}) },
       dammam: { ...(base.regionPriceMaps?.dammam || {}), ...(extra.regionPriceMaps?.dammam || {}) },
       jeddah: { ...(base.regionPriceMaps?.jeddah || {}), ...(extra.regionPriceMaps?.jeddah || {}) },
+    },
+    retailRegionPriceMaps: {
+      riyadh: { ...(base.retailRegionPriceMaps?.riyadh || {}), ...(extra.retailRegionPriceMaps?.riyadh || {}) },
+      dammam: { ...(base.retailRegionPriceMaps?.dammam || {}), ...(extra.retailRegionPriceMaps?.dammam || {}) },
+      jeddah: { ...(base.retailRegionPriceMaps?.jeddah || {}), ...(extra.retailRegionPriceMaps?.jeddah || {}) },
     },
     cashDiscountMap: { ...(base.cashDiscountMap || {}), ...(extra.cashDiscountMap || {}) },
     valueDiscountMap: { ...(base.valueDiscountMap || {}), ...(extra.valueDiscountMap || {}) },
@@ -373,14 +378,15 @@ async function runSync(sourcePayload = null) {
   const missingSchemes = Object.keys(parsed.cashDiscountMap || {}).length === 0
     && Object.keys(parsed.valueDiscountMap || {}).length === 0;
 
-  if (missingSchemes) {
+  const missingRetail = Object.values(parsed.retailRegionPriceMaps || {}).every((map) => Object.keys(map).length === 0);
+  if (missingSchemes || missingRetail) {
     try {
       const sheetRows = await fetchCostingSheetPayload();
       if (sheetRows) {
         parsed = mergeParsedCatalog(parsed, parsePricePayload(sheetRows));
       }
-    } catch {
-      // Keep the script payload when the costing sheet export is unavailable.
+    } catch (error) {
+      console.error("Costing sheet enrichment failed:", error.message);
     }
   }
 
@@ -516,6 +522,7 @@ async function runSync(sourcePayload = null) {
       cache_key: "pricing_rules",
       price_map: {
         regionPriceMaps,
+        retailRegionPriceMaps: parsed.retailRegionPriceMaps || {},
         cashDiscountMap: parsed.cashDiscountMap || {},
         valueDiscountMap: parsed.valueDiscountMap || {},
       },
@@ -556,6 +563,7 @@ async function runSync(sourcePayload = null) {
     contentHash: hashOfflineDataContent({
       priceMap: parsed.priceMap,
       regionPriceMaps,
+      retailRegionPriceMaps: parsed.retailRegionPriceMaps || {},
       cashDiscountMap: parsed.cashDiscountMap || {},
       valueDiscountMap: parsed.valueDiscountMap || {},
     }),

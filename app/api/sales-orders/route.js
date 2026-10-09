@@ -4,7 +4,8 @@ import { GPS_REQUIRED_ERROR, buildGpsActivityNote, hasGpsCoordinates, normalizeG
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { loadCachedPricingCatalog, priceOrderLines, resolveCatalogForOrder } from "../../lib/orderPricing.js";
-import { normalizePaymentType, normalizePricingRegion } from "../../lib/regionalPricing.js";
+import { normalizePaymentType, normalizePricingRegion, normalizePricingType } from "../../lib/regionalPricing.js";
+import { loadRetailPriceMaps } from "../../lib/retailPricingServer.js";
 import {
   findProspectByOfflineId,
   parseOfflineProspectIdFromCustomerCode,
@@ -227,6 +228,7 @@ async function appendOrderHistory(admin, {
   changedAt,
   paymentType,
   pricingRegion,
+  pricingType,
 }) {
   const entry = {
     orderId,
@@ -236,6 +238,7 @@ async function appendOrderHistory(admin, {
     nextStatus,
     paymentType: normalizePaymentType(paymentType),
     pricingRegion: normalizePricingRegion(pricingRegion),
+    pricingType: normalizePricingType(pricingType),
     changes: Array.isArray(changes) ? changes : [],
     changedAt,
     changedBy: userId,
@@ -789,6 +792,10 @@ export async function POST(request) {
     const customerSalesmanCode = String(body?.customerSalesmanCode || "").trim();
     const requestedPaymentType = normalizePaymentType(body?.paymentType);
     const requestedPricingRegion = normalizePricingRegion(body?.pricingRegion);
+    if (body?.pricingType != null && !["wholesale", "retail"].includes(body.pricingType)) {
+      return NextResponse.json({ success: false, error: "Invalid pricing type." }, { status: 400 });
+    }
+    const requestedPricingType = normalizePricingType(body?.pricingType);
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const location = body?.location || null;
     const capturedAt = String(body?.capturedAt || new Date().toISOString());
@@ -892,6 +899,10 @@ export async function POST(request) {
 
     const pricingSalesmanCode = customerSalesmanCode || salesmanCode;
     const catalog = await loadCachedPricingCatalog(admin);
+    if (requestedPricingType === "retail" &&
+        !Object.values(catalog.retailRegionPriceMaps || {}).some((map) => Object.keys(map).length > 0)) {
+      catalog.retailRegionPriceMaps = await loadRetailPriceMaps();
+    }
     const pricedCatalog = resolveCatalogForOrder(catalog, {
       selectedRegion: requestedPricingRegion,
       currentUserRegion: userMetadata.pricing_region,
@@ -901,6 +912,7 @@ export async function POST(request) {
         ? { [String(pricingSalesmanCode).trim().toUpperCase()]: requestedPricingRegion || userMetadata.pricing_region }
         : {},
       paymentType: requestedPaymentType,
+      pricingType: requestedPricingType,
     });
     const pricedLines = priceOrderLines(lines, pricedCatalog);
 
@@ -936,6 +948,7 @@ export async function POST(request) {
     await writeOrderPricingMeta(admin, orderId, {
       paymentType: requestedPaymentType,
       pricingRegion: pricedCatalog.region,
+      pricingType: requestedPricingType,
     });
 
     const isNewOrder = !requestedOrderId;
@@ -952,6 +965,7 @@ export async function POST(request) {
       changedAt: nowIso,
       paymentType: requestedPaymentType,
       pricingRegion: pricedCatalog.region,
+      pricingType: requestedPricingType,
     });
 
     if (action !== "submit" && requireGps && hasGpsCoordinates(location)) {
@@ -994,6 +1008,7 @@ export async function POST(request) {
         changedAt: nowIso,
         paymentType: requestedPaymentType,
         pricingRegion: pricedCatalog.region,
+        pricingType: requestedPricingType,
       });
 
       if (requireGps && hasGpsCoordinates(location)) {
@@ -1045,6 +1060,6 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error: error.message || "Unable to save order.",
-    }, { status: 500 });
+    }, { status: error.status || 500 });
   }
 }

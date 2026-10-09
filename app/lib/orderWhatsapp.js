@@ -1,7 +1,7 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
-import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
+import { formatOrderVatLabel, normalizePricingType, VAT_RATE } from "./regionalPricing.js";
 import { formatOrderSalesmanLabel } from "./orderSalesman.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 
@@ -33,6 +33,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     status: isAr ? "الحالة" : "Status",
     payment: isAr ? "الدفع" : "Payment",
     region: isAr ? "المنطقة" : "Region",
+    pricingType: isAr ? "نوع التسعير" : "Pricing type",
     items: isAr ? "عدد الأصناف" : "Items",
     totalQty: isAr ? "إجمالي الكمية" : "Total qty",
     cashDiscount: isAr ? "خصم نقدي" : "Cash discount",
@@ -69,6 +70,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,
+    `${labels.pricingType}: ${normalizePricingType(snapshot.pricingType).toUpperCase()}`,
     `${labels.items}: ${snapshot.itemCount || 0}`,
     `${labels.totalQty}: ${Number(snapshot.totalQuantity || 0)}`,
     `${labels.cashDiscount}: ${formatMoney(cashDiscount)}`,

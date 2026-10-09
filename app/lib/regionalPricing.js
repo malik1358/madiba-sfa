@@ -68,6 +68,23 @@ export const REGION_PRICE_COLUMNS = {
   jeddah: "CJ",
 };
 
+export const RETAIL_PRICE_COLUMNS = {
+  riyadh: "CD",
+  dammam: "CH",
+  jeddah: "CJ",
+};
+
+export function normalizePricingType(value) {
+  return value === "retail" ? "retail" : "wholesale";
+}
+
+export function orderPriceMapFor(catalog, region, pricingType = "wholesale") {
+  if (normalizePricingType(pricingType) === "retail") {
+    return catalog?.retailRegionPriceMaps?.[normalizePricingRegion(region)] || {};
+  }
+  return regionPriceMapFor(catalog?.regionPriceMaps, region, catalog?.priceMap);
+}
+
 export const SCHEME_COLUMNS = {
   valueDiscount: "CL",
   cashDiscount: "CM",

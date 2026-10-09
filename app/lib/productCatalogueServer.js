@@ -1,5 +1,17 @@
 import { isMissingRelationError } from "./schemaGuards.js";
-import { cataloguePacking, cataloguePermissions, normalizeCatalogueCode } from "./productCatalogue.js";
+import { cataloguePacking, cataloguePermissions, catalogueSheetPacking, normalizeCatalogueCode } from "./productCatalogue.js";
+import { parseCsvToRows } from "./pricePayload.js";
+
+export const CATALOGUE_PACKING_SHEET_URL = "https://docs.google.com/spreadsheets/d/1vXUem61icj7Gv8wBNx5_Sc-oXNDm-wZiLZCjTjGtXww/export?format=csv&gid=612911319";
+
+export async function loadCatalogueSheetPacking(fetcher = fetch) {
+  const response = await fetcher(CATALOGUE_PACKING_SHEET_URL, {
+    cache: "no-store", signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Packing sheet request failed (${response.status}).`);
+  const text = await response.text();
+  return catalogueSheetPacking(parseCsvToRows(text));
+}
 
 export async function requireCatalogueAccess(admin, request) {
   const header = request.headers.get("authorization") || "";
@@ -24,7 +36,7 @@ async function readAll(admin, table, columns) {
   }
 }
 
-export async function loadCatalogueDetails(admin) {
+export async function loadCatalogueDetails(admin, loadSheetPacking = loadCatalogueSheetPacking) {
   const warnings = [];
   async function optionalRows(table, columns) {
     try {
@@ -35,17 +47,27 @@ export async function loadCatalogueDetails(admin) {
       return [];
     }
   }
-  const [products, stockItems, items] = await Promise.all([
+  async function sheetPacking() {
+    try {
+      return await loadSheetPacking();
+    } catch (error) {
+      warnings.push(`Google Sheet packing unavailable: ${error.message} Showing existing stock-take packing where available.`);
+      return {};
+    }
+  }
+  const [products, stockItems, items, packingByCode] = await Promise.all([
     optionalRows("products", "item_code,unit"),
     optionalRows("stock_take_items", "item_code,base_uom,mid_uom,master_uom,base_uom_pack_size,mid_uom_pack_size"),
     readAll(admin, "items_master", "*"),
+    sheetPacking(),
   ]);
   const details = {};
   const productsByCode = new Map(products.map((item) => [normalizeCatalogueCode(item.item_code), item]));
   const stockByCode = new Map(stockItems.map((item) => [normalizeCatalogueCode(item.item_code), item]));
   const itemsByCode = new Map(items.map((item) => [normalizeCatalogueCode(item.item_code), item]));
-  for (const code of new Set([...productsByCode.keys(), ...stockByCode.keys(), ...itemsByCode.keys()])) {
+  for (const code of new Set([...productsByCode.keys(), ...stockByCode.keys(), ...itemsByCode.keys(), ...Object.keys(packingByCode)])) {
     details[code] = cataloguePacking(itemsByCode.get(code), productsByCode.get(code), stockByCode.get(code));
+    if (packingByCode[code]) details[code].packing = packingByCode[code];
   }
   return { details, warnings };
 }

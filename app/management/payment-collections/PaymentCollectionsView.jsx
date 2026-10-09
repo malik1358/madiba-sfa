@@ -62,7 +62,9 @@ import {
   matchesCollectionCustomerQuery,
   mergeLegalMatchesIntoDueRows,
 } from "../../lib/collectionQueueSearch";
-import { prepareUploadFile } from "../../lib/compressUploadFile";
+import { prepareReceiptUploadFile, prepareUploadFile } from "../../lib/compressUploadFile";
+import { createClientSubmissionId } from "../../lib/collectionSubmission";
+import { openAttachment } from "../../lib/openAttachment";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
@@ -2028,7 +2030,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
         },
       );
 
+      const clientSubmissionId = createClientSubmissionId();
       const formData = new FormData();
+      formData.append("clientSubmissionId", clientSubmissionId);
       formData.append("customerCode", row.customer_code);
       formData.append("customerName", row.customer_name || "");
       formData.append("paymentStatus", paymentStatus);
@@ -2067,7 +2071,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       if (form.receiptCopy) {
-        const preparedReceipt = await prepareUploadFile(form.receiptCopy);
+        const preparedReceipt = await prepareReceiptUploadFile(form.receiptCopy);
         const receiptFallback = String(preparedReceipt?.type || "").includes("pdf")
           ? "receipt-copy.pdf"
           : "receipt-copy.jpg";
@@ -2085,6 +2089,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         metadata: {
           type: "collection_visit",
           customerCode: row.customer_code,
+          clientSubmissionId,
         },
         // Always save on-device first (including Funds Received PDF/photo). Sync
         // re-resolves Android MIME on upload so queued attachments do not stick.
@@ -2191,6 +2196,43 @@ export default function PaymentCollectionsView({ view = "due" }) {
     recognitionRef.current = recognition;
     setIsDictating(true);
     recognition.start();
+  }
+
+  function openCollectionCopy(collection, kind) {
+    openAttachment({
+      getAccessToken: async () => (await resolveAuthSession(getSupabaseClient(), 8000))?.access_token,
+      attachmentId: collection?.[`${kind}_attachment_id`] || "",
+      legacyKind: `${kind}_copy`,
+      legacyRef: collection?.id ?? "",
+    }).catch((err) => {
+      showPopup({ message: localizeApiMessage(err?.message || "Unable to open attachment."), variant: "error" });
+    });
+  }
+
+  function renderCollectionCopyLinks(collection) {
+    if (!collection || collection.pending_sync) return null;
+    const canOpen = (kind) => Boolean(
+      collection[`${kind}_attachment_id`] || (collection.id && collection[`has_${kind}_copy`]),
+    );
+    const link = (kind, label) => (
+      <div>
+        <a
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            openCollectionCopy(collection, kind);
+          }}
+        >
+          {t(label)}
+        </a>
+      </div>
+    );
+    return (
+      <>
+        {canOpen("payment") ? link("payment", "viewPaymentCopy") : null}
+        {canOpen("receipt") ? link("receipt", "viewReceiptCopy") : null}
+      </>
+    );
   }
 
   async function copySummaryText() {
@@ -3241,14 +3283,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         {formatVisitHistoryItem(visit, t)}
                                       </div>
                                     ))}
-                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                    {renderCollectionCopyLinks(row.latest_collection)}
                                   </div>
                                 ) : row.latest_collection ? (
                                   <div className="moduleHint" style={{ marginBottom: "12px" }}>
                                     {formatVisitHistoryItem(row.latest_collection, t)}
-                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                    {renderCollectionCopyLinks(row.latest_collection)}
                                   </div>
                                 ) : <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("noLatestVisit")}</div>}
 

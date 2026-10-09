@@ -178,7 +178,7 @@ After a sales import, the BI cube and the daily supplier-order email can rebuild
 
 ## Offline and mobile cache
 
-Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued field writes use `app/lib/offlineSyncQueue.js` via `postJsonResilient` / `postFormDataResilient` / `sendJsonResilient`, which **default to `queueFirst: true`** so collections, visits, orders, stock take, and prospects save on-device first and sync in the background. Sales order numbers are allotted offline per salesman (`app/lib/offlineOrderNumber.js`) and persist unchanged through sync.
+Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued field writes use `app/lib/offlineSyncQueue.js` via `postJsonResilient` / `postFormDataResilient` / `sendJsonResilient`, which **default to `queueFirst: true`** so collections, visits, orders, stock take, and prospects save on-device first and sync in the background. Sales order numbers are allotted offline per salesman (`app/lib/offlineOrderNumber.js`) and persist unchanged through sync. Collection visit saves carry a `clientSubmissionId` form field generated before queueing (`app/lib/collectionSubmission.js`); it is stored with the queued fields in IndexedDB, so every retry and post-restart sync replays the same id. `POST /api/payment-collections` looks it up (scoped to `created_by`) before validation and uploads and returns the existing visit (`duplicate: true`) instead of inserting again; a concurrent unique violation is resolved the same way. Requests without the field (older queued items) and databases without the column keep the old insert path.
 
 Do not assume a page always has a live network read. Several screens render from cache and then refresh.
 
@@ -209,6 +209,18 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 - Period presets are `app/lib/biReportPeriod.js` (`mtd`, `qtd`, `ytd`, last month, last 3/6/12 months, custom).
 - Month-over-month coloring is `app/lib/salesmanMom.js` and `categoryGrowth.js`. Current incomplete month is not treated as a closed comparison month.
 - Tables must keep the colored header, zebra rows, up/down/current cell classes, and a total column or footer.
+
+## Attachment storage
+
+Business routes never call Supabase Storage for attachment files. Server-only modules in `app/lib/storage/`:
+
+- `attachmentKeys.js` — object keys `<bucket>/<path>` (existing Supabase layouts kept), legacy URL/path parsing.
+- `attachmentStorage.js` — facade `putObject` (no overwrite, returns size/sha256/md5), `writeAttachmentObject` (primary/fallback/dual-write), `getObject`, `headObject`, `getSignedReadUrl` (default 300 s, max 900 s); `deleteObject` throws. Providers: `providers/supabaseProvider.js` (default) and `providers/r2Provider.js` (Cloudflare R2 via `aws4fetch` SigV4, private S3 API endpoint, `If-None-Match: *`, `x-amz-content-sha256`, metadata limited to `sha256`/`category`/`entity-type`). `r2Guard.js` validates R2 config and blocks the production bucket outside Vercel production + production Supabase.
+- Write provider comes from `ATTACHMENT_WRITE_PROVIDER` (only an explicit `r2` selects R2; default Supabase with legacy key layout). In R2 mode keys are immutable (`…/{yyyy}/{mm}/{CUSTOMER}/{yyyymmdd}-{uuid}.{ext}`, `…/{timestamp}-{uuid}-{name}`); if R2 fails the same key is written to Supabase and the `attachments` row records `supabase`; with `ATTACHMENT_DUAL_WRITE=1` a best-effort Supabase copy is written at the same key after R2 succeeds (failures logged, save continues). If the attachments table is missing, R2 mode writes Supabase. Reads always use the row's `storage_provider`; `ATTACHMENT_FORCE_SUPABASE_READS=1` is the rollback switch for objects that also exist in Supabase.
+- `attachmentRecords.js` — `storeAttachment` (upload + `attachments` row), owner linking, queue-safe visit summaries, `readOrderInvoiceFile` (prefers `invoiceAttachmentId`, falls back to `invoiceFilePath`) used by invoice comparison, prospect linking and the supplier email.
+- `attachmentAccess.js` — resolves the owner and authorizes reads (collection scope / `canSeeOrder` / sales customer scope).
+
+`GET /api/attachments/<uuid>/url` and `GET /api/attachments/legacy/url?kind=receipt_copy|payment_copy|order_invoice|customer_document&ref=<owner id>` authenticate the bearer token, authorize, then return a short-lived signed URL (`Cache-Control: private, no-store`). Clients use `app/lib/openAttachment.js`, which opens a placeholder tab synchronously (iOS popup rules) or an anchor in the Capacitor shell. Bucket provisioning is `ensureAttachmentBucket` → `supabaseProvider.ensureBucket`: a missing bucket is created **private**; an existing bucket is never updated, so no upload can change its privacy. No app code builds `/storage/v1/object/public/...` URLs; historical public URLs are only parsed into bucket/path and signed.
 
 ## Collections architecture
 

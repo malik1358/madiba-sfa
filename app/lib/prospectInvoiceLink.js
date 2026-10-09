@@ -1,7 +1,7 @@
 import { isProspectCustomerCode } from "./customerCode.js";
 import { extractPdfText } from "./extractPdfText.js";
 import { extractInvoiceBuyerFromPdfText } from "./invoiceBuyerExtract.js";
-import { INVOICE_BUCKET } from "./orderInvoiceComparison.js";
+import { readOrderInvoiceFile } from "./storage/attachmentRecords.js";
 import { findCustomerByCode, formatCustomerLookupPreview, linkProspectToCustomer } from "./prospectCustomerLink.js";
 import { parseProspectIdFromCustomerCode } from "./prospects.js";
 
@@ -112,15 +112,14 @@ export async function tryLinkProspectFromInvoiceUpload(admin, order, pdfBuffer) 
   }
 }
 
-export async function tryLinkProspectFromStoredInvoice(admin, order, invoiceFilePath) {
-  if (!invoiceFilePath) {
+// invoiceRef: order invoice meta (preferred) or a legacy invoiceFilePath.
+export async function tryLinkProspectFromStoredInvoice(admin, order, invoiceRef) {
+  const hasInvoice = typeof invoiceRef === "string" ? invoiceRef.trim() : invoiceRef?.invoiceFilePath;
+  if (!hasInvoice) {
     return { linked: false, reason: "no_invoice" };
   }
 
-  const { data, error } = await admin.storage.from(INVOICE_BUCKET).download(invoiceFilePath);
-  if (error) throw error;
-
-  const buffer = await data.arrayBuffer();
+  const buffer = await readOrderInvoiceFile(admin, invoiceRef);
   return tryLinkProspectFromInvoiceUpload(admin, order, buffer);
 }
 
@@ -142,7 +141,7 @@ export async function attachProspectLinkToMeta(admin, order, meta, pdfBuffer = n
   try {
     const prospectLink = pdfBuffer
       ? await tryLinkProspectFromInvoiceUpload(admin, order, pdfBuffer)
-      : await tryLinkProspectFromStoredInvoice(admin, order, meta?.invoiceFilePath);
+      : await tryLinkProspectFromStoredInvoice(admin, order, meta);
 
     if (prospectLink?.linked) {
       const nowIso = new Date().toISOString();

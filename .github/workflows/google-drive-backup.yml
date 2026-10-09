@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   backup:
-    if: github.ref == 'refs/heads/main' && vars.BACKUP_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && (vars.BACKUP_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.validate_only))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment: production-backup

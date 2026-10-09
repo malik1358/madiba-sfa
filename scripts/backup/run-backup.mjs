@@ -37,6 +37,25 @@ export function classifyCommandFailure(stderr) {
   return "Unclassified command failure. Raw output remains suppressed; no backup was uploaded.";
 }
 
+export function safeBackupConfigError(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (/^Missing required setting: BACKUP_[A-Z0-9_]+$/.test(message)) return message;
+  const safeMessages = new Set([
+    "Invalid backup mode",
+    "Invalid Supabase project reference",
+    "Invalid backup connection URL",
+    "Storage URL does not match the explicitly selected backup project",
+    "Use the selected project's direct or SESSION pooler URL on port 5432 with sslmode=require",
+    "Expected an age public recipient, not a private key",
+    "Use a dedicated, single-level gdrive backup folder",
+    "Rclone configuration must contain only gdrive, with drive.file scope and your own OAuth client",
+    "Rclone configuration needs an OAuth refresh token",
+    "BACKUP_RECOVERY_INVENTORY_JSON must be valid JSON",
+    "Recovery inventory must contain only a vaultReference and a nonempty array of secretNames; never secret values",
+  ]);
+  return safeMessages.has(message) ? message : null;
+}
+
 export async function databaseStage(label, operation) {
   console.log(`Database stage: ${label}`);
   try {
@@ -301,8 +320,9 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((error) => {
-    console.error(error instanceof BackupDiagnosticError || error.message.startsWith("Missing required setting:")
-      ? error.message : "Backup failed. Review setup and tool/API permissions; sensitive error details are suppressed.");
+    const safeConfigError = safeBackupConfigError(error);
+    console.error(error instanceof BackupDiagnosticError ? error.message
+      : safeConfigError || "Backup failed. Review setup and tool/API permissions; sensitive error details are suppressed.");
     process.exitCode = 1;
   });
 }

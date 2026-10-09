@@ -701,11 +701,13 @@ test("runDailyVisitReportEmailCycle sends full customer-wise potential target di
         customer_code: "C1", customer_name: "Shop One", salesman_code: "SM001", salesman_name: "Sales One",
         is_active: true, total_outstanding: 1000, last_invoice_date: "2026-09-20",
         invoices: [{ pending_amount: 1000, invoice_date: "2026-09-20" }], potential_sale_expected: 2000,
+        last_visit_by_salesman: { SM001: "2026-10-06" },
       },
       {
         customer_code: "C2", customer_name: "Shop Two", salesman_code: "SM002", salesman_name: "Sales Two",
         is_active: true, total_outstanding: 1500, last_invoice_date: "2026-09-20",
         invoices: [{ pending_amount: 1500, invoice_date: "2026-09-20" }], potential_sale_expected: 3000,
+        last_visit_by_salesman: { SM002: "2026-10-05" },
       },
     ],
   });
@@ -716,6 +718,8 @@ test("runDailyVisitReportEmailCycle sends full customer-wise potential target di
   assert.match(sent[0].subject, /Potential Sales Target Customers/);
   assert.match(sent[0].html, /Sales One \(SM001\)/);
   assert.match(sent[0].html, /Sales Two \(SM002\)/);
+  assert.match(sent[0].text, /Last Visit Date/);
+  assert.match(sent[0].text, /2026-10-06/);
   assert.match(sent[0].text, /C1 \| Shop One/);
   assert.match(sent[0].text, /C2 \| Shop Two/);
 });

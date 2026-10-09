@@ -82,12 +82,15 @@ export function buildPotentialSalesTargetsSection({
       || String(left.customer_code).localeCompare(String(right.customer_code)));
   const money = (value) => Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const total = targets.reduce((sum, row) => sum + Number(row.total_outstanding), 0);
-  const headers = ["Customer Code", "Customer", "City / Area", "Last Invoice", "Days Since Invoice", "Outstanding (SAR)", "Potential Sale Expected (SAR)"];
+  const headers = ["Customer Code", "Customer", "City / Area", "Last Visit Date", "Last Invoice", "Days Since Invoice", "Outstanding (SAR)", "Potential Sale Expected (SAR)"];
   const values = (row) => {
     const date = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
+    const lastVisit = parseOutstandingSheetDate(
+      row.last_visit_by_salesman?.[potentialSalesTargetSalesmanCode(row)],
+    ) || "-";
     const days = daysSincePotentialSalesTargetInvoice(row, todayKey);
     const potentialSaleExpected = Number(row.potential_sale_expected) || 0;
-    return [row.customer_code, row.customer_name, [row.city, row.area].filter(Boolean).join(" / ") || "-", date, days, money(row.total_outstanding), money(potentialSaleExpected)];
+    return [row.customer_code, row.customer_name, [row.city, row.area].filter(Boolean).join(" / ") || "-", lastVisit, date, days, money(row.total_outstanding), money(potentialSaleExpected)];
   };
   const totalExpectedSale = targets.reduce((sum, row) => sum + (Number(row.potential_sale_expected) || 0), 0);
   const text = [
@@ -103,8 +106,8 @@ export function buildPotentialSalesTargetsSection({
     <table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px;width:100%;border-color:#99d5cf;">
       <thead style="background:#0f4c5c;color:#ffffff;"><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
       <tbody>${targets.map((row, index) => `<tr style="background:${index % 2 ? "#ecfdf5" : "#ffffff"};">${values(row).map((value, column) => `<td${column >= 5 ? ' style="text-align:right;background:#dcfce7;font-weight:700;"' : ""}>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")
-        || '<tr><td colspan="7">No qualifying customers.</td></tr>'}</tbody>
-      <tfoot style="background:#0f4c5c;color:#ffffff;font-weight:700;"><tr><td colspan="5">Total (${targets.length} customers)</td><td style="text-align:right;">${money(total)} SAR</td><td style="text-align:right;">${money(totalExpectedSale)} SAR</td></tr></tfoot>
+        || '<tr><td colspan="8">No qualifying customers.</td></tr>'}</tbody>
+      <tfoot style="background:#0f4c5c;color:#ffffff;font-weight:700;"><tr><td colspan="6">Total (${targets.length} customers)</td><td style="text-align:right;">${money(total)} SAR</td><td style="text-align:right;">${money(totalExpectedSale)} SAR</td></tr></tfoot>
     </table>`;
   return {
     html,

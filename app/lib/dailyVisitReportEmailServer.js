@@ -413,6 +413,8 @@ export async function runDailyVisitReportEmailCycle(admin, {
       potentialSalesTargets = await loadPotentialSalesTargets(admin, {
         records: collectionRecords || [],
         todayKey: staleAsOfKey,
+        includeVisitDetails: true,
+        profiles,
       });
     }
   } catch (error) {

@@ -308,7 +308,7 @@ export default function PromoterCoveragePage() {
                 {periodError ? <div className="moduleHint">{periodError}</div> : null}
                 <p className="moduleHint">{t("salesNote")}</p>
                 <ExportableTable filename={`promoter-coverage-${fromMonth}-${toMonth}`} sheetName="Promoter Coverage" className="moduleTableWrap">
-                  <table className="moduleTable moduleBiTable">
+                  <table className="moduleTable moduleBiTable modulePromoterCoverageTable">
                     <thead>
                       <tr>
                         <th>{t("customer")}</th>

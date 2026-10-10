@@ -205,7 +205,8 @@ export async function POST(request) {
       throw new Error("No receipt dates found in the uploaded file.");
     }
 
-    const mergedRows = mergeReceiptDatasets(existing.rows, parsed.rows, parsed.dates);
+    const mergeResult = mergeReceiptDatasets(existing.rows, parsed.rows, parsed.dates);
+    const mergedRows = mergeResult.rows;
     const liveMatched = mergedRows.filter((row) => row.matched || row.customer_code).length;
     const liveUnmatched = mergedRows.length - liveMatched;
     const nowIso = new Date().toISOString();
@@ -236,6 +237,8 @@ export async function POST(request) {
       lastFileMatchedCount: parsed.matchedCount,
       lastFileUnmatchedCount: parsed.unmatchedCount,
       lastFileRowsCount: parsed.rows.length,
+      lastFileAddedCount: mergeResult.added,
+      lastFileUpdatedCount: mergeResult.updated,
     };
 
     const { error: upsertError } = await admin
@@ -297,12 +300,14 @@ export async function POST(request) {
       uploadDates: parsed.dates,
       matchedCount: parsed.matchedCount,
       unmatchedCount: parsed.unmatchedCount,
+      rowsAdded: mergeResult.added,
+      rowsUpdated: mergeResult.updated,
       liveRows: payload.rowsCount,
       liveMatched: liveMatched,
       liveUnmatched: liveUnmatched,
       mergedIntoExisting: existing.rows.length > 0,
       message: existing.rows.length > 0
-        ? `Receipt register updated for ${parsed.dates.length} date(s). Other dates were kept unchanged.`
+        ? `Receipt register upserted ${mergeResult.added} new and ${mergeResult.updated} updated row(s); existing receipts were kept.`
         : "Receipt register is now live.",
     });
   } catch (error) {

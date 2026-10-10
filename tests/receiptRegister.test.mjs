@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   excelDateToIso,
   findReceiptHeaderRow,
+  mergeReceiptDatasets,
   parseParticularsParty,
   parseReceiptRegisterRows,
   prioritizeReceiptSheets,
+  receiptRowIdentity,
 } from "../app/lib/receiptRegister.js";
 
 const NEW_FORMAT_HEADER = [
@@ -87,5 +89,73 @@ test("prioritizeReceiptSheets prefers Export when no receipt sheet name exists",
   assert.deepEqual(
     prioritizeReceiptSheets(["Summary", "Export", "Other"]),
     ["Export", "Summary", "Other"],
+  );
+});
+
+test("mergeReceiptDatasets upserts by voucher and does not wipe other same-day receipts", () => {
+  const existing = [
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1001",
+      customer_name: "Keep Me",
+      particulars: "1001 Keep Me",
+      vch_type: "JV-Collection",
+      vch_no: "JV/Coll/2026/0900",
+      amount: 1000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-02",
+      customer_code: "1002",
+      customer_name: "Other Day",
+      particulars: "1002 Other Day",
+      vch_type: "Receipt",
+      vch_no: "10",
+      amount: 250,
+      matched: true,
+    },
+  ];
+  const incoming = [
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1041",
+      customer_name: "AL KHAMIS ARABIYA TRADING Co.",
+      particulars: "1041  AL KHAMIS ARABIYA TRADING Co.",
+      vch_type: "JV-Collection",
+      vch_no: "JV/Coll/2026/0928",
+      amount: 5000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1001",
+      customer_name: "Keep Me Updated",
+      particulars: "1001 Keep Me Updated",
+      vch_type: "JV-Collection",
+      vch_no: "JV/Coll/2026/0900",
+      amount: 1100,
+      matched: true,
+    },
+  ];
+
+  const merged = mergeReceiptDatasets(existing, incoming, ["2026-10-03"]);
+  assert.equal(merged.rows.length, 3);
+  assert.equal(merged.added, 1);
+  assert.equal(merged.updated, 1);
+  assert.equal(
+    merged.rows.find((row) => row.vch_no === "JV/Coll/2026/0900")?.amount,
+    1100,
+  );
+  assert.equal(
+    merged.rows.find((row) => row.vch_no === "JV/Coll/2026/0928")?.amount,
+    5000,
+  );
+  assert.equal(
+    merged.rows.find((row) => row.vch_no === "10")?.customer_code,
+    "1002",
+  );
+  assert.equal(
+    receiptRowIdentity(incoming[0]),
+    "2026-10-03|JV-COLLECTION|JV/COLL/2026/0928|1041",
   );
 });

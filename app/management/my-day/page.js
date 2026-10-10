@@ -39,6 +39,7 @@ import { daysSinceKsaDate } from "../../lib/latestCustomerVisits.js";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
 import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, customerOutstandingBreakdown, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
+  CUSTOMER_LOCATION_UPDATE_REPORT_ONLY,
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
   maybePromptCustomerLocationUpdate,
@@ -216,6 +217,8 @@ const PAGE_TEXT = {
   yes: { en: "Yes", ar: "نعم" },
   no: { en: "No", ar: "لا" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
+  locationReportOnlyTitle: { en: "GPS for report only", ar: "GPS للتقرير فقط" },
+  locationReportOnlyOk: { en: "OK", ar: "حسناً" },
   visitSaved: { en: "Visit saved. Share the summary on WhatsApp.", ar: "تم حفظ الزيارة. شارك الملخص على واتساب." },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
   purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
@@ -1077,6 +1080,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
         skipReverseGeocode: true,
         promptChoice: async (promptDetails) => {
           askedUser = true;
+          if (promptDetails?.reportOnlyBlocked) {
+            await showPopup({
+              title: t("locationReportOnlyTitle"),
+              message: promptDetails.message,
+              variant: "warning",
+              choices: [{ id: "ok", label: t("locationReportOnlyOk") }],
+            });
+            return CUSTOMER_LOCATION_UPDATE_REPORT_ONLY;
+          }
           const choice = await showPopup({
             title: t("locationUpdateTitle"),
             message: promptDetails.message,

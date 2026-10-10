@@ -1,6 +1,7 @@
 import { isSuccessfulCollection } from "./collectionDaySummary.js";
 import { formatFieldVisitOutcome } from "./fieldVisitWhatsapp.js";
 import { haversineDistanceKm, hasGpsCoordinates } from "./geo.js";
+import { isAtMadibaStore, madibaStoreLabel } from "./madibaStoreLocation.js";
 
 const ON_SITE_VISIT_TYPES = new Set([
   "VISIT_REPORT",
@@ -151,11 +152,32 @@ export function attachAcceptedGpsUpdateMarkers(entries = []) {
     });
 }
 
+function isGpsHistorySource(source) {
+  return ["visit", "salesman_accepted", "visit_accepted"].includes(String(source || "").trim().toLowerCase());
+}
+
+function historyMatchesEntry(update, entryCode, entryUser, entry) {
+  if (normalizeCode(update.customer_code) !== entryCode) return false;
+  if (String(update.updated_by || "").trim() !== entryUser) return false;
+  if (Number(update.latitude).toFixed(6) !== Number(entry.latitude).toFixed(6)) return false;
+  if (Number(update.longitude).toFixed(6) !== Number(entry.longitude).toFixed(6)) return false;
+  const entryTime = new Date(entry.saved_at || entry.savedAt || "").getTime();
+  const updateTime = new Date(update.created_at || "").getTime();
+  return Number.isFinite(updateTime) && Number.isFinite(entryTime)
+    && Math.abs(updateTime - entryTime) <= 5 * 60 * 1000;
+}
+
 export function markVisitsWithAcceptedGpsHistory(entries = [], history = []) {
-  const validUpdates = (Array.isArray(history) ? history : []).filter((update) => (
-    ["visit", "salesman_accepted", "visit_accepted"].includes(String(update?.source || "").trim().toLowerCase())
+  const rows = Array.isArray(history) ? history : [];
+  const overwriteUpdates = rows.filter((update) => (
+    isGpsHistorySource(update?.source)
     && hasGpsCoordinates(update)
     && hasGpsCoordinates({ latitude: update.previous_latitude, longitude: update.previous_longitude })
+  ));
+  const firstCaptureUpdates = rows.filter((update) => (
+    isGpsHistorySource(update?.source)
+    && hasGpsCoordinates(update)
+    && !hasGpsCoordinates({ latitude: update.previous_latitude, longitude: update.previous_longitude })
   ));
 
   return (Array.isArray(entries) ? entries : []).map((entry) => {
@@ -166,24 +188,28 @@ export function markVisitsWithAcceptedGpsHistory(entries = [], history = []) {
     const entryTime = new Date(entry.saved_at || entry.savedAt || "").getTime();
     if (!entryCode || !entryUser || !Number.isFinite(entryTime)) return entry;
 
-    const matchingUpdate = validUpdates.some((update) => {
-      if (normalizeCode(update.customer_code) !== entryCode) return false;
-      if (String(update.updated_by || "").trim() !== entryUser) return false;
-      if (Number(update.latitude).toFixed(6) !== Number(entry.latitude).toFixed(6)) return false;
-      if (Number(update.longitude).toFixed(6) !== Number(entry.longitude).toFixed(6)) return false;
-      const updateTime = new Date(update.created_at || "").getTime();
-      return Number.isFinite(updateTime) && Math.abs(updateTime - entryTime) <= 5 * 60 * 1000;
-    });
+    const matchingOverwrite = overwriteUpdates.some((update) => (
+      historyMatchesEntry(update, entryCode, entryUser, entry)
+    ));
+    const matchingFirstCapture = firstCaptureUpdates.some((update) => (
+      historyMatchesEntry(update, entryCode, entryUser, entry)
+    ));
 
-    if (!matchingUpdate) return entry;
+    if (!matchingOverwrite && !matchingFirstCapture) return entry;
     return {
       ...entry,
-      meta: { ...entry.meta, gpsLocationUpdateAccepted: true },
+      meta: {
+        ...entry.meta,
+        ...(matchingOverwrite ? { gpsLocationUpdateAccepted: true } : {}),
+        ...(matchingFirstCapture ? { firstCustomerGpsCaptured: true } : {}),
+      },
     };
   });
 }
 
 export function shouldMarkVisitFarFromCustomer(entry, isFar) {
+  // Store-side entries stay FAR even if a pin update was somehow accepted.
+  if (isAtMadibaStore(entryCoords(entry) || entry)) return true;
   return Boolean(isFar && !entry?.meta?.gpsLocationUpdateAccepted);
 }
 
@@ -208,9 +234,10 @@ export function assignOnSiteVisitNumbers(entries = []) {
   });
 }
 
-export function formatEntryCoordinates(entry) {
+export function formatEntryCoordinates(entry, language = "en") {
   const coords = entryCoords(entry);
   if (!coords) return "-";
+  if (isAtMadibaStore(coords)) return madibaStoreLabel(language);
   return `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
 }
 

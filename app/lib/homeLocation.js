@@ -1,6 +1,8 @@
 import { parseGpsFromActivityNote } from "./geo.js";
 
 export const HOME_LOCATION_BLOCK_RADIUS_METERS = 500;
+/** Radius used to block / clear customer pins that sit on a saved home point. */
+export const CUSTOMER_HOME_LOCATION_PIN_RADIUS_METERS = 25;
 export const HOME_LOCATION_CANDIDATE_MIN_DAYS = 6;
 
 export function haversineDistanceMeters(left, right) {

@@ -170,7 +170,7 @@ jobs:
           CURRENT_MAIN_SHA: ${{ steps.revision.outputs.current_main_sha }}
           PREVIOUS_PREFLIGHT_VERIFIED: ${{ steps.approved_preflight.outputs.verified || 'false' }}
           PRODUCTION_DB_READONLY_URL: ${{ secrets.PRODUCTION_DB_READONLY_URL }}
-          PRODUCTION_DB_MIGRATION_URL: ${{ inputs.mode == 'apply' && secrets.PRODUCTION_DB_MIGRATION_URL || '' }}
+          PRODUCTION_DB_MIGRATION_URL: ${{ secrets.PRODUCTION_DB_MIGRATION_URL }}
         run: node scripts/productionDbMigrations.mjs
 
       - name: Record fallback audit summary if runner did not start

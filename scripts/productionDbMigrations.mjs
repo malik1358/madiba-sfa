@@ -14,22 +14,91 @@ export const ALLOWLISTED_MIGRATIONS = Object.freeze([
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TARGET_TABLES = ["sales_orders", "collection_visits", "customer_documents", "attachments"];
+const PREFLIGHT_DATA_COLUMNS = Object.freeze([
+  ["sales_orders", "request_id"],
+  ["collection_visits", "client_submission_id"],
+  ["collection_visits", "receipt_attachment_id"],
+  ["collection_visits", "payment_attachment_id"],
+  ["customer_documents", "attachment_id"],
+  ["attachments", "id"],
+  ["attachments", "storage_provider"],
+  ["attachments", "object_key"],
+]);
+const PREFLIGHT_CATALOG_RELATIONS = Object.freeze([
+  "pg_catalog.pg_class", "pg_catalog.pg_namespace", "pg_catalog.pg_attribute", "pg_catalog.pg_type",
+  "pg_catalog.pg_constraint", "pg_catalog.pg_trigger", "pg_catalog.pg_roles", "pg_catalog.pg_database",
+  "pg_catalog.pg_shdepend", "pg_catalog.pg_stat_ssl", "pg_catalog.pg_indexes", "pg_catalog.pg_policies",
+]);
+
+/** Fixed duplicate/orphan aggregate SELECTs only. Never accept caller SQL, paths, or templates. */
+export const INTEGRITY_SCANS = Object.freeze([
+  {
+    key: "sales_orders.request_id",
+    tables: Object.freeze(["sales_orders"]),
+    requiresColumns: Object.freeze(["sales_orders.request_id"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT request_id FROM public.sales_orders WHERE request_id IS NOT NULL GROUP BY request_id HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "collection_visits.client_submission_id",
+    tables: Object.freeze(["collection_visits"]),
+    requiresColumns: Object.freeze(["collection_visits.client_submission_id"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT client_submission_id FROM public.collection_visits WHERE client_submission_id IS NOT NULL GROUP BY client_submission_id HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "attachments.storage_provider,object_key",
+    tables: Object.freeze(["attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["attachments.storage_provider", "attachments.object_key"]),
+    sql: "SELECT count(*)::int AS count FROM (SELECT storage_provider, object_key FROM public.attachments GROUP BY storage_provider, object_key HAVING count(*) > 1) AS duplicate_values",
+  },
+  {
+    key: "orphan:collection_visits.receipt_attachment_id",
+    tables: Object.freeze(["collection_visits", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["collection_visits.receipt_attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.collection_visits AS source WHERE source.receipt_attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.receipt_attachment_id)",
+  },
+  {
+    key: "orphan:collection_visits.payment_attachment_id",
+    tables: Object.freeze(["collection_visits", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["collection_visits.payment_attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.collection_visits AS source WHERE source.payment_attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.payment_attachment_id)",
+  },
+  {
+    key: "orphan:customer_documents.attachment_id",
+    tables: Object.freeze(["customer_documents", "attachments"]),
+    requiresTables: Object.freeze(["attachments"]),
+    requiresColumns: Object.freeze(["customer_documents.attachment_id", "attachments.id"]),
+    sql: "SELECT count(*)::int AS count FROM public.customer_documents AS source WHERE source.attachment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.attachment_id)",
+  },
+]);
+
+const INTEGRITY_SCAN_BY_KEY = Object.freeze(Object.fromEntries(INTEGRITY_SCANS.map((scan) => [scan.key, scan])));
+
+let mutationGate = "closed";
 
 const SQL = {
   identity: `SELECT current_database() AS database,
+    session_user::text AS session_role_name,
     current_user AS role_name,
     current_setting('server_version') AS server_version,
+    current_setting('server_version_num')::int AS server_version_num,
     COALESCE((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) AS tls,
     COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
     to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS ledger_exists,
     COALESCE((SELECT relkind IN ('r', 'p') FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_is_table,
     COALESCE((SELECT NOT relrowsecurity FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_rls_disabled,
     (SELECT count(*) = 3
-        AND count(*) FILTER (WHERE column_name = 'version' AND data_type = 'text' AND is_nullable = 'NO') = 1
-        AND count(*) FILTER (WHERE column_name = 'name' AND data_type = 'text') = 1
-        AND count(*) FILTER (WHERE column_name = 'statements' AND data_type = 'ARRAY' AND udt_name = '_text') = 1
-      FROM information_schema.columns
-      WHERE table_schema = 'supabase_migrations' AND table_name = 'schema_migrations') AS ledger_columns_ready,
+        AND count(*) FILTER (WHERE attribute.attname = 'version' AND type.typname = 'text' AND attribute.attnotnull) = 1
+        AND count(*) FILTER (WHERE attribute.attname = 'name' AND type.typname = 'text') = 1
+        AND count(*) FILTER (WHERE attribute.attname = 'statements' AND type.typname = '_text') = 1
+      FROM pg_attribute AS attribute
+      JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      JOIN pg_type AS type ON type.oid = attribute.atttypid
+      WHERE namespace.nspname = 'supabase_migrations' AND relation.relname = 'schema_migrations'
+        AND attribute.attnum > 0 AND NOT attribute.attisdropped) AS ledger_columns_ready,
     (SELECT count(*) = 1 FROM pg_constraint
       WHERE conrelid = to_regclass('supabase_migrations.schema_migrations')) AS ledger_constraints_exact,
     NOT EXISTS (SELECT 1 FROM pg_trigger
@@ -43,15 +112,28 @@ const SQL = {
         AND constraint_row.conkey[1] = attribute.attnum) AS ledger_version_unique;`,
   ledger: `SELECT version::text AS version FROM supabase_migrations.schema_migrations ORDER BY version;`,
   tables: `SELECT expected.table_name, relation.oid IS NOT NULL AS exists,
+    COALESCE(relation.relkind IN ('r', 'p'), false) AS is_table,
     COALESCE(relation.relrowsecurity, false) AS rls_enabled,
+    COALESCE(relation.relforcerowsecurity, false) AS force_rls,
     COALESCE(pg_get_userbyid(relation.relowner), '') AS owner
     FROM (VALUES ('sales_orders'), ('collection_visits'), ('customer_documents'), ('attachments')) AS expected(table_name)
     LEFT JOIN pg_class AS relation ON relation.oid = to_regclass('public.' || expected.table_name)
     ORDER BY expected.table_name;`,
-  columns: `SELECT table_name, column_name, data_type, is_nullable
-    FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = ANY (ARRAY['sales_orders','collection_visits','customer_documents','attachments'])
-    ORDER BY table_name, ordinal_position;`,
+  columns: `SELECT relation.relname AS table_name, attribute.attname AS column_name,
+    CASE WHEN type.typname = 'int8' THEN 'bigint'
+      WHEN type.typname = 'timestamptz' THEN 'timestamp with time zone'
+      WHEN type.typname = '_text' THEN 'ARRAY'
+      ELSE type.typname END AS data_type,
+    CASE WHEN attribute.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+    type.typname AS udt_name
+    FROM pg_attribute AS attribute
+    JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_type AS type ON type.oid = attribute.atttypid
+    WHERE namespace.nspname = 'public'
+      AND relation.relname = ANY (ARRAY['sales_orders','collection_visits','customer_documents','attachments'])
+      AND attribute.attnum > 0 AND NOT attribute.attisdropped
+    ORDER BY relation.relname, attribute.attnum;`,
   indexes: `SELECT tablename AS table_name, indexname AS index_name, indexdef AS definition
     FROM pg_indexes WHERE schemaname = 'public'
     AND tablename = ANY (ARRAY['sales_orders','collection_visits','customer_documents','attachments'])
@@ -68,6 +150,203 @@ const SQL = {
   policies: `SELECT policyname AS policy_name, cmd FROM pg_policies
     WHERE schemaname = 'public' AND tablename = 'attachments' ORDER BY policyname;`,
 };
+
+export function roleMembershipPrivilegeForVersion(serverVersionNum) {
+  return Number(serverVersionNum) >= 160000 ? "SET" : "MEMBER";
+}
+
+export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
+  const hasMaintainPrivilege = Number(serverVersionNum) >= 170000;
+  const currentMaintainCheck = hasMaintainPrivilege
+    ? "OR has_table_privilege(current_user, relation.oid, 'MAINTAIN') OR has_table_privilege(current_user, relation.oid, 'MAINTAIN WITH GRANT OPTION')"
+    : "";
+  const memberMaintainCheck = hasMaintainPrivilege
+    ? "OR has_table_privilege(pg_roles.oid, relation.oid, 'MAINTAIN') OR has_table_privilege(pg_roles.oid, relation.oid, 'MAINTAIN WITH GRANT OPTION')"
+    : "";
+  const identityFlags = [
+    ["superuser", "rolsuper"], ["bypassrls", "rolbypassrls"], ["createdb", "rolcreatedb"],
+    ["createrole", "rolcreaterole"], ["replication", "rolreplication"],
+  ];
+  const attrs = identityFlags.flatMap(([label, column]) => [
+    `COALESCE((SELECT ${column} FROM pg_roles WHERE rolname = session_user), true) AS session_${label}`,
+    `COALESCE((SELECT ${column} FROM pg_roles WHERE rolname = current_user), true) AS current_${label}`,
+  ]);
+  const catalogChecks = PREFLIGHT_CATALOG_RELATIONS.map((relation) =>
+    `has_table_privilege(current_user, '${relation}', 'SELECT') AS catalog_${relation.split(".").at(-1)}_select`);
+  const dataColumnChecks = PREFLIGHT_DATA_COLUMNS.map(([table, column]) =>
+    `CASE WHEN to_regclass('public.${table}') IS NULL OR NOT EXISTS (
+      SELECT 1 FROM pg_attribute AS attribute
+      WHERE attribute.attrelid = to_regclass('public.${table}') AND attribute.attname = '${column}'
+        AND attribute.attnum > 0 AND NOT attribute.attisdropped
+    ) THEN true ELSE has_column_privilege(current_user, to_regclass('public.${table}'), '${column}', 'SELECT') END AS select_${table}_${column}`);
+  const targetOwnerChecks = TARGET_TABLES.map((table) =>
+    `current_user = (SELECT pg_get_userbyid(relation.relowner) FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}') AS owns_${table}`);
+  const targetWriteChecks = TARGET_TABLES.map((table) => `EXISTS (
+      SELECT 1 FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}'
+        AND (
+          has_table_privilege(current_user, relation.oid, 'INSERT') OR
+          has_table_privilege(current_user, relation.oid, 'UPDATE') OR
+          has_table_privilege(current_user, relation.oid, 'DELETE') OR
+          has_table_privilege(current_user, relation.oid, 'TRUNCATE') OR
+          has_table_privilege(current_user, relation.oid, 'TRIGGER') OR
+          has_table_privilege(current_user, relation.oid, 'TRIGGER WITH GRANT OPTION') OR
+          has_table_privilege(current_user, relation.oid, 'INSERT WITH GRANT OPTION') OR
+          has_table_privilege(current_user, relation.oid, 'UPDATE WITH GRANT OPTION') OR
+          has_table_privilege(current_user, relation.oid, 'DELETE WITH GRANT OPTION') OR
+          EXISTS (SELECT 1 FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped
+              AND (has_column_privilege(current_user, relation.oid, attribute.attnum, 'INSERT')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'UPDATE')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'INSERT WITH GRANT OPTION')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'UPDATE WITH GRANT OPTION')))
+        )
+    ) AS write_${table}`);
+  const sequenceWriteCheck = `EXISTS (
+      SELECT 1 FROM pg_class AS sequence
+      JOIN pg_depend AS dependency ON dependency.objid = sequence.oid AND dependency.classid = 'pg_class'::regclass
+        AND dependency.refclassid = 'pg_class'::regclass AND dependency.deptype = 'a'
+      JOIN pg_class AS relation ON relation.oid = dependency.refobjid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE sequence.relkind = 'S' AND namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+        AND (has_sequence_privilege(current_user, sequence.oid, 'USAGE')
+          OR has_sequence_privilege(current_user, sequence.oid, 'UPDATE')
+          OR has_sequence_privilege(current_user, sequence.oid, 'USAGE WITH GRANT OPTION')
+          OR has_sequence_privilege(current_user, sequence.oid, 'UPDATE WITH GRANT OPTION'))
+    ) AS write_target_sequences`;
+  const anyRelationWriteCheck = `EXISTS (
+      SELECT 1 FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+        AND (has_table_privilege(current_user, relation.oid, 'INSERT')
+          OR has_table_privilege(current_user, relation.oid, 'UPDATE')
+          OR has_table_privilege(current_user, relation.oid, 'DELETE')
+          OR has_table_privilege(current_user, relation.oid, 'TRUNCATE')
+          OR has_table_privilege(current_user, relation.oid, 'TRIGGER')
+          OR has_table_privilege(current_user, relation.oid, 'TRIGGER WITH GRANT OPTION')
+          OR has_table_privilege(current_user, relation.oid, 'INSERT WITH GRANT OPTION')
+          OR has_table_privilege(current_user, relation.oid, 'UPDATE WITH GRANT OPTION')
+          OR has_table_privilege(current_user, relation.oid, 'DELETE WITH GRANT OPTION')
+          ${currentMaintainCheck}
+          OR EXISTS (SELECT 1 FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped
+              AND (has_column_privilege(current_user, relation.oid, attribute.attnum, 'INSERT')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'UPDATE')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'INSERT WITH GRANT OPTION')
+                OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'UPDATE WITH GRANT OPTION'))))
+    ) AS write_any_relation`;
+  return `WITH protected_roles AS (
+      SELECT oid FROM pg_roles
+      WHERE rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole OR rolreplication
+        OR EXISTS (SELECT 1 FROM pg_roles AS administered_role
+          WHERE administered_role.oid <> pg_roles.oid
+            AND pg_has_role(pg_roles.oid, administered_role.oid, 'MEMBER WITH ADMIN OPTION'))
+        OR has_database_privilege(oid, current_database(), 'CREATE')
+        OR has_database_privilege(oid, current_database(), 'TEMP')
+        OR EXISTS (SELECT 1 FROM pg_namespace AS namespace
+          WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+            AND has_schema_privilege(pg_roles.oid, namespace.oid, 'CREATE'))
+        OR oid = (SELECT datdba FROM pg_database WHERE datname = current_database())
+        OR EXISTS (SELECT 1 FROM pg_namespace AS namespace
+          WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+            AND namespace.nspowner = pg_roles.oid)
+        OR EXISTS (SELECT 1 FROM pg_class AS relation
+          JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+            AND relation.relowner = pg_roles.oid)
+        OR EXISTS (SELECT 1 FROM pg_shdepend AS dependency
+          WHERE dependency.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+            AND dependency.refclassid = 'pg_authid'::regclass
+            AND dependency.refobjid = pg_roles.oid AND dependency.deptype = 'o')
+        OR EXISTS (SELECT 1 FROM pg_class AS relation
+          JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+            AND (has_table_privilege(pg_roles.oid, relation.oid, 'INSERT')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'UPDATE')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'DELETE')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'TRUNCATE')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'TRIGGER')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'TRIGGER WITH GRANT OPTION')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'INSERT WITH GRANT OPTION')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'UPDATE WITH GRANT OPTION')
+              OR has_table_privilege(pg_roles.oid, relation.oid, 'DELETE WITH GRANT OPTION')
+              ${memberMaintainCheck}
+              OR EXISTS (SELECT 1 FROM pg_attribute AS attribute
+                WHERE attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped
+                  AND (has_column_privilege(pg_roles.oid, relation.oid, attribute.attnum, 'INSERT')
+                    OR has_column_privilege(pg_roles.oid, relation.oid, attribute.attnum, 'UPDATE')
+                    OR has_column_privilege(pg_roles.oid, relation.oid, attribute.attnum, 'INSERT WITH GRANT OPTION')
+                    OR has_column_privilege(pg_roles.oid, relation.oid, attribute.attnum, 'UPDATE WITH GRANT OPTION')))))
+        OR EXISTS (SELECT 1 FROM pg_class AS sequence
+          JOIN pg_depend AS dependency ON dependency.objid = sequence.oid AND dependency.classid = 'pg_class'::regclass
+            AND dependency.refclassid = 'pg_class'::regclass AND dependency.deptype = 'a'
+          JOIN pg_namespace AS namespace ON namespace.oid = sequence.relnamespace
+          WHERE sequence.relkind = 'S' AND namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+            AND (has_sequence_privilege(pg_roles.oid, sequence.oid, 'USAGE')
+              OR has_sequence_privilege(pg_roles.oid, sequence.oid, 'UPDATE')
+              OR has_sequence_privilege(pg_roles.oid, sequence.oid, 'USAGE WITH GRANT OPTION')
+              OR has_sequence_privilege(pg_roles.oid, sequence.oid, 'UPDATE WITH GRANT OPTION')))
+    )
+    SELECT current_user = session_user AS same_login_role,
+      ${attrs.join(",\n      ")},
+      COALESCE((SELECT NOT rolsuper AND NOT rolbypassrls AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication
+        FROM pg_roles WHERE rolname = current_user), false) AS current_role_safe,
+      has_database_privilege(current_user, current_database(), 'CREATE') AS database_create,
+      has_database_privilege(current_user, current_database(), 'TEMP') AS database_temp,
+      has_schema_privilege(current_user, 'public', 'CREATE') AS public_create,
+      has_schema_privilege(current_user, 'supabase_migrations', 'CREATE') AS migration_schema_create,
+      EXISTS (SELECT 1 FROM pg_namespace AS namespace
+        WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+          AND has_schema_privilege(current_user, namespace.oid, 'CREATE')) AS any_schema_create,
+      current_user = (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()) AS owns_database,
+      current_user = (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'public') AS owns_public_schema,
+      current_user = (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'supabase_migrations') AS owns_migration_schema,
+      EXISTS (SELECT 1 FROM pg_namespace AS namespace
+        WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+          AND namespace.nspowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)) AS owns_any_schema,
+      EXISTS (SELECT 1 FROM pg_class AS relation
+        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+          AND relation.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)) AS owns_any_relation,
+      EXISTS (SELECT 1 FROM pg_shdepend AS dependency
+        WHERE dependency.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND dependency.refclassid = 'pg_authid'::regclass
+          AND dependency.refobjid = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+          AND dependency.deptype = 'o') AS owns_any_database_object,
+      ${anyRelationWriteCheck},
+      NOT EXISTS (SELECT 1 FROM protected_roles AS protected
+        WHERE protected.oid <> (SELECT oid FROM pg_roles WHERE rolname = session_user)
+          AND pg_has_role(session_user, protected.oid, '${membershipPrivilege}')) AS no_settable_privileged_roles,
+      NOT EXISTS (SELECT 1 FROM protected_roles AS protected
+        WHERE protected.oid <> (SELECT oid FROM pg_roles WHERE rolname = session_user)
+          AND pg_has_role(session_user, protected.oid, '${membershipPrivilege} WITH ADMIN OPTION')) AS no_admin_on_privileged_roles,
+      current_setting('row_security') = 'on' AS row_security_setting_on,
+      has_schema_privilege(current_user, 'public', 'USAGE') AS public_usage,
+      has_schema_privilege(current_user, 'supabase_migrations', 'USAGE') AS migration_schema_usage,
+      has_column_privilege(current_user, 'supabase_migrations.schema_migrations', 'version', 'SELECT') AS ledger_version_select,
+      ${targetOwnerChecks.join(",\n      ")},
+      ${catalogChecks.join(",\n      ")},
+      ${dataColumnChecks.join(",\n      ")},
+      ${targetWriteChecks.join(",\n      ")},
+      ${sequenceWriteCheck},
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT') AS ledger_insert,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE') AS ledger_update,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'DELETE') AS ledger_delete,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'TRUNCATE') AS ledger_truncate,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT WITH GRANT OPTION') AS ledger_insert_grant,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE WITH GRANT OPTION') AS ledger_update_grant,
+      has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'DELETE WITH GRANT OPTION') AS ledger_delete_grant,
+      EXISTS (SELECT 1 FROM pg_attribute AS attribute
+        WHERE attribute.attrelid = to_regclass('supabase_migrations.schema_migrations')
+          AND attribute.attnum > 0 AND NOT attribute.attisdropped
+          AND (has_column_privilege(current_user, attribute.attrelid, attribute.attnum, 'INSERT')
+            OR has_column_privilege(current_user, attribute.attrelid, attribute.attnum, 'UPDATE')
+            OR has_column_privilege(current_user, attribute.attrelid, attribute.attnum, 'INSERT WITH GRANT OPTION')
+            OR has_column_privilege(current_user, attribute.attrelid, attribute.attnum, 'UPDATE WITH GRANT OPTION'))) AS ledger_column_write;`;
+}
 
 const bool = (value) => value === true || ["true", "t", "1"].includes(String(value).toLowerCase());
 const normalizeSql = (value) => String(value || "").toLowerCase().replaceAll('"', "").replace(/\s+/g, "");
@@ -113,12 +392,142 @@ export function migrationLedgerRepairIssues(identity = {}) {
 }
 
 export function readonlyPrivilegeIssues(privileges = {}) {
-  const writeCapabilities = [
-    "is_superuser", "can_create_public", "can_create_migration_schema",
-    "ledger_insert", "ledger_update", "ledger_delete", "ledger_truncate",
-    ...TARGET_TABLES.flatMap((table) => [`${table}_insert`, `${table}_update`, `${table}_delete`, `${table}_truncate`]),
+  const mustBeFalse = [
+    "session_superuser", "current_superuser", "session_bypassrls", "current_bypassrls",
+    "session_createdb", "current_createdb", "session_createrole", "current_createrole",
+    "session_replication", "current_replication",
+    "database_create", "public_create", "migration_schema_create", "owns_database",
+    "database_temp", "any_schema_create", "owns_any_schema", "owns_any_relation", "owns_any_database_object", "write_any_relation",
+    "write_target_sequences", "ledger_column_write",
+    "owns_public_schema", "owns_migration_schema", "ledger_insert", "ledger_update",
+    "ledger_delete", "ledger_truncate", "ledger_insert_grant", "ledger_update_grant", "ledger_delete_grant",
+    ...TARGET_TABLES.flatMap((table) => [`owns_${table}`, `write_${table}`]),
   ];
-  return writeCapabilities.filter((name) => bool(privileges[name]));
+  const mustBeTrue = [
+    "same_login_role", "current_role_safe", "no_settable_privileged_roles", "no_admin_on_privileged_roles",
+    "row_security_setting_on", "public_usage",
+    "migration_schema_usage", "ledger_version_select",
+    ...PREFLIGHT_CATALOG_RELATIONS.map((relation) => `catalog_${relation.split(".").at(-1)}_select`),
+    ...PREFLIGHT_DATA_COLUMNS.map(([table, column]) => `select_${table}_${column}`),
+  ];
+  const issues = [];
+  for (const name of mustBeFalse) {
+    if (!Object.hasOwn(privileges, name)) issues.push(`${name} was not verified`);
+    else if (bool(privileges[name])) issues.push(`${name} must be false`);
+  }
+  for (const name of mustBeTrue) {
+    if (!Object.hasOwn(privileges, name)) issues.push(`${name} was not verified`);
+    else if (!bool(privileges[name])) issues.push(`${name} is required`);
+  }
+  return issues;
+}
+
+export function selectIntegrityScanKeys(tableSet, columnSet) {
+  return INTEGRITY_SCANS
+    .filter((scan) => {
+      if ((scan.requiresTables || []).some((table) => !tableSet.has(table))) return false;
+      return scan.requiresColumns.every((column) => columnSet.has(column));
+    })
+    .map((scan) => scan.key);
+}
+
+export function tablesForIntegrityScans(keys) {
+  const tables = new Set();
+  for (const key of keys) {
+    const scan = INTEGRITY_SCAN_BY_KEY[key];
+    if (!scan) throw new Error(`integrity scan key is not allowlisted: ${key}`);
+    for (const table of scan.tables) tables.add(table);
+  }
+  return [...tables].sort();
+}
+
+export function integrityVisibilitySql(tables) {
+  if (!Array.isArray(tables) || tables.some((table) => !TARGET_TABLES.includes(table))) {
+    throw new Error("integrity visibility tables must be an allowlisted target subset");
+  }
+  if (!tables.length) return "SELECT true AS integrity_visibility_ready";
+  const checks = tables.flatMap((table) => [
+    `(to_regclass('public.${table}') IS NOT NULL) AS exists_${table}`,
+    `(current_user = (SELECT pg_get_userbyid(relation.relowner) FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}')) AS owns_${table}`,
+    `COALESCE((SELECT relation.relrowsecurity FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}'), false) AS rls_enabled_${table}`,
+    `COALESCE((SELECT relation.relforcerowsecurity FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname = '${table}'), false) AS force_rls_${table}`,
+    `CASE WHEN to_regclass('public.${table}') IS NULL THEN false
+      ELSE row_security_active(to_regclass('public.${table}')) END AS row_security_active_${table}`,
+    `has_table_privilege(current_user, to_regclass('public.${table}'), 'SELECT') AS select_${table}`,
+  ]);
+  return `SELECT ${checks.join(",\n      ")};`;
+}
+
+export function integrityVisibilityIssues(privileges = {}, tables = []) {
+  const issues = [];
+  for (const table of tables) {
+    if (!TARGET_TABLES.includes(table)) {
+      issues.push(`integrity visibility table is not allowlisted: ${table}`);
+      continue;
+    }
+    for (const name of [`exists_${table}`, `owns_${table}`, `rls_enabled_${table}`, `force_rls_${table}`, `row_security_active_${table}`, `select_${table}`]) {
+      if (!Object.hasOwn(privileges, name)) issues.push(`${name} was not verified`);
+    }
+    if (Object.hasOwn(privileges, `exists_${table}`) && !bool(privileges[`exists_${table}`])) {
+      issues.push(`public.${table} is missing for integrity scan visibility`);
+      continue;
+    }
+    if (Object.hasOwn(privileges, `owns_${table}`) && !bool(privileges[`owns_${table}`])) {
+      issues.push(`migration role must own public.${table} for full-row integrity visibility`);
+    }
+    if (Object.hasOwn(privileges, `force_rls_${table}`) && bool(privileges[`force_rls_${table}`])) {
+      issues.push(`public.${table} has FORCE ROW LEVEL SECURITY; owner visibility cannot be assumed`);
+    }
+    if (Object.hasOwn(privileges, `row_security_active_${table}`) && bool(privileges[`row_security_active_${table}`])) {
+      issues.push(`row_security_active is true for public.${table}; integrity scans would be filtered`);
+    }
+    if (Object.hasOwn(privileges, `select_${table}`) && !bool(privileges[`select_${table}`])) {
+      issues.push(`SELECT on public.${table} is required for integrity scans`);
+    }
+  }
+  return issues;
+}
+
+export function assertIntegrityScanSql(sql) {
+  const text = String(sql || "");
+  if (!/^\s*SELECT\b/i.test(text)) throw new Error("integrity scan SQL must be a SELECT");
+  if (/\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|GRANT|REVOKE|CALL|DO|COPY|REINDEX|VACUUM|CLUSTER|REFRESH|SECURITY\s+LABEL|LISTEN|NOTIFY|LOAD|RESET|SET\b|BEGIN|COMMIT|ROLLBACK|repair)\b/i.test(text)) {
+    throw new Error("integrity scan SQL contains disallowed statements");
+  }
+  return text;
+}
+
+export function buildIntegrityScanScript(keys) {
+  if (!Array.isArray(keys)) throw new Error("integrity scan keys must be an allowlisted array");
+  const unique = new Set(keys);
+  if (unique.size !== keys.length) throw new Error("integrity scan keys must not contain duplicates");
+  for (const key of keys) {
+    if (!INTEGRITY_SCAN_BY_KEY[key]) throw new Error(`integrity scan key is not allowlisted: ${key}`);
+  }
+  const statements = keys.map((key) => assertIntegrityScanSql(INTEGRITY_SCAN_BY_KEY[key].sql));
+  return `BEGIN READ ONLY;\nSET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '5min';\n${statements.join(";\n")};\nCOMMIT;\n`;
+}
+
+export function parseIntegrityScanCounts(stdout, keys) {
+  const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length !== keys.length) throw new Error(`integrity scan returned ${lines.length} rows; expected ${keys.length}`);
+  const duplicates = new Map();
+  for (let index = 0; index < keys.length; index += 1) {
+    const count = Number(lines[index]);
+    if (!Number.isInteger(count) || count < 0) throw new Error(`integrity scan count for ${keys[index]} is invalid`);
+    duplicates.set(keys[index], count);
+  }
+  return duplicates;
+}
+
+export function assertMutationAllowed(stage) {
+  if (mutationGate !== "apply") throw new Error(`preflight mode forbids mutation: ${stage}`);
 }
 
 export function migrationScope(repoVersions, ledgerVersions) {
@@ -274,11 +683,7 @@ function query(dbUrl, sql, stage) {
   return runCli(["db", "query", "--db-url", dbUrl, "--agent", "no", "--output", "json", sql], stage);
 }
 
-function countQuery(dbUrl, sql, stage) {
-  return Number(query(dbUrl, sql, stage)[0]?.count ?? 0);
-}
-
-function collectPreflight(dbUrl) {
+function collectReadonlyPreflight(dbUrl) {
   const identity = query(dbUrl, SQL.identity, "database identity")[0];
   if (!identity) throw new Error("database identity query returned no row");
   if (identity.database !== "postgres") throw new Error("connected database is not postgres");
@@ -286,23 +691,10 @@ function collectPreflight(dbUrl) {
   if (bool(identity.is_superuser)) throw new Error("read-only preflight must not use a superuser connection");
   const ledgerIssues = migrationLedgerRepairIssues(identity);
   if (ledgerIssues.length) throw new Error(`migration ledger is not repair-ready: ${ledgerIssues.join("; ")}`);
-  const readonlyPermissions = query(dbUrl, `
-    SELECT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
-           has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public,
-      has_schema_privilege(current_user, 'supabase_migrations', 'CREATE') AS can_create_migration_schema,
-           has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT') AS ledger_insert,
-           has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE') AS ledger_update,
-           has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'DELETE') AS ledger_delete,
-       has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'TRUNCATE') AS ledger_truncate,
-           ${TARGET_TABLES.flatMap((table) => [
-             `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'INSERT') END AS ${table}_insert`,
-             `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'UPDATE') END AS ${table}_update`,
-             `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'DELETE') END AS ${table}_delete`,
-             `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'TRUNCATE') END AS ${table}_truncate`,
-           ]).join(",")};
-  `, "read-only credential permissions")[0] || {};
+  const membershipPrivilege = roleMembershipPrivilegeForVersion(identity.server_version_num);
+  const readonlyPermissions = query(dbUrl, readonlySecuritySql(membershipPrivilege, identity.server_version_num), "read-only identity and effective permissions")[0] || {};
   const writeAccess = readonlyPrivilegeIssues(readonlyPermissions);
-  if (writeAccess.length) throw new Error(`read-only credential has write/DDL privileges: ${writeAccess.join(", ")}`);
+  if (writeAccess.length) throw new Error(`read-only credential is unsafe or preflight visibility is insufficient: ${writeAccess.join(", ")}`);
 
   const ledgerVersions = query(dbUrl, SQL.ledger, "migration ledger").map((row) => String(row.version));
   const tables = query(dbUrl, SQL.tables, "table catalog");
@@ -312,28 +704,53 @@ function collectPreflight(dbUrl) {
   const policies = query(dbUrl, SQL.policies, "attachment policies");
   const tableSet = new Set(tables.filter((row) => bool(row.exists)).map((row) => row.table_name));
   const columnSet = new Set(columns.map((row) => `${row.table_name}.${row.column_name}`));
+  for (const row of tables) {
+    if (bool(row.exists) && !bool(row.is_table)) throw new Error(`public.${row.table_name} is not a regular or partitioned table`);
+  }
   for (const table of ["sales_orders", "collection_visits", "customer_documents"]) if (!tableSet.has(table)) throw new Error(`required public.${table} base table is missing`);
 
-  const duplicates = new Map();
-  const uuidChecks = [
-    ["sales_orders.request_id", "sales_orders.request_id", "SELECT count(*)::int AS count FROM (SELECT request_id FROM public.sales_orders WHERE request_id IS NOT NULL GROUP BY request_id HAVING count(*) > 1) AS duplicate_values"],
-    ["collection_visits.client_submission_id", "collection_visits.client_submission_id", "SELECT count(*)::int AS count FROM (SELECT client_submission_id FROM public.collection_visits WHERE client_submission_id IS NOT NULL GROUP BY client_submission_id HAVING count(*) > 1) AS duplicate_values"],
-  ];
-  for (const [key, column, sql] of uuidChecks) if (columnSet.has(column)) duplicates.set(key, countQuery(dbUrl, sql, `duplicate check ${key}`));
-  if (tableSet.has("attachments")) {
-    duplicates.set("attachments.storage_provider,object_key", countQuery(dbUrl,
-      "SELECT count(*)::int AS count FROM (SELECT storage_provider, object_key FROM public.attachments GROUP BY storage_provider, object_key HAVING count(*) > 1) AS duplicate_values",
-      "attachment duplicate check"));
-    for (const [table, column] of [["collection_visits", "receipt_attachment_id"], ["collection_visits", "payment_attachment_id"], ["customer_documents", "attachment_id"]]) {
-      if (!columnSet.has(`${table}.${column}`)) continue;
-      duplicates.set(`orphan:${table}.${column}`, countQuery(dbUrl,
-        `SELECT count(*)::int AS count FROM public.${table} AS source WHERE source.${column} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.attachments AS target WHERE target.id = source.${column})`,
-        `orphan reference check ${table}.${column}`));
-    }
-  }
   const repoVersions = readdirSync(path.join(ROOT, "supabase", "migrations"))
     .map((file) => /^([0-9]{14})_.+\.sql$/.exec(file)?.[1]).filter(Boolean).sort();
-  return { identity, ledgerVersions, repoVersions, tables, columns, indexes, constraints, policies, duplicates };
+  return { identity, ledgerVersions, repoVersions, tables, columns, indexes, constraints, policies, tableSet, columnSet, duplicates: new Map() };
+}
+
+function assertIntegrityVisibility(dbUrl, tables) {
+  if (!tables.length) return {};
+  const sql = integrityVisibilitySql(tables);
+  const privileges = query(dbUrl, sql, "integrity scan visibility")[0] || {};
+  const issues = integrityVisibilityIssues(privileges, tables);
+  if (issues.length) throw new Error(`integrity visibility check failed: ${issues.join("; ")}`);
+  return privileges;
+}
+
+function collectIntegrityCounts(dbUrl, tableSet, columnSet) {
+  const keys = selectIntegrityScanKeys(tableSet, columnSet);
+  const tables = tablesForIntegrityScans(keys);
+  assertIntegrityVisibility(dbUrl, tables);
+  if (!keys.length) return new Map();
+  const script = buildIntegrityScanScript(keys);
+  if (!script.startsWith("BEGIN READ ONLY;")) throw new Error("integrity scan script must begin with BEGIN READ ONLY");
+  const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-integrity-"));
+  const tempFile = path.join(tempDirectory, "integrity-scans.sql");
+  try {
+    writeFileSync(tempFile, script, { flag: "wx" });
+    const result = spawnSync("psql", ["--no-psqlrc", "--set=ON_ERROR_STOP=1", "--no-align", "--tuples-only", "--file", tempFile, dbUrl], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env },
+    });
+    if (result.error || result.status !== 0) throw new Error(`integrity scan failed (exit ${result.status ?? "unavailable"}); raw psql output suppressed`);
+    return parseIntegrityScanCounts(result.stdout, keys);
+  } finally {
+    rmSync(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+function collectPreflight(readUrl, migrationUrl) {
+  const schema = collectReadonlyPreflight(readUrl);
+  schema.duplicates = collectIntegrityCounts(migrationUrl, schema.tableSet, schema.columnSet);
+  return schema;
 }
 
 function blockersFor(schema) {
@@ -405,6 +822,7 @@ export function executionFailureStatus(report) {
 }
 
 function executeExactMigration(dbUrl, migration) {
+  assertMutationAllowed(`execute migration file ${migration.file}`);
   const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-migration-"));
   const tempFile = path.join(tempDirectory, migration.file);
   try {
@@ -418,6 +836,7 @@ function executeExactMigration(dbUrl, migration) {
 }
 
 function markVersionApplied(dbUrl, version) {
+  assertMutationAllowed(`migration repair ${version}`);
   runCli(["migration", "repair", version, "--status", "applied", "--db-url", dbUrl], `record ${version}`, false);
 }
 
@@ -453,6 +872,7 @@ function writeAudit(report) {
 
 export async function runMigrationWorkflow(env = process.env) {
   const mode = env.PRODUCTION_DB_MIGRATION_MODE || "preflight";
+  mutationGate = "closed";
   const report = { actor: env.GITHUB_ACTOR, commit: env.REVIEWED_COMMIT, mode, preflight: "running", execution: mode === "preflight" ? "not requested (read-only)" : "not started", executionStarted: false, postVerification: "not run" };
   try {
     const contextErrors = validateWorkflowContext({
@@ -466,7 +886,9 @@ export async function runMigrationWorkflow(env = process.env) {
     if (!env.PGSSLROOTCERT) throw new Error("PGSSLROOTCERT must point to the trusted Supabase root CA certificate");
     const readUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_READONLY_URL);
     if (!readUrl.ok) throw new Error(`read-only connection rejected: ${readUrl.reason}`);
-    const schema = collectPreflight(env.PRODUCTION_DB_READONLY_URL);
+    const migrationUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_MIGRATION_URL);
+    if (!migrationUrl.ok) throw new Error(`migration connection rejected: ${migrationUrl.reason}`);
+    const schema = collectPreflight(env.PRODUCTION_DB_READONLY_URL, env.PRODUCTION_DB_MIGRATION_URL);
     const { scope, states, blockers } = blockersFor(schema);
     report.database = schema.identity.database;
     report.tls = bool(schema.identity.tls);
@@ -481,11 +903,10 @@ export async function runMigrationWorkflow(env = process.env) {
     report.preflight = "PASS";
     if (mode === "preflight") return report;
 
-    const migrationUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_MIGRATION_URL);
-    if (!migrationUrl.ok) throw new Error(`migration connection rejected: ${migrationUrl.reason}`);
     const privilegeErrors = checkMigrationRole(env.PRODUCTION_DB_MIGRATION_URL, schema);
     if (privilegeErrors.length) throw new Error(`migration-role check failed: ${privilegeErrors.join("; ")}`);
 
+    mutationGate = "apply";
     report.execution = "in progress; allowlisted versions only";
     for (const migration of ALLOWLISTED_MIGRATIONS) {
       const state = report.states.find((item) => item.version === migration.version);
@@ -507,7 +928,8 @@ export async function runMigrationWorkflow(env = process.env) {
       state.status = "executed exact file and recorded";
     }
     report.execution = "completed; exact allowlist only";
-    const postSchema = collectPreflight(env.PRODUCTION_DB_READONLY_URL);
+    mutationGate = "closed";
+    const postSchema = collectPreflight(env.PRODUCTION_DB_READONLY_URL, env.PRODUCTION_DB_MIGRATION_URL);
     const postStates = assessMigrationSchema(postSchema);
     report.states = postStates.map((state) => ({ ...state, status: state.status === "applied" ? "verified applied" : state.status }));
     report.postVerification = postStates.every((state) => state.status === "applied") ? "PASS" : "FAILED";
@@ -520,6 +942,7 @@ export async function runMigrationWorkflow(env = process.env) {
     report.error = true;
     return report;
   } finally {
+    mutationGate = "closed";
     writeAudit(report);
   }
 }

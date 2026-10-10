@@ -5,15 +5,26 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALLOWLISTED_MIGRATIONS,
+  INTEGRITY_SCANS,
   PRODUCTION_PROJECT_REF,
+  assertIntegrityScanSql,
+  assertMutationAllowed,
   assessMigrationSchema,
+  buildIntegrityScanScript,
   executionFailureStatus,
   hasOnlyAllowlistedMigrationSql,
+  integrityVisibilityIssues,
+  integrityVisibilitySql,
   migrationActionForState,
   migrationLedgerRepairIssues,
   migrationRoleIssues,
   migrationScope,
+  parseIntegrityScanCounts,
+  roleMembershipPrivilegeForVersion,
+  readonlySecuritySql,
   readonlyPrivilegeIssues,
+  selectIntegrityScanKeys,
+  tablesForIntegrityScans,
   validateProductionDatabaseUrl,
   validateWorkflowContext,
 } from "../scripts/productionDbMigrations.mjs";
@@ -38,6 +49,33 @@ function emptySchema(overrides = {}) {
     duplicates: new Map(),
     ...overrides,
   };
+}
+
+function safeReadonlyPrivileges() {
+  const privileges = {};
+  for (const name of [
+    "session_superuser", "current_superuser", "session_bypassrls", "current_bypassrls",
+    "session_createdb", "current_createdb", "session_createrole", "current_createrole",
+    "session_replication", "current_replication",
+    "database_create", "database_temp", "public_create", "migration_schema_create", "any_schema_create",
+    "owns_database", "owns_public_schema", "owns_migration_schema", "owns_any_schema", "owns_any_relation", "owns_any_database_object",
+    "write_any_relation", "write_target_sequences", "ledger_column_write", "ledger_insert", "ledger_update",
+    "ledger_delete", "ledger_truncate", "ledger_insert_grant", "ledger_update_grant", "ledger_delete_grant",
+    "write_sales_orders", "write_collection_visits", "write_customer_documents", "write_attachments",
+    "owns_sales_orders", "owns_collection_visits", "owns_customer_documents", "owns_attachments",
+  ]) privileges[name] = false;
+  for (const name of [
+    "same_login_role", "current_role_safe", "no_settable_privileged_roles", "no_admin_on_privileged_roles", "public_usage",
+    "row_security_setting_on", "migration_schema_usage", "ledger_version_select",
+  ]) privileges[name] = true;
+  for (const relation of ["pg_class", "pg_namespace", "pg_attribute", "pg_type", "pg_constraint", "pg_trigger", "pg_roles", "pg_database", "pg_shdepend", "pg_stat_ssl", "pg_indexes", "pg_policies"]) privileges[`catalog_${relation}_select`] = true;
+  for (const [table, column] of [
+    ["sales_orders", "request_id"], ["collection_visits", "client_submission_id"],
+    ["collection_visits", "receipt_attachment_id"], ["collection_visits", "payment_attachment_id"],
+    ["customer_documents", "attachment_id"], ["attachments", "id"],
+    ["attachments", "storage_provider"], ["attachments", "object_key"],
+  ]) privileges[`select_${table}_${column}`] = true;
+  return privileges;
 }
 
 test("production project ref and migration allowlist are pinned and exact", () => {
@@ -173,11 +211,130 @@ test("production database URL requires verified TLS and is pinned to production"
 });
 
 test("read-only preflight rejects effective write privileges and tolerates missing target tables", () => {
-  assert.deepEqual(readonlyPrivilegeIssues(), []);
-  assert.deepEqual(readonlyPrivilegeIssues({ sales_orders_update: true, ledger_update: true }), ["ledger_update", "sales_orders_update"]);
-  assert.deepEqual(readonlyPrivilegeIssues({ can_create_migration_schema: true, ledger_truncate: true }), ["can_create_migration_schema", "ledger_truncate"]);
-  assert.deepEqual(readonlyPrivilegeIssues({ is_superuser: true }), ["is_superuser"]);
-  assert.match(runner, /CASE WHEN to_regclass\('public\.\$\{table\}'\) IS NULL THEN false ELSE has_table_privilege\(current_user, to_regclass\('public\.\$\{table\}'\), 'INSERT'\) END AS \$\{table\}_insert/);
+  const safe = safeReadonlyPrivileges();
+  assert.deepEqual(readonlyPrivilegeIssues(safe), []);
+  for (const field of [
+    "session_superuser", "current_superuser", "session_bypassrls", "current_bypassrls",
+    "session_createdb", "current_createdb", "session_createrole", "current_createrole",
+    "session_replication", "current_replication", "database_create", "public_create", "migration_schema_create",
+    "database_temp", "any_schema_create", "owns_database", "owns_public_schema", "owns_migration_schema",
+    "owns_any_schema", "owns_any_relation", "owns_any_database_object", "write_any_relation", "owns_sales_orders",
+    "owns_collection_visits", "owns_customer_documents", "owns_attachments", "no_settable_privileged_roles",
+    "ledger_insert", "ledger_update", "ledger_delete", "ledger_truncate", "ledger_insert_grant",
+    "ledger_update_grant", "ledger_delete_grant", "ledger_column_write", "write_target_sequences", "write_any_relation", "write_sales_orders",
+    "write_collection_visits", "write_customer_documents", "write_attachments",
+    "row_security_setting_on", "no_admin_on_privileged_roles",
+    "catalog_pg_attribute_select", "select_sales_orders_request_id",
+  ]) {
+    assert.notDeepEqual(readonlyPrivilegeIssues({ ...safe, [field]: !safe[field] }).length, 0, `${field} must fail closed`);
+  }
+  for (const relation of ["pg_class", "pg_namespace", "pg_attribute", "pg_type", "pg_constraint", "pg_trigger", "pg_roles", "pg_database", "pg_shdepend", "pg_stat_ssl", "pg_indexes", "pg_policies"]) {
+    assert.ok(readonlyPrivilegeIssues({ ...safe, [`catalog_${relation}_select`]: false }).length > 0, `${relation} catalog visibility must be required`);
+  }
+  for (const [table, column] of [
+    ["sales_orders", "request_id"], ["collection_visits", "client_submission_id"],
+    ["collection_visits", "receipt_attachment_id"], ["collection_visits", "payment_attachment_id"],
+    ["customer_documents", "attachment_id"], ["attachments", "id"],
+    ["attachments", "storage_provider"], ["attachments", "object_key"],
+  ]) {
+    assert.ok(readonlyPrivilegeIssues({ ...safe, [`select_${table}_${column}`]: false }).length > 0, `${table}.${column} SELECT must be required`);
+  }
+  assert.ok(readonlyPrivilegeIssues({ same_login_role: true }).length > 0, "missing checks must fail closed");
+  assert.equal(roleMembershipPrivilegeForVersion(150000), "MEMBER");
+  assert.equal(roleMembershipPrivilegeForVersion(160000), "SET");
+  const pg15Sql = readonlySecuritySql("MEMBER", 150000);
+  const pg16Sql = readonlySecuritySql("SET", 160000);
+  const pg17Sql = readonlySecuritySql("SET", 170000);
+  assert.match(pg15Sql, /pg_has_role\(session_user, protected\.oid, 'MEMBER'\)/);
+  assert.match(pg16Sql, /pg_has_role\(session_user, protected\.oid, 'SET'\)/);
+  assert.doesNotMatch(pg15Sql, /'MAINTAIN/);
+  assert.doesNotMatch(pg16Sql, /'MAINTAIN/);
+  assert.match(pg17Sql, /'MAINTAIN WITH GRANT OPTION'/);
+  assert.match(runner, /pg_has_role\(session_user, protected\.oid, '\$\{membershipPrivilege\}'\)/);
+  assert.match(runner, /rolbypassrls/);
+  assert.match(runner, /pg_has_role\(session_user, protected\.oid/);
+  assert.match(runner, /has_table_privilege\(current_user, relation\.oid, 'UPDATE'\)/);
+  assert.match(runner, /has_column_privilege\(current_user, relation\.oid, attribute\.attnum, 'UPDATE'\)/);
+  assert.match(runner, /has_database_privilege\(current_user, current_database\(\), 'CREATE'\)/);
+  assert.match(runner, /has_database_privilege\(current_user, current_database\(\), 'TEMP'\)/);
+  assert.match(runner, /WITH ADMIN OPTION/);
+  assert.match(runner, /administered_role\.oid <> pg_roles\.oid/);
+  assert.match(runner, /pg_shdepend/);
+  assert.match(runner, /ledger_column_write/);
+  assert.match(runner, /write_any_relation/);
+  assert.match(runner, /current_setting\('row_security'\) = 'on'/);
+  assert.doesNotMatch(runner, /rolinherit|NOINHERIT/);
+  assert.match(runner, /CASE WHEN to_regclass\('public\.\$\{table\}'\) IS NULL OR NOT EXISTS/);
+  assert.match(runner, /collectReadonlyPreflight/);
+  assert.match(runner, /collectIntegrityCounts/);
+  assert.equal(Object.keys(safe).some((name) => name.startsWith("row_security_active_")), false);
+});
+
+test("integrity scans use a frozen allowlist and reject arbitrary SQL or keys", () => {
+  assert.ok(INTEGRITY_SCANS.length >= 2);
+  assert.deepEqual(selectIntegrityScanKeys(new Set(["sales_orders"]), new Set(["sales_orders.request_id"])), ["sales_orders.request_id"]);
+  assert.deepEqual(selectIntegrityScanKeys(new Set(["attachments"]), new Set(["attachments.storage_provider"])), []);
+  assert.throws(() => buildIntegrityScanScript(["not-a-real-scan"]), /not allowlisted/);
+  assert.throws(() => buildIntegrityScanScript(["sales_orders.request_id", "sales_orders.request_id"]), /duplicates/);
+  assert.throws(() => assertIntegrityScanSql("INSERT INTO public.sales_orders DEFAULT VALUES"), /disallowed|SELECT/);
+  assert.throws(() => assertIntegrityScanSql("SELECT 1; DROP TABLE public.sales_orders"), /disallowed/);
+  const script = buildIntegrityScanScript(["sales_orders.request_id", "collection_visits.client_submission_id"]);
+  assert.match(script, /^BEGIN READ ONLY;/);
+  assert.match(script, /SET LOCAL lock_timeout = '5s';/);
+  assert.match(script, /SET LOCAL statement_timeout = '5min';/);
+  assert.match(script, /COMMIT;\n$/);
+  assert.doesNotMatch(script, /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|GRANT|REVOKE|repair)\b/i);
+  assert.deepEqual(tablesForIntegrityScans(["orphan:collection_visits.receipt_attachment_id"]), ["attachments", "collection_visits"]);
+  assert.deepEqual([...parseIntegrityScanCounts("0\n2\n", ["sales_orders.request_id", "collection_visits.client_submission_id"])], [
+    ["sales_orders.request_id", 0],
+    ["collection_visits.client_submission_id", 2],
+  ]);
+  assert.throws(() => parseIntegrityScanCounts("0\n", ["sales_orders.request_id", "collection_visits.client_submission_id"]), /expected 2/);
+});
+
+test("integrity visibility fails closed without ownership, with FORCE RLS, or when row security is active", () => {
+  const tables = ["sales_orders"];
+  const sql = integrityVisibilitySql(tables);
+  assert.match(sql, /relforcerowsecurity/);
+  assert.match(sql, /row_security_active\(to_regclass\('public\.sales_orders'\)\)/);
+  assert.match(sql, /owns_sales_orders/);
+  const ready = {
+    exists_sales_orders: true,
+    owns_sales_orders: true,
+    rls_enabled_sales_orders: true,
+    force_rls_sales_orders: false,
+    row_security_active_sales_orders: false,
+    select_sales_orders: true,
+  };
+  assert.deepEqual(integrityVisibilityIssues(ready, tables), []);
+  assert.match(integrityVisibilityIssues({ ...ready, owns_sales_orders: false }, tables).join(" "), /must own/);
+  assert.match(integrityVisibilityIssues({ ...ready, force_rls_sales_orders: true }, tables).join(" "), /FORCE ROW LEVEL SECURITY/);
+  assert.match(integrityVisibilityIssues({ ...ready, row_security_active_sales_orders: true }, tables).join(" "), /row_security_active/);
+  assert.match(integrityVisibilityIssues({ ...ready, select_sales_orders: false }, tables).join(" "), /SELECT/);
+  assert.ok(integrityVisibilityIssues({ owns_sales_orders: true }, tables).length > 0, "missing visibility fields fail closed");
+  assert.throws(() => integrityVisibilitySql(["not_a_table"]), /allowlisted/);
+});
+
+test("preflight mutation gate blocks DDL, DML, migration files, and repair including on errors", () => {
+  assert.throws(() => assertMutationAllowed("execute migration file example.sql"), /preflight mode forbids mutation/);
+  assert.throws(() => assertMutationAllowed("migration repair 20260930190000"), /preflight mode forbids mutation/);
+  assert.match(runner, /mutationGate = "closed"/);
+  assert.match(runner, /mutationGate = "apply"/);
+  assert.match(runner, /assertMutationAllowed\(`execute migration file/);
+  assert.match(runner, /assertMutationAllowed\(`migration repair/);
+  assert.match(runner, /if \(mode === "preflight"\) return report;/);
+  const preflightReturnIndex = runner.indexOf('if (mode === "preflight") return report;');
+  const applyGateIndex = runner.indexOf('mutationGate = "apply"');
+  const executeIndex = runner.indexOf("function executeExactMigration");
+  const repairIndex = runner.indexOf("function markVersionApplied");
+  assert.ok(preflightReturnIndex > 0 && applyGateIndex > preflightReturnIndex, "apply mutation gate opens only after preflight return");
+  assert.ok(executeIndex > 0 && repairIndex > 0);
+  assert.match(runner, /BEGIN READ ONLY;/);
+  assert.match(runner, /collectPreflight\(env\.PRODUCTION_DB_READONLY_URL, env\.PRODUCTION_DB_MIGRATION_URL\)/);
+  assert.match(runner, /migration connection rejected/);
+  assert.doesNotMatch(runner, /inputs\.mode == 'apply' && secrets\.PRODUCTION_DB_MIGRATION_URL/);
+  assert.match(workflow, /PRODUCTION_DB_MIGRATION_URL: \$\{\{ secrets\.PRODUCTION_DB_MIGRATION_URL \}\}/);
+  assert.doesNotMatch(workflow, /inputs\.mode == 'apply' && secrets\.PRODUCTION_DB_MIGRATION_URL/);
 });
 
 test("read-only preflight is the default and apply fails closed on every missing gate", () => {

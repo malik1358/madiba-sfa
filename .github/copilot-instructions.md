@@ -1,6 +1,6 @@
 # MADIBA SFA — instructions for coding agents
 
-MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Local PC is development and staging (local/dev Supabase only). Production deploys from `main` to Vercel only. There is no permanent cloud staging environment.
+MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Local PC is development and staging (local/dev Supabase only). Production deploys from `main` to Vercel only. There is no permanent cloud staging environment and no Vercel Preview deployments — PR validation is GitHub Actions `Build`.
 
 This repository is developed by **Cursor agents and GitHub Copilot together**. Treat the handover files as living shared memory.
 

@@ -44,7 +44,7 @@ function isProductPromoterRole(role) {
 
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
+  return ["salesman", "manager", "admin", "report-user", "report_user", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 function profileCodeCandidates(profile) {
@@ -129,7 +129,7 @@ export async function resolveSalesScopeForUserId(admin, userId) {
   const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
-  if (["admin", "manager"].includes(role)) {
+  if (["admin", "report-user", "report_user", "manager"].includes(role)) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
     const headProfile = {
@@ -190,7 +190,7 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     ? [...new Set([currentProfile.id].filter(Boolean))]
     : [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
-  const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
+  const hasAllAccess = ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
 
   return {
     success: true,

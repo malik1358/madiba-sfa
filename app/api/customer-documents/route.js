@@ -1,3 +1,4 @@
+import { isManagementRole } from "../../lib/moduleAccess.js";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { extractCustomerDocumentTextSafe } from "../../lib/extractCustomerDocumentText.js";
@@ -76,7 +77,7 @@ async function requireUser(admin, request) {
 }
 
 function isManagerRole(role) {
-  return ["admin", "manager"].includes(String(role || "").toLowerCase());
+  return isManagementRole(role);
 }
 
 // Files open via /api/attachments/[id]/url; responses never carry storage paths or public URLs.

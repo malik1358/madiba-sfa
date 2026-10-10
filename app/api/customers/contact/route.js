@@ -1,3 +1,4 @@
+import { isManagementRole } from "../../../lib/moduleAccess.js";
 import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../lib/customerAccess.js";
 import { resolveCustomerMasterExportFields } from "../../../lib/customerCode.js";
@@ -42,7 +43,7 @@ async function getProfile(admin, userId) {
 
 async function ensureCustomerAccess(admin, profile, customerCode) {
   const role = String(profile.role || "").toLowerCase();
-  if (role === "admin" || role === "manager" || role === "collector") {
+  if (isManagementRole(role) || role === "collector") {
     const scope = { hasAllAccess: true, visibleSalesmanCodes: [], visibleMembers: [] };
     return ensureCustomerVisibleToScope(admin, customerCode, scope);
   }

@@ -1,7 +1,9 @@
+import { isAdminRole } from "./moduleAccess.js";
+
 export const ADMIN_LOGIN_AS_SESSION_KEY = "madiba-admin-login-as-session-v1";
 
 export function canStartAdminLoginAs(role) {
-  return String(role || "").trim().toLowerCase() === "admin";
+  return isAdminRole(role);
 }
 
 export function normalizeAdminLoginAsTargets(profiles) {

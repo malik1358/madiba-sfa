@@ -1,5 +1,6 @@
 "use client";
 
+import { isManagementRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -1092,7 +1093,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const { language, dir, setLanguage } = useAppLanguage();
   const { access } = useModuleAccess();
   const t = translate(language, TEXT);
-  const canViewVisitReports = access.role === "admin" || access.role === "manager";
+  const canViewVisitReports = isManagementRole(access.role);
   const [loading, setLoading] = useState(true);
   const [refreshingQueue, setRefreshingQueue] = useState(false);
   const [queueFromCache, setQueueFromCache] = useState(false);

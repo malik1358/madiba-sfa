@@ -18,7 +18,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function roleCanRebuild(role) {
   const normalized = String(role || "").trim().toLowerCase();
-  return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(normalized);
+  return ["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker"].includes(normalized);
 }
 
 async function resolveProfile(admin, token) {

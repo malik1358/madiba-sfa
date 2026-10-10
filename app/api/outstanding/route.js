@@ -37,7 +37,7 @@ function parseJson(value) {
 
 function roleCanUpload(role) {
   const normalized = String(role || "").trim().toLowerCase();
-  return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(normalized);
+  return ["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker"].includes(normalized);
 }
 
 async function resolveProfile(admin, token) {

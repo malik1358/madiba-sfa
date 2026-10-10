@@ -17,7 +17,7 @@ Roles are stored on `public.profiles.role` and normalized in `app/lib/moduleAcce
 | `product-promoter` or `product_promoter` | Field selling plus GPS map. |
 | `collector` | Collections-focused. Also inferred when `user_metadata.collection_only` is set or `salesman_code` matches `CL` plus digits. |
 
-`is_management()` in SQL is only `admin` and `manager`. Invoice makers are not management in row-level security even though the app gives them several admin screens.
+`is_management()` in SQL is `admin`, `report-user`, and `manager` after the report-user migration. Invoice makers are not management in row-level security even though the app gives them several admin screens.
 
 Screen access is `buildModuleAccess`. Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`).
 

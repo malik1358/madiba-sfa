@@ -37,7 +37,7 @@ async function requireManager(admin, request) {
   if (
     profileError
     || !profile
-    || !["admin", "manager"].includes(role)
+    || !["admin", "report-user", "report_user", "manager"].includes(role)
     || isCollectionOnlyAccess({ role, salesmanCode: profile.salesman_code })
   ) {
     return {

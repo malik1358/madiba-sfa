@@ -61,7 +61,7 @@ async function resolveScope(admin, token) {
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
+      .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -70,12 +70,12 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const allProfiles = profilesRes.data || [];
-  const subordinateIds = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role)
+  const subordinateIds = ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role)
     ? new Set()
     : resolveSubordinateUserIds(authUsers, profile, allProfiles);
 
   const visibleProfiles = allProfiles.filter((entry) => {
-    if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
+    if (["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
 
@@ -85,7 +85,7 @@ async function resolveScope(admin, token) {
 
   return {
     userId: user.id,
-    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(profile),
+    hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(profile),
     visibleUserIds: [...new Set(visibleProfiles.map((entry) => entry.id).filter(Boolean))],
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.map((entry) => normalizeCode(entry.salesman_code)).filter(Boolean),

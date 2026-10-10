@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { isCollectionOnlyAccess, normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { isCollectionOnlyAccess, normalizeAccessRole, isManagementRole } from "../../lib/moduleAccess.js";
 import {
   consolidatePerformanceSnapshots,
   normalizeSalesmanCode,
@@ -102,7 +102,7 @@ export async function GET(request) {
     const requestedCode = normalizeSalesmanCode(url.searchParams.get("salesmanCode"));
     const scope = await resolveSalesScopeForUserId(admin, user.id);
     const members = uniqueTeamMembers(scope, profile);
-    const canViewTeam = Boolean(scope.hasSubordinates || role === "admin" || role === "manager");
+    const canViewTeam = Boolean(scope.hasSubordinates || isManagementRole(role));
     const wantTeam = canViewTeam && isTeamView(requestedCode);
 
     if (requestedCode && !wantTeam) {
@@ -139,7 +139,7 @@ export async function GET(request) {
 
     return NextResponse.json({
       success: true,
-      canManageTargets: role === "admin" || role === "manager",
+      canManageTargets: isManagementRole(role),
       canViewTeam,
       view: selectedCode === TEAM_PERFORMANCE_VIEW ? "team" : "member",
       selectedCode,

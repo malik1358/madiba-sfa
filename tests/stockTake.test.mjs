@@ -118,6 +118,7 @@ test("qty converts to base first then back to master", () => {
 
 test("admins always have stock take access", () => {
   assert.equal(hasStockTakeModuleAccess({ role: "admin", stockTakeAccess: false }), true);
+  assert.equal(hasStockTakeModuleAccess({ role: "report-user", stockTakeAccess: false }), true);
   assert.equal(hasStockTakeModuleAccess({ role: "salesman", stockTakeAccess: false }), false);
   assert.equal(hasStockTakeModuleAccess({ role: "salesman", stockTakeAccess: true }), true);
 });
@@ -240,6 +241,7 @@ test("open inventories are only those started by the user or shared with them", 
   assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u1" }), true);
   assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u2" }), false);
   assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u2", role: "admin" }), true);
+  assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u2", role: "report-user" }), true);
   assert.equal(canArchiveStockTakeSession({ session: sessions[3], userId: "u1" }), false);
 });
 

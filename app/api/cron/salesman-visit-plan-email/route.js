@@ -1,3 +1,4 @@
+import { isAdminRole } from "../../../lib/moduleAccess.js";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
@@ -36,7 +37,7 @@ async function handleRequest(request) {
 
     const admin = createAdminClient();
     const profiles = await loadSalesmanVisitPlanProfiles(admin);
-    const actor = profiles.find((row) => String(row.role || "").toLowerCase() === "admin") || profiles[0];
+    const actor = profiles.find((row) => isAdminRole(row.role)) || profiles[0];
     if (!actor?.id) {
       return NextResponse.json({ success: false, error: "No admin profile available to build visit plans." }, { status: 500 });
     }

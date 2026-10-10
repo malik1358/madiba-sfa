@@ -180,7 +180,7 @@ export async function GET(request) {
       admin
         .from("profiles")
         .select("id,role,salesman_code,salesman_name")
-        .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]),
+        .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]),
       admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     ]);
     if (profilesResult.error) throw profilesResult.error;

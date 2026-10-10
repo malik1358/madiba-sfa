@@ -1,3 +1,4 @@
+import { isAdminRole } from "../../../lib/moduleAccess.js";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { cleanDirtyCustomerCodeDuplicates } from "../../../lib/cleanDirtyCustomerCodes.js";
@@ -33,7 +34,7 @@ async function requireAdmin(admin, request) {
     .eq("id", user.id)
     .single();
 
-  if (profileError || !profile || String(profile.role || "").toLowerCase() !== "admin") {
+  if (profileError || !profile || !isAdminRole(profile.role)) {
     return {
       error: NextResponse.json({ success: false, error: "Only admin can clean customer master data." }, { status: 403 }),
     };

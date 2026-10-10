@@ -896,7 +896,7 @@ export default function NewOrderPage() {
 
   const canUploadOutstanding = useMemo(() => {
     const role = String(accessScope?.role || "").toLowerCase();
-    return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(role);
+    return ["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker"].includes(role);
   }, [accessScope]);
 
   function toggleItemCategory(category) {

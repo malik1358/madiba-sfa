@@ -1,3 +1,4 @@
+import { isManagementRole } from "./moduleAccess.js";
 import { ksaDayBounds } from "./workdayActivity.js";
 
 export const ORDER_STATUS_PENDING_APPROVAL = "Pending for approval";
@@ -234,8 +235,7 @@ export function statusForRejectionReason(reason) {
 }
 
 export function canApprovePendingOrders(role) {
-  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
-  return normalized === "admin" || normalized === "manager";
+  return isManagementRole(role);
 }
 
 export function shouldShowPendingApprovalActions(order, meta = null, { approvalRequired = null } = {}) {

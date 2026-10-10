@@ -12,7 +12,7 @@ import {
 import { enrichCollectionRecordsWithAvgDays } from "../../lib/collectionAvgDays.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
-import { shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { shouldRequireGpsAccessGate, shouldRequireTransactionGps, isManagementRole } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
@@ -398,8 +398,7 @@ export async function getSalesScope(admin, userId) {
 
   const isCollectorCode = /^CL\d+$/i.test(normalizedProfileCode);
   const soyebAccess = isSoyebProfile(profile);
-  const likelyFullAccess = userRole === "admin"
-    || userRole === "manager"
+  const likelyFullAccess = isManagementRole(userRole)
     || userRole === "collector"
     || isCollectorCode
     || soyebAccess;
@@ -418,8 +417,7 @@ export async function getSalesScope(admin, userId) {
   }
 
   if (
-    userRole === "admin"
-    || userRole === "manager"
+    isManagementRole(userRole)
     || userRole === "collector"
     || collectionOnlyAccess
     || isCollectorCode
@@ -500,7 +498,7 @@ export async function getSalesScope(admin, userId) {
     }
   }
 
-  if (userRole === "admin" || userRole === "manager") {
+  if (isManagementRole(userRole)) {
     canSeeAllSchedulers = true;
     visibleSchedulerUserIds = null;
   } else if (hasAllAccess) {

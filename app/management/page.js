@@ -121,7 +121,7 @@ export default function ManagementPage() {
           collectionOnlyMetadata: collectionOnlyMetadata,
           stockTakeAccess: profile?.stock_take_access === true,
         }));
-        if (!["admin", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
+        if (!["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
           setAccessDenied(true);
           setLoading(false);
           return;
@@ -162,7 +162,7 @@ export default function ManagementPage() {
           recentOrdersRes,
         ] = await Promise.all([
           supabase.from("customers").select("customer_code", { count: "exact", head: true }),
-          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker"]),
           supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),

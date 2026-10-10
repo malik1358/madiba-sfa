@@ -28,7 +28,7 @@ async function requireAdminAccess(admin, request) {
     .single();
 
   const role = String(profile?.role || "").toLowerCase();
-  if (profileError || !profile || !["admin", "manager"].includes(role)) {
+  if (profileError || !profile || !["admin", "report-user", "report_user", "manager"].includes(role)) {
     return { error: NextResponse.json({ success: false, error: "Only admin or manager can access GPS history." }, { status: 403 }) };
   }
 

@@ -13,7 +13,7 @@ This file lists objects found in the repo. It is not a live dump of production. 
 | `salesman_code` | Unique. Collector codes look like `CL` + digits in app code. |
 | `salesman_name` | Required. Also used when matching hierarchy metadata. |
 | `email` | Profile email. Report mail may use `report_email` instead. |
-| `role` | Default `salesman`. Check constraint in the baseline migration allows `admin`, `manager`, `salesman`, `invoice-maker`, `invoice_maker`, `product-promoter`, `product_promoter`. |
+| `role` | Default `salesman`. Baseline check allows `admin`, `manager`, `salesman`, `invoice-maker`, `invoice_maker`, `product-promoter`, `product_promoter`. Later scripts/migrations also allow `collector`, `report-user`, and `report_user`. |
 | `preferred_language` | `en` or `ar`. |
 | `is_active` | |
 | `report_email` | Added in `20260904180000_profile_report_email.sql`. |

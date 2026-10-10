@@ -18,7 +18,7 @@ import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, parseEma
 import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
 import { buildSalesmanIncentiveEmailSection } from "./salesmanIncentiveEmail.js";
 import { buildSalesmanIncentiveReportFromDb } from "./salesmanIncentiveServer.js";
-import { isCollectionOnlyAccess } from "./moduleAccess.js";
+import { isAdminRole, isCollectionOnlyAccess, isManagementRole } from "./moduleAccess.js";
 import {
   buildCollectionStaleOverdueSalesmanSection,
   filterCollectionStaleOverdueRowsForProfile,
@@ -128,7 +128,7 @@ function envFlagEnabled(value, defaultValue = true) {
 }
 
 function isAdminVisitReportProfile(profile) {
-  return String(profile?.role || "").trim().toLowerCase() === "admin";
+  return isAdminRole(profile?.role);
 }
 
 function reportDisplayName(profile) {
@@ -253,8 +253,7 @@ export function collectVisitReportTeamLeaders({ recipients = [], profiles = [], 
 
   profiles.forEach((profile) => {
     if (leaders.has(profile.id)) return;
-    const role = String(profile?.role || "").toLowerCase();
-    if (role !== "admin" && role !== "manager") return;
+    if (!isManagementRole(profile?.role)) return;
     const subIds = resolveSubordinateUserIds(authUsers, profile, profiles);
     const hasTeam = recipients.some(({ user }) => subIds.has(user.userId));
     if (hasTeam) leaders.set(profile.id, profile);

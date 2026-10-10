@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdminRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -189,7 +190,7 @@ export default function SalesmanVisitPlanPage() {
   const t = translate(language, TEXT);
   const { access, loading: accessLoading } = useModuleAccess();
   const supabaseClient = getSupabaseClient();
-  const isAdmin = String(access?.role || "").toLowerCase() === "admin";
+  const isAdmin = isAdminRole(access?.role);
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);

@@ -22,7 +22,7 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 Constants in `app/lib/workdayActivity.js`:
 
 - Inactivity warning: 45 minutes without a transaction entry (`INACTIVITY_MS`).
-- Inactivity email: 70 minutes (`INACTIVITY_EMAIL_MS`). This was lengthened from 40. Do not set it back without an explicit request.
+- Inactivity email: 100 minutes (`INACTIVITY_EMAIL_MS`). This was lengthened from 70 (earlier from 40). Do not set it back without an explicit request.
 - Inactivity push repeat: 15 minutes. Login reminder hour: 11:00 KSA, then every 30 minutes until login.
 - Lunch reminder: 3 hours after lunch out, and a noon punch reminder at 12:00 KSA.
 - Workday window used by helpers: 06:00–22:00 KSA.

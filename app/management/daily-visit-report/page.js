@@ -145,8 +145,8 @@ const TEXT = {
   tableLegend: { en: "Row colors", ar: "ألوان الصفوف" },
   inactivityLogTitle: { en: "Inactivity email log", ar: "سجل بريد عدم النشاط" },
   inactivityLogHint: {
-    en: "Vercel Cron checks every 10 minutes. A new email is due every 70 minutes of idle time. Lunch is skipped. Gap shows minutes since the previous email for that user.",
-    ar: "يتحقق كرون Vercel كل 10 دقائق. يُستحق بريد جديد كل 70 دقيقة من التوقف. يُستثنى الغداء. الفجوة هي الدقائق منذ البريد السابق لنفس المستخدم.",
+    en: "Vercel Cron checks every 10 minutes. A new email is due every 100 minutes of idle time. Lunch is skipped. Gap shows minutes since the previous email for that user.",
+    ar: "يتحقق كرون Vercel كل 10 دقائق. يُستحق بريد جديد كل 100 دقيقة من التوقف. يُستثنى الغداء. الفجوة هي الدقائق منذ البريد السابق لنفس المستخدم.",
   },
   inactivitySent: { en: "Emails sent", ar: "رسائل أُرسلت" },
   inactivityChecks: { en: "Cron checks", ar: "فحوصات الكرون" },
@@ -184,12 +184,12 @@ function formatTime(value) {
 
 const INACTIVITY_REASON_LABELS = {
   sent: { en: "Sent", ar: "أُرسل" },
-  already_sent: { en: "Already sent this 70-minute slot", ar: "أُرسل في فترة الـ 70 دقيقة هذه" },
+  already_sent: { en: "Already sent this 100-minute slot", ar: "أُرسل في فترة الـ 100 دقيقة هذه" },
   no_recipients: { en: "No recipient emails", ar: "لا يوجد بريد للمستلمين" },
   lunch_break: { en: "Lunch break", ar: "استراحة الغداء" },
   logged_out: { en: "Logged out", ar: "تم تسجيل الخروج" },
   not_in_work_session: { en: "Between lunch out and lunch in", ar: "بين خروج الغداء ودخول الغداء" },
-  idle_under_70_minutes: { en: "Idle under 70 minutes", ar: "التوقف أقل من 70 دقيقة" },
+  idle_under_100_minutes: { en: "Idle under 100 minutes", ar: "التوقف أقل من 100 دقيقة" },
   outside_hours: { en: "Outside working hours", ar: "خارج ساعات العمل" },
   not_logged_in: { en: "Not logged in", ar: "لم يسجل الدخول" },
   failed: { en: "Send failed", ar: "فشل الإرسال" },

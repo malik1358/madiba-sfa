@@ -4637,20 +4637,14 @@ th:has(.moduleTableColumnFilterInput) {
 
 .moduleKpiTargetsTable .moduleKpiTargetInput {
   box-sizing: border-box;
-  width: 4.125rem;
-  min-width: 4.125rem;
-  max-width: 4.125rem;
+  width: 7.25rem;
+  min-width: 7.25rem;
+  max-width: 7.25rem;
   padding: 6px 4px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   appearance: textfield;
   -moz-appearance: textfield;
-}
-
-.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-outer-spin-button,
-.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
 }
 
 .moduleKpiTargetsTable .moduleKpiAchCell {
@@ -4709,11 +4703,28 @@ th:has(.moduleTableColumnFilterInput) {
   background: #e7eef0;
 }
 
+.moduleKpiTargetsTable .moduleKpiPaceEstimateRow td {
+  background: #dff0f3;
+  font-weight: 700;
+}
+
+.moduleKpiTargetsTable .moduleKpiPaceEstimateRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiPaceEstimateRow .moduleKpiBossCell {
+  background: #dff0f3;
+}
+
 .moduleKpiTargetsTable tfoot td {
   position: sticky;
-  bottom: 0;
   z-index: 4;
   box-shadow: 0 -2px 8px rgba(6, 47, 58, 0.08);
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiPaceEstimateRow td {
+  bottom: 0;
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiTotalsRow td {
+  bottom: 3.75rem;
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiSalesmanCell {

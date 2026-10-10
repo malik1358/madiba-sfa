@@ -5,14 +5,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildPerformanceKpi,
   formatAchievementPercent,
+  formatKpiTargetInput,
   formatPerformanceKpiValue,
   normalizeSalesmanCode,
+  parseKpiTargetInput,
   PERFORMANCE_DISPLAY_KPI_KEYS,
 } from "../../lib/performanceKpis";
 import {
   filterKpiTargetRows,
   NO_BOSS_KEY,
   sumFilteredKpiColumns,
+  sumFilteredKpiPaceEstimates,
   sumKpiActuals,
   teamMemberRows,
   teamRowLabel,
@@ -52,6 +55,11 @@ const TEXT = {
   team: { en: "team", ar: "فريق" },
   teamHint: { en: "Team target", ar: "هدف الفريق" },
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
+  paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
+  paceEstimateHint: {
+    en: "Month-end if today's actuals keep the same pace vs expected share",
+    ar: "نهاية الشهر إذا استمر الفعلي اليوم بنفس المسار مقابل الحصة المتوقعة",
+  },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
@@ -289,6 +297,14 @@ export default function KpiTargetsPage() {
     [columns, visibleRows],
   );
 
+  const paceEstimates = useMemo(
+    () => sumFilteredKpiPaceEstimates(visibleRows, columns, {
+      reportDate: `${month}-01`,
+      todayIso: getKsaDateString(),
+    }),
+    [columns, month, visibleRows],
+  );
+
   const individualVisibleCount = visibleRows.filter((row) => !row.isTeam).length;
 
   useEffect(() => {
@@ -473,12 +489,13 @@ export default function KpiTargetsPage() {
                             status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
                             statusKey={statusKey}
                             expected={expectedLabel}
-                            value={targetValue}
+                            value={formatKpiTargetInput(targetValue)}
                             readOnly={isTotalSales || isInformationOnly}
                             onChange={(value) => {
+                              const parsed = parseKpiTargetInput(value);
                               setRows((current) => current.map((item) => {
                                 if (item.salesmanCode !== row.salesmanCode) return item;
-                                const next = { ...item, [key]: value };
+                                const next = { ...item, [key]: parsed };
                                 next.totalSales = String(
                                   (Number(next.officeSupplies || 0) || 0)
                                     + (Number(next.localItemSales || 0) || 0)
@@ -524,7 +541,36 @@ export default function KpiTargetsPage() {
                             status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
                             statusKey={statusKey}
                             expected=""
-                            value={isInformationOnly ? "" : String(Math.round(column.target || 0))}
+                            value={isInformationOnly ? "" : formatKpiTargetInput(Math.round(column.target || 0))}
+                            readOnly
+                            onChange={() => {}}
+                          />
+                        );
+                      })}
+                    </tr>
+                    <tr className="moduleKpiPaceEstimateRow">
+                      <td className="moduleKpiSalesmanCell">
+                        <strong>{t("paceEstimate")}</strong>
+                        <div className="moduleKpiMeta">{t("paceEstimateHint")}</div>
+                      </td>
+                      <td className="moduleKpiBossCell"></td>
+                      {columns.map((key) => {
+                        const column = paceEstimates[key] || { estimate: null, target: 0, achievement: null };
+                        const isInformationOnly = key === "cashCollection";
+                        const hasEstimate = column.estimate != null;
+                        const statusKey = isInformationOnly
+                          ? "no_target"
+                          : (hasEstimate && column.target > 0 ? "on_pace" : "no_target");
+                        return (
+                          <KpiTargetCells
+                            key={key}
+                            actual={hasEstimate ? formatPerformanceKpiValue(key, column.estimate) : "—"}
+                            achievement={formatAchievementPercent(column.achievement)}
+                            ofTarget={t("ofTarget")}
+                            status={isInformationOnly ? t("informationOnly") : (hasEstimate ? t("paceEstimate") : "—")}
+                            statusKey={statusKey}
+                            expected=""
+                            value={isInformationOnly || !hasEstimate ? "" : formatKpiTargetInput(Math.round(column.target || 0))}
                             readOnly
                             onChange={() => {}}
                           />
@@ -634,11 +680,9 @@ function KpiTargetCells({
       <td>
         <input
           className="moduleInput moduleKpiTargetInput"
-          type="number"
-          min="0"
-          step="1"
-          size={8}
+          type="text"
           inputMode="numeric"
+          autoComplete="off"
           value={value}
           readOnly={readOnly}
           disabled={readOnly}

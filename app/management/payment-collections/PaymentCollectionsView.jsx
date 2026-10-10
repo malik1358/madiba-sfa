@@ -19,6 +19,7 @@ import {
   applyCustomerLocationUpdateFromPrompt,
   captureGpsLocationWithFallbackConfirm,
   CUSTOMER_LOCATION_UPDATE_CANCEL,
+  CUSTOMER_LOCATION_UPDATE_REPORT_ONLY,
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
   customerWithUpdatedLocation,
@@ -208,8 +209,10 @@ const TEXT = {
   attachmentSelected: { en: "Selected", ar: "تم الاختيار" },
   saveVisit: { en: "Save Collection Visit", ar: "حفظ زيارة التحصيل" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
+  locationReportOnlyTitle: { en: "GPS for report only", ar: "GPS للتقرير فقط" },
   locationUpdateAndSave: { en: "Update location and save", ar: "تحديث الموقع والحفظ" },
   locationSaveWithoutUpdate: { en: "Save without updating location", ar: "حفظ دون تحديث الموقع" },
+  locationReportOnlyOk: { en: "OK, continue", ar: "حسناً، متابعة" },
   cancel: { en: "Cancel", ar: "إلغاء" },
   transferLegal: { en: "Transfer To Legal", ar: "تحويل إلى القانوني" },
   removeLegal: { en: "Remove From Legal", ar: "إزالة من القانوني" },
@@ -1863,6 +1866,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
     const choice = await promptCustomerLocationChoice(promptDetails);
     let nextCustomer = customer;
+    if (promptDetails.reportOnlyBlocked || choice === CUSTOMER_LOCATION_UPDATE_REPORT_ONLY) {
+      return { choice: CUSTOMER_LOCATION_UPDATE_REPORT_ONLY, customer };
+    }
     if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
       try {
         await applyCustomerLocationUpdateFromPrompt(promptDetails);
@@ -3586,30 +3592,46 @@ export default function PaymentCollectionsView({ view = "due" }) {
         {locationPrompt ? (
           <div className="moduleModalOverlay" dir={dir}>
             <div className="moduleModal" role="dialog" aria-modal="true">
-              <h2>{t("locationUpdateTitle")}</h2>
+              <h2>
+                {locationPrompt.reportOnlyBlocked
+                  ? t("locationReportOnlyTitle")
+                  : t("locationUpdateTitle")}
+              </h2>
               <p>{locationPrompt.message}</p>
               <div className="moduleOrderActions">
-                <button
-                  type="button"
-                  className="modulePrimaryButton"
-                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_UPDATE)}
-                >
-                  {t("locationUpdateAndSave")}
-                </button>
-                <button
-                  type="button"
-                  className="moduleSecondaryButton"
-                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_SKIP)}
-                >
-                  {t("locationSaveWithoutUpdate")}
-                </button>
-                <button
-                  type="button"
-                  className="moduleInlineButton"
-                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_CANCEL)}
-                >
-                  {t("cancel")}
-                </button>
+                {locationPrompt.reportOnlyBlocked ? (
+                  <button
+                    type="button"
+                    className="modulePrimaryButton"
+                    onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_REPORT_ONLY)}
+                  >
+                    {t("locationReportOnlyOk")}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="modulePrimaryButton"
+                      onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_UPDATE)}
+                    >
+                      {t("locationUpdateAndSave")}
+                    </button>
+                    <button
+                      type="button"
+                      className="moduleSecondaryButton"
+                      onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_SKIP)}
+                    >
+                      {t("locationSaveWithoutUpdate")}
+                    </button>
+                    <button
+                      type="button"
+                      className="moduleInlineButton"
+                      onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_CANCEL)}
+                    >
+                      {t("cancel")}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

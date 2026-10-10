@@ -55,6 +55,7 @@ test("repeated attendance candidates count distinct KSA dates, not punch rows", 
 });
 
 test("customer GPS writes are rejected inside the actor's saved home radius", async () => {
+  const home = { home_latitude: 24.63063, home_longitude: 46.69947 };
   const admin = {
     from(table) {
       assert.equal(table, "profiles");
@@ -63,16 +64,19 @@ test("customer GPS writes are rejected inside the actor's saved home radius", as
           assert.equal(columns, "home_latitude,home_longitude");
           return this;
         },
+        not() {
+          return this;
+        },
+        then(resolve) {
+          resolve({ data: [home], error: null });
+        },
         eq(column, value) {
           assert.equal(column, "id");
           assert.equal(value, "salesman-user");
           return this;
         },
         async maybeSingle() {
-          return {
-            data: { home_latitude: 24.63063, home_longitude: 46.69947 },
-            error: null,
-          };
+          return { data: home, error: null };
         },
       };
     },
@@ -83,5 +87,5 @@ test("customer GPS writes are rejected inside the actor's saved home radius", as
     latitude: 24.6307,
     longitude: 46.6995,
     actor: { id: "salesman-user" },
-  }), /within 500 m of your saved home location/);
+  }), /saved home location.*report only/i);
 });

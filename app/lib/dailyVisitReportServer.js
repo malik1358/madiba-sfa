@@ -479,6 +479,7 @@ function enrichEntries(entries, customerMap, profileMap) {
     const entryLocation = { latitude: entry.latitude, longitude: entry.longitude };
     const distanceKm = distanceFromCustomerKm(entryLocation, customer);
     const gpsLocationUpdateAccepted = Boolean(entry.meta?.gpsLocationUpdateAccepted);
+    const firstCustomerGpsCaptured = Boolean(entry.meta?.firstCustomerGpsCaptured);
     const farFromCustomer = shouldMarkVisitFarFromCustomer(
       entry,
       isFarFromCustomer(entryLocation, customer),
@@ -542,6 +543,7 @@ function enrichEntries(entries, customerMap, profileMap) {
       capturePlatformLabel: capturePlatform ? formatGpsCapturePlatformLabel(capturePlatform) : null,
       isFarFromCustomer: farFromCustomer,
       gpsLocationUpdateAccepted,
+      firstCustomerGpsCaptured,
       farThresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
     };
   });

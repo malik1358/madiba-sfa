@@ -83,8 +83,13 @@ test("daily visit history recognizes an accepted GPS overwrite for an older visi
 
   assert.equal(recognized.meta.gpsLocationUpdateAccepted, true);
   assert.equal(shouldMarkVisitFarFromCustomer(recognized, true), false);
-  assert.equal(markVisitsWithAcceptedGpsHistory([visit], [{ ...history[0], previous_latitude: null }])[0]
-    .meta?.gpsLocationUpdateAccepted, undefined);
+  const firstCapture = markVisitsWithAcceptedGpsHistory([visit], [{
+    ...history[0],
+    previous_latitude: null,
+    previous_longitude: null,
+  }])[0];
+  assert.equal(firstCapture.meta?.gpsLocationUpdateAccepted, undefined);
+  assert.equal(firstCapture.meta?.firstCustomerGpsCaptured, true);
 });
 
 test("daily visit entry stats skip idle GPS pings and visit reports", () => {

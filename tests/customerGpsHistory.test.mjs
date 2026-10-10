@@ -75,6 +75,12 @@ test("promoteEntryGpsToCustomerIfMissing writes when customer has no GPS", async
         return {
           select() {
             return {
+              not() {
+                return this;
+              },
+              then(resolve) {
+                resolve({ data: [], error: null });
+              },
               eq() {
                 return {
                   async maybeSingle() {

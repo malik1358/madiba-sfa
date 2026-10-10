@@ -137,6 +137,7 @@ function transactionLabel(entry) {
   if (entry?.logoutAutoClosed) parts.push("Auto-closed");
   if (entry?.isFarFromCustomer) parts.push("Far");
   if (entry?.gpsLocationUpdateAccepted) parts.push("GPS update accepted");
+  if (entry?.firstCustomerGpsCaptured) parts.push("First GPS captured");
   return parts.join(" · ");
 }
 

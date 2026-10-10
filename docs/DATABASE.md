@@ -237,3 +237,5 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
 
 `20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Run the migration on local/dev first and production only through the normal approved release process; saving a home point in Salesman Hierarchy also clears matching customer pins through the GPS-audited API.
+
+`20261010170000_madiba_store_customer_gps_guard.sql` blocks customer latitude/longitude within 50 m of the fixed MADIBA store (`24.56825, 46.74082`) via trigger `customers_madiba_store_location_guard`, and clears any existing pins inside that radius with `customer_gps_history` source `madiba_store_cleanup`. Apply in Supabase before relying on the DB-side block; the app also enforces the same rule in `applyCustomerGpsUpdate`.

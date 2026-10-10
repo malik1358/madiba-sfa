@@ -75,8 +75,8 @@ const TEXT = {
   homeLatitude: { en: "Latitude", ar: "خط العرض" },
   homeLongitude: { en: "Longitude", ar: "خط الطول" },
   homeLocationHint: {
-    en: "Login and logout attendance punches are blocked within 500 m. Customer GPS pins within 25 m are cleared when saved and cannot be added again.",
-    ar: "يُمنع تسجيل الحضور والانصراف ضمن 500 متر. تُحذف مواقع العملاء ضمن 25 متراً عند الحفظ ولا يمكن إضافتها مجدداً.",
+    en: "Login and logout attendance punches are blocked within 500 m. Existing customer GPS pins within 25 m are cleared when a home is saved; field users are warned that new GPS at home/store is for the report only and is not saved on the customer.",
+    ar: "يُمنع تسجيل الحضور والانصراف ضمن 500 متر. تُحذف مواقع العملاء الحالية ضمن 25 متراً عند حفظ المنزل؛ ويُنبَّه المندوب بأن GPS عند المنزل/المتجر للتقرير فقط ولن يُحفظ كموقع للعميل.",
   },
   saveAll: { en: "Save all", ar: "حفظ الكل" },
   savingAll: { en: "Saving all...", ar: "جاري حفظ الكل..." },

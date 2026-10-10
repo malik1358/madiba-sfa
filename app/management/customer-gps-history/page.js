@@ -39,6 +39,7 @@ const TEXT = {
   visit_accepted: { en: "GPS update accepted", ar: "تمت الموافقة على تحديث الموقع" },
   excel_import: { en: "Excel import", ar: "استيراد Excel" },
   home_location_cleanup: { en: "Home location cleanup", ar: "تنظيف مواقع المنزل" },
+  madiba_store_cleanup: { en: "MADIBA store cleanup", ar: "تنظيف موقع متجر ماديبا" },
   prev: { en: "Previous", ar: "السابق" },
   next: { en: "Next", ar: "التالي" },
   page: { en: "Page", ar: "صفحة" },
@@ -228,7 +229,7 @@ export default function CustomerGpsHistoryPage() {
                             <td data-label={t("distance")}>{row.distance_meters != null && Number.isFinite(Number(row.distance_meters)) ? Number(row.distance_meters).toLocaleString(language === "ar" ? "ar-SA" : "en-US", { maximumFractionDigits: 1 }) : "-"}</td>
                             <td data-label={t("actor")} style={{ overflowWrap: "anywhere" }}>{row.updated_by_name || row.updated_by || "-"}</td>
                             <td data-label={t("savedAt")} style={{ whiteSpace: "nowrap" }}>{formatSavedAt(row.created_at, language)}</td>
-                            <td data-label={t("source")}>{["customer_master", "visit", "salesman_accepted", "visit_accepted", "excel_import", "home_location_cleanup"].includes(row.source) ? t(row.source) : row.source || "-"}</td>
+                            <td data-label={t("source")}>{["customer_master", "visit", "salesman_accepted", "visit_accepted", "excel_import", "home_location_cleanup", "madiba_store_cleanup"].includes(row.source) ? t(row.source) : row.source || "-"}</td>
                             <td data-label={t("approval")} style={{ color: row.acceptance === "confirmed_salesman" ? "#166534" : row.acceptance === "confirmed_other" ? "#075985" : "#6b7280", fontWeight: 600 }}>
                               {t(["confirmed_salesman", "confirmed_other"].includes(row.acceptance) ? row.acceptance : "not_recorded")}
                             </td>

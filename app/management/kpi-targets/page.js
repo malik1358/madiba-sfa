@@ -57,8 +57,8 @@ const TEXT = {
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
   paceEstimateHint: {
-    en: "Month-end if today's actuals keep the same pace vs expected share",
-    ar: "نهاية الشهر إذا استمر الفعلي اليوم بنفس المسار مقابل الحصة المتوقعة",
+    en: "Month-end if today's ahead/behind pace gap holds (e.g. 21% behind → 79% of target)",
+    ar: "نهاية الشهر إذا استمر فارق المسار الحالي (مثلاً خلف 21٪ → 79٪ من الهدف)",
   },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
@@ -570,7 +570,8 @@ export default function KpiTargetsPage() {
                             status={isInformationOnly ? t("informationOnly") : (hasEstimate ? t("paceEstimate") : "—")}
                             statusKey={statusKey}
                             expected=""
-                            value={isInformationOnly || !hasEstimate ? "" : formatKpiTargetInput(Math.round(column.target || 0))}
+                            value=""
+                            hideTarget
                             readOnly
                             onChange={() => {}}
                           />
@@ -673,21 +674,24 @@ function KpiTargetCells({
   value,
   onChange,
   readOnly = false,
+  hideTarget = false,
 }) {
   return (
     <>
       <td>{actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}</td>
       <td>
-        <input
-          className="moduleInput moduleKpiTargetInput"
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          value={value}
-          readOnly={readOnly}
-          disabled={readOnly}
-          onChange={(event) => onChange(event.target.value)}
-        />
+        {hideTarget ? null : (
+          <input
+            className="moduleInput moduleKpiTargetInput"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={value}
+            readOnly={readOnly}
+            disabled={readOnly}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )}
       </td>
       <td className="moduleKpiAchCell">
         {statusKey === "no_target" ? (

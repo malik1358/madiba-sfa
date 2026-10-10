@@ -1,10 +1,10 @@
 import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
   achievementPercent,
-  estimateAtCurrentPace,
+  buildPerformanceKpi,
+  estimateFromPaceGap,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
-  resolveExpectedPacePercent,
 } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
@@ -179,34 +179,28 @@ export function sumFilteredKpiPaceEstimates(
   columns = PERFORMANCE_DISPLAY_KPI_KEYS,
   { reportDate, todayIso } = {},
 ) {
-  const totals = {};
-  columns.forEach((key) => {
-    totals[key] = { estimate: null, target: 0, expected: null };
-  });
+  const totals = sumFilteredKpiColumns(rows, columns);
+  const estimates = {};
 
-  (rows || []).forEach((row) => {
-    if (row?.isTeam) return;
-    columns.forEach((key) => {
-      const kpi = (row.kpis || []).find((item) => item.key === key);
-      const actual = Number(kpi?.actual || 0) || 0;
-      const target = rowTargetValue(row, key);
-      const expected = resolveExpectedPacePercent(key, {
-        reportDate: row.reportDate || reportDate,
-        todayIso: row.todayIso || todayIso,
-        paceShares: row.paceShares,
-      });
-      const estimate = estimateAtCurrentPace(actual, expected);
-      totals[key].target += target;
-      if (estimate == null) return;
-      totals[key].estimate = (totals[key].estimate || 0) + estimate;
-      totals[key].expected = expected;
+  columns.forEach((key) => {
+    const column = totals[key] || { actual: 0, target: 0 };
+    const liveKpi = buildPerformanceKpi(key, {
+      actual: column.actual,
+      target: column.target,
+      reportDate,
+      todayIso,
     });
+    const estimate = estimateFromPaceGap(column.target, liveKpi.paceGap);
+    estimates[key] = {
+      estimate,
+      target: column.target,
+      expected: liveKpi.expected,
+      paceGap: liveKpi.paceGap,
+      achievement: achievementPercent(estimate, column.target),
+    };
   });
 
-  columns.forEach((key) => {
-    totals[key].achievement = achievementPercent(totals[key].estimate, totals[key].target);
-  });
-  return totals;
+  return estimates;
 }
 
 export function hasExplicitTargets(targets = {}) {

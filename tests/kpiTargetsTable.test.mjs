@@ -19,8 +19,9 @@ import {
 import {
   achievementPercent,
   consolidatePerformanceSnapshots,
+  buildPerformanceKpi,
   buildPerformanceSnapshot,
-  estimateAtCurrentPace,
+  estimateFromPaceGap,
   formatKpiTargetInput,
   parseKpiTargetInput,
 } from "../app/lib/performanceKpis.js";
@@ -167,11 +168,12 @@ test("filtered totals skip team rows so they are not double counted", () => {
   assert.equal(totals.localItemSales.target, 60);
 });
 
-test("estimate at current pace scales actual by expected share", () => {
-  assert.equal(estimateAtCurrentPace(249, 24.9), 1000);
-  assert.equal(estimateAtCurrentPace(0, 24.9), 0);
-  assert.equal(estimateAtCurrentPace(100, 100), 100);
-  assert.equal(estimateAtCurrentPace(50, 0), null);
+test("estimate from pace gap applies ahead/behind points to the target", () => {
+  assert.equal(estimateFromPaceGap(4_550_000, -21), 3_594_500);
+  assert.equal(estimateFromPaceGap(1_000_000, 10), 1_100_000);
+  assert.equal(estimateFromPaceGap(1_000_000, 0), 1_000_000);
+  assert.equal(estimateFromPaceGap(0, -21), null);
+  assert.equal(estimateFromPaceGap(100, null), null);
 });
 
 test("target inputs round-trip through thousand separators", () => {
@@ -181,28 +183,26 @@ test("target inputs round-trip through thousand separators", () => {
   assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
 });
 
-test("pace estimate footer sums individuals and skips team rows", () => {
-  const withPace = [
-    {
-      ...ahmed,
-      reportDate: "2026-10-01",
-      todayIso: "2026-10-10",
-      paceShares: { 10: 0.25 },
-    },
-    {
-      ...ali,
-      reportDate: "2026-10-01",
-      todayIso: "2026-10-10",
-      paceShares: { 10: 0.2 },
-    },
-    teamAhmed,
-  ];
-  const estimates = sumFilteredKpiPaceEstimates(withPace, ["officeSupplies", "totalSales"], {
+test("pace estimate footer applies filtered total pace gap to targets", () => {
+  const rows = [ahmed, ali, teamAhmed];
+  const estimates = sumFilteredKpiPaceEstimates(rows, ["officeSupplies", "totalSales"], {
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
   });
-  assert.equal(estimates.officeSupplies.estimate, 40 / 0.25 + 30 / 0.2);
-  assert.equal(estimates.totalSales.estimate, 50 / 0.25 + 50 / 0.2);
+  const office = buildPerformanceKpi("officeSupplies", {
+    actual: 70,
+    target: 180,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  const total = buildPerformanceKpi("totalSales", {
+    actual: 100,
+    target: 310,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  assert.equal(estimates.officeSupplies.estimate, estimateFromPaceGap(180, office.paceGap));
+  assert.equal(estimates.totalSales.estimate, estimateFromPaceGap(310, total.paceGap));
   assert.equal(estimates.officeSupplies.target, 180);
   assert.equal(
     estimates.officeSupplies.achievement,

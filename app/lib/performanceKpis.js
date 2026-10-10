@@ -261,6 +261,19 @@ export function estimateAtCurrentPace(actual, expectedPercent) {
   return value * (100 / expected);
 }
 
+/**
+ * Project month-end value if today's ahead/behind pace gap (percentage points vs expected)
+ * holds through month-end: target × (100 + gap) / 100.
+ * Example: target 4,550,000 and 21% behind pace → 4,550,000 × 0.79 = 3,594,500.
+ */
+export function estimateFromPaceGap(target, paceGap) {
+  const goal = Number(target || 0);
+  if (!(goal > 0) || paceGap == null || paceGap === "") return null;
+  const gap = Number(paceGap);
+  if (!Number.isFinite(gap)) return null;
+  return goal * ((100 + gap) / 100);
+}
+
 export function formatKpiTargetInput(value) {
   const digits = String(value ?? "").replace(/[^\d]/g, "");
   if (!digits) return "";

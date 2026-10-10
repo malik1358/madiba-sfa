@@ -139,7 +139,7 @@ Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` 
 | `items_master` | Item master. Unique `item_code`. Extra Tally columns: `tally_unit`, `tally_item_name`, `tally_unit_source`, `tally_unit_updated_at`. |
 | `products` | Selling catalog: names, `category`, `unit` default `CTN`, `price`, `vat_percent` default 15, `stock_status`, `is_active`, `do_not_use`. |
 | `product_categories`, `product_subcategories` | Category tree. |
-| `price_catalog_cache` | What `/api/pricing/cache` reads. |
+| `price_catalog_cache` | What `/api/pricing/cache` reads (`default`, `pricing_rules`, `order_schemes`, `order_quantity_controls`). Quantity controls are returned as `quantityControls` for offline New Order checks. |
 | `price_catalog_snapshots` | Dump written by price sync. `price_map` jsonb. |
 | `item_price_history` | `item_code`, `region` default `riyadh`, `price`, `recorded_at`, `source` default `price_sync`. |
 | `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `updated_by`. |

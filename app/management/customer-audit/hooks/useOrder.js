@@ -19,6 +19,10 @@ import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
 import { friendlyErrorMessage } from '../../../lib/abortError';
 import { blockedByAvgDaysMessage } from '../../../lib/customerOrderBlock';
+import {
+  assertLocalOrderQuantityControls,
+  recordConfirmedOrderQuantityUsage,
+} from '../../../lib/orderQuantityControlsClient';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -119,6 +123,7 @@ export function useOrder({
   cashDiscountMap = {},
   valueDiscountMap = {},
   schemes = [],
+  quantityControls = null,
   pricingRegion = 'riyadh',
   setPricingRegion = null,
   pricingType = 'wholesale',
@@ -402,6 +407,17 @@ export function useOrder({
       if (draftContextRef.current === requestContextKey) setDraftOrderNumber(allottedOrderNumber);
       orderRequestId.current ||= crypto.randomUUID();
 
+      const quantityControlCheck = await assertLocalOrderQuantityControls({
+        customerCode: selectedCustomer.customer_code,
+        orderItems,
+        excludeOrderId: currentDraftOrderId,
+        controls: quantityControls,
+        language,
+      });
+      if (!quantityControlCheck.ok) {
+        throw new Error(quantityControlCheck.error || 'Order quantity limit exceeded.');
+      }
+
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
@@ -507,7 +523,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, pricingType, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (submitInFlight.current) return null;
@@ -588,6 +604,17 @@ export function useOrder({
       );
       if (draftContextRef.current === requestContextKey) setDraftOrderNumber(allottedOrderNumber);
       orderRequestId.current ||= crypto.randomUUID();
+
+      const quantityControlCheck = await assertLocalOrderQuantityControls({
+        customerCode: selectedCustomer?.customer_code || '',
+        orderItems,
+        excludeOrderId: currentDraftOrderId,
+        controls: quantityControls,
+        language,
+      });
+      if (!quantityControlCheck.ok) {
+        throw new Error(quantityControlCheck.error || 'Order quantity limit exceeded.');
+      }
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -682,6 +709,10 @@ export function useOrder({
         setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
         setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
       }
+      recordConfirmedOrderQuantityUsage({
+        customerCode: selectedCustomer?.customer_code || '',
+        lines: orderItems,
+      });
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
         setMessage(`Order #${confirmedNumber} submitted successfully.`);
@@ -699,7 +730,7 @@ export function useOrder({
       submitInFlight.current = false;
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

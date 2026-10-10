@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ORDER_SCHEMES_CACHE_KEY, resolveStoredOrderSchemes } from "../../../lib/orderSchemes.js";
+import {
+  ORDER_QUANTITY_CONTROLS_CACHE_KEY,
+  resolveStoredOrderQuantityControls,
+} from "../../../lib/orderQuantityControls.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { overlayGoogleSheetItemNames } from "../../../lib/pricePayload.js";
 import { loadRetailPriceMaps } from "../../../lib/retailPricingServer.js";
@@ -80,7 +84,7 @@ export async function GET() {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const [{ data, error }, { data: rulesRow }, { data: schemesRow }] = await Promise.all([
+    const [{ data, error }, { data: rulesRow }, { data: schemesRow }, { data: quantityControlsRow }] = await Promise.all([
       admin
         .from("price_catalog_cache")
         .select("cache_key,price_map,sheet_items,source_synced_at,updated_at")
@@ -95,6 +99,11 @@ export async function GET() {
         .from("price_catalog_cache")
         .select("price_map")
         .eq("cache_key", ORDER_SCHEMES_CACHE_KEY)
+        .maybeSingle(),
+      admin
+        .from("price_catalog_cache")
+        .select("price_map")
+        .eq("cache_key", ORDER_QUANTITY_CONTROLS_CACHE_KEY)
         .maybeSingle(),
     ]);
 
@@ -138,6 +147,7 @@ export async function GET() {
       cashDiscountMap: rules.cashDiscountMap || {},
       valueDiscountMap: rules.valueDiscountMap || {},
       schemes: resolveStoredOrderSchemes(schemesRow?.price_map),
+      quantityControls: resolveStoredOrderQuantityControls(quantityControlsRow?.price_map),
       sheetItems,
     });
   } catch (error) {

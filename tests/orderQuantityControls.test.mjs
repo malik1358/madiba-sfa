@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_ORDER_QUANTITY_CONTROLS,
   activeOrderQuantityControls,
+  assertOrderQuantityControlsLocal,
   evaluateOrderQuantityControls,
   formatQuantityControlViolation,
   getRiyadhWeekBounds,
+  mergeQtyByItemMaps,
   normalizeOrderQuantityControls,
   resolveStoredOrderQuantityControls,
+  sumPriorQtyByItemFromLocalOrders,
 } from "../app/lib/orderQuantityControls.js";
 
 test("missing storage falls back to A004075 weekly 20 default", () => {
@@ -136,4 +139,70 @@ test("group rule ignores orders that do not include any group SKU", () => {
     priorQtyByItem: { SKU1: 100 },
   });
   assert.equal(violations.length, 0);
+});
+
+test("local prior qty sums queued peer orders in the Riyadh week and excludes current pending id", () => {
+  const bounds = getRiyadhWeekBounds(new Date("2026-10-10T10:00:00.000Z"));
+  const prior = sumPriorQtyByItemFromLocalOrders({
+    customerCode: "1606",
+    weekStartIso: bounds.weekStartIso,
+    weekEndIso: bounds.weekEndIso,
+    excludeOrderId: "pending:abc123def456",
+    orders: [
+      {
+        id: "pending:abc123def456",
+        customer_code: "1606",
+        status: "SUBMITTED",
+        created_at: "2026-10-10T09:00:00.000Z",
+        queuedLines: [
+          { item_code: "A006299", quantity: 100 },
+          { item_code: "A006300", quantity: 100 },
+        ],
+      },
+      {
+        id: "pending:otherorder1",
+        customer_code: "1606",
+        status: "SUBMITTED",
+        created_at: "2026-10-09T12:00:00.000Z",
+        queuedLines: [{ item_code: "A006298", quantity: 40 }],
+      },
+      {
+        id: "pending:othercustomer",
+        customer_code: "9999",
+        status: "SUBMITTED",
+        created_at: "2026-10-10T09:30:00.000Z",
+        queuedLines: [{ item_code: "A006299", quantity: 50 }],
+      },
+    ],
+  });
+  assert.deepEqual(prior, { A006298: 40 });
+});
+
+test("offline local assert blocks 200 CTN gloves against combined 100 cap", () => {
+  const controls = normalizeOrderQuantityControls([{
+    id: "gloves-100",
+    active: true,
+    itemCodes: ["A006298", "A006299", "A006300"],
+    maxQty: 100,
+  }]);
+  const blocked = assertOrderQuantityControlsLocal({
+    lines: [
+      { item_code: "A006299", quantity: 100 },
+      { item_code: "A006300", quantity: 100 },
+    ],
+    controls,
+    priorQtyByItem: {},
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /Remaining allowed: 100|max 100/i);
+
+  const allowed = assertOrderQuantityControlsLocal({
+    lines: [
+      { item_code: "A006299", quantity: 60 },
+      { item_code: "A006300", quantity: 40 },
+    ],
+    controls,
+    priorQtyByItem: mergeQtyByItemMaps({ A006298: 0 }),
+  });
+  assert.equal(allowed.ok, true);
 });

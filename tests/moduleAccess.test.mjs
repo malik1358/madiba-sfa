@@ -64,7 +64,7 @@ test("potential sales targets is available to salesmen and report viewers, not c
 });
 
 test("promoter coverage is available to all app roles", () => {
-  const roles = ["admin", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
+  const roles = ["admin", "report-user", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
   roles.forEach((role) => {
     assert.equal(buildModuleAccess({ role }).canAccess("promoterCoverage"), true, role);

@@ -5,15 +5,16 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 ## Roles and gates
 
 - `buildModuleAccess` in `app/lib/moduleAccess.js` decides every management screen. Do not hide a page only with CSS.
-- An active admin can switch to an active user's real Supabase session from the global **Login as** control. The selected user's modules, sales scope, and API permissions apply; changes are attributed to that user, not to the admin, and there is no separate impersonation audit record. The confirmation warns about this and **Return to admin** restores the admin session for the current tab.
+- `report-user` (`report_user` accepted) is admin-equivalent: same modules, sales scope, API gates, Login as, morning-attendance exemption, GPS exemptions, and stock-take access as `admin`. Helpers: `isAdminRole`, `isManagementRole`.
+- An active admin or report-user can switch to an active user's real Supabase session from the global **Login as** control. The selected user's modules, sales scope, and API permissions apply; changes are attributed to that user, not to the operator, and there is no separate impersonation audit record. The confirmation warns about this and **Return to admin** restores the operator session for the current tab.
 - Collector access is true when role is `collector`, or `user_metadata.collection_only` is set, or salesman code matches `/^CL\d+$/i`.
 - Invoice-maker profiles can view all management reports, including cross-user activity, working-hours, visit, collection, BI, incentive, and outstanding-without-GPS reports. This does not grant setup/configuration permissions or visit-report email sending.
 - Customer GPS History is an exception: module `customerGpsHistory`, path `/management/customer-gps-history`, and its API are restricted to admin/manager only.
-- Morning attendance is required for every role except `admin` (`isMorningAttendanceRequiredForRole`), including invoice makers and collectors. Until today’s `MORNING_ATTENDANCE` exists, routes other than `/` and My Day redirect to My Day (collection-only users are sent to Payment Collections instead). Payment Collections, `/legal`, and `/management/my-collections` do not redirect; `MorningAttendanceRedirect` shows a blocking Morning Attendance overlay there that saves the punch with GPS. Pages rendering `MorningAttendanceGate requireMorningAttendance={false}` must not cache “attendance complete” for roles that still need it.
-- GPS for transactions is required for every role except invoice makers. The access gate skips admin and manager. Background GPS is off for admin and invoice makers.
-- Stock take is admin or `profiles.stock_take_access === true`.
+- Morning attendance is required for every role except admin-equivalent roles (`isMorningAttendanceRequiredForRole`), including invoice makers and collectors. Until today’s `MORNING_ATTENDANCE` exists, routes other than `/` and My Day redirect to My Day (collection-only users are sent to Payment Collections instead). Payment Collections, `/legal`, and `/management/my-collections` do not redirect; `MorningAttendanceRedirect` shows a blocking Morning Attendance overlay there that saves the punch with GPS. Pages rendering `MorningAttendanceGate requireMorningAttendance={false}` must not cache “attendance complete” for roles that still need it.
+- GPS for transactions is required for every role except invoice makers. The access gate skips admin, report-user, and manager. Background GPS is off for admin, report-user, and invoice makers.
+- Stock take is admin/report-user or `profiles.stock_take_access === true`.
 - Salesman visit plan is on for field roles unless `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` is `0`, `false`, or `no`.
-- `is_management()` SQL does not include invoice makers, collectors, or product promoters.
+- `is_management()` SQL includes admin, report-user, and manager. It does not include invoice makers, collectors, or product promoters.
 
 ## Workday and attendance
 

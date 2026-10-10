@@ -118,16 +118,20 @@ function isInvoiceMakerRole(role) {
 }
 
 function autoCodeHintForRole(role) {
-  const normalized = String(role || "").trim().toLowerCase();
-  if (normalized === "invoice-maker" || normalized === "invoice_maker") return "IV###";
-  if (normalized === "product-promoter" || normalized === "product_promoter") return "PP###";
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "invoice-maker") return "IV###";
+  if (normalized === "product-promoter") return "PP###";
+  if (normalized === "report-user") return "RU###";
+  if (normalized === "admin") return "AD###";
+  if (normalized === "manager") return "MG###";
+  if (normalized === "collector") return "CL###";
   return "SM###";
 }
 
 const ROLE_OPTIONS = [
   { value: "salesman", label: "Salesman" },
   { value: "manager", label: "Manager" },
-  { value: "admin", label: "Admin" },
+  { value: "admin", "report-user", "report_user", label: "Admin" },
   { value: "invoice-maker", label: "Invoice Maker" },
   { value: "product-promoter", label: "Product Promoter" },
   { value: "collector", label: "Collector" },

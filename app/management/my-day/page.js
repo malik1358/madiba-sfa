@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdminRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -2154,7 +2155,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     };
   }, [visitOnlyMode, activeVisitCustomerCode]);
 
-  const isAdministrator = String(profile?.role || "").toLowerCase() === "admin";
+  const isAdministrator = isAdminRole(profile?.role);
 
   function renderVisitReportForm(row, { showClose = false } = {}) {
     if (!row) return null;

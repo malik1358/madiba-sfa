@@ -121,6 +121,24 @@ export function normalizeAccessRole(role) {
   return String(role || "").trim().toLowerCase().replace(/_/g, "-");
 }
 
+/** Admin and report-user share the same app access. */
+export function isAdminRole(role) {
+  const normalized = normalizeAccessRole(role);
+  return normalized === "admin" || normalized === "report-user";
+}
+
+/** Admin-equivalent roles plus manager (common API / scope gate). */
+export function isManagementRole(role) {
+  const normalized = normalizeAccessRole(role);
+  return isAdminRole(normalized) || normalized === "manager";
+}
+
+/** Values accepted in profiles.role / Auth metadata for admin-equivalent users. */
+export const ADMIN_ROLE_VALUES = ["admin", "report-user", "report_user"];
+
+/** Values for management-level scope checks (admin-equivalent + manager). */
+export const MANAGEMENT_ROLE_VALUES = [...ADMIN_ROLE_VALUES, "manager"];
+
 export function isInvoiceMakerRole(role) {
   const normalized = normalizeAccessRole(role);
   return normalized === "invoice-maker";
@@ -128,12 +146,12 @@ export function isInvoiceMakerRole(role) {
 
 export function canViewManagementReports(role) {
   const normalized = normalizeAccessRole(role);
-  return normalized === "admin" || normalized === "manager" || isInvoiceMakerRole(normalized);
+  return isAdminRole(normalized) || normalized === "manager" || isInvoiceMakerRole(normalized);
 }
 
 export function canManageOrderInvoice(role) {
   const normalized = normalizeAccessRole(role);
-  return isInvoiceMakerRole(normalized) || normalized === "admin" || normalized === "manager";
+  return isInvoiceMakerRole(normalized) || isAdminRole(normalized) || normalized === "manager";
 }
 
 export function shouldRequireTransactionGps(role) {
@@ -141,16 +159,14 @@ export function shouldRequireTransactionGps(role) {
 }
 
 export function shouldRequireGpsAccessGate(role) {
-  const normalized = normalizeAccessRole(role);
-  if (normalized === "admin" || normalized === "manager") {
+  if (isManagementRole(role)) {
     return false;
   }
   return shouldRequireTransactionGps(role);
 }
 
 export function shouldEnableBackgroundGps(role) {
-  const normalized = normalizeAccessRole(role);
-  if (normalized === "admin" || isInvoiceMakerRole(role)) {
+  if (isAdminRole(role) || isInvoiceMakerRole(role)) {
     return false;
   }
   return shouldRequireTransactionGps(role);
@@ -171,7 +187,7 @@ export function isCollectionOnlyAccess({ role, salesmanCode, collectionOnlyMetad
 export function buildModuleAccess(context = {}) {
   const role = normalizeAccessRole(context.role);
   const collectionOnly = isCollectionOnlyAccess(context);
-  const isAdmin = role === "admin";
+  const isAdmin = isAdminRole(role);
   const isManager = role === "manager";
   const isSalesman = role === "salesman";
   const isInvoiceMaker = isInvoiceMakerRole(role);
@@ -324,6 +340,8 @@ export const NAV_GROUP_LABELS = {
 
 export const ROLE_LABELS = {
   admin: { en: "admin", ar: "مدير النظام" },
+  "report-user": { en: "report-user", ar: "مستخدم تقارير" },
+  report_user: { en: "report_user", ar: "مستخدم تقارير" },
   manager: { en: "manager", ar: "مدير" },
   salesman: { en: "salesman", ar: "مندوب مبيعات" },
   collector: { en: "collector", ar: "محصل" },
@@ -334,6 +352,7 @@ export const ROLE_LABELS = {
 
 export const PINNED_MODULE_KEYS = {
   admin: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
+  "report-user": ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
   manager: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
   salesman: ["myDay", "customerAudit", "newOrder", "paymentCollections"],
   collector: ["paymentCollections", "collectionReport", "receiptsNotInTally", "dailyVisitReport", "userActivity"],
@@ -343,7 +362,9 @@ export const PINNED_MODULE_KEYS = {
 
 export function pinnedModuleKeysForAccess(access) {
   const role = access?.collectionOnly ? "collector" : normalizeAccessRole(access?.role);
-  const keys = PINNED_MODULE_KEYS[role] || PINNED_MODULE_KEYS.salesman;
+  const keys = PINNED_MODULE_KEYS[role]
+    || (isAdminRole(role) ? PINNED_MODULE_KEYS.admin : null)
+    || PINNED_MODULE_KEYS.salesman;
   return keys.filter((moduleKey) => access?.canAccess?.(moduleKey));
 }
 

@@ -335,7 +335,7 @@ export async function POST(request) {
     if (
       profileError ||
       !profile ||
-      !["admin", "manager", "invoice-maker", "invoice_maker"].includes(
+      !["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker"].includes(
         String(profile.role).toLowerCase()
       )
     ) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdminRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -673,7 +674,7 @@ export default function StockTakePage() {
                                     </button>
                                   </>
                                 ) : null}
-                                {row.accessKind === "mine" || access.role === "admin" ? (
+                                {row.accessKind === "mine" || isAdminRole(access.role) ? (
                                   <button
                                     type="button"
                                     className="moduleInlineButton"
@@ -744,7 +745,7 @@ export default function StockTakePage() {
                         </button>
                       </>
                     ) : null}
-                    {session.accessKind !== "shared" || access.role === "admin" ? (
+                    {session.accessKind !== "shared" || isAdminRole(access.role) ? (
                       <button
                         type="button"
                         className="moduleInlineButton"

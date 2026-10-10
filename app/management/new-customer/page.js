@@ -432,7 +432,7 @@ export default function NewCustomerPage() {
         );
 
         const salesmanRows = (Array.isArray(scope.visibleMembers) ? scope.visibleMembers : [])
-          .filter((member) => ["salesman", "manager", "admin"].includes(String(member.role || "").toLowerCase()))
+          .filter((member) => ["salesman", "manager", "admin", "report-user", "report_user"].includes(String(member.role || "").toLowerCase()))
           .map((member) => ({
             id: member.id,
             salesman_code: String(member.salesman_code || "").trim(),

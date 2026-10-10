@@ -1,4 +1,4 @@
-import { buildModuleAccess, normalizeAccessRole } from "./moduleAccess.js";
+import { buildModuleAccess, isManagementRole } from "./moduleAccess.js";
 import { rowsFromSheetMatrix } from "./stockTakeMasterImport.js";
 import { getPricedOrderLine, lookupDiscountRate } from "./regionalPricing.js";
 import { lookupSchemeApplication } from "./orderSchemes.js";
@@ -67,7 +67,7 @@ export function cataloguePermissions(profile, user = {}) {
   const canView = Boolean(profile?.is_active) && buildModuleAccess(context).canAccess("productCatalogue");
   return {
     canView,
-    canManagePhotos: canView && ["admin", "manager"].includes(normalizeAccessRole(profile?.role)),
+    canManagePhotos: canView && isManagementRole(profile?.role),
   };
 }
 

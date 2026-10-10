@@ -58,7 +58,7 @@ import { useOrder } from "./hooks/useOrder";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
-import { normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { isAdminRole } from "../../lib/moduleAccess.js";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient.js";
 
 function formatAmount(value) {
@@ -139,7 +139,7 @@ function CustomerAuditPageContent() {
   } = useCustomerData({ setError, setMessage });
 
   const { access } = useModuleAccess();
-  const isAdmin = normalizeAccessRole(access?.role) === "admin";
+  const isAdmin = isAdminRole(access?.role);
   const analytics = useAnalytics(transactions, receipts, {}, {
     customer: outstandingInfo.customer,
     customerInvoices: outstandingInfo.customerInvoices,

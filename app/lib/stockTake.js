@@ -1,3 +1,5 @@
+import { isAdminRole } from "./moduleAccess.js";
+
 export const STOCK_TAKE_UOM = {
   BASE: "BASE",
   MID: "MID",
@@ -240,8 +242,7 @@ export function buildLocalStockTakeLine({
 }
 
 export function hasStockTakeModuleAccess({ role, stockTakeAccess = false } = {}) {
-  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
-  if (normalized === "admin") return true;
+  if (isAdminRole(role)) return true;
   return Boolean(stockTakeAccess);
 }
 
@@ -258,7 +259,7 @@ export function isOpenStockTakeSession(session) {
 export function canArchiveStockTakeSession({ session, userId, role } = {}) {
   if (!session || !userId || !isOpenStockTakeSession(session)) return false;
   if (String(session.started_by || "") === String(userId)) return true;
-  return String(role || "").trim().toLowerCase().replace(/_/g, "-") === "admin";
+  return isAdminRole(role);
 }
 
 export function duplicateOpenWarehouseMessage({ warehouseName, existing, userId, sharedSessionIds = [] } = {}) {

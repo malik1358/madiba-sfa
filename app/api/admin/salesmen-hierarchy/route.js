@@ -14,7 +14,7 @@ const LOCAL_LOGIN_DOMAIN = "@madiba-sfa.local";
 const ASSIGNABLE_ROLES = [
   "salesman",
   "manager",
-  "admin",
+  "admin", "report-user", "report_user",
   "invoice-maker",
   "product-promoter",
   "collector",
@@ -75,7 +75,8 @@ function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
   if (role === "invoice-maker" || role === "invoice_maker") return "invoice-maker";
   if (role === "product-promoter" || role === "product_promoter") return "product-promoter";
-  if (["salesman", "manager", "admin"].includes(role)) return role;
+  if (role === "report-user" || role === "report_user") return "report-user";
+  if (["salesman", "manager", "admin", "report-user", "report_user"].includes(role)) return role;
   return "salesman";
 }
 
@@ -96,6 +97,7 @@ function codePrefixForRole(role) {
   if (normalized === "collector") return "CL";
   if (normalized === "manager") return "MG";
   if (normalized === "admin") return "AD";
+  if (normalized === "report-user") return "RU";
   return "SM";
 }
 
@@ -126,7 +128,7 @@ async function syncGeneratedSalesmanCodes(admin) {
   const { data: profiles, error } = await admin
     .from("profiles")
     .select("id,salesman_code,role")
-    .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
+    .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
     .order("created_at", { ascending: true });
 
   if (error) throw error;
@@ -346,7 +348,7 @@ async function requireManagementAccess(admin, request) {
     .eq("id", user.id)
     .single();
 
-  if (profileError || !profile || !["admin", "manager", "invoice-maker", "invoice_maker"].includes(String(profile.role || "").toLowerCase())) {
+  if (profileError || !profile || !["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker"].includes(String(profile.role || "").toLowerCase())) {
     return { error: NextResponse.json({ success: false, error: "Only management can access salesman hierarchy." }, { status: 403 }) };
   }
 
@@ -354,7 +356,7 @@ async function requireManagementAccess(admin, request) {
 }
 
 async function loadSalesmen(admin) {
-  const roleFilter = ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
+  const roleFilter = ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
   let profilesRes = await admin
     .from("profiles")
     .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled,stock_take_access,home_latitude,home_longitude")
@@ -531,7 +533,7 @@ export async function POST(request) {
       const { data: existingProfiles, error: existingProfilesError } = await admin
         .from("profiles")
         .select("salesman_code")
-        .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"]);
+        .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"]);
 
       if (existingProfilesError) throw existingProfilesError;
       const salesmanCode = generateAutoSalesmanCode(
@@ -595,7 +597,7 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: true,
-        message: `${isCollectionOnly ? "Collector" : isInvoiceMakerRole(selectedRole) ? "Invoice maker" : selectedRole === "product-promoter" ? "Product promoter" : "Salesman"} ${salesmanName} created successfully.`,
+        message: `${isCollectionOnly ? "Collector" : isInvoiceMakerRole(selectedRole) ? "Invoice maker" : selectedRole === "product-promoter" ? "Product promoter" : selectedRole === "report-user" ? "Report user" : selectedRole === "admin" ? "Admin" : selectedRole === "manager" ? "Manager" : "Salesman"} ${salesmanName} created successfully.`,
         created: {
           id: userId,
           email,

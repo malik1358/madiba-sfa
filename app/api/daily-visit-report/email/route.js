@@ -1,3 +1,4 @@
+import { isAdminRole, isManagementRole } from "../../../lib/moduleAccess.js";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -14,7 +15,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function canSendVisitReportEmail(profile) {
   const role = String(profile?.role || "").toLowerCase();
-  return role === "admin" || role === "manager";
+  return isManagementRole(role);
 }
 
 async function requireSenderAccess(admin, request) {
@@ -69,7 +70,7 @@ export async function POST(request) {
         { status: 400 },
       );
     }
-    if (digestOnly && String(access.profile?.role || "").toLowerCase() !== "admin") {
+    if (digestOnly && !isAdminRole(access.profile?.role)) {
       return NextResponse.json(
         { success: false, error: "Only admin can send the digest-only report." },
         { status: 403 },

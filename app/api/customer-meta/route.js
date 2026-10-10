@@ -40,7 +40,7 @@ function isProductPromoterRole(role) {
 
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
+  return ["salesman", "manager", "admin", "report-user", "report_user", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 function profileCodeCandidates(profile) {
@@ -125,7 +125,7 @@ async function resolveScope(admin, token) {
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
 
   let visibleProfiles = scopedProfiles;
-  if (!["admin", "manager"].includes(role)) {
+  if (!["admin", "report-user", "report_user", "manager"].includes(role)) {
     if (isProductPromoterRole(role) && inheritedHeadCode) {
       const headProfile = {
         salesman_code: inheritedHeadCode,
@@ -143,7 +143,7 @@ async function resolveScope(admin, token) {
     }
   }
 
-  if (!["admin", "manager"].includes(role) && !visibleProfiles.some((profile) => profile.id === currentProfile.id)) {
+  if (!["admin", "report-user", "report_user", "manager"].includes(role) && !visibleProfiles.some((profile) => profile.id === currentProfile.id)) {
     visibleProfiles = [currentProfile, ...visibleProfiles];
   }
 
@@ -155,7 +155,7 @@ async function resolveScope(admin, token) {
   const scopeMatchers = buildSalesmanScopeMatchers(visibleProfiles);
 
   return {
-    hasAllAccess: ["admin", "manager"].includes(role),
+    hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role),
     identitySearchPattern,
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.flatMap((profile) => profileCodeCandidates(profile)),

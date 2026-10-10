@@ -1,5 +1,6 @@
 "use client";
 
+import { isManagementRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -1701,7 +1702,7 @@ export default function PendingOrdersPage() {
               <p className="moduleEyebrow">MADIBA SFA</p>
               <h1>{t("title")}</h1>
               <p className="moduleSubtitle">
-                {userRole === "admin" || userRole === "manager" || isInvoiceMaker ? t("subtitleTeam") : t("subtitleMine")}
+                {isManagementRole(userRole) || isInvoiceMaker ? t("subtitleTeam") : t("subtitleMine")}
               </p>
             </div>
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>

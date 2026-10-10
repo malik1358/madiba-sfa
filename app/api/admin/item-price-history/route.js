@@ -68,7 +68,7 @@ async function requirePriceHistoryAccess(admin, request) {
     profileError
     || !profile
     || collectionOnly
-    || !["admin", "manager", "invoice-maker", "invoice_maker", "salesman", "product-promoter"].includes(role)
+    || !["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker", "salesman", "product-promoter"].includes(role)
   ) {
     return {
       error: NextResponse.json(

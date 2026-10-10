@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { isCollectionOnlyAccess, isSalesmanVisitPlanSalesmanAccessApproved } from "../../../lib/moduleAccess.js";
+import { isCollectionOnlyAccess, isSalesmanVisitPlanSalesmanAccessApproved, isAdminRole } from "../../../lib/moduleAccess.js";
 import {
   DEFAULT_VISITS_PER_SALESMAN,
   isSalesmanVisitPlanEmailEnabled,
@@ -55,7 +55,7 @@ async function requireVisitPlanAccess(admin, request, { forEmail = false, forReb
     };
   }
 
-  if (role === "admin") {
+  if (isAdminRole(role)) {
     return { user, profile, role, forceOwnSalesman: false };
   }
 

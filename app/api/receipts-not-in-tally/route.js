@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { canViewManagementReports } from "../../lib/moduleAccess.js";
+import { canViewManagementReports, isManagementRole } from "../../lib/moduleAccess.js";
 import {
   buildReceiptsNotInTallyReport,
   defaultReceiptsNotInTallyFromDate,
@@ -29,7 +29,7 @@ function canAccessReport(role) {
 
 function canMarkReceiptMistakes(role) {
   const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
-  return normalized === "admin" || normalized === "manager" || normalized === "collector" || normalized === "invoice-maker";
+  return isManagementRole(normalized) || normalized === "collector" || normalized === "invoice-maker";
 }
 
 async function getAuthUser(request) {

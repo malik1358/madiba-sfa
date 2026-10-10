@@ -52,7 +52,7 @@ async function requireManager(admin, request) {
   if (
     profileError
     || !profile
-    || !["admin", "manager"].includes(role)
+    || !["admin", "report-user", "report_user", "manager"].includes(role)
     || isCollectionOnlyAccess({ role, salesmanCode: profile.salesman_code })
   ) {
     return { error: NextResponse.json({ success: false, error: "Only admin or manager can update KPI targets." }, { status: 403 }) };

@@ -74,7 +74,7 @@ function identitySearchPattern(value) {
 
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
+  return ["salesman", "manager", "admin", "report-user", "report_user", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 function profileCodeCandidates(profile) {
@@ -176,7 +176,7 @@ async function resolveScopeForUser(admin, user) {
   const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
-  if (["admin", "manager"].includes(role)) {
+  if (["admin", "report-user", "report_user", "manager"].includes(role)) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
     const headProfile = {
@@ -221,7 +221,7 @@ async function resolveScopeForUser(admin, user) {
   )];
 
   return {
-    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
+    hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
     identitySearchPatterns,
     outstandingSalesmanIdentities,

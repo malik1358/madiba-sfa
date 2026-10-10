@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope } from "../../lib/customerAccess.js";
-import { normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { normalizeAccessRole, isAdminRole } from "../../lib/moduleAccess.js";
 import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBlockServer.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
@@ -93,7 +93,7 @@ export async function GET(request) {
       message: status.blocked
         ? blockedByAvgDaysMessage({ threshold: status.threshold, avgDaysToPay: status.avgDaysToPay })
         : "",
-      canAdminOverride: normalizeAccessRole(scope.role) === "admin",
+      canAdminOverride: isAdminRole(scope.role),
     });
   } catch (error) {
     const message = error.message || "Unable to load customer order block status.";
@@ -112,7 +112,7 @@ export async function POST(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const { user, scope } = await resolveAuth(admin, request);
-    if (normalizeAccessRole(scope.role) !== "admin") {
+    if (!isAdminRole(scope.role)) {
       return NextResponse.json({ success: false, error: "Only admin can change customer order unblock status." }, { status: 403 });
     }
 

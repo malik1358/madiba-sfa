@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdminRole } from "../../lib/moduleAccess.js";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -183,6 +184,7 @@ function getUserRoleLabel(role) {
   if (normalized === "salesman") return "Salesman";
   if (normalized === "manager") return "Manager";
   if (normalized === "admin") return "Admin";
+  if (normalized === "report-user") return "Report User";
   if (isInvoiceMakerRole(normalized)) return "Invoice maker";
   if (isProductPromoterRole(normalized)) return "Product promoter";
   return normalized ? normalized : "-";
@@ -235,7 +237,7 @@ export default function GpsMapPage() {
 
         const role = String(profile?.role || "").toLowerCase();
         setUserRole(role);
-        if (role !== "admin" && !isInvoiceMakerRole(role) && !isProductPromoterRole(role)) {
+        if (!isAdminRole(role) && !isInvoiceMakerRole(role) && !isProductPromoterRole(role)) {
           setError("Only administrators, invoice-makers, and product promoters can view the GPS map.");
           return;
         }
@@ -251,7 +253,7 @@ export default function GpsMapPage() {
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
           .select("id,salesman_code,salesman_name,role")
-          .in("role", ["salesman", "manager", "admin", "collector", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]);
+          .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "collector", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]);
 
         if (profilesError) throw profilesError;
 

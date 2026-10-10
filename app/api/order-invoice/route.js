@@ -105,7 +105,7 @@ async function resolveScope(admin, token) {
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
+      .in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -114,7 +114,7 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const allProfiles = profilesRes.data || [];
-  const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role);
+  const hasAllAccess = ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role);
   const subordinateIds = hasAllAccess
     ? new Set()
     : resolveSubordinateUserIds(authUsers, profile, allProfiles);

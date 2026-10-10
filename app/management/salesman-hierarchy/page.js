@@ -131,7 +131,8 @@ function autoCodeHintForRole(role) {
 const ROLE_OPTIONS = [
   { value: "salesman", label: "Salesman" },
   { value: "manager", label: "Manager" },
-  { value: "admin", "report-user", "report_user", label: "Admin" },
+  { value: "admin", label: "Admin" },
+  { value: "report-user", label: "Report User" },
   { value: "invoice-maker", label: "Invoice Maker" },
   { value: "product-promoter", label: "Product Promoter" },
   { value: "collector", label: "Collector" },

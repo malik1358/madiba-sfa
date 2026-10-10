@@ -278,6 +278,16 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
       await removeQueueItem(item);
       options.onSynced?.(item, payload);
       if (typeof window !== "undefined" && (item.metadata?.type === "sales_order" || String(item.url || "").includes("/api/sales-orders"))) {
+        try {
+          const { recordConfirmedOrderQuantityUsage } = await import("./orderQuantityControlsClient.js");
+          const body = item.jsonBody && typeof item.jsonBody === "object" ? item.jsonBody : {};
+          recordConfirmedOrderQuantityUsage({
+            customerCode: body.customerCode || item.metadata?.customerCode || "",
+            lines: Array.isArray(body.lines) ? body.lines : [],
+          });
+        } catch {
+          // Ignore local usage ledger failures after a successful sync.
+        }
         window.dispatchEvent(new CustomEvent("madiba-offline-queue-changed"));
         window.dispatchEvent(new CustomEvent("madiba-pending-orders-changed"));
       }

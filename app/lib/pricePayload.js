@@ -2,6 +2,10 @@ import { applyPriceCodeAliases } from "./itemCodeAliases.js";
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { resolveStoredOrderSchemes } from "./orderSchemes.js";
 import {
+  ORDER_QUANTITY_CONTROLS_LOCAL_KEY,
+  resolveStoredOrderQuantityControls,
+} from "./orderQuantityControls.js";
+import {
   DEFAULT_PRICING_REGION,
   PRICING_REGIONS,
   REGION_PRICE_COLUMNS,
@@ -299,7 +303,16 @@ function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
-function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, schemes, retailRegionPriceMaps) {
+function normalizeCatalogResult(
+  priceMap,
+  regionPriceMaps,
+  cashDiscountMap,
+  valueDiscountMap,
+  sheetItems,
+  schemes,
+  retailRegionPriceMaps,
+  quantityControls,
+) {
   const aliasedRegions = {};
   PRICING_REGIONS.forEach((region) => {
     aliasedRegions[region] = applyPriceCodeAliases(regionPriceMaps?.[region] || {});
@@ -330,6 +343,12 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
     return next;
   }
 
+  const resolvedQuantityControls = quantityControls === undefined
+    ? resolveStoredOrderQuantityControls(null)
+    : resolveStoredOrderQuantityControls(
+      Array.isArray(quantityControls) ? { controls: quantityControls } : quantityControls,
+    );
+
   return {
     priceMap: stripExcludedPrices(resolvedPriceMap),
     regionPriceMaps: {
@@ -344,6 +363,7 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
     valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
     sheetItems: keptSheetItems,
     schemes: resolveStoredOrderSchemes({ schemes }),
+    quantityControls: resolvedQuantityControls,
   };
 }
 
@@ -731,7 +751,16 @@ export function parsePricePayload(payload) {
 
   if (Array.isArray(payload)) {
     walk(payload);
-    return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, undefined, retailRegionPriceMaps);
+    return normalizeCatalogResult(
+      priceMap,
+      regionPriceMaps,
+      cashDiscountMap,
+      valueDiscountMap,
+      sheetItems,
+      undefined,
+      retailRegionPriceMaps,
+      undefined,
+    );
   }
 
   if (payload && typeof payload === "object") {
@@ -751,10 +780,20 @@ export function parsePricePayload(payload) {
       sheetItems,
       payload.schemes,
       retailRegionPriceMaps,
+      payload.quantityControls,
     );
   }
 
-  return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, undefined, retailRegionPriceMaps);
+  return normalizeCatalogResult(
+    priceMap,
+    regionPriceMaps,
+    cashDiscountMap,
+    valueDiscountMap,
+    sheetItems,
+    undefined,
+    retailRegionPriceMaps,
+    undefined,
+  );
 }
 
 function readCached(cacheKey) {
@@ -773,6 +812,7 @@ function readCached(cacheKey) {
       Array.isArray(parsed.sheetItems) ? parsed.sheetItems : [],
       parsed.schemes,
       parsed.retailRegionPriceMaps,
+      parsed.quantityControls,
     );
   } catch {
     return null;
@@ -783,6 +823,12 @@ function writeCached(cacheKey, data) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(cacheKey, JSON.stringify(data));
+    if (Array.isArray(data?.quantityControls)) {
+      window.localStorage.setItem(ORDER_QUANTITY_CONTROLS_LOCAL_KEY, JSON.stringify({
+        controls: data.quantityControls,
+        savedAt: new Date().toISOString(),
+      }));
+    }
   } catch {
     // Ignore storage write failures.
   }
@@ -821,6 +867,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
             Array.isArray(data.sheetItems) ? data.sheetItems : [],
             data.schemes,
             data.retailRegionPriceMaps,
+            data.quantityControls,
           )
         : parsePricePayload(data || {});
 

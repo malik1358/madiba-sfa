@@ -1,4 +1,6 @@
 export const ORDER_QUANTITY_CONTROLS_CACHE_KEY = "order_quantity_controls";
+/** Browser localStorage mirror so New Order can enforce limits offline. */
+export const ORDER_QUANTITY_CONTROLS_LOCAL_KEY = "madiba.orderQuantityControls.v1";
 
 export const CONTROL_PERIOD_WEEK = "week";
 export const CONTROL_SCOPE_CUSTOMER = "customer";
@@ -272,4 +274,101 @@ export function describeOrderQuantityControl(control) {
   const label = formatItemCodesLabel(normalized.itemCodes);
   const groupSuffix = normalized.itemCodes.length > 1 ? " combined" : "";
   return `${label}: max ${normalized.maxQty} ${normalized.unit}${groupSuffix} per ${normalized.scope} per ${normalized.period}${normalized.active ? "" : " (disabled)"}`;
+}
+
+export function mergeQtyByItemMaps(...maps) {
+  const out = {};
+  maps.forEach((map) => {
+    Object.entries(map || {}).forEach(([code, qty]) => {
+      const normalized = normalizeCode(code);
+      if (!normalized) return;
+      out[normalized] = (out[normalized] || 0) + Number(qty || 0);
+    });
+  });
+  return out;
+}
+
+/**
+ * Sum item quantities from local/queued order snapshots for one customer in a week window.
+ * Does not call the network — used for offline-first quantity-limit checks.
+ */
+export function sumPriorQtyByItemFromLocalOrders({
+  orders = [],
+  customerCode,
+  weekStartIso,
+  weekEndIso,
+  excludeOrderId = null,
+  itemCodes = null,
+} = {}) {
+  const customer = normalizeCode(customerCode);
+  const priorQtyByItem = {};
+  if (!customer) return priorQtyByItem;
+
+  const weekStartMs = Date.parse(weekStartIso);
+  const weekEndMs = Date.parse(weekEndIso);
+  if (!Number.isFinite(weekStartMs) || !Number.isFinite(weekEndMs)) return priorQtyByItem;
+
+  const excludeIds = new Set(
+    [excludeOrderId]
+      .flatMap((value) => {
+        const text = String(value ?? "").trim();
+        if (!text) return [];
+        return [text, text.startsWith("pending:") ? text.slice("pending:".length) : `pending:${text}`];
+      }),
+  );
+  const codeFilter = Array.isArray(itemCodes) && itemCodes.length > 0
+    ? new Set(itemCodes.map(normalizeCode).filter(Boolean))
+    : null;
+
+  (orders || []).forEach((order) => {
+    if (normalizeCode(order?.customer_code || order?.customerCode) !== customer) return;
+    const status = String(order?.status || "").trim().toUpperCase();
+    if (status === "CANCELLED") return;
+
+    const orderId = String(order?.id ?? order?.orderId ?? "").trim();
+    const queueId = String(order?.queueId || "").trim();
+    if (orderId && excludeIds.has(orderId)) return;
+    if (queueId && (excludeIds.has(queueId) || excludeIds.has(`pending:${queueId}`))) return;
+
+    const createdMs = Date.parse(
+      order?.created_at || order?.createdAt || order?.updated_at || order?.updatedAt || "",
+    );
+    if (!Number.isFinite(createdMs) || createdMs < weekStartMs || createdMs >= weekEndMs) return;
+
+    const lines = Array.isArray(order?.queuedLines)
+      ? order.queuedLines
+      : (Array.isArray(order?.lines) ? order.lines : []);
+    lines.forEach((line) => {
+      const code = normalizeCode(line?.item_code || line?.itemCode);
+      if (!code) return;
+      if (codeFilter && !codeFilter.has(code)) return;
+      priorQtyByItem[code] = (priorQtyByItem[code] || 0)
+        + Number(line?.quantity ?? line?.order_quantity ?? 0);
+    });
+  });
+
+  return priorQtyByItem;
+}
+
+export function assertOrderQuantityControlsLocal({
+  lines = [],
+  quantities = null,
+  controls = [],
+  priorQtyByItem = {},
+  language = "en",
+} = {}) {
+  const violations = evaluateOrderQuantityControls({
+    lines,
+    quantities,
+    controls,
+    priorQtyByItem,
+  });
+  if (violations.length === 0) {
+    return { ok: true, violations: [] };
+  }
+  return {
+    ok: false,
+    violations,
+    error: violations.map((row) => formatQuantityControlViolation(row, language)).join(" "),
+  };
 }

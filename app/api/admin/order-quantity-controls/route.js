@@ -124,6 +124,17 @@ export async function PUT(request) {
 
     if (error) throw error;
 
+    try {
+      const { hashOfflineDataContent, publishOfflineDataUpdate } = await import("../../../lib/offlineDataBroadcast.js");
+      await publishOfflineDataUpdate(admin, {
+        trigger: "order-quantity-controls-update",
+        kinds: ["prices"],
+        contentHash: hashOfflineDataContent(controls),
+      });
+    } catch (publishError) {
+      console.error("Offline data publish after order quantity controls update failed:", publishError);
+    }
+
     return NextResponse.json({
       success: true,
       controls,

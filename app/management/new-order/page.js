@@ -636,6 +636,7 @@ export default function NewOrderPage() {
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
+  const [quantityControls, setQuantityControls] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
   const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
@@ -953,6 +954,7 @@ export default function NewOrderPage() {
     cashDiscountMap,
     valueDiscountMap,
     schemes,
+    quantityControls,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -1564,6 +1566,7 @@ export default function NewOrderPage() {
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
+        setQuantityControls(parsed.quantityControls || []);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch (err) {
         if (catalogueMode) setError(err.message || "Unable to load catalogue prices.");

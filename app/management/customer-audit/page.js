@@ -96,6 +96,7 @@ function CustomerAuditPageContent() {
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
+  const [quantityControls, setQuantityControls] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
   const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [priceSheetItems, setPriceSheetItems] = useState([]);
@@ -220,6 +221,7 @@ function CustomerAuditPageContent() {
     cashDiscountMap,
     valueDiscountMap,
     schemes,
+    quantityControls,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -406,6 +408,7 @@ function CustomerAuditPageContent() {
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
+        setQuantityControls(parsed.quantityControls || []);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.

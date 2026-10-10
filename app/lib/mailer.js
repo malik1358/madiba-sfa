@@ -46,7 +46,52 @@ export function isEmailConfigured(config = getMailerConfig()) {
   return Boolean(config.host);
 }
 
+function bufferToBase64(content) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(content)) {
+    return content.toString("base64");
+  }
+  if (content instanceof ArrayBuffer) {
+    return Buffer.from(content).toString("base64");
+  }
+  if (ArrayBuffer.isView(content)) {
+    return Buffer.from(content.buffer, content.byteOffset, content.byteLength).toString("base64");
+  }
+  return Buffer.from(String(content || ""), "utf8").toString("base64");
+}
+
+function toNodeBuffer(content) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(content)) return content;
+  if (content instanceof ArrayBuffer) return Buffer.from(content);
+  if (ArrayBuffer.isView(content)) {
+    return Buffer.from(content.buffer, content.byteOffset, content.byteLength);
+  }
+  return Buffer.from(String(content || ""), "utf8");
+}
+
+export function normalizeEmailAttachments(attachments = []) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments
+    .map((entry) => {
+      const filename = String(entry?.filename || entry?.fileName || "").trim();
+      if (!filename || entry?.content == null) return null;
+      const contentType = String(entry.contentType || entry.content_type || "application/octet-stream").trim()
+        || "application/octet-stream";
+      return {
+        filename,
+        content: entry.content,
+        contentType,
+      };
+    })
+    .filter(Boolean);
+}
+
 async function sendWithResend(config, message) {
+  const attachments = normalizeEmailAttachments(message.attachments).map((entry) => ({
+    filename: entry.filename,
+    content: bufferToBase64(entry.content),
+    content_type: entry.contentType,
+  }));
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -60,6 +105,7 @@ async function sendWithResend(config, message) {
       subject: message.subject,
       html: message.html,
       text: message.text,
+      ...(attachments.length ? { attachments } : {}),
     }),
   });
 
@@ -81,6 +127,12 @@ async function sendWithSmtp(config, message) {
     auth: config.user ? { user: config.user, pass: config.pass } : undefined,
   });
 
+  const attachments = normalizeEmailAttachments(message.attachments).map((entry) => ({
+    filename: entry.filename,
+    content: toNodeBuffer(entry.content),
+    contentType: entry.contentType,
+  }));
+
   const info = await transporter.sendMail({
     from: config.from,
     to: message.to.join(", "),
@@ -88,6 +140,7 @@ async function sendWithSmtp(config, message) {
     subject: message.subject,
     html: message.html,
     text: message.text,
+    ...(attachments.length ? { attachments } : {}),
   });
 
   return { provider: "smtp", id: info?.messageId || null };
@@ -113,6 +166,7 @@ export async function sendEmail(message, env = process.env) {
     subject: String(message.subject || "").trim(),
     html: String(message.html || ""),
     text: String(message.text || ""),
+    attachments: normalizeEmailAttachments(message.attachments),
   };
 
   if (config.resendKey) {

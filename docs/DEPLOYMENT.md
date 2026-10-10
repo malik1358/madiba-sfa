@@ -77,6 +77,45 @@ The job summary records the actor, SHA, project ref, allowlisted versions, prefl
 
 Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
 
+### Production database access provisioning
+
+DBA review SQL (discovery + commented provisioning) lives in `sql/production_migration_access_dba_review.sql`. It is **not** a migration and must not be applied until separately authorized. All provisioning DDL in that file stays commented and marked **NOT EXECUTED**.
+
+**Migration identity:** the login used in `PRODUCTION_DB_MIGRATION_URL` must be the **direct owner** of each existing target table (`sales_orders`, `collection_visits`, `customer_documents`, and `attachments` if present), must not be a superuser (so `postgres` fails), and must satisfy `CREATE` on `public` plus ledger `SELECT`/`INSERT`/`UPDATE` for apply. Prefer **reusing** an existing non-superuser table-owner LOGIN when discovery confirms one owner for all existing targets with `rolcanlogin` and not `rolsuper`. Create `madiba_mig_owner` and transfer ownership only when no such login exists. Creating roles alone never grants ownership of existing tables.
+
+**Do not change existing `PUBLIC` privileges** (including database `CONNECT`/`TEMP`/`CREATE` or schema grants) without a separate impact assessment. The review script must not revoke privileges from `PUBLIC`.
+
+Before any ownership transfer, inspect dependent sequences (section A of the review SQL) and record current table/sequence owners for rollback.
+
+| Capability | `madiba_mig_readonly` | Migration owner login (`madiba_mig_owner` or reused owner) |
+| --- | --- | --- |
+| Login / `session_user = current_user` | Required | Required |
+| Superuser / BYPASSRLS / CREATEDB / CREATEROLE / REPLICATION | Forbidden | Forbidden |
+| Own database / unrelated schemas / unrelated relations | Forbidden | Forbidden except listed targets |
+| DB `TEMP` | Forbidden | Forbidden |
+| Schema `USAGE` | `public`, `supabase_migrations` | `public`, `supabase_migrations` |
+| Schema `CREATE` | Forbidden | `public` only; never `supabase_migrations` |
+| Catalog `SELECT` | Relations listed in the runner `PREFLIGHT_CATALOG_RELATIONS` | Not used on the readonly path |
+| Column `SELECT` | Preflight columns in `PREFLIGHT_DATA_COLUMNS` when present | Via table ownership |
+| Ledger | `SELECT (version)` only | `SELECT` / `INSERT` / `UPDATE` |
+| Direct table ownership | Forbidden | Required for each existing target |
+| Preflight use | Catalog, privilege, ledger inspection | Ownership/RLS/FORCE visibility + allowlisted `BEGIN READ ONLY` aggregates |
+| Apply use | Post-apply re-verification | Allowlisted migration files + `migration repair` |
+
+Connection secrets (set only in the GitHub `production-db` environment; never commit passwords):
+
+- `PRODUCTION_DB_READONLY_URL` → `postgresql://madiba_mig_readonly:<password>@db.ynmtlzyqvmurpmfretji.supabase.co:5432/postgres?sslmode=verify-full`
+- `PRODUCTION_DB_MIGRATION_URL` → same host/db/sslmode with the chosen migration owner login
+- `PRODUCTION_DB_ROOT_CA_CERT` → full PEM from Supabase Database Settings
+
+Use direct port **5432**, not the pooler. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED` unset or `false` until a separate apply approval.
+
+**Rollback (authorized DBA only):** restore recorded prior table/sequence owners; revoke only grants that were added for these roles; drop the new roles only after they own nothing and secrets no longer reference them. Do not “fix” `PUBLIC` privileges by guessing.
+
+First preflight with Prevent self-review: a **non-`malik1358`** GitHub account with Actions run permission dispatches from `main` (`mode=preflight`, full current `main` SHA). The job waits on `production-db` environment approval; **`malik1358`** reviews and approves. Do not dispatch until roles/owner login choice, any ownership transfers, and the three secrets are authorized and configured. Do not enable apply until a successful preflight is separately approved.
+
+Authorization blockers before any production DB change or first preflight: nominate the dispatcher account; authorize discovery SQL; decide reuse vs create+transfer for the migration owner; authorize readonly role creation and grants; authorize environment secrets; confirm whether `attachments` already exists.
+
 ## Environment variable names
 
 Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is gitignored. Names from `.env.example`:

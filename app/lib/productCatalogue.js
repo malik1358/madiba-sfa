@@ -58,11 +58,12 @@ export function catalogueSheetPacking(matrix) {
   return packingByCode;
 }
 
-export function cataloguePermissions(profile, user = {}) {
+export function cataloguePermissions(profile, user = {}, options = {}) {
   const context = {
     role: profile?.role,
     salesmanCode: profile?.salesman_code,
     collectionOnlyMetadata: Boolean(user.user_metadata?.collection_only || user.app_metadata?.collection_only),
+    roleModuleMatrix: options.roleModuleMatrix || null,
   };
   const canView = Boolean(profile?.is_active) && buildModuleAccess(context).canAccess("productCatalogue");
   return {

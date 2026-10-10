@@ -1,6 +1,8 @@
 import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
   achievementPercent,
+  buildPerformanceKpi,
+  estimateFromPaceGap,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
 } from "./performanceKpis.js";
@@ -170,6 +172,35 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
     totals[key].achievement = achievementPercent(totals[key].actual, totals[key].target);
   });
   return totals;
+}
+
+export function sumFilteredKpiPaceEstimates(
+  rows = [],
+  columns = PERFORMANCE_DISPLAY_KPI_KEYS,
+  { reportDate, todayIso } = {},
+) {
+  const totals = sumFilteredKpiColumns(rows, columns);
+  const estimates = {};
+
+  columns.forEach((key) => {
+    const column = totals[key] || { actual: 0, target: 0 };
+    const liveKpi = buildPerformanceKpi(key, {
+      actual: column.actual,
+      target: column.target,
+      reportDate,
+      todayIso,
+    });
+    const estimate = estimateFromPaceGap(column.target, liveKpi.paceGap);
+    estimates[key] = {
+      estimate,
+      target: column.target,
+      expected: liveKpi.expected,
+      paceGap: liveKpi.paceGap,
+      achievement: achievementPercent(estimate, column.target),
+    };
+  });
+
+  return estimates;
 }
 
 export function hasExplicitTargets(targets = {}) {

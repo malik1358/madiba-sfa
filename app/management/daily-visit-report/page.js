@@ -73,6 +73,7 @@ const TEXT = {
   noEntryGps: { en: "No entry GPS", ar: "لا GPS للإدخال" },
   farBadge: { en: "Far", ar: "بعيد" },
   gpsUpdateAccepted: { en: "GPS update accepted", ar: "تمت الموافقة على تحديث GPS" },
+  firstGpsCaptured: { en: "First GPS captured", ar: "أول موقع GPS محفوظ" },
   entries: { en: "entries", ar: "إدخالات" },
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
@@ -984,6 +985,9 @@ export default function DailyVisitReportPage() {
                               {entry.gpsLocationUpdateAccepted ? (
                                 <div className="moduleCode">{t("gpsUpdateAccepted")}</div>
                               ) : null}
+                              {entry.firstCustomerGpsCaptured ? (
+                                <div className="moduleCode">{t("firstGpsCaptured")}</div>
+                              ) : null}
                             </td>
                             <td>{formatVisitEntryOutcome(entry, language)}</td>
                             <td>
@@ -998,7 +1002,7 @@ export default function DailyVisitReportPage() {
                                 ? "-"
                                 : `${formatNumber(entry.distanceFromPreviousKm)} km`}
                             </td>
-                            <td>{formatEntryCoordinates(entry)}</td>
+                            <td>{formatEntryCoordinates(entry, language)}</td>
                             <td>{entry.area || "-"}</td>
                             <td>{entry.street || "-"}</td>
                             <td>

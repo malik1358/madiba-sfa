@@ -8,13 +8,58 @@ import {
   reverseGeocodeCoordinates,
 } from "./geo.js";
 import { toFriendlyAbortError } from "./abortError.js";
+import {
+  buildCustomerGpsReportOnlyMessage,
+  classifyCustomerGpsWriteBlock,
+} from "./customerGpsWriteGuard.js";
+import { isAtMadibaStore } from "./madibaStoreLocation.js";
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
 export const GPS_CANCELLED_ERROR = "Location update cancelled.";
 export const CUSTOMER_LOCATION_UPDATE_UPDATE = "update";
 export const CUSTOMER_LOCATION_UPDATE_SKIP = "skip";
 export const CUSTOMER_LOCATION_UPDATE_CANCEL = "cancel";
+export const CUSTOMER_LOCATION_UPDATE_REPORT_ONLY = "report_only";
 const CUSTOMER_LOCATION_FETCH_TIMEOUT_MS = 8000;
+
+async function fetchCustomerGpsWriteBlock(accessToken, entryLocation, language = "en") {
+  if (!hasGpsCoordinates(entryLocation)) return null;
+
+  // Store is known offline; still warn without a network round-trip.
+  const localStoreBlock = classifyCustomerGpsWriteBlock(entryLocation, []);
+  if (localStoreBlock) {
+    return {
+      ...localStoreBlock,
+      message: language === "ar" ? localStoreBlock.messageAr : localStoreBlock.messageEn,
+    };
+  }
+
+  if (!accessToken) return null;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return null;
+
+  try {
+    const params = new URLSearchParams({
+      latitude: String(entryLocation.latitude),
+      longitude: String(entryLocation.longitude),
+      language: language === "ar" ? "ar" : "en",
+    });
+    const response = await fetchWithTimeout(
+      `/api/customers/location-write-check?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success || !payload.blocked) return null;
+    return {
+      reason: payload.reason || "home",
+      message: String(payload.message || buildCustomerGpsReportOnlyMessage({
+        language,
+        reason: payload.reason || "home",
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_LOCATION_FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -178,6 +223,9 @@ export function isFarFromCustomer(
   customer,
   thresholdKm = CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
 ) {
+  // Entries made at the MADIBA store are always FAR, even with no customer pin
+  // or when the saved pin happens to sit within the normal 0.5 km threshold.
+  if (isAtMadibaStore(entryLocation)) return true;
   const distanceKm = distanceFromCustomerKm(entryLocation, customer);
   if (distanceKm === null) return false;
   return distanceKm > thresholdKm;
@@ -358,6 +406,19 @@ export async function evaluateCustomerLocationUpdatePrompt({
     return null;
   }
 
+  const writeBlock = await fetchCustomerGpsWriteBlock(accessToken, entryLocation, language);
+  if (writeBlock) {
+    return {
+      message: writeBlock.message,
+      accessToken,
+      customerCode,
+      updatePayload: null,
+      autoPromote: false,
+      reportOnlyBlocked: true,
+      blockedReason: writeBlock.reason,
+    };
+  }
+
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const skipGeocode = skipReverseGeocode || offline;
 
@@ -375,8 +436,10 @@ export async function evaluateCustomerLocationUpdatePrompt({
     try {
       geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
       const detectedArea = String(geocoded.area || "").trim();
-      const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
-      if (detectedArea) {
+      // Area-only enrichment still goes through the location API; skip when the
+      // entry point itself is a blocked store/home coordinate.
+      if (detectedArea && !isAtMadibaStore(entryLocation)) {
+        const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
         await updateCustomerLocation(accessToken, customerCode, updatePayload);
         applyCustomerLocation(customer, updatePayload);
       }
@@ -406,6 +469,7 @@ export async function evaluateCustomerLocationUpdatePrompt({
     // First visit GPS is promoted onto the customer master without asking.
     // Far-from-saved still prompts so an existing pin is not overwritten silently.
     autoPromote: missingGps,
+    reportOnlyBlocked: false,
   };
 }
 
@@ -419,6 +483,10 @@ export async function applyCustomerLocationUpdateFromPrompt(promptDetails) {
 }
 
 async function defaultLegacyLocationUpdatePrompt(promptDetails) {
+  if (promptDetails?.reportOnlyBlocked) {
+    window.alert(promptDetails.message);
+    return CUSTOMER_LOCATION_UPDATE_REPORT_ONLY;
+  }
   return window.confirm(promptDetails.message)
     ? CUSTOMER_LOCATION_UPDATE_UPDATE
     : CUSTOMER_LOCATION_UPDATE_SKIP;
@@ -446,6 +514,13 @@ export async function maybePromptCustomerLocationUpdate({
   if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
 
   const canWrite = !shouldSkipCustomerLocationWrite(customerCode, customer);
+
+  // Store / home: warn that GPS stays on the report only — never write the pin.
+  if (promptDetails.reportOnlyBlocked) {
+    const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
+    await resolveChoice(promptDetails);
+    return CUSTOMER_LOCATION_UPDATE_REPORT_ONLY;
+  }
 
   // Promote visit GPS onto the customer master when none is saved yet.
   if (promptDetails.autoPromote) {

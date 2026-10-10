@@ -1,7 +1,10 @@
 import { applyCustomerGpsUpdate } from "./customerGpsHistory.js";
-import { isAtHomeLocation } from "./homeLocation.js";
+import {
+  CUSTOMER_HOME_LOCATION_PIN_RADIUS_METERS,
+  isAtHomeLocation,
+} from "./homeLocation.js";
 
-export const CUSTOMER_HOME_LOCATION_CLEANUP_RADIUS_METERS = 25;
+export const CUSTOMER_HOME_LOCATION_CLEANUP_RADIUS_METERS = CUSTOMER_HOME_LOCATION_PIN_RADIUS_METERS;
 
 export async function clearCustomerPinsAtHomeLocation(admin, {
   latitude,

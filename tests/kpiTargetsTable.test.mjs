@@ -10,12 +10,21 @@ import {
   mergeKpiTargetProfiles,
   rowMatchesKpiFilters,
   sumFilteredKpiColumns,
+  sumFilteredKpiPaceEstimates,
   teamMemberRows,
   teamRowLabel,
   teamTargetSalesmanCode,
   uniqueBossesFromRows,
 } from "../app/lib/kpiTargetsTable.js";
-import { consolidatePerformanceSnapshots, buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
+import {
+  achievementPercent,
+  consolidatePerformanceSnapshots,
+  buildPerformanceKpi,
+  buildPerformanceSnapshot,
+  estimateFromPaceGap,
+  formatKpiTargetInput,
+  parseKpiTargetInput,
+} from "../app/lib/performanceKpis.js";
 import { isCollectionOnlyAccess } from "../app/lib/moduleAccess.js";
 
 test("KPI roster includes Zia and Asrar without changing collection-only access", () => {
@@ -157,6 +166,48 @@ test("filtered totals skip team rows so they are not double counted", () => {
   assert.equal(totals.officeSupplies.achievement, (70 / 180) * 100);
   assert.equal(totals.localItemSales.actual, 15);
   assert.equal(totals.localItemSales.target, 60);
+});
+
+test("estimate from pace gap applies ahead/behind points to the target", () => {
+  assert.equal(estimateFromPaceGap(4_550_000, -21), 3_594_500);
+  assert.equal(estimateFromPaceGap(1_000_000, 10), 1_100_000);
+  assert.equal(estimateFromPaceGap(1_000_000, 0), 1_000_000);
+  assert.equal(estimateFromPaceGap(0, -21), null);
+  assert.equal(estimateFromPaceGap(100, null), null);
+});
+
+test("target inputs round-trip through thousand separators", () => {
+  assert.equal(parseKpiTargetInput("1,200,000"), "1200000");
+  assert.equal(parseKpiTargetInput("12a00"), "1200");
+  assert.match(formatKpiTargetInput("1200000"), /1.?200.?000/);
+  assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
+});
+
+test("pace estimate footer applies filtered total pace gap to targets", () => {
+  const rows = [ahmed, ali, teamAhmed];
+  const estimates = sumFilteredKpiPaceEstimates(rows, ["officeSupplies", "totalSales"], {
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  const office = buildPerformanceKpi("officeSupplies", {
+    actual: 70,
+    target: 180,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  const total = buildPerformanceKpi("totalSales", {
+    actual: 100,
+    target: 310,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  assert.equal(estimates.officeSupplies.estimate, estimateFromPaceGap(180, office.paceGap));
+  assert.equal(estimates.totalSales.estimate, estimateFromPaceGap(310, total.paceGap));
+  assert.equal(estimates.officeSupplies.target, 180);
+  assert.equal(
+    estimates.officeSupplies.achievement,
+    achievementPercent(estimates.officeSupplies.estimate, 180),
+  );
 });
 
 test("unique bosses and team members include the boss", () => {

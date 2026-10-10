@@ -243,7 +243,7 @@ The collections UI was split so a background queue refresh does not remount the 
 
 ## Scheduled work
 
-Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes. GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
+Vercel deploys production from `main` only (`vercel.json` `git.deploymentEnabled`); Preview deployments are intentionally off. Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes. GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
 
 ## Patterns to copy
 

@@ -56,7 +56,7 @@ On 2026-10-09 the operator reported updating Google Apps Script. A read-only che
 Before anyone dispatches it, a repository administrator must create the protected GitHub environment `production-db` and configure:
 
 - Required reviewers, prevent self-review, and disable administrator bypass. Restrict deployment branches to `main`; do not allow feature branches.
-- Environment secrets `PRODUCTION_DB_READONLY_URL`, `PRODUCTION_DB_MIGRATION_URL`, and `PRODUCTION_DB_ROOT_CA_CERT`. Use separate least-privilege PostgreSQL credentials and direct URLs for `db.ynmtlzyqvmurpmfretji.supabase.co:5432/postgres?sslmode=verify-full`. Set the CA secret to the PEM root certificate downloaded from Supabase Database Settings. The workflow writes it to a permission-restricted runner-temp file and passes only its path as `PGSSLROOTCERT`. Never put either URL or the certificate in the repository, local environment files, logs, or summaries.
+- Environment secrets `PRODUCTION_DB_READONLY_URL`, `PRODUCTION_DB_MIGRATION_URL`, and `PRODUCTION_DB_ROOT_CA_CERT`. Use separate least-privilege PostgreSQL credentials with `sslmode=verify-full` on port **5432** only (never transaction pooler **6543**). Allowed hosts: direct `db.ynmtlzyqvmurpmfretji.supabase.co`, or the pinned Session Pooler `aws-0-ap-southeast-2.pooler.supabase.com` (IPv4 path for GitHub Actions). Session Pooler usernames must be `role.ynmtlzyqvmurpmfretji` (for example `madiba_mig_readonly.ynmtlzyqvmurpmfretji`). Set `PRODUCTION_DB_ROOT_CA_CERT` to the Supabase Database Settings **Download certificate** PEM (`prod-ca-2021`); Session Pooler verify-full requires that Supabase CA (the AWS RDS regional bundle alone fails pooler hostname verification). A combined PEM that also includes the RDS regional CA is acceptable when keeping both connection modes. The workflow writes the CA to a permission-restricted runner-temp file and passes only its path as `PGSSLROOTCERT`. Never put either URL or the certificate in the repository, local environment files, logs, or summaries.
 - The read-only role must be the direct login identity, not a superuser, `BYPASSRLS`, `CREATEDB`, `CREATEROLE`, replication role, database/schema/object owner, or a member that can `SET ROLE` to a role with protected privileges or any role-membership `ADMIN OPTION`. It must have no database `CREATE`/`TEMP`, no `CREATE` on any non-system schema, and no effective table, column, sequence, trigger, or PostgreSQL 17+ `MAINTAIN` write/delegation privileges anywhere in non-system schemas (including rights inherited from memberships or `PUBLIC`).
 - The read-only role needs `USAGE` on `public` and `supabase_migrations`, `SELECT` on the migration ledger's `version`, the inspected preflight columns, and catalog relations used for schema/role/RLS inspection. Schema, privilege, and ledger inspection always use `PRODUCTION_DB_READONLY_URL` only. That role is not expected to see every application row under RLS.
 - The migration role must not be a superuser. It needs `CREATE` on `public`, direct ownership of existing `sales_orders`, `collection_visits`, and `customer_documents` tables (and `attachments` if it already exists), and `SELECT`/`INSERT`/`UPDATE` on `supabase_migrations.schema_migrations` for `migration repair`. It must not have `CREATE` on `supabase_migrations`. Grant no broader access than required.
@@ -106,11 +106,12 @@ Before any ownership transfer, inspect dependent sequences (section A of the rev
 
 Connection secrets (set only in the GitHub `production-db` environment; never commit passwords):
 
-- `PRODUCTION_DB_READONLY_URL` → `postgresql://madiba_mig_readonly:<password>@db.ynmtlzyqvmurpmfretji.supabase.co:5432/postgres?sslmode=verify-full`
-- `PRODUCTION_DB_MIGRATION_URL` → same host/db/sslmode with the chosen migration owner login
-- `PRODUCTION_DB_ROOT_CA_CERT` → full PEM from Supabase Database Settings
+- Direct (IPv6 / Dedicated IPv4): `postgresql://madiba_mig_readonly:<password>@db.ynmtlzyqvmurpmfretji.supabase.co:5432/postgres?sslmode=verify-full`
+- Session Pooler (free IPv4; preferred for GitHub-hosted runners without IPv6): `postgresql://madiba_mig_readonly.ynmtlzyqvmurpmfretji:<password>@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=verify-full`
+- `PRODUCTION_DB_MIGRATION_URL` → same mode/host/db/sslmode with the chosen migration owner login (`madiba_mig_owner` or `madiba_mig_owner.ynmtlzyqvmurpmfretji` on the pooler)
+- `PRODUCTION_DB_ROOT_CA_CERT` → Supabase Database Settings download (`prod-ca-2021`); include the RDS regional CA as well if you also keep direct URLs
 
-Use direct port **5432**, not the pooler. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED` unset or `false` until a separate apply approval.
+Both URLs must use port **5432** and `sslmode=verify-full`. Reject transaction pooler port **6543**. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED` unset or `false` until a separate apply approval.
 
 **Rollback (authorized DBA only):** restore recorded prior table/sequence owners; revoke only grants that were added for these roles; drop the new roles only after they own nothing and secrets no longer reference them. Do not “fix” `PUBLIC` privileges by guessing.
 

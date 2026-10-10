@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PRODUCTION_PROJECT_REF = "ynmtlzyqvmurpmfretji";
+/** Official Session Pooler host from Supabase Connect (project settings); not derivable from region alone. */
+export const PRODUCTION_SESSION_POOLER_HOST = "aws-0-ap-southeast-2.pooler.supabase.com";
 export const SUPABASE_CLI_VERSION = "2.120.0";
 export const ALLOWLISTED_MIGRATIONS = Object.freeze([
   { version: "20260930190000", file: "20260930190000_sales_order_request_id.sql" },
@@ -370,13 +372,40 @@ export function validateProductionDatabaseUrl(raw) {
   let url;
   try { url = new URL(raw || ""); } catch { return { ok: false, reason: "database URL missing or malformed" }; }
   if (!["postgres:", "postgresql:"].includes(url.protocol)) return { ok: false, reason: "URL must use PostgreSQL" };
-  if (url.hostname.toLowerCase() !== `db.${PRODUCTION_PROJECT_REF}.supabase.co`) return { ok: false, reason: "host does not match the pinned production project" };
-  if (url.port && url.port !== "5432") return { ok: false, reason: "must use direct PostgreSQL port 5432" };
+  const host = url.hostname.toLowerCase();
+  const directHost = `db.${PRODUCTION_PROJECT_REF}.supabase.co`;
+  const isDirect = host === directHost;
+  const isSessionPooler = host === PRODUCTION_SESSION_POOLER_HOST;
+  if (!isDirect && !isSessionPooler) {
+    if (/^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(host)) {
+      return { ok: false, reason: "pooler host is not the pinned production Session Pooler" };
+    }
+    return { ok: false, reason: "host does not match the pinned production project" };
+  }
+  if (url.port === "6543") return { ok: false, reason: "must not use transaction pooler port 6543" };
+  if (url.port && url.port !== "5432") return { ok: false, reason: "must use PostgreSQL port 5432" };
   if (url.pathname !== "/postgres") return { ok: false, reason: "database name must be postgres" };
   if (!url.username || !url.password) return { ok: false, reason: "database URL must include credentials" };
+  const username = decodeURIComponent(url.username);
+  if (isSessionPooler) {
+    const expectedSuffix = `.${PRODUCTION_PROJECT_REF}`;
+    if (!username.endsWith(expectedSuffix) || username.length <= expectedSuffix.length) {
+      return { ok: false, reason: "Session Pooler username must be role.<project-ref>" };
+    }
+    const roleName = username.slice(0, -expectedSuffix.length);
+    if (!/^[A-Za-z0-9_]+$/.test(roleName)) {
+      return { ok: false, reason: "Session Pooler role name is invalid" };
+    }
+  }
   const sslModes = url.searchParams.getAll("sslmode");
   if (sslModes.length !== 1 || sslModes[0] !== "verify-full") return { ok: false, reason: "database URL must use sslmode=verify-full" };
-  return { ok: true, host: url.hostname, database: url.pathname.slice(1) };
+  return {
+    ok: true,
+    host,
+    database: url.pathname.slice(1),
+    mode: isDirect ? "direct" : "session-pooler",
+    username,
+  };
 }
 
 export function migrationLedgerRepairIssues(identity = {}) {

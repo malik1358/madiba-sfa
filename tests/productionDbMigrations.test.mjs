@@ -7,6 +7,7 @@ import {
   ALLOWLISTED_MIGRATIONS,
   INTEGRITY_SCANS,
   PRODUCTION_PROJECT_REF,
+  PRODUCTION_SESSION_POOLER_HOST,
   assertIntegrityScanSql,
   assertMutationAllowed,
   assessMigrationSchema,
@@ -203,11 +204,96 @@ test("production database URL requires verified TLS and is pinned to production"
   const valid = validateProductionDatabaseUrl(`postgresql://migration:example@db.${PRODUCTION_PROJECT_REF}.supabase.co:5432/postgres?sslmode=verify-full`);
   assert.equal(valid.ok, true);
   assert.equal(valid.host, `db.${PRODUCTION_PROJECT_REF}.supabase.co`);
+  assert.equal(valid.mode, "direct");
   assert.equal(validateProductionDatabaseUrl("postgresql://user:pw@db.other.supabase.co/postgres?sslmode=verify-full").ok, false);
   assert.equal(validateProductionDatabaseUrl(`postgresql://user:pw@db.${PRODUCTION_PROJECT_REF}.supabase.co/postgres?sslmode=require`).ok, false);
   assert.equal(validateProductionDatabaseUrl(`postgresql://user:pw@db.${PRODUCTION_PROJECT_REF}.supabase.co/postgres?sslmode=verify-ca`).ok, false);
   assert.equal(validateProductionDatabaseUrl(`postgresql://user:pw@db.${PRODUCTION_PROJECT_REF}.supabase.co/postgres?sslmode=verify-full&sslmode=require`).ok, false);
   assert.equal(validateProductionDatabaseUrl(`postgresql://user:pw@db.${PRODUCTION_PROJECT_REF}.supabase.co:6543/postgres?sslmode=verify-full`).ok, false);
+});
+
+test("production Session Pooler URL is allowlisted with project-suffixed username and verify-full TLS", () => {
+  assert.equal(PRODUCTION_SESSION_POOLER_HOST, "aws-0-ap-southeast-2.pooler.supabase.com");
+  const poolerUser = `madiba_mig_readonly.${PRODUCTION_PROJECT_REF}`;
+  const valid = validateProductionDatabaseUrl(
+    `postgresql://${poolerUser}:example@${PRODUCTION_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+  );
+  assert.equal(valid.ok, true);
+  assert.equal(valid.mode, "session-pooler");
+  assert.equal(valid.host, PRODUCTION_SESSION_POOLER_HOST);
+  assert.equal(valid.username, poolerUser);
+
+  const owner = validateProductionDatabaseUrl(
+    `postgresql://madiba_mig_owner.${PRODUCTION_PROJECT_REF}:example@${PRODUCTION_SESSION_POOLER_HOST}/postgres?sslmode=verify-full`,
+  );
+  assert.equal(owner.ok, true);
+  assert.equal(owner.mode, "session-pooler");
+
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://madiba_mig_readonly.${PRODUCTION_PROJECT_REF}:pw@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+    ).ok,
+    false,
+    "wrong pooler cluster index must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://madiba_mig_readonly.${PRODUCTION_PROJECT_REF}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+    ).ok,
+    false,
+    "wrong pooler region must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://madiba_mig_readonly.${PRODUCTION_PROJECT_REF}:pw@${PRODUCTION_SESSION_POOLER_HOST}:6543/postgres?sslmode=verify-full`,
+    ).ok,
+    false,
+    "transaction pooler port must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://madiba_mig_readonly:pw@${PRODUCTION_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+    ).ok,
+    false,
+    "unsuffixed pooler username must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://madiba_mig_readonly.otherproject:pw@${PRODUCTION_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+    ).ok,
+    false,
+    "wrong project-ref suffix must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://${poolerUser}:pw@${PRODUCTION_SESSION_POOLER_HOST}:5432/postgres?sslmode=require`,
+    ).ok,
+    false,
+    "sslmode=require must be rejected",
+  );
+  assert.equal(
+    validateProductionDatabaseUrl(
+      `postgresql://${poolerUser}:pw@${PRODUCTION_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-ca`,
+    ).ok,
+    false,
+    "sslmode=verify-ca must be rejected",
+  );
+  assert.match(runner, /PRODUCTION_SESSION_POOLER_HOST/);
+  assert.match(runner, /session-pooler/);
+  assert.match(runner, /role\.<project-ref>/);
+  assert.match(runner, /must not use transaction pooler port 6543/);
+});
+
+test("privilege gates still require same_login_role and reject write escalation paths", () => {
+  const safe = safeReadonlyPrivileges();
+  assert.deepEqual(readonlyPrivilegeIssues(safe), []);
+  assert.ok(readonlyPrivilegeIssues({ ...safe, same_login_role: false }).length > 0);
+  assert.ok(readonlyPrivilegeIssues({ ...safe, session_superuser: true }).length > 0);
+  assert.ok(readonlyPrivilegeIssues({ ...safe, write_any_relation: true }).length > 0);
+  assert.ok(readonlyPrivilegeIssues({ ...safe, owns_sales_orders: true }).length > 0);
+  assert.match(runner, /session_user::text AS session_role_name/);
+  assert.match(runner, /current_user AS role_name/);
+  assert.match(runner, /same_login_role/);
 });
 
 test("read-only preflight rejects effective write privileges and tolerates missing target tables", () => {

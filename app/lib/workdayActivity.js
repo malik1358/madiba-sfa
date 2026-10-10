@@ -761,9 +761,42 @@ export function shouldFlagInactivity({
   return now.getTime() - referenceTs >= thresholdMs;
 }
 
-export function areActivityRemindersEnabled(profileOrFlag) {
+/**
+ * Inclusive KSA calendar dates. Suppresses late-login and inactivity reminders.
+ * After `until`, restoreActivityRemindersAfterLeave turns the profile flag back on.
+ */
+export const ACTIVITY_REMINDER_LEAVE = [
+  { salesmanCode: "JUNAID", from: "2026-10-10", until: "2026-11-08" },
+];
+
+export function normalizeActivityReminderSalesmanCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+export function isOnActivityReminderLeave(profile, now = new Date()) {
+  const code = normalizeActivityReminderSalesmanCode(profile?.salesman_code);
+  if (!code) return false;
+  const today = getKsaDateString(now);
+  return ACTIVITY_REMINDER_LEAVE.some((row) => (
+    normalizeActivityReminderSalesmanCode(row.salesmanCode) === code
+    && today >= row.from
+    && today <= row.until
+  ));
+}
+
+export function activityReminderLeaveCodesNeedingRestore(now = new Date()) {
+  const today = getKsaDateString(now);
+  return ACTIVITY_REMINDER_LEAVE
+    .filter((row) => today > row.until)
+    .map((row) => normalizeActivityReminderSalesmanCode(row.salesmanCode))
+    .filter(Boolean);
+}
+
+export function areActivityRemindersEnabled(profileOrFlag, now = new Date()) {
   if (profileOrFlag && typeof profileOrFlag === "object") {
-    return profileOrFlag.activity_reminders_enabled !== false;
+    if (profileOrFlag.activity_reminders_enabled === false) return false;
+    if (isOnActivityReminderLeave(profileOrFlag, now)) return false;
+    return true;
   }
   return profileOrFlag !== false;
 }

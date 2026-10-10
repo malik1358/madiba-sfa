@@ -17,7 +17,7 @@ This file lists objects found in the repo. It is not a live dump of production. 
 | `preferred_language` | `en` or `ar`. |
 | `is_active` | |
 | `report_email` | Added in `20260904180000_profile_report_email.sql`. |
-| `activity_reminders_enabled` | Boolean, default true. `20260907120000_profile_activity_reminders.sql`. |
+| `activity_reminders_enabled` | Boolean, default true. `20260907120000_profile_activity_reminders.sql`. Dated leave restore for JUNAID uses pg_cron job `restore-junaid-activity-reminders-after-leave` (`20261010154500_restore_junaid_activity_reminders_after_leave.sql`). |
 | `stock_take_access` | Boolean, default false. `20260908140000_stock_take.sql`. |
 | `home_latitude`, `home_longitude` | Optional saved salesperson home point. Added by `20260929120000_salesman_home_locations.sql`; both coordinates must be set or null. |
 

@@ -42,7 +42,7 @@ export default function LunchPunchNoonPrompt() {
 
         const { data: profile } = await supabase
           .from("profiles")
-          .select("activity_reminders_enabled")
+          .select("activity_reminders_enabled,salesman_code")
           .eq("id", userId)
           .maybeSingle();
         if (!areActivityRemindersEnabled(profile)) {

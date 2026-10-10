@@ -348,7 +348,7 @@ async function runTrackingCycle(userId) {
         .lte("updated_at", endIso),
       supabase
         .from("profiles")
-        .select("activity_reminders_enabled")
+        .select("activity_reminders_enabled,salesman_code")
         .eq("id", userId)
         .maybeSingle(),
     ]);

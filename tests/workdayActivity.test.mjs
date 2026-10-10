@@ -36,7 +36,9 @@ import {
   shouldEmailInactivity,
   shouldSendLateLoginReminder,
   shouldWarnInactivity,
+  activityReminderLeaveCodesNeedingRestore,
   areActivityRemindersEnabled,
+  isOnActivityReminderLeave,
   snoozeInactivityPrompt,
   writeInactivityPromptSnoozeUntil,
 } from "../app/lib/workdayActivity.js";
@@ -581,6 +583,35 @@ test("areActivityRemindersEnabled defaults on and can be turned off per user", (
   assert.equal(areActivityRemindersEnabled({ activity_reminders_enabled: true }), true);
   assert.equal(areActivityRemindersEnabled({ activity_reminders_enabled: false }), false);
   assert.equal(areActivityRemindersEnabled(false), false);
+});
+
+test("JUNAID annual leave suppresses reminders through 8 Nov and restores from 9 Nov", () => {
+  const duringLeave = new Date("2026-10-10T10:00:00.000Z"); // 13:00 KSA
+  const lastLeaveDay = new Date("2026-11-08T12:00:00.000Z"); // 15:00 KSA
+  const firstDayBack = new Date("2026-11-09T00:05:00.000Z"); // 03:05 KSA
+
+  assert.equal(isOnActivityReminderLeave({
+    salesman_code: "JUNAID",
+    activity_reminders_enabled: true,
+  }, duringLeave), true);
+  assert.equal(areActivityRemindersEnabled({
+    salesman_code: "JUNAID",
+    activity_reminders_enabled: true,
+  }, duringLeave), false);
+  assert.equal(areActivityRemindersEnabled({
+    salesman_code: "JUNAID",
+    activity_reminders_enabled: true,
+  }, lastLeaveDay), false);
+  assert.equal(isOnActivityReminderLeave({
+    salesman_code: "JUNAID",
+    activity_reminders_enabled: true,
+  }, firstDayBack), false);
+  assert.equal(areActivityRemindersEnabled({
+    salesman_code: "JUNAID",
+    activity_reminders_enabled: true,
+  }, firstDayBack), true);
+  assert.deepEqual(activityReminderLeaveCodesNeedingRestore(duringLeave), []);
+  assert.deepEqual(activityReminderLeaveCodesNeedingRestore(firstDayBack), ["JUNAID"]);
 });
 
 test("inactivity prompt snooze persists across reads", () => {

@@ -16,6 +16,7 @@ import {
   loadActiveFieldUsers,
   loadUserActivity,
   loadUsersPendingMorningLogin,
+  restoreActivityRemindersAfterLeave,
 } from "./workdayActivityLoaders.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
@@ -287,8 +288,16 @@ export async function runInactivityEmailCycle(admin, {
   loadActiveUsers = loadActiveFieldUsers,
   loadActivity = loadUserActivity,
   loadPendingLoginUsers = loadUsersPendingMorningLogin,
+  restoreLeaveReminders = restoreActivityRemindersAfterLeave,
 } = {}) {
   const reportDate = getKsaDateString(now);
+
+  // Re-enable profile flags once inclusive leave `until` has passed (e.g. JUNAID from 9 Nov).
+  try {
+    await restoreLeaveReminders(admin, now);
+  } catch {
+    // Leave restore must not block the inactivity / late-login cycle.
+  }
 
   if (!isEmailConfigured(getMailerConfig(env))) {
     const skippedResult = {

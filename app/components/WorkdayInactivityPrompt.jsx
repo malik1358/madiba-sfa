@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { getSupabaseClient } from "../lib/supabase";
 import {
+  areActivityRemindersEnabled,
   getKsaDateString,
   INACTIVITY_PROMPT_DISMISS_SNOOZE_MS,
   INACTIVITY_PROMPT_SHOWN_SNOOZE_MS,
@@ -48,10 +49,10 @@ export default function WorkdayInactivityPrompt() {
 
         const { data: profile } = await supabase
           .from("profiles")
-          .select("activity_reminders_enabled")
+          .select("activity_reminders_enabled,salesman_code")
           .eq("id", userId)
           .maybeSingle();
-        if (profile?.activity_reminders_enabled === false) {
+        if (!areActivityRemindersEnabled(profile)) {
           setVisible(false);
           return;
         }

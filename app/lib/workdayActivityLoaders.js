@@ -1,6 +1,12 @@
 import { shouldRequireTransactionGps } from "./moduleAccess.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
-import { areActivityRemindersEnabled, ksaDayBounds } from "./workdayActivity.js";
+import {
+  activityReminderLeaveCodesNeedingRestore,
+  areActivityRemindersEnabled,
+  ksaClockTimestamp,
+  ksaDayBounds,
+  normalizeActivityReminderSalesmanCode,
+} from "./workdayActivity.js";
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase().replace(/_/g, "-");
@@ -9,6 +15,44 @@ function normalizeRole(value) {
 export function isFieldAttendanceRole(role) {
   const normalized = normalizeRole(role);
   return normalized === "salesman" || normalized === "collector";
+}
+
+/** After inclusive leave `until`, turn activity reminders back on for those salesman codes. */
+export async function restoreActivityRemindersAfterLeave(admin, now = new Date()) {
+  const codes = activityReminderLeaveCodesNeedingRestore(now);
+  if (!codes.length) {
+    return { restored: [], codes: [] };
+  }
+
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id,salesman_code,activity_reminders_enabled");
+  if (error) throw error;
+
+  const codeSet = new Set(codes);
+  const targets = (data || []).filter((row) => (
+    codeSet.has(normalizeActivityReminderSalesmanCode(row.salesman_code))
+    && row.activity_reminders_enabled === false
+  ));
+  if (!targets.length) {
+    return { restored: [], codes };
+  }
+
+  const ids = targets.map((row) => row.id);
+  const { data: updated, error: updateError } = await admin
+    .from("profiles")
+    .update({ activity_reminders_enabled: true })
+    .in("id", ids)
+    .select("id,salesman_code");
+  if (updateError) throw updateError;
+
+  return {
+    restored: (updated || []).map((row) => ({
+      id: row.id,
+      salesmanCode: normalizeActivityReminderSalesmanCode(row.salesman_code),
+    })),
+    codes,
+  };
 }
 
 export async function loadActiveFieldUsers(admin, reportDate) {
@@ -48,8 +92,14 @@ export async function loadActiveFieldUsers(admin, reportDate) {
 
   let profilesRes = await admin
     .from("profiles")
-    .select("id,role,preferred_language,activity_reminders_enabled")
+    .select("id,role,preferred_language,salesman_code,activity_reminders_enabled")
     .in("id", userIds);
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin
+      .from("profiles")
+      .select("id,role,preferred_language,salesman_code")
+      .in("id", userIds);
+  }
   if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
     profilesRes = await admin
       .from("profiles")
@@ -59,10 +109,11 @@ export async function loadActiveFieldUsers(admin, reportDate) {
   if (profilesRes.error) throw profilesRes.error;
 
   const profileByUserId = new Map((profilesRes.data || []).map((row) => [row.id, row]));
+  const reminderNow = new Date(ksaClockTimestamp(reportDate, 12));
 
   return userIds
     .filter((userId) => shouldRequireTransactionGps(normalizeRole(profileByUserId.get(userId)?.role)))
-    .filter((userId) => areActivityRemindersEnabled(profileByUserId.get(userId)))
+    .filter((userId) => areActivityRemindersEnabled(profileByUserId.get(userId), reminderNow))
     .map((userId) => ({
       userId,
       loginLog: loginByUserId.get(userId),
@@ -72,8 +123,8 @@ export async function loadActiveFieldUsers(admin, reportDate) {
 
 export async function loadUsersPendingMorningLogin(admin, reportDate) {
   const { startIso, endIso } = ksaDayBounds(reportDate);
-  const profileSelect = "id,role,is_active,preferred_language,activity_reminders_enabled";
-  const profileFallback = "id,role,is_active,preferred_language";
+  const profileSelect = "id,role,is_active,preferred_language,salesman_code,activity_reminders_enabled";
+  const profileFallback = "id,role,is_active,preferred_language,salesman_code";
   const profileMinimal = "id,role,preferred_language";
 
   let profilesRes = await admin.from("profiles").select(profileSelect);
@@ -95,11 +146,12 @@ export async function loadUsersPendingMorningLogin(admin, reportDate) {
   if (morningError) throw morningError;
 
   const loggedIn = new Set((morningRows || []).map((row) => row.user_id).filter(Boolean));
+  const reminderNow = new Date(ksaClockTimestamp(reportDate, 12));
 
   return (profilesRes.data || [])
     .filter((profile) => profile.is_active !== false)
     .filter((profile) => isFieldAttendanceRole(profile.role))
-    .filter((profile) => areActivityRemindersEnabled(profile))
+    .filter((profile) => areActivityRemindersEnabled(profile, reminderNow))
     .filter((profile) => !loggedIn.has(profile.id))
     .map((profile) => ({
       userId: profile.id,

@@ -830,8 +830,9 @@ export default function UploadSalesPage() {
             <p>
               Upload the receipt Excel export (columns: TRANSACTIONDATE, VOUCHERTYPENAME,
               VOUCHERNUMBER, LEDGERNAME, Cr). Receipt and JV-Collection rows are imported.
-              Only the receipt dates found in this file are replaced. Other dates stay unchanged,
-              same as sales uploads. Ledger names are mapped to customers by code/name.
+              New vouchers are added and matching vouchers are updated; other existing receipts
+              stay in place (partial files no longer wipe the rest of a day). Ledger names are
+              mapped to customers by code/name.
             </p>
           </div>
 
@@ -894,7 +895,7 @@ export default function UploadSalesPage() {
                 <strong>Please keep this page open</strong>
                 <p>
                   Reading receipt rows (Receipt + JV-Collection), mapping ledger names to customers,
-                  and updating only the dates found in the file.
+                  and upserting new or changed vouchers into the live register.
                 </p>
               </div>
             </div>
@@ -908,8 +909,12 @@ export default function UploadSalesPage() {
                   <strong>{Number(receiptResult.rows || 0).toLocaleString()}</strong>
                 </div>
                 <div>
-                  <span>Dates Updated</span>
-                  <strong>{Number(receiptResult.datesUpdated || 0).toLocaleString()}</strong>
+                  <span>New Rows</span>
+                  <strong>{Number(receiptResult.rowsAdded || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Updated Rows</span>
+                  <strong>{Number(receiptResult.rowsUpdated || 0).toLocaleString()}</strong>
                 </div>
                 <div>
                   <span>Mapped To Customers</span>
@@ -926,7 +931,7 @@ export default function UploadSalesPage() {
               </div>
               <div className="snapshotActivated">
                 {receiptResult.mergedIntoExisting
-                  ? `✓ Updated ${Number(receiptResult.datesUpdated || 0).toLocaleString()} date(s) in the live receipt register`
+                  ? `✓ Upserted ${Number(receiptResult.rowsAdded || 0).toLocaleString()} new / ${Number(receiptResult.rowsUpdated || 0).toLocaleString()} updated; existing receipts kept`
                   : "✓ Receipt register is now LIVE"}
               </div>
             </div>

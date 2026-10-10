@@ -375,16 +375,79 @@ export function prioritizeReceiptSheets(sheetNames = []) {
   });
 }
 
-export function mergeReceiptDatasets(existingRows, incomingRows, uploadDates) {
-  const dateSet = new Set((uploadDates || []).map((value) => String(value || "").slice(0, 10)).filter(Boolean));
-  const kept = (Array.isArray(existingRows) ? existingRows : [])
-    .map(buildReceiptRow)
-    .filter((row) => row.receipt_date && !dateSet.has(row.receipt_date));
-  const incoming = (Array.isArray(incomingRows) ? incomingRows : []).map(buildReceiptRow);
-  return [...kept, ...incoming].sort((left, right) => {
-    if (left.receipt_date !== right.receipt_date) return left.receipt_date.localeCompare(right.receipt_date);
-    return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+/**
+ * Stable identity for upsert merges. Prefer date + voucher type + voucher no;
+ * fall back to date + customer + amount when the voucher number is blank.
+ * Same-key incoming rows overwrite existing ones (amount/name/mapping updates)
+ * without deleting other receipts on those dates.
+ */
+export function receiptRowIdentity(row) {
+  const built = buildReceiptRow(row);
+  const date = String(built.receipt_date || "").slice(0, 10);
+  const vchNo = String(built.vch_no || "").trim().toUpperCase();
+  const vchType = String(built.vch_type || "").trim().toUpperCase();
+  const code = built.customer_code
+    || normalizeName(built.customer_name || built.particulars)
+    || "";
+  if (date && vchNo) return `${date}|${vchType}|${vchNo}|${code}`;
+  const amount = Number(built.amount || 0).toFixed(3);
+  return `${date}|${vchType}|${code}|${amount}`;
+}
+
+function sortReceiptRows(rows) {
+  return [...rows].sort((left, right) => {
+    if (left.receipt_date !== right.receipt_date) {
+      return left.receipt_date.localeCompare(right.receipt_date);
+    }
+    const vch = String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+    if (vch !== 0) return vch;
+    return String(left.customer_code || "").localeCompare(String(right.customer_code || ""));
   });
+}
+
+/**
+ * Merge receipt uploads by row identity. Existing receipts are kept; incoming
+ * rows add new vouchers or update matching ones. `uploadDates` is accepted for
+ * call-site compatibility and is not used to wipe a whole day.
+ */
+export function mergeReceiptDatasets(existingRows, incomingRows, _uploadDates = []) {
+  const byKey = new Map();
+  for (const row of (Array.isArray(existingRows) ? existingRows : []).map(buildReceiptRow)) {
+    if (!row.receipt_date || !(row.amount > 0)) continue;
+    byKey.set(receiptRowIdentity(row), row);
+  }
+
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+  for (const row of (Array.isArray(incomingRows) ? incomingRows : []).map(buildReceiptRow)) {
+    if (!row.receipt_date || !(row.amount > 0)) continue;
+    const key = receiptRowIdentity(row);
+    if (byKey.has(key)) {
+      const previous = byKey.get(key);
+      const changed = (
+        Number(previous.amount || 0) !== Number(row.amount || 0)
+        || String(previous.customer_code || "") !== String(row.customer_code || "")
+        || String(previous.customer_name || "") !== String(row.customer_name || "")
+        || String(previous.particulars || "") !== String(row.particulars || "")
+        || String(previous.vch_type || "") !== String(row.vch_type || "")
+        || Boolean(previous.matched) !== Boolean(row.matched)
+      );
+      if (changed) updated += 1;
+      else unchanged += 1;
+      byKey.set(key, row);
+    } else {
+      added += 1;
+      byKey.set(key, row);
+    }
+  }
+
+  return {
+    rows: sortReceiptRows([...byKey.values()]),
+    added,
+    updated,
+    unchanged,
+  };
 }
 
 export function emptyReceiptDataset() {

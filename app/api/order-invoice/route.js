@@ -34,9 +34,10 @@ import {
   shouldAutoRejectLegacyUninvoicedOrder,
   statusForRejectionReason,
 } from "../../lib/orderApproval.js";
+import { sendInvoiceUploadNotification } from "../../lib/invoiceUploadEmailServer.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -438,7 +439,31 @@ export async function POST(request) {
       }
       const hydrated = toClientInvoiceMeta(enriched);
 
-      return NextResponse.json({ success: true, item: hydrated, prospectLink });
+      let uploadEmail = null;
+      try {
+        uploadEmail = await sendInvoiceUploadNotification(admin, {
+          orderId,
+          invoiceBuffer: arrayBuffer,
+          invoiceFileName: file.name || "invoice.pdf",
+          uploaderUserId: scope.userId,
+          uploadedAtIso: nowIso,
+        });
+      } catch (error) {
+        uploadEmail = {
+          skipped: false,
+          sent: false,
+          failed: true,
+          error: String(error?.message || error),
+        };
+        console.error("[invoice-upload-email]", uploadEmail.error);
+      }
+
+      return NextResponse.json({
+        success: true,
+        item: hydrated,
+        prospectLink,
+        ...(uploadEmail ? { uploadEmail } : {}),
+      });
     }
 
     const body = await request.json();

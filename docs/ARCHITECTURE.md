@@ -11,7 +11,7 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 - Supabase JS (`@supabase/supabase-js`). `@supabase/ssr` is listed in `package.json` but app code does not import it. The browser client in `app/lib/supabase.js` uses `createClient` from `@supabase/supabase-js`.
 - No global `middleware.js`. No ORM. SQL is written by hand.
 - PDF: `jspdf`, `pdf-parse`, `pdfjs-dist`. Excel: `xlsx`. Images: `sharp`. Optional OCR: `tesseract.js`.
-- Email: `nodemailer`. Push: `firebase-admin`.
+- Email: `nodemailer` (SMTP) or Resend via `app/lib/mailer.js`, including optional PDF attachments. Push: `firebase-admin`.
 - Android: Capacitor 8 (`android/`, `capacitor.config.js`).
 
 `next.config.mjs` marks `tesseract.js`, `pdfjs-dist`, `@napi-rs/canvas`, and `sharp` as server external packages and raises the server-action body limit to 20mb. It also injects `NEXT_PUBLIC_BUILD_TIME` so the shell can show which deploy is running.
@@ -237,7 +237,7 @@ The collections UI was split so a background queue refresh does not remount the 
 
 ## Invoice office flow
 
-`/api/order-invoice` reads and writes `order_invoice_meta:<id>`. Status strings are constants in `app/lib/orderApproval.js` (for example `Pending for invoice creation`, `Invoice made`). Uploading a PDF sets status to `Invoice made` when the upload exists. Time-to-make runs only while status is still the pending-invoice queue (`app/lib/pendingOrderTimeToMake.js`).
+`/api/order-invoice` reads and writes `order_invoice_meta:<id>`. Status strings are constants in `app/lib/orderApproval.js` (for example `Pending for invoice creation`, `Invoice made`). Uploading a PDF sets status to `Invoice made` when the upload exists. After a successful upload, `sendInvoiceUploadNotification` emails the order-copy and invoice PDFs to the uploader, salesman, direct boss, and `iliyas.belliyaru@noorshukran.com`. `/api/cron/invoice-upload-email-test` resends the latest (or a chosen) upload for manual checks. Mail failures do not roll back the upload. Time-to-make runs only while status is still the pending-invoice queue (`app/lib/pendingOrderTimeToMake.js`).
 
 `/api/cron/missing-invoice-email` checks submitted orders created on or after `2026-09-01` that still have no invoice one hour after creation. It emails every 15 minutes while Pending for approval or Pending for invoice creation orders remain; otherwise it sends one summary at KSA midnight. The cycle skips Friday in India office time (`Asia/Kolkata`) before syncing cron credentials, loading orders, or sending mail, so both pg_cron and the GitHub Actions backup are covered. Orders created before that KSA cutoff are legacy and can be auto-rejected as `Rejected by management` with reason `Pre-September 2026 — invoice not uploaded`.
 

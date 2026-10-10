@@ -1,0 +1,45 @@
+name: Invoice Upload Email Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      orderId:
+        description: "Optional sales order id. Empty = latest uploaded invoice."
+        required: false
+        default: ""
+      cc:
+        description: "Extra CC addresses (comma-separated)."
+        required: false
+        default: "malik@pinasz.com"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger invoice upload email resend
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_ORDER_ID: ${{ github.event.inputs.orderId }}
+          INPUT_CC: ${{ github.event.inputs.cc }}
+        run: |
+          URL='https://madiba-sfa.vercel.app/api/cron/invoice-upload-email-test'
+          if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
+          ORDER_VALUE="$(printf '%s' "$INPUT_ORDER_ID" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          CC_VALUE="$(printf '%s' "$INPUT_CC" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -z "$CC_VALUE" ]]; then CC_VALUE='malik@pinasz.com'; fi
+          export ORDER_VALUE CC_VALUE
+          python3 - <<'PY' > payload.json
+          import json, os
+          payload = {"cc": os.environ.get("CC_VALUE", "malik@pinasz.com").strip() or "malik@pinasz.com"}
+          order_id = os.environ.get("ORDER_VALUE", "").strip()
+          if order_id:
+            payload["orderId"] = order_id
+          print(json.dumps(payload))
+          PY
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          status_code="$(curl -sS -L --max-time 180 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" --data @payload.json)"
+          cat response.json
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then echo "Invoice upload email test returned HTTP $status_code"; exit 1; fi

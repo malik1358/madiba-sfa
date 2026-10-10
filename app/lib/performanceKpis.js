@@ -237,6 +237,40 @@ export function expectedPacePercent(asOfDate, paceShares = null) {
   return workday;
 }
 
+export function resolveExpectedPacePercent(key, {
+  reportDate,
+  todayIso,
+  paceShares = null,
+} = {}) {
+  const monthEnd = currentMonthDateRange(reportDate).to;
+  const today = String(todayIso || reportDate || "").slice(0, 10);
+  const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
+  if (monthIsComplete) return 100;
+  const paceDate = resolveKpiPaceDate(reportDate, today || reportDate);
+  return expectedPacePercent(
+    paceDate,
+    SALES_PACE_KPI_KEYS.has(key) ? paceShares : null,
+  );
+}
+
+/** Project month-end value if today's actual holds at the expected pace share. */
+export function estimateAtCurrentPace(actual, expectedPercent) {
+  const value = Number(actual || 0);
+  const expected = Number(expectedPercent);
+  if (!Number.isFinite(value) || !Number.isFinite(expected) || !(expected > 0)) return null;
+  return value * (100 / expected);
+}
+
+export function formatKpiTargetInput(value) {
+  const digits = String(value ?? "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("en-SA", { maximumFractionDigits: 0 });
+}
+
+export function parseKpiTargetInput(value) {
+  return String(value ?? "").replace(/[^\d]/g, "");
+}
+
 export function achievementPercent(actual, target) {
   const goal = Number(target || 0);
   if (!(goal > 0)) return null;

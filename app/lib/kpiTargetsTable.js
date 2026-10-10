@@ -1,8 +1,10 @@
 import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
   achievementPercent,
+  estimateAtCurrentPace,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
+  resolveExpectedPacePercent,
 } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
@@ -168,6 +170,41 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
 
   columns.forEach((key) => {
     totals[key].achievement = achievementPercent(totals[key].actual, totals[key].target);
+  });
+  return totals;
+}
+
+export function sumFilteredKpiPaceEstimates(
+  rows = [],
+  columns = PERFORMANCE_DISPLAY_KPI_KEYS,
+  { reportDate, todayIso } = {},
+) {
+  const totals = {};
+  columns.forEach((key) => {
+    totals[key] = { estimate: null, target: 0, expected: null };
+  });
+
+  (rows || []).forEach((row) => {
+    if (row?.isTeam) return;
+    columns.forEach((key) => {
+      const kpi = (row.kpis || []).find((item) => item.key === key);
+      const actual = Number(kpi?.actual || 0) || 0;
+      const target = rowTargetValue(row, key);
+      const expected = resolveExpectedPacePercent(key, {
+        reportDate: row.reportDate || reportDate,
+        todayIso: row.todayIso || todayIso,
+        paceShares: row.paceShares,
+      });
+      const estimate = estimateAtCurrentPace(actual, expected);
+      totals[key].target += target;
+      if (estimate == null) return;
+      totals[key].estimate = (totals[key].estimate || 0) + estimate;
+      totals[key].expected = expected;
+    });
+  });
+
+  columns.forEach((key) => {
+    totals[key].achievement = achievementPercent(totals[key].estimate, totals[key].target);
   });
   return totals;
 }

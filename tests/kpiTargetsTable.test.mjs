@@ -10,12 +10,20 @@ import {
   mergeKpiTargetProfiles,
   rowMatchesKpiFilters,
   sumFilteredKpiColumns,
+  sumFilteredKpiPaceEstimates,
   teamMemberRows,
   teamRowLabel,
   teamTargetSalesmanCode,
   uniqueBossesFromRows,
 } from "../app/lib/kpiTargetsTable.js";
-import { consolidatePerformanceSnapshots, buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
+import {
+  achievementPercent,
+  consolidatePerformanceSnapshots,
+  buildPerformanceSnapshot,
+  estimateAtCurrentPace,
+  formatKpiTargetInput,
+  parseKpiTargetInput,
+} from "../app/lib/performanceKpis.js";
 import { isCollectionOnlyAccess } from "../app/lib/moduleAccess.js";
 
 test("KPI roster includes Zia and Asrar without changing collection-only access", () => {
@@ -157,6 +165,49 @@ test("filtered totals skip team rows so they are not double counted", () => {
   assert.equal(totals.officeSupplies.achievement, (70 / 180) * 100);
   assert.equal(totals.localItemSales.actual, 15);
   assert.equal(totals.localItemSales.target, 60);
+});
+
+test("estimate at current pace scales actual by expected share", () => {
+  assert.equal(estimateAtCurrentPace(249, 24.9), 1000);
+  assert.equal(estimateAtCurrentPace(0, 24.9), 0);
+  assert.equal(estimateAtCurrentPace(100, 100), 100);
+  assert.equal(estimateAtCurrentPace(50, 0), null);
+});
+
+test("target inputs round-trip through thousand separators", () => {
+  assert.equal(parseKpiTargetInput("1,200,000"), "1200000");
+  assert.equal(parseKpiTargetInput("12a00"), "1200");
+  assert.match(formatKpiTargetInput("1200000"), /1.?200.?000/);
+  assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
+});
+
+test("pace estimate footer sums individuals and skips team rows", () => {
+  const withPace = [
+    {
+      ...ahmed,
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-10",
+      paceShares: { 10: 0.25 },
+    },
+    {
+      ...ali,
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-10",
+      paceShares: { 10: 0.2 },
+    },
+    teamAhmed,
+  ];
+  const estimates = sumFilteredKpiPaceEstimates(withPace, ["officeSupplies", "totalSales"], {
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  assert.equal(estimates.officeSupplies.estimate, 40 / 0.25 + 30 / 0.2);
+  assert.equal(estimates.totalSales.estimate, 50 / 0.25 + 50 / 0.2);
+  assert.equal(estimates.officeSupplies.target, 180);
+  assert.equal(
+    estimates.officeSupplies.achievement,
+    achievementPercent(estimates.officeSupplies.estimate, 180),
+  );
 });
 
 test("unique bosses and team members include the boss", () => {

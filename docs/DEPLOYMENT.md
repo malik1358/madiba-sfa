@@ -81,6 +81,8 @@ Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase
 
 DBA review SQL (discovery + commented provisioning) lives in `sql/production_migration_access_dba_review.sql`. It is **not** a migration and must not be applied until separately authorized. All provisioning DDL in that file stays commented and marked **NOT EXECUTED**.
 
+**Section A coverage (read-only):** PostgreSQL version/TLS; target table ownership + RLS/FORCE RLS; owner login/`rolinherit`/admin attrs; sequence ownership/deps; migration ledger existence/structure; `pg_auth_members` memberships and SET/admin paths for owners and proposed `madiba_mig_*` roles; database `CONNECT`/`CREATE`/`TEMP`; schema `USAGE`/`CREATE` on `public` and `supabase_migrations`; table and preflight column privileges; ledger `SELECT`/`INSERT`/`UPDATE`; exploded database/schema/table ACLs including `PUBLIC` (OID 0). Never selects password hashes. Run **only** the reviewed file `sql/production_migration_access_discovery_section_a.sql` (A1–A12 with `\set ON_ERROR_STOP on`, `BEGIN READ ONLY`, `statement_timeout`/`lock_timeout`, `ROLLBACK`). Do not paste the full DBA review file into `psql` (it also contains commented provisioning).
+
 **Migration identity:** the login used in `PRODUCTION_DB_MIGRATION_URL` must be the **direct owner** of each existing target table (`sales_orders`, `collection_visits`, `customer_documents`, and `attachments` if present), must not be a superuser (so `postgres` fails), and must satisfy `CREATE` on `public` plus ledger `SELECT`/`INSERT`/`UPDATE` for apply. Prefer **reusing** an existing non-superuser table-owner LOGIN when discovery confirms one owner for all existing targets with `rolcanlogin` and not `rolsuper`. Create `madiba_mig_owner` and transfer ownership only when no such login exists. Creating roles alone never grants ownership of existing tables.
 
 **Do not change existing `PUBLIC` privileges** (including database `CONNECT`/`TEMP`/`CREATE` or schema grants) without a separate impact assessment. The review script must not revoke privileges from `PUBLIC`.
@@ -115,6 +117,24 @@ Use direct port **5432**, not the pooler. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED
 First preflight with Prevent self-review: a **non-`malik1358`** GitHub account with Actions run permission dispatches from `main` (`mode=preflight`, full current `main` SHA). The job waits on `production-db` environment approval; **`malik1358`** reviews and approves. Do not dispatch until roles/owner login choice, any ownership transfers, and the three secrets are authorized and configured. Do not enable apply until a successful preflight is separately approved.
 
 Authorization blockers before any production DB change or first preflight: nominate the dispatcher account; authorize discovery SQL; decide reuse vs create+transfer for the migration owner; authorize readonly role creation and grants; authorize environment secrets; confirm whether `attachments` already exists.
+
+**Local Windows discovery (authorized DBA only; not run by agents without a secure `verify-full` session):**
+
+1. Install PostgreSQL client tools (or locate `psql.exe`).
+2. Download the project SSL root certificate from Supabase Database Settings → save outside the repo (e.g. `%USERPROFILE%\madiba-dba\prod-root.crt`).
+3. From a repo checkout of this branch/main:
+   ```powershell
+   New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\madiba-dba" | Out-Null
+   $env:PGSSLMODE = 'verify-full'
+   $env:PGSSLROOTCERT = "$env:USERPROFILE\madiba-dba\prod-root.crt"
+   $out = "$env:USERPROFILE\madiba-dba\discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+   psql "host=db.ynmtlzyqvmurpmfretji.supabase.co port=5432 dbname=postgres user=<dba_login> sslmode=verify-full" `
+     -v ON_ERROR_STOP=1 `
+     -f "sql/production_migration_access_discovery_section_a.sql" `
+     -o $out
+   ```
+4. Password is prompted by `psql` (do not paste passwords into chat, commit them, or put them in the connection string).
+5. Review `$out` under `%USERPROFILE%\madiba-dba\` only (not in the git tree). Stop without B/C/D. On any SQL error, `ON_ERROR_STOP` aborts and the read-only transaction ends via `ROLLBACK` in the script (or client disconnect).
 
 ## Environment variable names
 

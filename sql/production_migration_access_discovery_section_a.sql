@@ -1,21 +1,21 @@
 -- =============================================================================
--- MADIBA production migration access — DBA REVIEW ONLY
+-- MADIBA production migration access — Section A ONLY (executable discovery)
 -- Project: ynmtlzyqvmurpmfretji
--- Aligned to runner at 3de09d97 (Harden production DB preflight permission checks)
--- STATUS: NOT EXECUTED by the planning/docs agent
+-- STATUS: NOT EXECUTED by agents in this PR; authorized DBA may run locally
 --
--- Do not run section B/C until separately authorized. Never commit real passwords.
--- See docs/DEPLOYMENT.md → "Production database access provisioning".
+-- Companion to sql/production_migration_access_dba_review.sql (A1–A12).
+-- Contains NO provisioning (no CREATE/ALTER/GRANT/REVOKE/ownership transfer).
+-- Never SELECT pg_authid.rolpassword / password hashes.
 --
--- Do NOT revoke or alter existing PUBLIC database/schema privileges without a
--- separate impact assessment. This script never proposes REVOKE ... FROM PUBLIC.
+-- Requires: psql with ON_ERROR_STOP, sslmode=verify-full, trusted CA.
+-- See docs/DEPLOYMENT.md → Local Windows discovery.
 -- =============================================================================
 
--- ----- A) Read-only discovery (safe SELECT / SHOW metadata only) -----
--- Executable runner (reviewed Section A only): sql/production_migration_access_discovery_section_a.sql
--- That file wraps A1–A12 in ON_ERROR_STOP + BEGIN READ ONLY + timeouts + ROLLBACK.
--- Never SELECT pg_authid.rolpassword / password hashes. Never run B/C/D here.
--- Do not paste this review file into psql (it also contains commented provisioning).
+\set ON_ERROR_STOP on
+
+BEGIN READ ONLY;
+SET LOCAL statement_timeout = '10s';
+SET LOCAL lock_timeout = '3s';
 
 -- A1) Version + TLS on this session
 SHOW server_version;
@@ -91,8 +91,6 @@ WHERE rolname IN ('madiba_mig_readonly', 'madiba_mig_owner')
 ORDER BY 1;
 
 -- A6) Role memberships for owners and proposed mig roles (SET ROLE / admin paths)
--- pg_auth_members.roleid = granted role; .member = member. admin_option ≈ ADMIN/SET admin path.
--- Runner uses PG16+ SET vs pre-16 MEMBER semantics; record server_version_num from A1.
 SELECT granted.rolname AS granted_role,
        member.rolname AS member_role,
        am.admin_option,
@@ -118,7 +116,6 @@ WHERE granted.rolname IN ('madiba_mig_readonly', 'madiba_mig_owner')
    )
 ORDER BY 1, 2;
 
--- Direct members of each target-table owner (who can SET ROLE / inherit that owner)
 SELECT DISTINCT owner.rolname AS owner_role,
        grantee.rolname AS member_of_owner,
        am.admin_option AS admin_option_on_owner,
@@ -134,8 +131,7 @@ WHERE n.nspname = 'public'
   AND c.relname IN ('sales_orders','collection_visits','customer_documents','attachments')
 ORDER BY 1, 2;
 
--- A7) Database CONNECT / CREATE / TEMP for current_user, owners, proposed mig roles
--- PUBLIC is not a pg_roles entry — use A12 ACLs for PUBLIC database privileges.
+-- A7) Database CONNECT / CREATE / TEMP (PUBLIC ACLs: see A12)
 SELECT role_name,
        has_database_privilege(role_name, current_database(), 'CONNECT') AS db_connect,
        has_database_privilege(role_name, current_database(), 'CREATE') AS db_create,
@@ -157,8 +153,7 @@ WHERE role_name IS NOT NULL
   AND EXISTS (SELECT 1 FROM pg_roles pr WHERE pr.rolname = roles.role_name)
 ORDER BY 1;
 
--- A8) Schema USAGE / CREATE for public and supabase_migrations
--- PUBLIC schema ACLs: see A12 (grantee "PUBLIC" means OID 0).
+-- A8) Schema USAGE / CREATE
 SELECT role_name,
        has_schema_privilege(role_name, 'public', 'USAGE') AS public_usage,
        has_schema_privilege(role_name, 'public', 'CREATE') AS public_create,
@@ -183,7 +178,7 @@ WHERE role_name IS NOT NULL
   AND EXISTS (SELECT 1 FROM pg_roles pr WHERE pr.rolname = roles.role_name)
 ORDER BY 1;
 
--- A9) Table-level privileges on targets (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES)
+-- A9) Table-level privileges on targets
 SELECT c.relname AS table_name,
        role_name,
        has_table_privilege(role_name, c.oid, 'SELECT') AS priv_select,
@@ -214,7 +209,7 @@ WHERE n.nspname = 'public'
   AND EXISTS (SELECT 1 FROM pg_roles pr WHERE pr.rolname = roles.role_name)
 ORDER BY 1, 2;
 
--- A10) Column privileges aligned to runner PREFLIGHT_DATA_COLUMNS (missing col → null)
+-- A10) Column privileges aligned to runner PREFLIGHT_DATA_COLUMNS
 SELECT table_name, column_name, role_name,
        CASE WHEN to_regclass('public.' || table_name) IS NULL THEN NULL
             WHEN NOT EXISTS (
@@ -272,7 +267,6 @@ WHERE role_name IS NOT NULL
 ORDER BY 1;
 
 -- A12) Existing PUBLIC and role ACLs (aclitem explode only — no secrets)
--- grantee "PUBLIC" is OID 0. NULL datacl/nspacl/relacl means default owner-only ACL.
 SELECT 'database'::text AS object_kind,
        current_database() AS object_name,
        CASE WHEN acl.grantee = 0 THEN 'PUBLIC' ELSE acl.grantee::regrole::text END AS grantee,
@@ -307,73 +301,4 @@ WHERE (
   AND c.relacl IS NOT NULL
 ORDER BY 1, 2, 3, 4;
 
--- ----- B) Proposed provisioning (REQUIRES SEPARATE AUTHORIZATION) -----
--- All statements below remain commented. STATUS: NOT EXECUTED.
--- Replace <READONLY_PASSWORD> / <OWNER_PASSWORD> out-of-band; do not log them.
---
--- Prefer reusing an existing non-superuser table-owner LOGIN if discovery (section A)
--- shows one owner for all existing targets with rolcanlogin and NOT rolsuper, and that
--- role can also hold CREATE on public plus ledger SELECT/INSERT/UPDATE. Only create
--- madiba_mig_owner (and transfer ownership) when no such login exists.
-
--- CREATE ROLE madiba_mig_readonly LOGIN PASSWORD '<READONLY_PASSWORD>'
---   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
--- CREATE ROLE madiba_mig_owner LOGIN PASSWORD '<OWNER_PASSWORD>'
---   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-
--- Grant CONNECT only to the new roles. Do not REVOKE privileges from PUBLIC.
--- GRANT CONNECT ON DATABASE postgres TO madiba_mig_readonly, madiba_mig_owner;
--- REVOKE TEMP, CREATE ON DATABASE postgres FROM madiba_mig_readonly, madiba_mig_owner;
-
--- GRANT USAGE ON SCHEMA public, supabase_migrations TO madiba_mig_readonly, madiba_mig_owner;
--- REVOKE CREATE ON SCHEMA public FROM madiba_mig_readonly;
--- GRANT CREATE ON SCHEMA public TO madiba_mig_owner;
--- REVOKE CREATE ON SCHEMA supabase_migrations FROM madiba_mig_readonly, madiba_mig_owner;
-
--- Catalog SELECT (Supabase usually grants these to PUBLIC; verify and grant if missing)
--- GRANT SELECT ON pg_catalog.pg_class, pg_catalog.pg_namespace, pg_catalog.pg_attribute,
---   pg_catalog.pg_type, pg_catalog.pg_constraint, pg_catalog.pg_trigger, pg_catalog.pg_roles,
---   pg_catalog.pg_database, pg_catalog.pg_shdepend, pg_catalog.pg_stat_ssl,
---   pg_catalog.pg_indexes, pg_catalog.pg_policies TO madiba_mig_readonly;
-
--- GRANT SELECT (version) ON supabase_migrations.schema_migrations TO madiba_mig_readonly;
--- GRANT SELECT, INSERT, UPDATE ON supabase_migrations.schema_migrations TO madiba_mig_owner;
-
--- Column SELECT for readonly (grant only columns that exist)
--- GRANT SELECT (request_id) ON public.sales_orders TO madiba_mig_readonly;
--- GRANT SELECT (client_submission_id, receipt_attachment_id, payment_attachment_id)
---   ON public.collection_visits TO madiba_mig_readonly;
--- GRANT SELECT (attachment_id) ON public.customer_documents TO madiba_mig_readonly;
--- If attachments exists:
--- GRANT SELECT (id, storage_provider, object_key) ON public.attachments TO madiba_mig_readonly;
-
--- OWNERSHIP TRANSFER only when reusing an existing owner login is not possible.
--- Record current owners (section A) before running. Current owner must execute:
--- ALTER TABLE public.sales_orders OWNER TO madiba_mig_owner;
--- ALTER TABLE public.collection_visits OWNER TO madiba_mig_owner;
--- ALTER TABLE public.customer_documents OWNER TO madiba_mig_owner;
--- ALTER TABLE public.attachments OWNER TO madiba_mig_owner;  -- only if exists
--- After transfer, re-run the sequence ownership query in section A and transfer any
--- dependent sequences that did not follow the table owner:
--- ALTER SEQUENCE public.<sequence_name> OWNER TO madiba_mig_owner;
-
--- Ensure FORCE RLS remains off on targets (runner fails if on):
--- ALTER TABLE ... NO FORCE ROW LEVEL SECURITY;  -- only if unexpectedly forced
-
--- ----- C) Post-provision checks as each role (NOT EXECUTED here) -----
--- Connect as madiba_mig_readonly (preferred) or SET ROLE after login as a privileged admin.
--- Expect: session_user = current_user; no owns_*; catalog/column SELECT true; writes false
--- Connect as migration owner login (madiba_mig_owner or reused owner):
--- Expect: owns each existing target; row_security_active false; force_rls false
--- Integrity aggregates must run only inside BEGIN READ ONLY with the allowlisted SELECT count(*) statements
--- from scripts/productionDbMigrations.mjs (INTEGRITY_SCANS).
-
--- ----- D) Rollback outline (REQUIRES SEPARATE AUTHORIZATION; NOT EXECUTED) -----
--- 1. Revert table ownership to the recorded prior owners from section A:
---    ALTER TABLE public.<table> OWNER TO <previous_owner>;
--- 2. Revert any sequences whose ownership was changed.
--- 3. REVOKE grants issued to madiba_mig_readonly / madiba_mig_owner (CONNECT, USAGE,
---    column SELECT, ledger privileges, catalog SELECT, schema CREATE) as applicable.
--- 4. DROP ROLE madiba_mig_readonly; DROP ROLE madiba_mig_owner; only after no objects
---    remain owned by them and GitHub secrets no longer reference them.
--- 5. Do not restore PUBLIC privileges by guessing; only reverse changes you actually made.
+ROLLBACK;

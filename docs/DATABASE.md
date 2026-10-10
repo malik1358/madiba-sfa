@@ -178,6 +178,7 @@ Schemes and quantity limits are settings, not tables:
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |
 | `order_quantity_controls` | Per-customer quantity caps |
+| `role_module_access_v1` | Admin Role Access matrix JSON (`matrix` of role → moduleKey → boolean). No migration; uses existing `system_settings`. |
 | `salesman_visit_plan_snapshot_v1` | Saved visit plan |
 | `salesman_visit_plan_rebuild_status_v1` | Plan rebuild status |
 | `android_apk_min_version_v1` | Minimum APK |

@@ -9,9 +9,10 @@ import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
-import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
+import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
 import { formatKsaDateTime } from "../lib/workdayActivity";
 import ExportableTable from "../components/ExportableTable";
+import { useModuleAccess } from "../hooks/useModuleAccess";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -38,10 +39,10 @@ export default function ManagementPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const { showPopup } = useAppPopup();
+  const { access: moduleAccess, loading: moduleAccessLoading } = useModuleAccess();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [moduleAccess, setModuleAccess] = useState(() => buildModuleAccess({}));
+  const accessDenied = !moduleAccessLoading && !moduleAccess.canAccess("management");
   const [summary, setSummary] = useState({
     customers: 0,
     salesmen: 0,
@@ -62,7 +63,7 @@ export default function ManagementPage() {
   useEffect(() => {
     if (!accessDenied) return;
     showPopup({
-      message: "Only manager/admin/invoice-maker/collector users can access this panel.",
+      message: "Only users with Management panel access can open this page.",
       variant: "error",
     });
   }, [accessDenied, showPopup]);
@@ -115,25 +116,8 @@ export default function ManagementPage() {
         const collectionOnlyAccess = collectionOnlyMetadata
           || role === "collector"
           || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
-        setModuleAccess(buildModuleAccess({
-          role,
-          salesmanCode: profile?.salesman_code,
-          collectionOnlyMetadata: collectionOnlyMetadata,
-          stockTakeAccess: profile?.stock_take_access === true,
-        }));
-        if (!["admin", "report-user", "report_user", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
-          setAccessDenied(true);
-          setLoading(false);
-          return;
-        }
 
         if (collectionOnlyAccess) {
-          setModuleAccess(buildModuleAccess({
-            role: "collector",
-            salesmanCode: profile?.salesman_code,
-            collectionOnlyMetadata: true,
-            stockTakeAccess: profile?.stock_take_access === true,
-          }));
           setSummary({
             customers: 0,
             salesmen: 0,
@@ -247,7 +231,7 @@ export default function ManagementPage() {
     );
   }
 
-  if (loading) {
+  if (loading || moduleAccessLoading) {
     return (
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { withTimeout } from "../lib/authSession";
+import { fetchJsonWithTimeout, withTimeout } from "../lib/authSession";
 import { buildModuleAccess } from "../lib/moduleAccess";
 import { readCacheEntry, writeCacheEntry } from "../lib/localDataStore";
 import { getSupabaseClient } from "../lib/supabase";
@@ -9,7 +9,7 @@ import { getSupabaseClient } from "../lib/supabase";
 const ACCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function accessCacheKey(userId) {
-  return `moduleAccess:v1:${String(userId || "").trim()}`;
+  return `moduleAccess:v2:${String(userId || "").trim()}`;
 }
 
 export function useModuleAccess() {
@@ -29,6 +29,21 @@ export function useModuleAccess() {
       stopLoading();
       window.clearTimeout(failsafeTimer);
       return undefined;
+    }
+
+    async function loadRoleModuleMatrix(accessToken) {
+      if (!accessToken) return null;
+      try {
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/role-module-access",
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+          8000,
+        );
+        if (!response.ok || !payload?.success || !payload.matrix) return null;
+        return payload.matrix;
+      } catch {
+        return null;
+      }
     }
 
     async function loadAccess(session) {
@@ -73,11 +88,13 @@ export function useModuleAccess() {
         if (profileRes.error) throw profileRes.error;
 
         const profile = profileRes.data;
+        const roleModuleMatrix = await loadRoleModuleMatrix(session.access_token);
         const context = {
           role: profile?.role,
           salesmanCode: profile?.salesman_code,
           collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
           stockTakeAccess: profile?.stock_take_access === true,
+          roleModuleMatrix,
         };
         if (!cancelled) {
           setAccess(buildModuleAccess(context));

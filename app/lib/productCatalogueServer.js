@@ -1,6 +1,7 @@
 import { isMissingRelationError } from "./schemaGuards.js";
 import { cataloguePacking, cataloguePermissions, catalogueSheetPacking, normalizeCatalogueCode } from "./productCatalogue.js";
 import { parseCsvToRows } from "./pricePayload.js";
+import { loadRoleModuleMatrix } from "./roleModuleAccessServer.js";
 
 export const CATALOGUE_PACKING_SHEET_URL = "https://docs.google.com/spreadsheets/d/1vXUem61icj7Gv8wBNx5_Sc-oXNDm-wZiLZCjTjGtXww/export?format=csv&gid=612911319";
 
@@ -21,7 +22,14 @@ export async function requireCatalogueAccess(admin, request) {
   const { data: profile, error: profileError } = await admin.from("profiles")
     .select("id,role,salesman_code,is_active").eq("id", user.id).single();
   if (profileError) throw profileError;
-  const permissions = cataloguePermissions(profile, user);
+  let roleModuleMatrix = null;
+  try {
+    const loaded = await loadRoleModuleMatrix(admin);
+    roleModuleMatrix = loaded.matrix;
+  } catch {
+    roleModuleMatrix = null;
+  }
+  const permissions = cataloguePermissions(profile, user, { roleModuleMatrix });
   if (!permissions.canView) throw Object.assign(new Error("Product catalogue access denied."), { status: 403 });
   return permissions;
 }

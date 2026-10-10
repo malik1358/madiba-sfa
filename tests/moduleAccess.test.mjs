@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ACCESS_MATRIX_ROLES,
+  buildDefaultRoleModuleMatrix,
   buildModuleAccess,
   canViewManagementReports,
   canManageOrderInvoice,
@@ -10,7 +12,9 @@ import {
   listAccessibleModules,
   localizedModuleLabel,
   localizedNavGroupLabel,
+  matrixRoleKey,
   moduleLabelForPath,
+  normalizeRoleModuleMatrix,
   pathMatchesModuleHref,
   pinnedModuleKeysForAccess,
   shouldRequireTransactionGps,
@@ -271,6 +275,65 @@ test("localized module and nav labels return Arabic text", () => {
   assert.equal(localizedModuleLabel("newOrder", "ar"), "طلب جديد");
   assert.equal(localizedNavGroupLabel("collections", "ar"), "التحصيلات");
   assert.equal(moduleLabelForPath("/management/new-order", "ar"), "طلب جديد");
+});
+
+test("role access matrix defaults match built-in module flags", () => {
+  const matrix = buildDefaultRoleModuleMatrix();
+  assert.deepEqual(Object.keys(matrix).sort(), [...ACCESS_MATRIX_ROLES].sort());
+  assert.equal(matrix.admin.roleAccess, true);
+  assert.equal(matrix["report-user"].roleAccess, true);
+  assert.equal(matrix.salesman.roleAccess, false);
+  assert.equal(matrix.salesman.myDay, true);
+  assert.equal(matrix.collector.myDay, false);
+  assert.equal(matrix.collector.paymentCollections, true);
+  assert.equal(moduleLabelForPath("/management/role-access", "en"), "Role Access");
+});
+
+test("role module matrix overrides grant and revoke page access", () => {
+  const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
+  matrix.salesman.businessDashboard = true;
+  matrix.manager.upload = false;
+
+  const salesman = buildModuleAccess({
+    role: "salesman",
+    salesmanCode: "PARVEZ",
+    roleModuleMatrix: matrix,
+  });
+  assert.equal(salesman.canAccess("businessDashboard"), true);
+
+  const manager = buildModuleAccess({
+    role: "manager",
+    roleModuleMatrix: matrix,
+  });
+  assert.equal(manager.canAccess("upload"), false);
+});
+
+test("admin and report-user cannot lose Role Access via matrix", () => {
+  const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
+  matrix.admin.roleAccess = false;
+  matrix["report-user"].roleAccess = false;
+
+  assert.equal(buildModuleAccess({ role: "admin", roleModuleMatrix: matrix }).canAccess("roleAccess"), true);
+  assert.equal(buildModuleAccess({ role: "report-user", roleModuleMatrix: matrix }).canAccess("roleAccess"), true);
+  assert.equal(normalizeRoleModuleMatrix(matrix).admin.roleAccess, true);
+});
+
+test("matrix role key maps collectors and underscore role aliases", () => {
+  assert.equal(matrixRoleKey({ role: "salesman", salesmanCode: "CL01" }), "collector");
+  assert.equal(matrixRoleKey({ role: "report_user" }), "report-user");
+  assert.equal(matrixRoleKey({ role: "product_promoter" }), "product-promoter");
+});
+
+test("stock take profile flag still grants access when role matrix is off", () => {
+  const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
+  matrix.salesman.stockTake = false;
+  const access = buildModuleAccess({
+    role: "salesman",
+    salesmanCode: "PARVEZ",
+    stockTakeAccess: true,
+    roleModuleMatrix: matrix,
+  });
+  assert.equal(access.canAccess("stockTake"), true);
 });
 
 test("potential sales targets is available to salesmen and report viewers, not collectors", () => {

@@ -63,6 +63,7 @@ Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.
 - Salesman visit plan for field roles depends on `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` (default enabled).
 - `myCollections` module flag is always `false`; `/management/my-collections` remains reachable via `canAccessPath` when payment collections are allowed.
 - SQL `is_management()` is only admin/manager. App UI can still show invoice makers more screens via service-role APIs.
+- Optional override matrix: `system_settings.role_module_access_v1`, edited on `/management/role-access`. `useModuleAccess` loads it and passes `roleModuleMatrix` into `buildModuleAccess`. Defaults below apply until an admin saves.
 
 Module access summary from `buildModuleAccess` (Y = true for that role group; collectors use the collection-only path):
 
@@ -77,6 +78,7 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | businessDashboard, outstandingNoGps | Y | Y | | | Y | |
 | customerGpsHistory | Y | Y | | | | |
 | customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
+| roleAccess | Y | | | | | |
 | salesmanHierarchy, upload | Y | Y | | | Y | |
 | salesmanVisitPlan | Y | Y* | Y* | | Y* | Y* |
 | itemPriceHistory | Y | Y | Y | | Y | Y |

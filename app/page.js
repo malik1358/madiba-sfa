@@ -8,7 +8,7 @@ import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import DashboardNearestCustomers from "./components/DashboardNearestCustomers";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
-import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
+import { listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
 import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from "./lib/morningAttendance";
 import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
@@ -17,6 +17,7 @@ import { isAtHomeLocation } from "./lib/homeLocation";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
+import { useModuleAccess } from "./hooks/useModuleAccess";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -34,12 +35,7 @@ export default function Home() {
   const router = useRouter();
   const { showPopup } = useAppPopup();
   const { requestLogout, dialog: logoutDialog, busy: logoutBusy } = useLogoutWithDaySummary();
-  const moduleAccess = buildModuleAccess({
-    role: profile?.role,
-    salesmanCode: profile?.salesman_code,
-    collectionOnlyMetadata: Boolean(user?.user_metadata?.collection_only),
-    stockTakeAccess: profile?.stock_take_access === true,
-  });
+  const { access: moduleAccess } = useModuleAccess();
   const isCollectionOnlyAccess = moduleAccess.collectionOnly;
   const hasManagementAccess = moduleAccess.hasManagementPanel;
 

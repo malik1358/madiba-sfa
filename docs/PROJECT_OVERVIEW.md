@@ -19,7 +19,7 @@ Roles are stored on `public.profiles.role` and normalized in `app/lib/moduleAcce
 
 `is_management()` in SQL is `admin`, `report-user`, and `manager` after the report-user migration. Invoice makers are not management in row-level security even though the app gives them several admin screens.
 
-Screen access is `buildModuleAccess`. Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`).
+Screen access is `buildModuleAccess`, optionally overridden by the admin **Role Access** matrix (`/management/role-access`, `system_settings.role_module_access_v1`). Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`).
 
 ## Main screens
 
@@ -35,7 +35,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Business Intelligence**: category growth, salesman month-over-month, period filters.
 - **Promoter Coverage** (`/management/promoter-coverage`): all authenticated roles can select a product promoter and review that promoter's head-team customer book, 12-month visit coverage, repeat visits, and six completed months of customer sales.
 - **Salesman Incentive**: monthly incentive from collection speed (35/60-day buckets for office supplies, electronics and other categories, 3-day window for cash deals) plus 0.5% on the sales increase over last month.
-- **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Imports**.
+- **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Role Access**, **Imports**.
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
 - **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.
 - **Customer GPS History** (`/management/customer-gps-history`, module `customerGpsHistory`): admin/manager only. Date-filtered, paginated history shows old/new coordinates and maps, displacement in meters, save actor/time in KSA, and explicitly recorded approval. Excel export covers the displayed page only. A daily digest of salesman-accepted changes goes to `malik@pinasz.com` by default at 00:40 KSA, including Friday and zero-change days.

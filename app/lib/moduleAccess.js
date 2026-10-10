@@ -48,6 +48,7 @@ export const MODULES = {
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
   stockTake: { href: "/management/stock-take", label: "Stock Take" },
+  roleAccess: { href: "/management/role-access", label: "Role Access" },
 };
 
 export const NAV_GROUPS = [
@@ -112,6 +113,7 @@ export const NAV_GROUPS = [
       "kpiTargets",
       "schemes",
       "orderQuantityControls",
+      "roleAccess",
       "upload",
     ],
   },
@@ -245,9 +247,13 @@ export function buildModuleAccess(context = {}) {
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
       stockTake: stockTakeAccess,
+      roleAccess: isAdmin,
     },
   };
 
+  applyRoleModuleMatrixOverrides(access, context);
+
+  access.hasManagementPanel = Boolean(access.modules.management);
   access.canAccess = (moduleKey) => Boolean(access.modules[moduleKey]);
   access.canAccessPath = (href) => {
     const normalizedHref = String(href || "").trim().split("?")[0];
@@ -262,6 +268,117 @@ export function buildModuleAccess(context = {}) {
   };
 
   return access;
+}
+
+/** Roles shown as columns on the Role Access matrix (and stored in system_settings). */
+export const ACCESS_MATRIX_ROLES = [
+  "admin",
+  "report-user",
+  "manager",
+  "salesman",
+  "collector",
+  "invoice-maker",
+  "product-promoter",
+];
+
+export const ROLE_MODULE_ACCESS_SETTING_KEY = "role_module_access_v1";
+
+/** Admin-equivalent roles always keep Role Access so the matrix cannot lock them out. */
+export const ROLE_ACCESS_LOCKED_ROLES = ["admin", "report-user"];
+
+export function matrixRoleKey(context = {}) {
+  if (isCollectionOnlyAccess(context)) return "collector";
+  const role = normalizeAccessRole(context.role);
+  if (role === "report_user") return "report-user";
+  if (role === "invoice_maker") return "invoice-maker";
+  if (role === "product_promoter") return "product-promoter";
+  return role || "salesman";
+}
+
+export function buildDefaultRoleModuleMatrix() {
+  const matrix = {};
+  for (const role of ACCESS_MATRIX_ROLES) {
+    const access = buildModuleAccess({
+      role,
+      salesmanCode: role === "collector" ? "CL01" : "SM001",
+      collectionOnlyMetadata: role === "collector",
+      stockTakeAccess: false,
+      // Avoid re-applying a matrix while building defaults.
+      roleModuleMatrix: null,
+      skipRoleModuleMatrix: true,
+    });
+    matrix[role] = { ...access.modules };
+  }
+  return matrix;
+}
+
+export function normalizeRoleModuleMatrix(input, { fillDefaults = true } = {}) {
+  const defaults = buildDefaultRoleModuleMatrix();
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const matrix = {};
+
+  for (const role of ACCESS_MATRIX_ROLES) {
+    const roleSource = source[role] && typeof source[role] === "object" ? source[role] : {};
+    const row = {};
+    for (const moduleKey of Object.keys(MODULES)) {
+      if (Object.prototype.hasOwnProperty.call(roleSource, moduleKey)) {
+        row[moduleKey] = Boolean(roleSource[moduleKey]);
+      } else if (fillDefaults) {
+        row[moduleKey] = Boolean(defaults[role]?.[moduleKey]);
+      } else {
+        row[moduleKey] = Boolean(defaults[role]?.[moduleKey]);
+      }
+    }
+    if (ROLE_ACCESS_LOCKED_ROLES.includes(role) && Object.prototype.hasOwnProperty.call(row, "roleAccess")) {
+      row.roleAccess = true;
+    }
+    matrix[role] = row;
+  }
+
+  return matrix;
+}
+
+export function parseStoredRoleModuleAccess(settingValue) {
+  let parsed = settingValue;
+  if (typeof settingValue === "string") {
+    try {
+      parsed = JSON.parse(settingValue);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const matrixSource = parsed.matrix && typeof parsed.matrix === "object" ? parsed.matrix : parsed;
+  return {
+    matrix: normalizeRoleModuleMatrix(matrixSource),
+    updatedAt: parsed.updatedAt || null,
+    updatedBy: parsed.updatedBy || null,
+  };
+}
+
+function applyRoleModuleMatrixOverrides(access, context = {}) {
+  if (context.skipRoleModuleMatrix) return;
+  const matrix = context.roleModuleMatrix;
+  if (!matrix || typeof matrix !== "object") return;
+
+  const roleKey = matrixRoleKey(context);
+  const row = matrix[roleKey];
+  if (!row || typeof row !== "object") return;
+
+  for (const moduleKey of Object.keys(access.modules)) {
+    if (Object.prototype.hasOwnProperty.call(row, moduleKey)) {
+      access.modules[moduleKey] = Boolean(row[moduleKey]);
+    }
+  }
+
+  if (ROLE_ACCESS_LOCKED_ROLES.includes(roleKey) && Object.prototype.hasOwnProperty.call(access.modules, "roleAccess")) {
+    access.modules.roleAccess = true;
+  }
+
+  // Per-user stock-take flag still grants Stock Take even when the role matrix is off.
+  if (Boolean(context.stockTakeAccess)) {
+    access.modules.stockTake = true;
+  }
 }
 
 export function listAccessibleModules(access, moduleKeys) {
@@ -327,6 +444,7 @@ export const MODULE_LABELS = {
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },
+  roleAccess: { en: "Role Access", ar: "صلاحيات الأدوار" },
 };
 
 export const NAV_GROUP_LABELS = {

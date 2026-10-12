@@ -154,6 +154,9 @@ export async function POST(request) {
 
     const form = await request.formData();
     const file = form.get("file");
+    const includePaymentVouchers = ["1", "true", "yes", "on"].includes(
+      String(form.get("includePaymentVouchers") || "").trim().toLowerCase(),
+    );
 
     if (!(file instanceof File)) {
       return NextResponse.json({ success: false, error: "Excel file is required." }, { status: 400 });
@@ -176,8 +179,9 @@ export async function POST(request) {
 
     let parsed = null;
     const sheetPreviews = [];
+    const parseOptions = { includePaymentVouchers };
 
-    for (const sheetName of prioritizeReceiptSheets(workbook.SheetNames)) {
+    for (const sheetName of prioritizeReceiptSheets(workbook.SheetNames, parseOptions)) {
       const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
         header: 1,
         defval: "",
@@ -192,7 +196,7 @@ export async function POST(request) {
       const header = findReceiptHeaderRow(sheetRows);
       if (!header) continue;
 
-      parsed = parseReceiptRegisterRows(sheetRows, header, customerLookup);
+      parsed = parseReceiptRegisterRows(sheetRows, header, customerLookup, parseOptions);
       if (parsed.rows.length > 0) break;
     }
 
@@ -290,6 +294,10 @@ export async function POST(request) {
       }
     });
 
+    const paymentNote = includePaymentVouchers
+      ? " Payment vouchers were included for dual customer/supplier parties."
+      : "";
+
     return NextResponse.json({
       success: true,
       uploadedAt: payload.uploadedAt,
@@ -300,6 +308,8 @@ export async function POST(request) {
       uploadDates: parsed.dates,
       matchedCount: parsed.matchedCount,
       unmatchedCount: parsed.unmatchedCount,
+      skippedPaymentCount: parsed.skippedPaymentCount || 0,
+      includePaymentVouchers,
       rowsAdded: mergeResult.added,
       rowsUpdated: mergeResult.updated,
       liveRows: payload.rowsCount,
@@ -307,8 +317,8 @@ export async function POST(request) {
       liveUnmatched: liveUnmatched,
       mergedIntoExisting: existing.rows.length > 0,
       message: existing.rows.length > 0
-        ? `Receipt register upserted ${mergeResult.added} new and ${mergeResult.updated} updated row(s); existing receipts were kept.`
-        : "Receipt register is now live.",
+        ? `Receipt register upserted ${mergeResult.added} new and ${mergeResult.updated} updated row(s); existing receipts were kept.${paymentNote}`
+        : `Receipt register is now live.${paymentNote}`,
     });
   } catch (error) {
     return NextResponse.json({

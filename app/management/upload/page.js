@@ -955,8 +955,9 @@ export default function UploadSalesPage() {
               <br />
               <span style={{ opacity: 0.85, fontSize: "0.92em" }}>
                 For parties that are both customer and supplier. Accepts Payment Register
-                exports with a Dr amount column so those vouchers settle into the same
-                receipt ledger used by Payment Settlement / Outstanding Compare.
+                exports with a Dr amount column. Payment vouchers are stored as negative
+                amounts on the receipt side so FIFO / collected totals match the Tally
+                party ledger.
               </span>
             </span>
           </label>

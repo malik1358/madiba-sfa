@@ -11,6 +11,7 @@ import {
   prioritizeReceiptSheets,
   receiptRegisterTemplateMatrix,
   receiptRowIdentity,
+  stripPaymentVoucherRows,
 } from "../app/lib/receiptRegister.js";
 
 const NEW_FORMAT_HEADER = [
@@ -119,10 +120,10 @@ test("parseReceiptRegisterRows imports Payment vouchers when opted in", () => {
   assert.equal(parsed.skippedPaymentCount, 0);
   assert.equal(parsed.rows[1].vch_type, "Payment");
   assert.equal(parsed.rows[1].customer_code, "1006");
-  assert.equal(parsed.rows[1].amount, 10);
+  assert.equal(parsed.rows[1].amount, -10);
 });
 
-test("parseReceiptRegisterRows imports Payment Register Dr amounts when opted in", () => {
+test("parseReceiptRegisterRows imports Payment Register Dr amounts as negative when opted in", () => {
   const lookup = {
     byCode: new Map([
       ["1415", { customer_code: "1415", customer_name: "DUAL PARTY TRADING" }],
@@ -139,7 +140,7 @@ test("parseReceiptRegisterRows imports Payment Register Dr amounts when opted in
   assert.equal(parsed.rows[0].vch_type, "Payment");
   assert.equal(parsed.rows[0].customer_code, "1415");
   assert.equal(parsed.rows[0].vch_no, "PV/102");
-  assert.equal(parsed.rows[0].amount, 2500);
+  assert.equal(parsed.rows[0].amount, -2500);
   assert.equal(parsed.rows[0].matched, true);
 });
 
@@ -199,7 +200,35 @@ test("upload templates parse cleanly as receipt and payment registers", () => {
   });
   assert.equal(payments.rows.length, 1);
   assert.equal(payments.rows[0].vch_type, "Payment");
-  assert.equal(payments.rows[0].amount, 2500);
+  assert.equal(payments.rows[0].amount, -2500);
+});
+
+test("stripPaymentVoucherRows removes Payment types and keeps collections", () => {
+  const { rows, removed } = stripPaymentVoucherRows([
+    { vch_type: "Receipt", amount: 100, receipt_date: "2026-01-01", vch_no: "1" },
+    { vch_type: "Payment", amount: 0.02, receipt_date: "2026-09-30", vch_no: "VP-1" },
+    { vch_type: "Payment", amount: -50, receipt_date: "2026-09-30", vch_no: "VP-2" },
+    { vch_type: "JV-Collection", amount: 200, receipt_date: "2026-01-02", vch_no: "45" },
+  ]);
+  assert.equal(removed, 2);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.vch_type), ["Receipt", "JV-Collection"]);
+});
+
+test("mergeReceiptDatasets keeps negative Payment voucher amounts", () => {
+  const merged = mergeReceiptDatasets([], [{
+    receipt_date: "2026-09-30",
+    customer_code: "1301",
+    customer_name: "Zero One Trading Establishment",
+    particulars: "1301 Zero One Trading Establishment",
+    vch_type: "Payment",
+    vch_no: "VP-1",
+    amount: -1250,
+    matched: true,
+  }]);
+  assert.equal(merged.rows.length, 1);
+  assert.equal(merged.added, 1);
+  assert.equal(merged.rows[0].amount, -1250);
 });
 
 test("mergeReceiptDatasets upserts by voucher and does not wipe other same-day receipts", () => {

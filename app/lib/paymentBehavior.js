@@ -669,17 +669,22 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       reference: note.reference || "",
     })),
     ...buildSortedReceipts(receipts).map((row) => ({
-      kind: "receipt",
+      kind: row.amount < 0 ? "payment" : "receipt",
       date: row.receipt_date,
-      amount: row.amount,
+      amount: Math.abs(row.amount),
+      signed_amount: row.amount,
       vch_no: row.vch_no,
     })),
   ]
     .filter((row) => row.date && row.amount > 0)
     .sort((left, right) => {
       if (left.date !== right.date) return left.date.localeCompare(right.date);
-      // Same day: apply credit notes before cash (Tally voids hit AR before receipts).
-      if (left.kind !== right.kind) return left.kind === "credit_note" ? -1 : 1;
+      // Same day: credit notes, then receipts, then payment reversals.
+      const kindRank = (kind) => (
+        kind === "credit_note" ? 0 : kind === "receipt" ? 1 : 2
+      );
+      const rankDelta = kindRank(left.kind) - kindRank(right.kind);
+      if (rankDelta !== 0) return rankDelta;
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
     });
 
@@ -692,6 +697,11 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       && other.remaining > 0.009
       && other.invoice_date
       && other.invoice_date < cashInvoice.invoice_date);
+  }
+
+  function findInvoice(invoiceDate, voucherNumber) {
+    const key = invoiceKey(invoiceDate, voucherNumber);
+    return invoices.find((invoice) => invoiceKey(invoice.invoice_date, invoice.voucher_number) === key) || null;
   }
 
   function applyToInvoice(event, invoice, remaining) {
@@ -723,8 +733,41 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     return Math.max(0, remaining - applied);
   }
 
+  /** Payment vouchers (negative receipts) reverse prior cash settlements LIFO so Open rises. */
+  function reversePaymentFromSettlements(event) {
+    let toRestore = event.amount;
+    for (let index = allocations.length - 1; index >= 0 && toRestore > 0.009; index -= 1) {
+      const allocation = allocations[index];
+      if (!allocation || toNumber(allocation.amount) <= 0.009) continue;
+      if (allocation.receipt_date && event.date && allocation.receipt_date > event.date) continue;
+      const take = Math.min(toRestore, toNumber(allocation.amount));
+      if (take <= 0.009) continue;
+      allocation.amount = Math.max(0, toNumber(allocation.amount) - take);
+      const invoice = findInvoice(allocation.invoice_date, allocation.voucher_number);
+      if (invoice) {
+        invoice.remaining = Math.max(0, toNumber(invoice.remaining) + take);
+      }
+      toRestore = Math.max(0, toRestore - take);
+    }
+    for (let index = allocations.length - 1; index >= 0; index -= 1) {
+      if (toNumber(allocations[index]?.amount) <= 0.009) allocations.splice(index, 1);
+    }
+    // Leftover payment with nothing to reverse still increases AR on the newest invoice.
+    if (toRestore > 0.009 && invoices.length > 0) {
+      const newest = invoices[invoices.length - 1];
+      newest.remaining = Math.max(0, toNumber(newest.remaining) + toRestore);
+      toRestore = 0;
+    }
+    return toRestore;
+  }
+
   for (const event of events) {
     let remaining = event.amount;
+
+    if (event.kind === "payment") {
+      reversePaymentFromSettlements(event);
+      continue;
+    }
 
     if (event.kind === "credit_note") {
       const referencedVoucher = normalizeRef(event.reference);

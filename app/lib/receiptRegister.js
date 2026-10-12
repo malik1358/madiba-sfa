@@ -151,6 +151,29 @@ export function isPaymentVoucherType(vchType) {
   return false;
 }
 
+/** True for any non-zero receipt/payment amount (payments are stored negative). */
+export function hasReceiptRegisterAmount(amount) {
+  return Math.abs(toNumber(amount)) > 0;
+}
+
+/**
+ * Drop Payment voucher rows from a live receipt register (cleanup after a bad
+ * positive-amount import). Returns kept rows plus how many payments were removed.
+ */
+export function stripPaymentVoucherRows(rows = []) {
+  const source = Array.isArray(rows) ? rows : [];
+  const kept = [];
+  let removed = 0;
+  for (const row of source) {
+    if (isPaymentVoucherType(row?.vch_type)) {
+      removed += 1;
+      continue;
+    }
+    kept.push(row);
+  }
+  return { rows: kept, removed };
+}
+
 export function findReceiptHeaderRow(sheetRows) {
   const rows = Array.isArray(sheetRows) ? sheetRows : [];
   for (let index = 0; index < Math.min(rows.length, 40); index += 1) {
@@ -356,11 +379,13 @@ export function parseReceiptRegisterRows(
 
     const credit = columns.credit >= 0 ? toNumber(row[columns.credit]) : 0;
     const debit = columns.debit >= 0 ? toNumber(row[columns.debit]) : 0;
-    // Payment hits the party as Dr; Receipt / JV collection as Cr.
-    const amount = isPayment
+    // Receipt / JV collection credit the party (positive). Payment debits the
+    // party for dual customer+supplier ledgers, so it lands as a negative receipt.
+    const signedMagnitude = isPayment
       ? (debit || credit || 0)
       : (credit || (debit > 0 ? debit : 0));
-    if (!receiptDate || amount <= 0) continue;
+    const amount = isPayment ? -Math.abs(signedMagnitude) : signedMagnitude;
+    if (!receiptDate || !hasReceiptRegisterAmount(amount)) continue;
 
     const party = parseParticularsParty(particulars);
     const mapped = mapReceiptPartyToCustomer(party, customerLookup);
@@ -465,7 +490,7 @@ function sortReceiptRows(rows) {
 export function mergeReceiptDatasets(existingRows, incomingRows, _uploadDates = []) {
   const byKey = new Map();
   for (const row of (Array.isArray(existingRows) ? existingRows : []).map(buildReceiptRow)) {
-    if (!row.receipt_date || !(row.amount > 0)) continue;
+    if (!row.receipt_date || !hasReceiptRegisterAmount(row.amount)) continue;
     byKey.set(receiptRowIdentity(row), row);
   }
 
@@ -473,7 +498,7 @@ export function mergeReceiptDatasets(existingRows, incomingRows, _uploadDates = 
   let updated = 0;
   let unchanged = 0;
   for (const row of (Array.isArray(incomingRows) ? incomingRows : []).map(buildReceiptRow)) {
-    if (!row.receipt_date || !(row.amount > 0)) continue;
+    if (!row.receipt_date || !hasReceiptRegisterAmount(row.amount)) continue;
     const key = receiptRowIdentity(row);
     if (byKey.has(key)) {
       const previous = byKey.get(key);

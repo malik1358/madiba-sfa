@@ -138,6 +138,83 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   );
 }
 
+function DatewiseDayRow({ row, open, onToggle }) {
+  const invoices = Array.isArray(row.invoices) ? row.invoices : [];
+  const receipts = Array.isArray(row.receipts) ? row.receipts : [];
+  const detailCount = invoices.length + receipts.length;
+
+  return (
+    <>
+      <tr>
+        <td>
+          <div className="paymentSettleDateCell">
+            {detailCount ? (
+              <button
+                type="button"
+                className="moduleInlineButton"
+                aria-expanded={open}
+                onClick={onToggle}
+              >
+                {open ? "−" : "+"}
+              </button>
+            ) : null}
+            <span>{row.date}</span>
+          </div>
+        </td>
+        <td>{formatCount(row.invoice_count)}</td>
+        <td>{formatMoney(row.sales_excl_vat)}</td>
+        <td>{formatMoney(row.sales_incl_vat)}</td>
+        <td>{formatCount(row.receipt_count)}</td>
+        <td>{formatMoney(row.collected_amount)}</td>
+        <td>{formatMoney(row.open_sales_amount)}</td>
+      </tr>
+      {open && invoices.map((invoice, index) => (
+        <tr
+          key={`${row.date}-inv-${invoice.voucher_number || index}`}
+          className="paymentSettleChildRow"
+        >
+          <td style={{ paddingLeft: 28 }}>
+            Invoice · {invoice.voucher_number || "—"}
+            {invoice.status ? (
+              <>
+                {" · "}
+                <span className={statusClass(invoice.status)}>{invoice.status}</span>
+              </>
+            ) : null}
+          </td>
+          <td>1</td>
+          <td>{formatMoney(invoice.amount_excl_vat)}</td>
+          <td>{formatMoney(invoice.amount_incl_vat)}</td>
+          <td />
+          <td />
+          <td>{formatMoney(invoice.remaining)}</td>
+        </tr>
+      ))}
+      {open && receipts.map((receipt, index) => (
+        <tr
+          key={`${row.date}-rcpt-${receipt.vch_no || index}`}
+          className="paymentSettleChildRow"
+        >
+          <td style={{ paddingLeft: 28 }}>
+            Receipt{receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
+          </td>
+          <td />
+          <td />
+          <td />
+          <td>1</td>
+          <td>{formatMoney(receipt.amount)}</td>
+          <td />
+        </tr>
+      ))}
+      {open && !detailCount && (
+        <tr className="paymentSettleChildRow">
+          <td colSpan={7} style={{ paddingLeft: 28 }}>No transactions on this date.</td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -155,6 +232,7 @@ export default function PaymentSettlementPage() {
   const [ledger, setLedger] = useState(null);
   const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
+  const [expandedDate, setExpandedDate] = useState("");
   const [autoCode, setAutoCode] = useState("");
 
   const canAccess = access.canAccess("paymentSettlement") || access.canAccess("customerAudit");
@@ -239,6 +317,7 @@ export default function PaymentSettlementPage() {
     setLedger(null);
     setHistoryMeta(null);
     setExpandedInvoice("");
+    setExpandedDate("");
 
     try {
       const session = await resolveAuthSession(supabase);
@@ -928,6 +1007,9 @@ export default function PaymentSettlementPage() {
                 <div className="moduleSectionHeader">
                   <h2>Datewise Sales & Collections</h2>
                 </div>
+                <p className="moduleHint">
+                  Use + / − on a date to see the invoices and receipts that make up that day’s totals.
+                </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
                     <thead>
@@ -942,17 +1024,17 @@ export default function PaymentSettlementPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ledger.datewise.map((row) => (
-                        <tr key={row.date}>
-                          <td>{row.date}</td>
-                          <td>{formatCount(row.invoice_count)}</td>
-                          <td>{formatMoney(row.sales_excl_vat)}</td>
-                          <td>{formatMoney(row.sales_incl_vat)}</td>
-                          <td>{formatCount(row.receipt_count)}</td>
-                          <td>{formatMoney(row.collected_amount)}</td>
-                          <td>{formatMoney(row.open_sales_amount)}</td>
-                        </tr>
-                      ))}
+                      {ledger.datewise.map((row) => {
+                        const open = expandedDate === row.date;
+                        return (
+                          <DatewiseDayRow
+                            key={row.date}
+                            row={row}
+                            open={open}
+                            onToggle={() => setExpandedDate(open ? "" : row.date)}
+                          />
+                        );
+                      })}
                       {!ledger.datewise.length && (
                         <tr>
                           <td colSpan={7}>No dated sales or collections found.</td>

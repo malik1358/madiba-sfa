@@ -353,6 +353,16 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
   assert.ok(ledger.invoices[1].remaining > 0);
 
   assert.equal(ledger.datewise.length, 4);
+  const day1 = ledger.datewise.find((row) => row.date === "2026-01-01");
+  assert.ok(day1);
+  assert.equal(day1.invoices.length, 1);
+  assert.equal(day1.invoices[0].voucher_number, "1");
+  assert.equal(day1.receipts.length, 0);
+  const dayReceipt = ledger.datewise.find((row) => row.date === "2026-01-31");
+  assert.ok(dayReceipt);
+  assert.equal(dayReceipt.invoices.length, 0);
+  assert.equal(dayReceipt.receipts.length, 1);
+  assert.equal(dayReceipt.receipts[0].vch_no, "R1");
   assert.equal(ledger.settlementEvents.length, 2);
   // Paid: 1150@30 + 200@21 => paid-only ≈ 29
   // Open FIFO residual 375@26 is younger than paid avg → excluded

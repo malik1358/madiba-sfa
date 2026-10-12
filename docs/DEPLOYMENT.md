@@ -134,7 +134,7 @@ Connection secrets (set only in the GitHub `production-db` environment; never co
 - `PRODUCTION_DB_MIGRATION_URL` → same mode/host/db/sslmode with the chosen migration owner login (`madiba_mig_owner` or `madiba_mig_owner.ynmtlzyqvmurpmfretji` on the pooler)
 - `PRODUCTION_DB_ROOT_CA_CERT` → Supabase Database Settings download (`prod-ca-2021`); include the RDS regional CA as well if you also keep direct URLs
 
-Both URLs must use port **5432** and `sslmode=verify-full`. Reject transaction pooler port **6543**. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED` unset or `false` until a separate apply approval.
+Both URLs must use port **5432** and `sslmode=verify-full`. Reject transaction pooler port **6543**. Keep `PRODUCTION_DB_MIGRATIONS_ENABLED` unset or `false` until a separate apply approval. Preflight proves the live session is TLS-encrypted via `current_setting('ssl')` (with `pg_stat_ssl` only as fallback), because least-privilege mig roles often cannot read `pg_stat_ssl` on Session Pooler even when verify-full succeeded.
 
 **Rollback (authorized DBA only):** restore recorded prior table/sequence owners; revoke only grants that were added for these roles; drop the new roles only after they own nothing and secrets no longer reference them. Do not “fix” `PUBLIC` privileges by guessing.
 

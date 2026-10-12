@@ -86,7 +86,10 @@ const SQL = {
     current_user AS role_name,
     current_setting('server_version') AS server_version,
     current_setting('server_version_num')::int AS server_version_num,
-    COALESCE((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) AS tls,
+    CASE
+      WHEN lower(COALESCE(current_setting('ssl', true), '')) IN ('on', 'true', '1') THEN true
+      ELSE COALESCE((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)
+    END AS tls,
     COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
     to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS ledger_exists,
     COALESCE((SELECT relkind IN ('r', 'p') FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_is_table,

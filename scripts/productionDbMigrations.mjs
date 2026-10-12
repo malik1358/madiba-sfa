@@ -554,7 +554,11 @@ export function buildIntegrityScanScript(keys) {
 }
 
 export function parseIntegrityScanCounts(stdout, keys) {
-  const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // Keep only integer count lines. Quiet psql still may emit blanks; never treat SET/COMMIT tags as counts.
+  const lines = String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^\d+$/.test(line));
   if (lines.length !== keys.length) throw new Error(`integrity scan returned ${lines.length} rows; expected ${keys.length}`);
   const duplicates = new Map();
   for (let index = 0; index < keys.length; index += 1) {
@@ -773,7 +777,7 @@ function collectIntegrityCounts(dbUrl, tableSet, columnSet) {
   const tempFile = path.join(tempDirectory, "integrity-scans.sql");
   try {
     writeFileSync(tempFile, script, { flag: "wx" });
-    const result = spawnSync("psql", ["--no-psqlrc", "--set=ON_ERROR_STOP=1", "--no-align", "--tuples-only", "--file", tempFile, dbUrl], {
+    const result = spawnSync("psql", ["--no-psqlrc", "--quiet", "--set=ON_ERROR_STOP=1", "--no-align", "--tuples-only", "--file", tempFile, dbUrl], {
       cwd: ROOT,
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,

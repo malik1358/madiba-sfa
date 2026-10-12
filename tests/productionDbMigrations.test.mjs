@@ -375,7 +375,12 @@ test("integrity scans use a frozen allowlist and reject arbitrary SQL or keys", 
     ["sales_orders.request_id", 0],
     ["collection_visits.client_submission_id", 2],
   ]);
+  assert.deepEqual(
+    [...parseIntegrityScanCounts("BEGIN\nSET\n0\nCOMMIT\n", ["sales_orders.request_id"])],
+    [["sales_orders.request_id", 0]],
+  );
   assert.throws(() => parseIntegrityScanCounts("0\n", ["sales_orders.request_id", "collection_visits.client_submission_id"]), /expected 2/);
+  assert.match(runner, /--quiet/);
 });
 
 test("integrity visibility fails closed without ownership, with FORCE RLS, or when row security is active", () => {

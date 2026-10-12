@@ -617,10 +617,15 @@ export function buildSortedReceipts(receipts = []) {
       amount: toNumber(row?.amount),
       vch_no: String(row?.vch_no || "").trim(),
     }))
-    .filter((row) => row.receipt_date && row.amount > 0)
+    // Keep Payment vouchers stored as negative amounts so collected totals net correctly.
+    .filter((row) => row.receipt_date && Math.abs(row.amount) > 0)
     .sort((left, right) => {
       if (left.receipt_date !== right.receipt_date) {
         return left.receipt_date.localeCompare(right.receipt_date);
+      }
+      // Same day: apply positive receipts before negative payment reversals.
+      if (left.amount !== right.amount && (left.amount > 0) !== (right.amount > 0)) {
+        return left.amount > 0 ? -1 : 1;
       }
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
     });
@@ -1527,12 +1532,21 @@ export function buildPaymentSettlementLedger({
       sales_incl_vat: 0,
       paid_amount: 0,
       open_amount: 0,
+      invoices: [],
     };
     current.invoice_count += 1;
     current.sales_excl_vat += row.amount_excl_vat;
     current.sales_incl_vat += row.amount_incl_vat;
     current.paid_amount += row.paid_amount;
     current.open_amount += row.remaining;
+    current.invoices.push({
+      voucher_number: row.voucher_number,
+      amount_excl_vat: row.amount_excl_vat,
+      amount_incl_vat: row.amount_incl_vat,
+      paid_amount: row.paid_amount,
+      remaining: row.remaining,
+      status: row.status,
+    });
     salesByDateMap.set(row.invoice_date, current);
   });
 
@@ -1542,9 +1556,14 @@ export function buildPaymentSettlementLedger({
       date: row.receipt_date,
       receipt_count: 0,
       collected_amount: 0,
+      receipts: [],
     };
     current.receipt_count += 1;
     current.collected_amount += toNumber(row.amount);
+    current.receipts.push({
+      vch_no: row.vch_no,
+      amount: toNumber(row.amount),
+    });
     collectionsByDateMap.set(row.receipt_date, current);
   });
 
@@ -1561,11 +1580,13 @@ export function buildPaymentSettlementLedger({
       sales_incl_vat: 0,
       paid_amount: 0,
       open_amount: 0,
+      invoices: [],
     };
     const collections = collectionsByDateMap.get(date) || {
       date,
       receipt_count: 0,
       collected_amount: 0,
+      receipts: [],
     };
     return {
       date,
@@ -1576,6 +1597,8 @@ export function buildPaymentSettlementLedger({
       collected_amount: collections.collected_amount,
       paid_against_sales: sales.paid_amount,
       open_sales_amount: sales.open_amount,
+      invoices: sales.invoices || [],
+      receipts: collections.receipts || [],
     };
   });
 

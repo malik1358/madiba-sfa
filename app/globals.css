@@ -8005,6 +8005,12 @@ button.moduleBiDashKpi:focus-visible {
   font-weight: 700;
 }
 
+.paymentSettleDateCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .paymentSettleChildRow td {
   background: #f3f8f9 !important;
   color: #4a646b;

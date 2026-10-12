@@ -4,7 +4,7 @@ import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runMatchedReceiptEmailCycle } from "../../../lib/matchedReceiptEmailServer.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 function createAdminClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {

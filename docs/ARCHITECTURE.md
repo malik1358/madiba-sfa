@@ -108,7 +108,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/payment-collections`, `/api/payment-collections/report`, `/api/payment-collections/day-summary`
 - `/api/receipts`, `/api/receipts-not-in-tally`
-- `/api/cron/matched-receipt-email` — matches saved app receipts against the uploaded receipt register and sends one-time salesman notifications.
+- `/api/cron/matched-receipt-email` — matches saved app receipts against the uploaded receipt register and sends one-time salesman notifications plus boss digests. Daily runs reconcile month-to-date once (`maxDuration` 300s), then filter salesman mail to yesterday while bosses see late Tally matches for the month.
 
 **Admin / imports / BI**
 

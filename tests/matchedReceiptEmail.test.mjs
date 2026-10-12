@@ -290,11 +290,6 @@ test("daily boss digest includes later-matched month-to-date receipts while sale
     env: { ...mailEnv, MATCHED_RECEIPT_EMAIL_ENABLED: "true" },
     loadData: async (_admin, options) => {
       loads += 1;
-      if (loads === 1) {
-        assert.equal(options.fromDate, "2026-10-08");
-        assert.equal(options.toDate, "2026-10-08");
-        return { ...fixture, groups: new Map([["S01", fixture.groups.get("S01")]]) };
-      }
       assert.equal(options.fromDate, "2026-10-01");
       assert.equal(options.toDate, "2026-10-10");
       assert.equal(options.dateFilter, null);
@@ -305,10 +300,12 @@ test("daily boss digest includes later-matched month-to-date receipts while sale
     send: async (message) => { sent.push(message); return { id: `email-${sent.length}` }; },
   });
 
+  assert.equal(loads, 1);
   assert.equal(result.sentCount, 2);
   assert.deepEqual(sent.map((message) => message.to[0]).sort(), ["boss@example.com", "reports@example.com"]);
   const bossMail = sent.find((message) => message.to[0] === "boss@example.com");
   assert.match(bossMail.html, /R-200/);
+  assert.doesNotMatch(sent.find((message) => message.to[0] === "reports@example.com").html, /R-200/);
   assert.equal(sent.filter((message) => message.to[0] === "boss@example.com").length, 1);
 });
 

@@ -72,6 +72,30 @@ function groupMatchedRows(matches = [], profilesByCode = new Map(), dateFilter =
   return groups;
 }
 
+function filterGroupsByAppDate(groups = new Map(), appDate = "") {
+  const target = String(appDate || "").slice(0, 10);
+  const filtered = new Map();
+  for (const [salesmanCode, group] of groups) {
+    const rows = (group.rows || []).filter((row) => (
+      String(row?.visit?.visit_date || "").slice(0, 10) === target
+    ));
+    if (!rows.length) continue;
+    filtered.set(salesmanCode, { ...group, rows });
+  }
+  return filtered;
+}
+
+async function claimRows(admin, claim, rows, audienceKey, claimedAt) {
+  const results = await Promise.all((rows || []).map(async (row) => {
+    const visitId = String(row.visit?.id || "").trim();
+    if (!visitId) return null;
+    const claimId = `${visitId}:${audienceKey}`;
+    if (!(await claim(admin, claimId, claimedAt, visitId))) return null;
+    return { ...row, claimId };
+  }));
+  return results.filter(Boolean);
+}
+
 async function loadMatches(admin, { fromDate, toDate, windowDays }) {
   const report = await buildReceiptsNotInTallyReport(admin, {
     fromDate,
@@ -105,12 +129,14 @@ async function releaseClaims(admin, claimIds) {
 }
 
 async function completeClaims(admin, claimIds, sentAt, emailId = "") {
-  for (const claimId of claimIds) {
+  const ids = (claimIds || []).map((claimId) => String(claimId).trim()).filter(Boolean);
+  if (!ids.length) return;
+  await Promise.all(ids.map(async (claimId) => {
     const { error } = await admin.from("system_settings")
-      .update({ setting_value: JSON.stringify({ status: "sent", claimId: String(claimId), sentAt, emailId: emailId || null }) })
-      .eq("setting_key", `${MATCHED_RECEIPT_EMAIL_CLAIM_PREFIX}${String(claimId).trim()}`);
+      .update({ setting_value: JSON.stringify({ status: "sent", claimId, sentAt, emailId: emailId || null }) })
+      .eq("setting_key", `${MATCHED_RECEIPT_EMAIL_CLAIM_PREFIX}${claimId}`);
     if (error) throw error;
-  }
+  }));
 }
 
 async function buildGroups(admin, options) {
@@ -172,6 +198,7 @@ export async function runMatchedReceiptEmailCycle(admin, {
   if (!isEmailConfigured(getMailerConfig(env))) return emptyResult(reportDate, "email_not_configured");
 
   const windowDays = DEFAULT_DATE_WINDOW_DAYS;
+  const isDailyRun = parsedUploadDates.length === 0 && !isPreview;
   let fromDate = reportDate;
   let toDate = reportDate;
   let dateLabel = reportDate;
@@ -183,21 +210,27 @@ export async function runMatchedReceiptEmailCycle(admin, {
     dateLabel = parsedUploadDates.join(", ");
     const uploaded = new Set(parsedUploadDates);
     dateFilter = ({ tallyDate }) => uploaded.has(tallyDate);
-  } else if (isPreview && !String(date || "").trim()) {
+  } else if (isDailyRun || (isPreview && !String(date || "").trim())) {
+    // One month-to-date reconciliation for daily/boss digests (and default preview).
+    // Salesman mail still filters to reportDate after the load.
     const today = getKsaDateString(now);
     fromDate = `${today.slice(0, 7)}-01`;
     toDate = today;
-    dateLabel = `${fromDate} to ${toDate}`;
+    dateLabel = isDailyRun ? reportDate : `${fromDate} to ${toDate}`;
+    dateFilter = null;
   } else {
     dateFilter = ({ appDate }) => appDate === reportDate;
   }
 
-  const { groups, profiles = [], authUsers = [] } = await loadData(admin, {
+  const { groups: loadedGroups, profiles = [], authUsers = [] } = await loadData(admin, {
     fromDate,
     toDate,
     windowDays,
     dateFilter,
   });
+  const groups = isDailyRun
+    ? filterGroupsByAppDate(loadedGroups, reportDate)
+    : loadedGroups;
   const salesmanGroups = [...groups.values()];
   const matchedCount = salesmanGroups.reduce((sum, group) => sum + group.rows.length, 0);
 
@@ -218,25 +251,8 @@ export async function runMatchedReceiptEmailCycle(admin, {
     };
   }
 
-  const isDailyRun = parsedUploadDates.length === 0;
-  let bossSourceGroups = groups;
-  let bossProfiles = profiles;
-  let bossAuthUsers = authUsers;
-  if (isDailyRun) {
-    const today = getKsaDateString(now);
-    const monthStart = `${today.slice(0, 7)}-01`;
-    const bossData = await loadData(admin, {
-      fromDate: monthStart,
-      toDate: today,
-      windowDays,
-      dateFilter: null,
-    });
-    bossSourceGroups = bossData.groups;
-    bossProfiles = bossData.profiles || profiles;
-    bossAuthUsers = bossData.authUsers || authUsers;
-  }
   const bossGroups = isDailyRun
-    ? groupMatchedRowsByBoss(bossSourceGroups, bossProfiles, bossAuthUsers)
+    ? groupMatchedRowsByBoss(loadedGroups, profiles, authUsers)
     : new Map();
   const bossIds = new Set(bossGroups.keys());
   const bossReceiptCount = [...bossGroups.values()].reduce((sum, boss) => (
@@ -249,6 +265,7 @@ export async function runMatchedReceiptEmailCycle(admin, {
   const sentBosses = [];
   const failures = [];
   let claimedCount = 0;
+  const claimedAt = now.toISOString();
   for (const [salesmanCode, group] of groups) {
     const salesmanId = String(group.salesman.id || salesmanCode);
     if (bossIds.has(salesmanId)) continue;
@@ -259,12 +276,7 @@ export async function runMatchedReceiptEmailCycle(admin, {
       continue;
     }
 
-    const claimedRows = [];
-    for (const row of group.rows) {
-      const visitId = String(row.visit?.id || "").trim();
-      const claimId = `${visitId}:salesman:${salesmanId}`;
-      if (await claim(admin, claimId, now.toISOString(), visitId)) claimedRows.push({ ...row, claimId });
-    }
+    const claimedRows = await claimRows(admin, claim, group.rows, `salesman:${salesmanId}`, claimedAt);
     if (!claimedRows.length) continue;
     claimedCount += claimedRows.length;
 
@@ -276,7 +288,7 @@ export async function runMatchedReceiptEmailCycle(admin, {
     try {
       const delivery = await send({ ...message, to: [recipient] }, env);
       emailAccepted = true;
-      await complete(admin, claimedRows.map((row) => row.claimId), now.toISOString(), delivery?.id || "");
+      await complete(admin, claimedRows.map((row) => row.claimId), claimedAt, delivery?.id || "");
       sentSalesmen.push(salesmanCode);
     } catch (error) {
       if (!emailAccepted) await release(admin, claimedRows.map((row) => row.claimId));
@@ -292,18 +304,11 @@ export async function runMatchedReceiptEmailCycle(admin, {
 
     const claimedSalesmanGroups = [];
     const claimedRows = [];
-    for (const [salesmanCode, group] of bossGroup.salesmen) {
-      const rows = [];
-      for (const row of group.rows) {
-        const visitId = String(row.visit?.id || "").trim();
-        const claimId = `${visitId}:boss:${bossId}`;
-        if (await claim(admin, claimId, now.toISOString(), visitId)) {
-          const claimed = { ...row, claimId };
-          rows.push(claimed);
-          claimedRows.push(claimed);
-        }
-      }
-      if (rows.length) claimedSalesmanGroups.push({ salesman: group.salesman, rows });
+    for (const [, group] of bossGroup.salesmen) {
+      const rows = await claimRows(admin, claim, group.rows, `boss:${bossId}`, claimedAt);
+      if (!rows.length) continue;
+      claimedSalesmanGroups.push({ salesman: group.salesman, rows });
+      claimedRows.push(...rows);
     }
     if (!claimedRows.length) continue;
     claimedCount += claimedRows.length;
@@ -317,7 +322,7 @@ export async function runMatchedReceiptEmailCycle(admin, {
     try {
       const delivery = await send({ ...message, to: [recipient] }, env);
       emailAccepted = true;
-      await complete(admin, claimedRows.map((row) => row.claimId), now.toISOString(), delivery?.id || "");
+      await complete(admin, claimedRows.map((row) => row.claimId), claimedAt, delivery?.id || "");
       sentBosses.push(bossId);
     } catch (error) {
       if (!emailAccepted) await release(admin, claimedRows.map((row) => row.claimId));

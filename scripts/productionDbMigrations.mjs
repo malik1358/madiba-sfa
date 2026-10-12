@@ -94,8 +94,8 @@ const SQL = {
     to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS ledger_exists,
     COALESCE((SELECT relkind IN ('r', 'p') FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_is_table,
     COALESCE((SELECT NOT relrowsecurity FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_rls_disabled,
-    (SELECT count(*) = 3
-        AND count(*) FILTER (WHERE attribute.attname = 'version' AND type.typname = 'text' AND attribute.attnotnull) = 1
+    -- Required repair columns must exist; newer Supabase ledgers may add extra columns.
+    (SELECT count(*) FILTER (WHERE attribute.attname = 'version' AND type.typname = 'text' AND attribute.attnotnull) = 1
         AND count(*) FILTER (WHERE attribute.attname = 'name' AND type.typname = 'text') = 1
         AND count(*) FILTER (WHERE attribute.attname = 'statements' AND type.typname = '_text') = 1
       FROM pg_attribute AS attribute
@@ -104,8 +104,12 @@ const SQL = {
       JOIN pg_type AS type ON type.oid = attribute.atttypid
       WHERE namespace.nspname = 'supabase_migrations' AND relation.relname = 'schema_migrations'
         AND attribute.attnum > 0 AND NOT attribute.attisdropped) AS ledger_columns_ready,
-    (SELECT count(*) = 1 FROM pg_constraint
-      WHERE conrelid = to_regclass('supabase_migrations.schema_migrations')) AS ledger_constraints_exact,
+    -- Allow PK plus UNIQUE (e.g. idempotency_key); reject FK/CHECK/EXCLUDE/triggers via constraints.
+    (SELECT NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = to_regclass('supabase_migrations.schema_migrations')
+          AND contype NOT IN ('p', 'u')
+      )) AS ledger_constraints_exact,
     NOT EXISTS (SELECT 1 FROM pg_trigger
       WHERE tgrelid = to_regclass('supabase_migrations.schema_migrations') AND NOT tgisinternal) AS ledger_triggers_absent,
     EXISTS (SELECT 1 FROM pg_constraint AS constraint_row

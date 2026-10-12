@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   excelDateToIso,
   findReceiptHeaderRow,
+  isPaymentVoucherType,
   mergeReceiptDatasets,
   parseParticularsParty,
   parseReceiptRegisterRows,
+  paymentRegisterTemplateMatrix,
   prioritizeReceiptSheets,
+  receiptRegisterTemplateMatrix,
   receiptRowIdentity,
 } from "../app/lib/receiptRegister.js";
 
@@ -16,6 +19,14 @@ const NEW_FORMAT_HEADER = [
   "VOUCHERNUMBER",
   "LEDGERNAME",
   "Cr",
+];
+
+const PAYMENT_FORMAT_HEADER = [
+  "TRANSACTIONDATE",
+  "VOUCHERTYPENAME",
+  "VOUCHERNUMBER",
+  "LEDGERNAME",
+  "Dr",
 ];
 
 test("findReceiptHeaderRow accepts the TRANSACTIONDATE / LEDGERNAME / Cr export", () => {
@@ -33,7 +44,26 @@ test("findReceiptHeaderRow accepts the TRANSACTIONDATE / LEDGERNAME / Cr export"
   assert.equal(header.columns.credit, 4);
 });
 
-test("parseReceiptRegisterRows keeps every voucher type from the new format — no upload row is skipped", () => {
+test("findReceiptHeaderRow accepts Payment Register Dr-only exports", () => {
+  const header = findReceiptHeaderRow([
+    PAYMENT_FORMAT_HEADER,
+  ]);
+
+  assert.ok(header);
+  assert.equal(header.columns.debit, 4);
+  assert.equal(header.columns.credit, -1);
+});
+
+test("isPaymentVoucherType detects Payment voucher labels", () => {
+  assert.equal(isPaymentVoucherType("Payment"), true);
+  assert.equal(isPaymentVoucherType("Payment Voucher"), true);
+  assert.equal(isPaymentVoucherType("Bank Payment"), true);
+  assert.equal(isPaymentVoucherType("Receipt"), false);
+  assert.equal(isPaymentVoucherType("JV-Collection"), false);
+  assert.equal(isPaymentVoucherType("NSTC JV"), false);
+});
+
+test("parseReceiptRegisterRows keeps collection voucher types and skips Payment by default", () => {
   const lookup = {
     byCode: new Map([
       ["1006", { customer_code: "1006", customer_name: "ABDULLAH HAMAD AL DAKHEEL TRADING EST." }],
@@ -51,8 +81,9 @@ test("parseReceiptRegisterRows keeps every voucher type from the new format — 
     [new Date("2026-01-10T00:00:00.000Z"), "Payment", "99", "1006  ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 10],
   ], null, lookup);
 
-  assert.equal(parsed.rows.length, 5);
-  assert.deepEqual(parsed.dates, ["2026-01-01", "2026-01-08", "2026-01-09", "2026-01-10"]);
+  assert.equal(parsed.rows.length, 4);
+  assert.equal(parsed.skippedPaymentCount, 1);
+  assert.deepEqual(parsed.dates, ["2026-01-01", "2026-01-08", "2026-01-09"]);
   assert.equal(parsed.rows[0].receipt_date, "2026-01-01");
   assert.equal(parsed.rows[0].customer_code, "1006");
   assert.equal(parsed.rows[0].vch_no, "1");
@@ -66,11 +97,60 @@ test("parseReceiptRegisterRows keeps every voucher type from the new format — 
   assert.equal(parsed.rows[3].vch_type, "NSTC JV");
   assert.equal(parsed.rows[3].customer_code, "1006");
   assert.equal(parsed.rows[3].amount, 11782.25);
-  assert.equal(parsed.rows[4].vch_type, "Payment");
-  assert.equal(parsed.rows[4].customer_code, "1006");
-  assert.equal(parsed.rows[4].amount, 10);
-  assert.equal(parsed.matchedCount, 4);
+  assert.equal(parsed.matchedCount, 3);
   assert.equal(parsed.unmatchedCount, 1);
+});
+
+test("parseReceiptRegisterRows imports Payment vouchers when opted in", () => {
+  const lookup = {
+    byCode: new Map([
+      ["1006", { customer_code: "1006", customer_name: "ABDULLAH HAMAD AL DAKHEEL TRADING EST." }],
+    ]),
+    byName: new Map(),
+  };
+
+  const parsed = parseReceiptRegisterRows([
+    NEW_FORMAT_HEADER,
+    [new Date("2026-01-01T00:00:00.000Z"), "Receipt", "1", "1006  ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 500],
+    [new Date("2026-01-10T00:00:00.000Z"), "Payment", "99", "1006  ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 10],
+  ], null, lookup, { includePaymentVouchers: true });
+
+  assert.equal(parsed.rows.length, 2);
+  assert.equal(parsed.skippedPaymentCount, 0);
+  assert.equal(parsed.rows[1].vch_type, "Payment");
+  assert.equal(parsed.rows[1].customer_code, "1006");
+  assert.equal(parsed.rows[1].amount, 10);
+});
+
+test("parseReceiptRegisterRows imports Payment Register Dr amounts when opted in", () => {
+  const lookup = {
+    byCode: new Map([
+      ["1415", { customer_code: "1415", customer_name: "DUAL PARTY TRADING" }],
+    ]),
+    byName: new Map(),
+  };
+
+  const parsed = parseReceiptRegisterRows([
+    PAYMENT_FORMAT_HEADER,
+    [new Date("2026-02-05T00:00:00.000Z"), "Payment", "PV/102", "1415  DUAL PARTY TRADING", 2500],
+  ], null, lookup, { includePaymentVouchers: true });
+
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].vch_type, "Payment");
+  assert.equal(parsed.rows[0].customer_code, "1415");
+  assert.equal(parsed.rows[0].vch_no, "PV/102");
+  assert.equal(parsed.rows[0].amount, 2500);
+  assert.equal(parsed.rows[0].matched, true);
+});
+
+test("parseReceiptRegisterRows skips Payment Register rows when option is off", () => {
+  const parsed = parseReceiptRegisterRows([
+    PAYMENT_FORMAT_HEADER,
+    [new Date("2026-02-05T00:00:00.000Z"), "Payment", "PV/102", "1415  DUAL PARTY TRADING", 2500],
+  ], null, null, { includePaymentVouchers: false });
+
+  assert.equal(parsed.rows.length, 0);
+  assert.equal(parsed.skippedPaymentCount, 1);
 });
 
 test("parseParticularsParty keeps letter suffixes on customer codes", () => {
@@ -90,6 +170,36 @@ test("prioritizeReceiptSheets prefers Export when no receipt sheet name exists",
     prioritizeReceiptSheets(["Summary", "Export", "Other"]),
     ["Export", "Summary", "Other"],
   );
+});
+
+test("prioritizeReceiptSheets prefers Payment sheets when payment vouchers are opted in", () => {
+  assert.deepEqual(
+    prioritizeReceiptSheets(["Summary", "Receipt", "Payment Register"], { includePaymentVouchers: true }),
+    ["Payment Register", "Receipt", "Summary"],
+  );
+});
+
+test("upload templates parse cleanly as receipt and payment registers", () => {
+  const receiptTemplate = receiptRegisterTemplateMatrix();
+  const paymentTemplate = paymentRegisterTemplateMatrix();
+  assert.deepEqual(receiptTemplate[0], [
+    "TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHERNUMBER", "LEDGERNAME", "Cr",
+  ]);
+  assert.deepEqual(paymentTemplate[0], [
+    "TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHERNUMBER", "LEDGERNAME", "Dr",
+  ]);
+
+  const receipts = parseReceiptRegisterRows(receiptTemplate);
+  assert.equal(receipts.rows.length, 2);
+  assert.equal(receipts.rows[0].vch_type, "Receipt");
+  assert.equal(receipts.rows[1].vch_type, "JV-Collection");
+
+  const payments = parseReceiptRegisterRows(paymentTemplate, null, null, {
+    includePaymentVouchers: true,
+  });
+  assert.equal(payments.rows.length, 1);
+  assert.equal(payments.rows[0].vch_type, "Payment");
+  assert.equal(payments.rows[0].amount, 2500);
 });
 
 test("mergeReceiptDatasets upserts by voucher and does not wipe other same-day receipts", () => {

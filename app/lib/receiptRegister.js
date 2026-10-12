@@ -136,6 +136,21 @@ export function excelDateToIso(value) {
   return "";
 }
 
+/**
+ * Payment voucher types from Tally (Payment Register / day book). Used for
+ * dual customer+supplier parties where supplier-side payments also move the
+ * party ledger that FIFO settlement must match.
+ */
+export function isPaymentVoucherType(vchType) {
+  const text = normalizeHeader(vchType);
+  if (!text) return false;
+  if (text === "payment") return true;
+  if (text.includes("payment voucher")) return true;
+  if (text.startsWith("payment ")) return true;
+  if (text.endsWith(" payment")) return true;
+  return false;
+}
+
 export function findReceiptHeaderRow(sheetRows) {
   const rows = Array.isArray(sheetRows) ? sheetRows : [];
   for (let index = 0; index < Math.min(rows.length, 40); index += 1) {
@@ -143,7 +158,9 @@ export function findReceiptHeaderRow(sheetRows) {
     const dateIndex = findColumnIndex(row, HEADER_ALIASES.date);
     const particularsIndex = findColumnIndex(row, HEADER_ALIASES.particulars);
     const creditIndex = findColumnIndex(row, HEADER_ALIASES.credit);
-    if (dateIndex >= 0 && particularsIndex >= 0 && creditIndex >= 0) {
+    const debitIndex = findColumnIndex(row, HEADER_ALIASES.debit);
+    // Receipt Register uses Cr; Payment Register uses Dr. Accept either amount column.
+    if (dateIndex >= 0 && particularsIndex >= 0 && (creditIndex >= 0 || debitIndex >= 0)) {
       return {
         headerRowIndex: index,
         columns: {
@@ -154,7 +171,7 @@ export function findReceiptHeaderRow(sheetRows) {
           state: findColumnIndex(row, HEADER_ALIASES.state),
           vchType: findColumnIndex(row, HEADER_ALIASES.vchType),
           vchNo: findColumnIndex(row, HEADER_ALIASES.vchNo),
-          debit: findColumnIndex(row, HEADER_ALIASES.debit),
+          debit: debitIndex,
           credit: creditIndex,
         },
       };
@@ -301,11 +318,17 @@ export function buildReceiptRow(raw) {
   };
 }
 
-export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup = null) {
+export function parseReceiptRegisterRows(
+  sheetRows,
+  headerInfo,
+  customerLookup = null,
+  options = {},
+) {
+  const includePaymentVouchers = Boolean(options?.includePaymentVouchers);
   const rows = Array.isArray(sheetRows) ? sheetRows : [];
   const header = headerInfo || findReceiptHeaderRow(rows);
   if (!header) {
-    return { rows: [], dates: [], matchedCount: 0, unmatchedCount: 0 };
+    return { rows: [], dates: [], matchedCount: 0, unmatchedCount: 0, skippedPaymentCount: 0 };
   }
 
   const { headerRowIndex, columns } = header;
@@ -313,6 +336,7 @@ export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup =
   const dates = new Set();
   let matchedCount = 0;
   let unmatchedCount = 0;
+  let skippedPaymentCount = 0;
 
   for (let index = headerRowIndex + 1; index < rows.length; index += 1) {
     const row = rows[index] || [];
@@ -321,13 +345,21 @@ export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup =
     if (isTotalRow(particulars, receiptDate)) continue;
     if (!receiptDate && !particulars) continue;
 
-    // Keep every voucher type (Receipt, JV-Collection, NSTC JV, etc.) — any row with a
-    // date and a positive amount is a real collection; no upload row should be skipped.
+    // Keep collection voucher types (Receipt, JV-Collection, NSTC JV, etc.).
+    // Payment vouchers are opt-in: they settle dual customer+supplier party ledgers.
     const vchType = columns.vchType >= 0 ? cellText(row[columns.vchType]) : "Receipt";
+    const isPayment = isPaymentVoucherType(vchType);
+    if (isPayment && !includePaymentVouchers) {
+      skippedPaymentCount += 1;
+      continue;
+    }
 
     const credit = columns.credit >= 0 ? toNumber(row[columns.credit]) : 0;
     const debit = columns.debit >= 0 ? toNumber(row[columns.debit]) : 0;
-    const amount = credit || (debit > 0 ? debit : 0);
+    // Payment hits the party as Dr; Receipt / JV collection as Cr.
+    const amount = isPayment
+      ? (debit || credit || 0)
+      : (credit || (debit > 0 ? debit : 0));
     if (!receiptDate || amount <= 0) continue;
 
     const party = parseParticularsParty(particulars);
@@ -343,7 +375,7 @@ export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup =
       salesman: columns.salesman >= 0 ? cellText(row[columns.salesman]) : "",
       city: columns.city >= 0 ? cellText(row[columns.city]) : "",
       state: columns.state >= 0 ? cellText(row[columns.state]) : "",
-      vch_type: vchType || "Receipt",
+      vch_type: vchType || (isPayment ? "Payment" : "Receipt"),
       vch_no: columns.vchNo >= 0 ? cellText(row[columns.vchNo]) : "",
       amount,
       matched: mapped.matched || Boolean(mapped.customer_code),
@@ -358,21 +390,41 @@ export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup =
     dates: [...dates].sort(),
     matchedCount,
     unmatchedCount,
+    skippedPaymentCount,
   };
 }
 
-export function prioritizeReceiptSheets(sheetNames = []) {
+export function prioritizeReceiptSheets(sheetNames = [], options = {}) {
+  const includePaymentVouchers = Boolean(options?.includePaymentVouchers);
   const names = Array.isArray(sheetNames) ? sheetNames : [];
   return [...names].sort((left, right) => {
     const score = (name) => {
       const text = String(name || "").toLowerCase();
-      if (text.includes("receipt")) return 0;
-      if (text.includes("daybook") || text.includes("day book")) return 1;
-      if (text === "export" || text.includes("export")) return 2;
+      if (includePaymentVouchers && text.includes("payment")) return 0;
+      if (text.includes("receipt")) return includePaymentVouchers ? 1 : 0;
+      if (text.includes("daybook") || text.includes("day book")) return 2;
+      if (text === "export" || text.includes("export")) return 3;
       return 5;
     };
     return score(left) - score(right);
   });
+}
+
+/** Header + sample rows for the Receipt Register upload template (Cr amounts). */
+export function receiptRegisterTemplateMatrix() {
+  return [
+    ["TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHERNUMBER", "LEDGERNAME", "Cr"],
+    ["2026-01-15", "Receipt", "1", "1006  SAMPLE CUSTOMER TRADING EST.", 1500],
+    ["2026-01-15", "JV-Collection", "JV/Coll/2026/0001", "1144  SAMPLE CUSTOMER TWO EST.", 837.2],
+  ];
+}
+
+/** Header + sample rows for the Payment Register upload template (Dr amounts). */
+export function paymentRegisterTemplateMatrix() {
+  return [
+    ["TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHERNUMBER", "LEDGERNAME", "Dr"],
+    ["2026-01-15", "Payment", "PV/0001", "1415  SAMPLE DUAL CUSTOMER SUPPLIER", 2500],
+  ];
 }
 
 /**

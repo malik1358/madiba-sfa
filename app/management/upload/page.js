@@ -23,6 +23,8 @@ const TEXT = {
   loadingLastUploads: { en: "Loading last upload dates...", ar: "جاري تحميل تواريخ آخر رفع..." },
   downloadFile: { en: "Download file", ar: "تحميل الملف" },
   downloadingFile: { en: "Downloading...", ar: "جاري التحميل..." },
+  downloadReceiptTemplate: { en: "Download Receipt template", ar: "تنزيل قالب سندات القبض" },
+  downloadPaymentTemplate: { en: "Download Payment template", ar: "تنزيل قالب سندات الصرف" },
 };
 
 function formatUploadTimestamp(value) {
@@ -45,6 +47,7 @@ export default function UploadSalesPage() {
   const [outstandingResult, setOutstandingResult] = useState(null);
   const [outstandingError, setOutstandingError] = useState("");
   const [receiptFile, setReceiptFile] = useState(null);
+  const [includePaymentVouchers, setIncludePaymentVouchers] = useState(false);
   const [receiptUploading, setReceiptUploading] = useState(false);
   const [receiptResult, setReceiptResult] = useState(null);
   const [receiptError, setReceiptError] = useState("");
@@ -58,6 +61,7 @@ export default function UploadSalesPage() {
   const [lastItemUnitUpload, setLastItemUnitUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
   const [downloadingKind, setDownloadingKind] = useState("");
+  const [templateDownloading, setTemplateDownloading] = useState("");
 
   const uploadSuccessMessage = result
     ? String(result.message || result.fileName || "Sales data updated successfully.").trim()
@@ -387,6 +391,32 @@ export default function UploadSalesPage() {
     }
   }
 
+  async function downloadReceiptUploadTemplate(kind) {
+    setReceiptError("");
+    setTemplateDownloading(kind);
+    try {
+      const XLSX = await import("xlsx");
+      const {
+        paymentRegisterTemplateMatrix,
+        receiptRegisterTemplateMatrix,
+      } = await import("../../lib/receiptRegister.js");
+      const workbook = XLSX.utils.book_new();
+      if (kind === "payment") {
+        const sheet = XLSX.utils.aoa_to_sheet(paymentRegisterTemplateMatrix());
+        XLSX.utils.book_append_sheet(workbook, sheet, "Payment");
+        XLSX.writeFile(workbook, "payment-register-upload-template.xlsx");
+        return;
+      }
+      const sheet = XLSX.utils.aoa_to_sheet(receiptRegisterTemplateMatrix());
+      XLSX.utils.book_append_sheet(workbook, sheet, "Receipt");
+      XLSX.writeFile(workbook, "receipt-register-upload-template.xlsx");
+    } catch (err) {
+      setReceiptError(err.message || "Unable to download template.");
+    } finally {
+      setTemplateDownloading("");
+    }
+  }
+
   async function uploadReceiptFile() {
     if (!receiptFile) {
       setReceiptError("Please select a receipt Excel file first.");
@@ -414,6 +444,9 @@ export default function UploadSalesPage() {
 
       const formData = new FormData();
       formData.append("file", receiptFile);
+      if (includePaymentVouchers) {
+        formData.append("includePaymentVouchers", "1");
+      }
 
       const response = await fetch("/api/receipts", {
         method: "POST",
@@ -832,8 +865,29 @@ export default function UploadSalesPage() {
               VOUCHERNUMBER, LEDGERNAME, Cr). Receipt and JV-Collection rows are imported.
               New vouchers are added and matching vouchers are updated; other existing receipts
               stay in place (partial files no longer wipe the rest of a day). Ledger names are
-              mapped to customers by code/name.
+              mapped to customers by code/name. For parties that are both customer and supplier,
+              turn on Payment vouchers below and upload the Payment Register (same columns with Dr)
+              so FIFO settlement can match the Tally party ledger. Use the template buttons if you
+              need a blank Excel layout with sample rows.
             </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "10px" }}>
+              <button
+                type="button"
+                className="uploadDownloadButton"
+                onClick={() => downloadReceiptUploadTemplate("receipt")}
+                disabled={Boolean(templateDownloading)}
+              >
+                {templateDownloading === "receipt" ? t("downloadingFile") : t("downloadReceiptTemplate")}
+              </button>
+              <button
+                type="button"
+                className="uploadDownloadButton"
+                onClick={() => downloadReceiptUploadTemplate("payment")}
+                disabled={Boolean(templateDownloading)}
+              >
+                {templateDownloading === "payment" ? t("downloadingFile") : t("downloadPaymentTemplate")}
+              </button>
+            </div>
           </div>
 
           <div className="uploadMeta">
@@ -880,6 +934,33 @@ export default function UploadSalesPage() {
             />
           </label>
 
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "10px",
+              marginTop: "14px",
+              cursor: "pointer",
+              lineHeight: 1.4,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={includePaymentVouchers}
+              onChange={(e) => setIncludePaymentVouchers(e.target.checked)}
+              style={{ marginTop: "3px" }}
+            />
+            <span>
+              <strong>Also import Payment vouchers</strong>
+              <br />
+              <span style={{ opacity: 0.85, fontSize: "0.92em" }}>
+                For parties that are both customer and supplier. Accepts Payment Register
+                exports with a Dr amount column so those vouchers settle into the same
+                receipt ledger used by Payment Settlement / Outstanding Compare.
+              </span>
+            </span>
+          </label>
+
           <button
             className="replaceButton"
             onClick={uploadReceiptFile}
@@ -894,7 +975,8 @@ export default function UploadSalesPage() {
               <div>
                 <strong>Please keep this page open</strong>
                 <p>
-                  Reading receipt rows (Receipt + JV-Collection), mapping ledger names to customers,
+                  Reading receipt rows (Receipt + JV-Collection
+                  {includePaymentVouchers ? " + Payment" : ""}), mapping ledger names to customers,
                   and upserting new or changed vouchers into the live register.
                 </p>
               </div>
@@ -924,6 +1006,12 @@ export default function UploadSalesPage() {
                   <span>Unmapped Rows</span>
                   <strong>{Number(receiptResult.unmatchedCount || 0).toLocaleString()}</strong>
                 </div>
+                {Number(receiptResult.skippedPaymentCount || 0) > 0 ? (
+                  <div>
+                    <span>Payment Rows Skipped</span>
+                    <strong>{Number(receiptResult.skippedPaymentCount || 0).toLocaleString()}</strong>
+                  </div>
+                ) : null}
                 <div>
                   <span>Live Receipts</span>
                   <strong>{Number(receiptResult.liveRows || receiptResult.rowsCount || 0).toLocaleString()}</strong>

@@ -52,7 +52,7 @@ jobs:
           print(json.dumps(payload))
           PY
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          status_code="$(curl -sS -L --max-time 180 -o response.json -w "%{http_code}" -X POST "$URL" \
+          status_code="$(curl -sS -L --max-time 360 -o response.json -w "%{http_code}" -X POST "$URL" \
             -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" --data @payload.json)"
           cat response.json
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then echo "Matched receipt email returned HTTP $status_code"; exit 1; fi

@@ -226,7 +226,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA, build snapshot then maybe email | `/api/cron/salesman-visit-plan-email` |
 | `daily-visit-report-email.yml` | `10 21 * * 0-3,6`; `0 3 * * 6` | 00:10 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-visit-report-email` |
 | `daily-salesman-resume-email.yml` | `15 21 * * 0-3,6`; `0 3 * * 6` | 00:15 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-salesman-resume-email` |
-| `matched-receipt-email.yml` | `35 21 * * *` | 00:35 KSA daily, catch up yesterday's matched app receipts | `/api/cron/matched-receipt-email` |
+| `matched-receipt-email.yml` | `35 21 * * *` | 00:35 KSA daily, catch up yesterday's matched app receipts (month-to-date boss digest; function `maxDuration` 300s; workflow curl `--max-time` 360) | `/api/cron/matched-receipt-email` |
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |

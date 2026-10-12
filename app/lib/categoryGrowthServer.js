@@ -73,11 +73,19 @@ function measureSlice(report) {
   };
 }
 
-function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = false }) {
+function reportFromRows(rows, {
+  asOfDate,
+  filters,
+  extraMeta = {},
+  alignDates = false,
+  includeCohorts = true,
+  includeSalesMix = true,
+  includeCatalogs = true,
+} = {}) {
   const applied = alignDates ? monthAlignGrowthFilters(filters) : filters;
   function build(measure) {
     const acc = createCategoryGrowthAccumulator();
-    const catalogs = createGrowthCatalogs();
+    const catalogs = includeCatalogs ? createGrowthCatalogs() : null;
     ingestCategoryGrowthRows(acc, rows, { filters: applied, catalogs, measure });
     return packReport(acc, {
       asOfDate,
@@ -85,7 +93,7 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
       extraMeta: {
         ...extraMeta,
         filtered: extraMeta.filtered === true || hasActiveGrowthFilters(filters) || acc.sourceRowCount !== acc.rowCount,
-        catalogs,
+        catalogs: catalogs || createGrowthCatalogs(),
         measure,
       },
     });
@@ -94,12 +102,12 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   const profit = build("profit");
   return {
     ...sales,
-    ...(filters.groupBy === "customer" ? {
+    ...(includeCohorts && filters.groupBy === "customer" ? {
       customerCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate }),
       customerMonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "month" }),
       customerBimonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "bimonth" }),
     } : {}),
-    salesMix: buildSalesMixReport(rows, applied),
+    ...(includeSalesMix ? { salesMix: buildSalesMixReport(rows, applied) } : {}),
     measures: {
       sales: measureSlice(sales),
       profit: measureSlice(profit),
@@ -107,7 +115,15 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   };
 }
 
-function reportFromFacts(facts, { asOfDate, filters, extraMeta = {}, ownershipMap = null }) {
+function reportFromFacts(facts, {
+  asOfDate,
+  filters,
+  extraMeta = {},
+  ownershipMap = null,
+  includeCohorts = true,
+  includeSalesMix = true,
+  includeCatalogs = true,
+} = {}) {
   const growthRows = applyCustomerSalesmanOwnershipToRows(
     (facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
     ownershipMap,
@@ -120,6 +136,9 @@ function reportFromFacts(facts, { asOfDate, filters, extraMeta = {}, ownershipMa
       source: extraMeta.source || "sales_bi_cube",
     },
     alignDates: true,
+    includeCohorts,
+    includeSalesMix,
+    includeCatalogs,
   });
 }
 
@@ -170,7 +189,51 @@ async function reportFromLiveSales(admin, { asOfDate, filters, ownershipMap = nu
   };
 }
 
-export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters } = {}) {
+function attachSalesmanTeams(report, {
+  sourceRows = [],
+  members = [],
+  filters,
+  asOfDate = "",
+} = {}) {
+  if (!report) return report;
+  function attachTeams(target, measure) {
+    if (!target) return;
+    target.teamGroups = sourceRows.length
+      ? rollupTeamGrowthFromRows(sourceRows, members, {
+        filters,
+        measure,
+        report: target,
+        asOfDate,
+      })
+      : rollupTeamGrowthGroups(target.groups || target.categories || [], members, target);
+    target.meta = {
+      ...target.meta,
+      teamCount: target.teamGroups.length,
+    };
+  }
+  attachTeams(report, report.measure || "sales");
+  attachTeams(report.measures?.sales, "sales");
+  attachTeams(report.measures?.profit, "profit");
+  return report;
+}
+
+function cubeExtraMeta(cube) {
+  return {
+    preparedAt: cube.builtAt || null,
+    stale: cube.stale === true,
+    source: cube.source === "rebuild" ? "sales_bi_cube_rebuild" : "sales_bi_cube",
+    cubeFactCount: cube.factCount || cube.facts?.length || 0,
+    cubeSourceRows: cube.sourceRowCount || 0,
+  };
+}
+
+export async function loadCategoryGrowthReport(admin, {
+  asOfDate = "",
+  filters,
+  includeCohorts = true,
+  includeSalesMix = true,
+  includeCatalogs = true,
+} = {}) {
   const normalized = normalizeGrowthFilters(filters);
   let report;
   let sourceRows = [];
@@ -197,13 +260,10 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
           asOfDate,
           filters: normalized,
           ownershipMap,
-          extraMeta: {
-            preparedAt: cube.builtAt || null,
-            stale: cube.stale === true,
-            source: cube.source === "rebuild" ? "sales_bi_cube_rebuild" : "sales_bi_cube",
-            cubeFactCount: cube.factCount || cube.facts.length,
-            cubeSourceRows: cube.sourceRowCount || 0,
-          },
+          includeCohorts,
+          includeSalesMix,
+          includeCatalogs,
+          extraMeta: cubeExtraMeta(cube),
         });
       }
     } catch (error) {
@@ -226,30 +286,121 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
   if (normalized.groupBy === "salesman") {
     try {
       const members = await loadSalesmanTeamMembers(admin);
-      function attachTeams(target, measure) {
-        if (!target) return;
-        target.teamGroups = sourceRows.length
-          ? rollupTeamGrowthFromRows(sourceRows, members, {
-            filters: normalized,
-            measure,
-            report: target,
-            asOfDate,
-          })
-          : rollupTeamGrowthGroups(target.groups || target.categories || [], members, target);
-        target.meta = {
-          ...target.meta,
-          teamCount: target.teamGroups.length,
-        };
-      }
-      attachTeams(report, report.measure || "sales");
-      attachTeams(report.measures?.sales, "sales");
-      attachTeams(report.measures?.profit, "profit");
+      attachSalesmanTeams(report, {
+        sourceRows,
+        members,
+        filters: normalized,
+        asOfDate,
+      });
     } catch (error) {
       console.error("Team month-on-month grouping failed:", error);
     }
   }
 
   return report;
+}
+
+export async function loadBiOverviewBundle(admin, { asOfDate = "", filters = {} } = {}) {
+  const base = normalizeGrowthFilters(filters);
+  const ownershipMap = await loadCustomerSalesmanOwnershipMap(admin).catch((error) => {
+    console.error("Customer salesman ownership unavailable for BI overview:", error);
+    return new Map();
+  });
+
+  let sourceRows = [];
+  let cubeMeta = { source: "active_sales", preparedAt: null, stale: false };
+  let buildFromRows = null;
+
+  if (cubeSupportsFilters(base)) {
+    try {
+      const cube = await loadSalesBiCube(admin, { allowStale: true });
+      if (cube?.missingTable) {
+        const empty = packReport(createCategoryGrowthAccumulator(), {
+          asOfDate,
+          filters: base,
+          extraMeta: { missingTable: true, filtered: false, source: "sales_bi_cube" },
+        });
+        return {
+          growth: empty,
+          customer: empty,
+          item: empty,
+          salesman: empty,
+          catalogs: finalizeGrowthCatalogs(createGrowthCatalogs()),
+          meta: { missingTable: true, source: "sales_bi_cube", preparedAt: null, stale: false },
+        };
+      }
+      if (cube?.facts) {
+        sourceRows = applyCustomerSalesmanOwnershipToRows(
+          (cube.facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
+          ownershipMap,
+        );
+        cubeMeta = cubeExtraMeta(cube);
+        buildFromRows = (groupBy, options = {}) => reportFromRows(sourceRows, {
+          asOfDate,
+          filters: normalizeGrowthFilters({ ...base, groupBy }),
+          extraMeta: cubeMeta,
+          alignDates: true,
+          includeCohorts: false,
+          includeSalesMix: groupBy === "category",
+          includeCatalogs: groupBy === "category",
+          ...options,
+        });
+      }
+    } catch (error) {
+      console.error("Prepared sales cube unavailable for BI overview, scanning live sales:", error);
+    }
+  }
+
+  if (!buildFromRows) {
+    const live = await reportFromLiveSales(admin, {
+      asOfDate,
+      filters: normalizeGrowthFilters({ ...base, groupBy: "category" }),
+      ownershipMap,
+    });
+    sourceRows = live.rows || [];
+    cubeMeta = { source: "active_sales", preparedAt: null, stale: false };
+    buildFromRows = (groupBy, options = {}) => reportFromRows(sourceRows, {
+      asOfDate,
+      filters: normalizeGrowthFilters({ ...base, groupBy }),
+      extraMeta: cubeMeta,
+      includeCohorts: false,
+      includeSalesMix: groupBy === "category",
+      includeCatalogs: groupBy === "category",
+      ...options,
+    });
+  }
+
+  const growth = buildFromRows("category");
+  const customer = buildFromRows("customer");
+  const item = buildFromRows("item");
+  const salesman = buildFromRows("salesman");
+
+  try {
+    const members = await loadSalesmanTeamMembers(admin);
+    attachSalesmanTeams(salesman, {
+      sourceRows,
+      members,
+      filters: normalizeGrowthFilters({ ...base, groupBy: "salesman" }),
+      asOfDate,
+    });
+  } catch (error) {
+    console.error("Team month-on-month grouping failed for BI overview:", error);
+  }
+
+  return {
+    growth,
+    customer,
+    item,
+    salesman,
+    catalogs: growth.catalogs || finalizeGrowthCatalogs(createGrowthCatalogs()),
+    meta: {
+      source: cubeMeta.source,
+      preparedAt: cubeMeta.preparedAt,
+      stale: cubeMeta.stale === true,
+      cubeFactCount: cubeMeta.cubeFactCount || 0,
+      cubeSourceRows: cubeMeta.cubeSourceRows || 0,
+    },
+  };
 }
 
 export { rebuildSalesBiCube };

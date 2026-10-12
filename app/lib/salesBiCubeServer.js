@@ -22,8 +22,10 @@ const SALES_SELECTS = [
 ];
 
 const MAX_SETTINGS_CHARS = 3500000;
+const REBUILD_CHECK_TTL_MS = 60000;
 
 let memoryCube = null;
+let rebuildCheckCache = null;
 
 function isMissingTableError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();
@@ -77,6 +79,7 @@ export function peekSalesBiCubeMemory() {
 
 export function clearSalesBiCubeMemory() {
   memoryCube = null;
+  rebuildCheckCache = null;
 }
 
 async function readCubeFromSettings(admin) {
@@ -216,6 +219,12 @@ async function buildCubeFromActiveSales(admin) {
 export async function rebuildSalesBiCube(admin) {
   const cube = await buildCubeFromActiveSales(admin);
   rememberCube(cube);
+  rebuildCheckCache = {
+    at: Date.now(),
+    batchId: String(cube.batchId || ""),
+    builtAt: String(cube.builtAt || ""),
+    needsRebuild: false,
+  };
   if (!cube.missingTable) {
     await writeCubeToTable(admin, cube.facts).catch((error) => {
       console.error("Saving sales BI table failed:", error);
@@ -257,11 +266,29 @@ async function liveSalesHaveProfit(admin) {
 
 async function shouldRebuildLoadedCube(admin, cube) {
   if (!cube?.facts?.length) return true;
+  const batchId = String(cube.batchId || "");
+  const builtAt = String(cube.builtAt || "");
+  const now = Date.now();
+  if (
+    rebuildCheckCache
+    && rebuildCheckCache.needsRebuild === false
+    && rebuildCheckCache.batchId === batchId
+    && rebuildCheckCache.builtAt === builtAt
+    && now - rebuildCheckCache.at < REBUILD_CHECK_TTL_MS
+  ) {
+    return false;
+  }
   const [lastImportAt, liveHasProfit] = await Promise.all([
     latestActiveImportCompletedAt(admin),
     liveSalesHaveProfit(admin),
   ]);
-  return salesBiCubeNeedsRebuild(cube, { lastImportAt, liveHasProfit });
+  const needsRebuild = salesBiCubeNeedsRebuild(cube, { lastImportAt, liveHasProfit });
+  if (!needsRebuild) {
+    rebuildCheckCache = { at: now, batchId, builtAt, needsRebuild: false };
+  } else {
+    rebuildCheckCache = null;
+  }
+  return needsRebuild;
 }
 
 export async function loadSalesBiCube(admin, { allowStale = true } = {}) {

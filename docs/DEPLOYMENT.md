@@ -46,7 +46,7 @@ Repo config alone is not enough until every open branch carries the new `vercel.
 
 | Project | Action |
 | --- | --- |
-| `madiba-sfa` (`prj_IQgqkii5oWNqViDVpAndqua1lLdI`) | Production Branch already `main`. Ignored Build Step set to only build production: `if [ "$VERCEL_ENV" == "production" ]; then exit 1; else exit 0; fi`. Prioritize production builds already on. Elastic Standard (4 vCPU). No deploy hooks. |
+| `madiba-sfa` (`prj_IQgqkii5oWNqViDVpAndqua1lLdI`) | Production Branch already `main`. Ignored Build Step set to only build production: `if [ "$VERCEL_ENV" == "production" ]; then exit 1; else exit 0; fi`. Prioritize production builds already on. Elastic Standard (4 vCPU). No deploy hooks. Retention (2026-10-12): pre-prod/canceled 30 days, production/errored 90 days, keep 10 production deployments. |
 | `madiba-sfa-staging` (`prj_Wc51ggmzgJNLHWsI098gpqVtgxm3`) | Not Git-linked. Ignored Build Step set to always skip (`exit 0`). Project paused. |
 
 **Still required:**

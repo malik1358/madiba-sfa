@@ -32,8 +32,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Paid is cash FIFO plus VAT-inclusive credit notes on each invoice; Open is the residual after both (not forced to the outstanding upload). Use Outstanding Compare for Tally vs computed gaps. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate credit-note reversals stay in Sales but are excluded from avg days.",
-    ar: "المدفوع = التحصيل حسب الأقدم أولاً + إشعارات دائنة شاملة الضريبة لكل فاتورة؛ المفتوح هو المتبقي بعدهما (دون إجبار ملف المستحقات). استخدم مقارنة المستحقات لفروق تالي. متوسط الأيام من الإيصالات المدفوعة فقط ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
+    en: "Referenced credit notes reduce that invoice's sales (with VAT) before cash; Paid is cash only. Leftover CN applies to later open vouchers. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
+    ar: "إشعار دائن بمرجع يخفض مبيعات تلك الفاتورة (مع الضريبة) قبل التحصيل؛ المدفوع نقد فقط. المتبقي من الإشعار يطبق على فواتير لاحقة. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
 
@@ -125,9 +125,11 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
             {" · "}
             {note.voucher_number || "—"}
             {note.credit_date ? ` · ${note.credit_date}` : ""}
+            {" · reduces sales"}
           </td>
-          <td colSpan={2} />
-          <td>{formatMoney(note.amount)}</td>
+          <td>{formatMoney(-Math.abs(note.amount_excl_vat ?? note.amount))}</td>
+          <td>{formatMoney(-Math.abs(note.amount))}</td>
+          <td />
           <td colSpan={3} />
           <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
           <td>Not in avg days</td>
@@ -646,9 +648,10 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Paid is cash FIFO plus VAT-inclusive credit notes. Machine Open is the residual after both.
-                  Tally Open is the outstanding upload per invoice. Open Δ highlights where they disagree — use{" "}
-                  <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below for the full gap report.
+                  Referenced credit notes reduce Sales (VAT-incl) on that invoice; Paid is cash only. Leftover CN
+                  goes to later open vouchers. Machine Open is the residual after both. Tally Open is the
+                  outstanding upload. Open Δ — use{" "}
+                  <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable paymentSettleInvoiceTable">

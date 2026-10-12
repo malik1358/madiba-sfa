@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCreditNotes,
@@ -128,8 +128,8 @@ test("buildPaymentBehavior blends only open invoices older than paid-only avg", 
   });
 
   // Paid-only: 10d on 1150 + 30d on 1150 => 20
-  // Open 14d is below paid avg → excluded; open 90d is included
-  // Blended: (11500 + 34500 + 45000) / 2800 ≈ 32.5 → 33
+  // Open 14d is below paid avg â†’ excluded; open 90d is included
+  // Blended: (11500 + 34500 + 45000) / 2800 â‰ˆ 32.5 â†’ 33
   assert.equal(behavior.avgDaysPaidOnly, 20);
   assert.equal(behavior.avgDaysToPay, 33);
   assert.equal(behavior.openAmountInAvg, 500);
@@ -180,7 +180,7 @@ test("open invoices younger than paid avg are ignored so avg cannot fall", () =>
     todayIso: "2026-04-11",
   });
 
-  // Paid-only = 100 days; open 1d < 100 → excluded
+  // Paid-only = 100 days; open 1d < 100 â†’ excluded
   assert.equal(behavior.avgDaysPaidOnly, 100);
   assert.equal(behavior.avgDaysToPay, 100);
   assert.equal(behavior.openAmountInAvg, 0);
@@ -215,7 +215,7 @@ test("isCashSalesVoucher detects RC/DC/JC and skips credit notes", () => {
 });
 
 test("first receipt after cash voucher settles cash before older credit invoices", () => {
-  // Older credit open, then cash RC — first receipt after RC must clear RC first.
+  // Older credit open, then cash RC â€” first receipt after RC must clear RC first.
   const { allocations, invoices } = matchPaymentsFifo(
     [
       { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
@@ -242,7 +242,7 @@ test("cash receipt leftover after RC goes to credit invoices on FIFO", () => {
     [{ receipt_date: "2026-09-14", amount: 2000 }],
   );
 
-  // RC 800*1.15=920 first; leftover 1080 → NFD/1 1150 (partial 1080)
+  // RC 800*1.15=920 first; leftover 1080 â†’ NFD/1 1150 (partial 1080)
   assert.equal(allocations[0].voucher_number, "RC/100");
   assert.equal(Number(allocations[0].amount.toFixed(2)), 920);
   assert.equal(allocations[1].voucher_number, "NFD/1");
@@ -291,7 +291,7 @@ test("a receipt older than a cash invoice settles it when nothing older is pendi
 });
 
 test("second receipt after cash uses normal FIFO including unfinished cash", () => {
-  // First receipt after RC is tiny — marks cash priority used; second receipt is plain FIFO.
+  // First receipt after RC is tiny â€” marks cash priority used; second receipt is plain FIFO.
   const { allocations } = matchPaymentsFifo(
     [
       { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
@@ -305,7 +305,7 @@ test("second receipt after cash uses normal FIFO including unfinished cash", () 
 
   assert.equal(allocations[0].voucher_number, "RC/100");
   assert.equal(Number(allocations[0].amount.toFixed(2)), 100);
-  // Second receipt: oldest open first → finish NFD/1 then RC
+  // Second receipt: oldest open first â†’ finish NFD/1 then RC
   assert.equal(allocations[1].voucher_number, "NFD/1");
   assert.equal(allocations[2].voucher_number, "RC/100");
 });
@@ -331,7 +331,7 @@ test("settlement Sales total keeps gloves without VAT and paper with 15%", () =>
       { transaction_date: "2026-01-01", voucher_number: "CN", sales_amount: -400, category: "Paper" },
     ],
     // sales = gloves 1000 + paper 1150 + reversed 460 = 2610
-    // open 610 on P1 → collected must be 2000 for identity
+    // open 610 on P1 â†’ collected must be 2000 for identity
     receipts: [{ receipt_date: "2026-01-20", amount: 2000 }],
     outstandingCustomer: { total_outstanding: 610, open_invoices: 1 },
     outstandingInvoices: [
@@ -346,7 +346,7 @@ test("settlement Sales total keeps gloves without VAT and paper with 15%", () =>
   assert.equal(Number(paper.amount_incl_vat.toFixed(2)), 1150);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 2610);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 2000);
-  // FIFO open on P1 after 2000 cash (gloves 1000 + paper 1000) = 150 — not forced to outstanding 610.
+  // FIFO open on P1 after 2000 cash (gloves 1000 + paper 1000) = 150 â€” not forced to outstanding 610.
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 150);
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 610);
   assert.equal(ledger.totals.open_matches_outstanding, false);
@@ -392,8 +392,8 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
   assert.equal(dayReceipt.receipts.length, 1);
   assert.equal(dayReceipt.receipts[0].vch_no, "R1");
   assert.equal(ledger.settlementEvents.length, 2);
-  // Paid: 1150@30 + 200@21 => paid-only ≈ 29
-  // Open FIFO residual 375@26 is younger than paid avg → excluded
+  // Paid: 1150@30 + 200@21 => paid-only â‰ˆ 29
+  // Open FIFO residual 375@26 is younger than paid avg â†’ excluded
   assert.equal(ledger.summary.avgDaysPaidOnly, 29);
   assert.equal(ledger.summary.avgDaysToPay, 29);
   assert.equal(ledger.summary.openAmountInAvg, 0);
@@ -430,7 +430,7 @@ test("buildPaymentBehavior prefers invoice sum over rounded header total", () =>
 
   assert.equal(behavior.outstandingTotal, 76107);
   assert.equal(behavior.outstandingOldestDays, 112);
-  // Open-only avg: (14795*112 + 61312*46) / 76107 ≈ 59
+  // Open-only avg: (14795*112 + 61312*46) / 76107 â‰ˆ 59
   assert.equal(behavior.avgDaysToPay, 59);
   assert.equal(behavior.avgDaysPaidOnly, null);
 });
@@ -462,7 +462,7 @@ test("buildPaymentSettlementLedger Paid/Open follow FIFO, not outstanding force"
   const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
   assert.equal(nfd868.open_source, "fifo");
   assert.equal(Number(nfd868.outstanding_pending.toFixed(2)), 14795.35);
-  // Paid must equal FIFO cash on the row — not sales − outstanding pending (19,555.15).
+  // Paid must equal FIFO cash on the row â€” not sales âˆ’ outstanding pending (19,555.15).
   assert.equal(Number(nfd868.paid_amount.toFixed(2)), Number(nfd868.fifo_paid.toFixed(2)));
   assert.equal(Number(nfd868.remaining.toFixed(2)), Number(nfd868.fifo_remaining.toFixed(2)));
   assert.notEqual(Number(nfd868.paid_amount.toFixed(2)), Number((34350.5 - 14795.35).toFixed(2)));
@@ -577,7 +577,7 @@ test("immediate same-day credit note reversal is excluded from avg days to pay",
   assert.equal(Number(ledger.totals.invoice_sales_incl_vat.toFixed(2)), 1150);
 });
 
-test("Sales − Collected = Open for balanced reversed + outstanding books", () => {
+test("Sales âˆ’ Collected = Open for balanced reversed + outstanding books", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "INV-REV", sales_amount: 400, category: "Paper" },
@@ -585,7 +585,7 @@ test("Sales − Collected = Open for balanced reversed + outstanding books", () 
       { transaction_date: "2026-01-01", voucher_number: "INV-OPEN", sales_amount: 1000, category: "Paper" },
       { transaction_date: "2026-01-01", voucher_number: "INV-PAID", sales_amount: 500, category: "Paper" },
     ],
-    // collected = sales_incl − open = 2185 − 690 = 1495
+    // collected = sales_incl âˆ’ open = 2185 âˆ’ 690 = 1495
     receipts: [{ receipt_date: "2026-01-25", amount: 1495 }],
     outstandingCustomer: { total_outstanding: 690, open_invoices: 1 },
     outstandingInvoices: [
@@ -596,7 +596,7 @@ test("Sales − Collected = Open for balanced reversed + outstanding books", () 
 
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 2185);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 1495);
-  // FIFO open after cash — not forced to outstanding pending 690.
+  // FIFO open after cash â€” not forced to outstanding pending 690.
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 230);
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 690);
   assert.equal(ledger.totals.open_matches_outstanding, false);
@@ -608,7 +608,7 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "INV1", sales_amount: 1000, category: "Paper" },
-      // Credit note several days later — not an immediate reversal pair.
+      // Credit note several days later â€” not an immediate reversal pair.
       { transaction_date: "2026-01-10", voucher_number: "CN1", sales_amount: -200, category: "Paper" },
     ],
     receipts: [{ receipt_date: "2026-01-20", amount: 500 }],
@@ -627,18 +627,18 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 230);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 920);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 500);
-  // Machine open also applies unpaired CN in date order: 1150 − 230 CN − 500 cash = 420.
+  // Machine open also applies unpaired CN in date order: 1150 âˆ’ 230 CN âˆ’ 500 cash = 420.
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 420);
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 420);
   const inv1 = ledger.invoices.find((row) => row.voucher_number === "INV1");
-  // Paid column = cash FIFO + VAT-inclusive CN (200 excl → 230 incl).
+  // Unreferenced CN still FIFO-settles Open; Paid stays cash-only.
   assert.equal(Number(inv1.fifo_paid.toFixed(2)), 500);
   assert.equal(Number(inv1.credit_note_settled.toFixed(2)), 230);
-  assert.equal(Number(inv1.paid_amount.toFixed(2)), 730);
+  assert.equal(Number(inv1.paid_amount.toFixed(2)), 500);
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
-test("Paid column includes VAT-inclusive credit note with cash receipts (invoice 2395-style)", () => {
+test("referenced credit note reduces invoice sales (VAT-incl); Paid is cash only (2395-style)", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "2395", sales_amount: 10220, category: "Paper" },
@@ -661,16 +661,47 @@ test("Paid column includes VAT-inclusive credit note with cash receipts (invoice
 
   const invoice = ledger.invoices.find((row) => row.voucher_number === "2395");
   assert.ok(invoice);
-  assert.equal(Number(invoice.amount_excl_vat.toFixed(2)), 10220);
-  assert.equal(Number(invoice.amount_incl_vat.toFixed(2)), 11753);
-  assert.equal(Number(invoice.fifo_paid.toFixed(2)), 10235);
-  // 1320 excl × 1.15 = 1518 incl — VAT on the credit note must enter Paid.
+  // 1320 excl Ã— 1.15 = 1518 incl reduces billable sales before cash.
+  assert.equal(Number(invoice.amount_excl_vat.toFixed(2)), 8900);
+  assert.equal(Number(invoice.amount_incl_vat.toFixed(2)), 10235);
   assert.equal(Number(invoice.credit_note_settled.toFixed(2)), 1518);
-  assert.equal(Number(invoice.paid_amount.toFixed(2)), 11753);
+  assert.equal(Number(invoice.fifo_paid.toFixed(2)), 10235);
+  assert.equal(Number(invoice.paid_amount.toFixed(2)), 10235);
   assert.equal(Number(invoice.remaining.toFixed(2)), 0);
   assert.equal(invoice.status, "Paid");
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 1518);
   assert.equal(Number(ledger.totals.credit_note_excl_vat.toFixed(2)), 1320);
+});
+
+test("referenced credit note leftover after sales reduction applies to the next open voucher", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "2395", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-01-25", voucher_number: "2749", sales_amount: 1000, category: "Paper" },
+      {
+        transaction_date: "2026-02-10",
+        voucher_number: "56",
+        voucher_type: "Credit Note",
+        reference: "2395",
+        // Larger than 2395 so leftover must hit 2749.
+        sales_amount: -1500,
+        category: "Paper",
+      },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-03-01",
+  });
+
+  const first = ledger.invoices.find((row) => row.voucher_number === "2395");
+  const next = ledger.invoices.find((row) => row.voucher_number === "2749");
+  assert.ok(first);
+  assert.ok(next);
+  assert.equal(Number(first.amount_incl_vat.toFixed(2)), 0);
+  assert.equal(Number(first.credit_note_settled.toFixed(2)), 1150);
+  assert.equal(Number(first.remaining.toFixed(2)), 0);
+  assert.equal(Number(next.credit_note_settled.toFixed(2)), 575);
+  assert.equal(Number(next.remaining.toFixed(2)), 575);
 });
 
 test("credit notes settle their referenced invoice before falling back to FIFO", () => {
@@ -752,7 +783,7 @@ test("partial credit note and sales return appear in creditNotes table, not reve
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "INV1", sales_amount: 1000, category: "Paper" },
-      // Partial CN same day — not a full reverse
+      // Partial CN same day â€” not a full reverse
       {
         transaction_date: "2026-01-01",
         voucher_number: "CN-PART",
@@ -788,7 +819,7 @@ test("partial credit note and sales return appear in creditNotes table, not reve
   assert.equal(invoice.credit_notes[0].voucher_number, "CN-PART");
   assert.equal(invoice.credit_notes[0].days, null);
   assert.equal(invoice.settlements.length, 1);
-  // Payment days only from the cash receipt — CN amounts ignored.
+  // Payment days only from the cash receipt â€” CN amounts ignored.
   assert.equal(invoice.payment_days, 19);
   assert.equal(ledger.creditNotes[0].applied_to_voucher, "INV1");
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 345);
@@ -820,7 +851,7 @@ test("credit note several days later is not treated as immediate reversal", () =
 
   assert.equal(reversedInvoices.length, 0);
   assert.equal(invoices.length, 1);
-  // Full unpaired CN clears the invoice before the later receipt — not a Reversed pair.
+  // Full unpaired CN clears the invoice before the later receipt â€” not a Reversed pair.
   assert.equal(Number(invoices[0].remaining.toFixed(2)), 0);
   assert.equal(allocations.length, 0);
 });
@@ -900,7 +931,7 @@ test("same-day CN voids original; next-day reissue stays open (2384 / 2397)", ()
   const item = { item_code: "P-100", item_name: "Paper A4", quantity: 10, category: "Paper" };
   const ledger = buildPaymentSettlementLedger({
     transactions: [
-      // Original bill 31 Dec — fully reversed same day by CN 121.
+      // Original bill 31 Dec â€” fully reversed same day by CN 121.
       {
         transaction_date: "2025-12-31",
         voucher_number: "2384",
@@ -915,7 +946,7 @@ test("same-day CN voids original; next-day reissue stays open (2384 / 2397)", ()
         sales_amount: 18026.2,
         ...item,
       },
-      // Orphan / blank-style second CN same day — must NOT reverse the next-day reissue.
+      // Orphan / blank-style second CN same day â€” must NOT reverse the next-day reissue.
       {
         transaction_date: "2025-12-31",
         voucher_number: "",
@@ -923,7 +954,7 @@ test("same-day CN voids original; next-day reissue stays open (2384 / 2397)", ()
         sales_amount: 18026.2,
         ...item,
       },
-      // Replacement invoice next day — live AR again (Tally keeps this open).
+      // Replacement invoice next day â€” live AR again (Tally keeps this open).
       {
         transaction_date: "2026-01-01",
         voucher_number: "2397",
@@ -955,7 +986,7 @@ test("CN/ and SR/ voucher codes with positive amounts are sales returns not invo
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "NFD/100", sales_amount: 1000, category: "Paper" },
-      // Positive amount but CN/ voucher code — should not inflate sales.
+      // Positive amount but CN/ voucher code â€” should not inflate sales.
       { transaction_date: "2026-01-20", voucher_number: "CN/55", sales_amount: 200, category: "Paper" },
       { transaction_date: "2026-02-01", voucher_number: "SR/9", sales_amount: 100, category: "Paper" },
     ],

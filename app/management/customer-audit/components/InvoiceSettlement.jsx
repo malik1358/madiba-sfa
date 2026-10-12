@@ -91,9 +91,11 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
             {" · "}
             {note.voucher_number || "—"}
             {note.credit_date ? ` · ${note.credit_date}` : ""}
+            {" · reduces sales"}
           </td>
-          <td colSpan={2} />
-          <td>{formatMoney(note.amount)}</td>
+          <td>{formatMoney(-Math.abs(note.amount_excl_vat ?? note.amount))}</td>
+          <td>{formatMoney(-Math.abs(note.amount))}</td>
+          <td />
           <td colSpan={3} />
           <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
           <td>Not in avg days</td>
@@ -317,10 +319,10 @@ export default function InvoiceSettlement({
           <div>
             <h3>Invoices & Settlement</h3>
             <p className="auditSectionNote">
-              Paid is cash FIFO plus VAT-inclusive credit notes on the invoice. Machine Open is the
-              residual (sales − cash − credit notes) from day-1 history through today. Tally Open is
-              the outstanding upload per invoice. Open Δ shows where they disagree. Gloves stay excl.
-              VAT; other sales and credit-note lines are grossed up at 15%.
+              Referenced credit notes reduce Sales (VAT-incl) on that invoice before cash; Paid is cash
+              only. Leftover CN applies to later open vouchers. Machine Open is sales − cash − CN from
+              day-1 history. Tally Open is the outstanding upload. Gloves stay excl. VAT; other lines
+              gross up at 15%.
             </p>
           </div>
           <span>

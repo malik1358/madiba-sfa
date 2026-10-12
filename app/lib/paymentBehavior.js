@@ -343,6 +343,9 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 
   function pushCreditChild(invoice, note, amount) {
     if (amount <= AMOUNT_TOLERANCE) return;
+    const noteIncl = toNumber(note.amount_incl_vat ?? note.amount);
+    const noteExcl = toNumber(note.amount_excl_vat);
+    const exclShare = noteIncl > 0.009 ? amount * (noteExcl / noteIncl) : amount;
     invoice.credit_notes.push({
       type: "credit_note",
       credit_date: note.credit_date,
@@ -350,6 +353,7 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
       kind: note.kind || classifyCreditNoteKind(note.voucher_type, note.voucher_number),
       reference: note.reference || "",
       amount,
+      amount_excl_vat: exclShare,
       days: null,
     });
     note.remaining = Math.max(0, toNumber(note.remaining) - amount);
@@ -638,8 +642,10 @@ export function buildSortedReceipts(receipts = []) {
  * follows normal oldest-open FIFO across remaining invoices. A receipt dated
  * before the cash invoice only takes that slot when no older bill is still open.
  * Invoices reversed immediately by credit notes are excluded from matching.
- * Unpaired credit notes (orphans) also reduce open remaining in date order,
- * so Tally blank CNs that wipe older bills are reflected in Machine Open.
+ * Referenced unpaired credit notes first reduce that invoice's sales (VAT-incl)
+ * before cash FIFO — a goods return cuts the bill, it is not stacked as extra Paid.
+ * Any leftover CN amount (and unreferenced orphans) then reduces open remaining in
+ * date order so Tally blank CNs that wipe older / later bills still hit Machine Open.
  */
 export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
@@ -649,6 +655,8 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
     .map((invoice) => ({
       ...invoice,
+      gross_amount: toNumber(invoice.amount),
+      gross_amount_excl_vat: toNumber(invoice.amount_excl_vat),
       remaining: toNumber(invoice.amount),
       is_cash: isCashSalesVoucher(invoice.voucher_number),
       cash_first_receipt_used: false,
@@ -660,14 +668,57 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     (note) => !pairedCreditNoteKeys.has(invoiceKey(note.credit_date, note.voucher_number)),
   );
 
+  const allocations = [];
+  const creditNoteAllocations = [];
+  let unmatchedReceiptAmount = 0;
+
+  // Phase A: referenced credit notes reduce the named invoice's billable sales first.
+  // Leftover after that invoice is full goes into the FIFO event stream (next vouchers).
+  const notesForEvents = [];
+  unpairedNotes.forEach((note) => {
+    let remaining = toNumber(note.amount);
+    const creditDate = dateOnly(note.credit_date);
+    const referencedVoucher = normalizeRef(note.reference);
+    if (referencedVoucher && creditDate) {
+      for (const invoice of invoices) {
+        if (remaining <= 0.009) break;
+        if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
+        if (creditDate < dateOnly(invoice.invoice_date)) continue;
+        if (invoice.remaining <= 0.009) continue;
+        const applied = Math.min(remaining, invoice.remaining);
+        if (applied <= 0.009) continue;
+        const exclRatio = toNumber(note.amount) > 0.009
+          ? toNumber(note.amount_excl_vat) / toNumber(note.amount)
+          : 0;
+        const appliedExcl = applied * exclRatio;
+        creditNoteAllocations.push({
+          invoice_date: invoice.invoice_date,
+          voucher_number: invoice.voucher_number,
+          credit_date: creditDate,
+          credit_voucher: note.voucher_number || "",
+          amount: applied,
+          amount_excl_vat: appliedExcl,
+          sales_reduction: true,
+        });
+        invoice.amount = Math.max(0, toNumber(invoice.amount) - applied);
+        invoice.amount_excl_vat = Math.max(0, toNumber(invoice.amount_excl_vat) - appliedExcl);
+        invoice.remaining = Math.max(0, toNumber(invoice.remaining) - applied);
+        remaining = Math.max(0, remaining - applied);
+      }
+    }
+    if (remaining > 0.009) {
+      notesForEvents.push({
+        kind: "credit_note",
+        date: creditDate,
+        amount: remaining,
+        voucher_number: note.voucher_number || "",
+        reference: "",
+      });
+    }
+  });
+
   const events = [
-    ...unpairedNotes.map((note) => ({
-      kind: "credit_note",
-      date: dateOnly(note.credit_date),
-      amount: toNumber(note.amount),
-      voucher_number: note.voucher_number || "",
-      reference: note.reference || "",
-    })),
+    ...notesForEvents,
     ...buildSortedReceipts(receipts).map((row) => ({
       kind: row.amount < 0 ? "payment" : "receipt",
       date: row.receipt_date,
@@ -679,7 +730,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     .filter((row) => row.date && row.amount > 0)
     .sort((left, right) => {
       if (left.date !== right.date) return left.date.localeCompare(right.date);
-      // Same day: credit notes, then receipts, then payment reversals.
+      // Same day: leftover credit notes, then receipts, then payment reversals.
       const kindRank = (kind) => (
         kind === "credit_note" ? 0 : kind === "receipt" ? 1 : 2
       );
@@ -687,10 +738,6 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       if (rankDelta !== 0) return rankDelta;
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
     });
-
-  const allocations = [];
-  const creditNoteAllocations = [];
-  let unmatchedReceiptAmount = 0;
 
   function hasOlderOpenInvoice(list, cashInvoice) {
     return list.some((other) => other !== cashInvoice
@@ -727,6 +774,8 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
         credit_date: event.date,
         credit_voucher: event.voucher_number || "",
         amount: applied,
+        amount_excl_vat: applied,
+        sales_reduction: false,
       });
     }
     invoice.remaining = Math.max(0, invoice.remaining - applied);
@@ -1200,10 +1249,10 @@ export function buildTallyFifoDiscrepancies(invoiceRows = [], {
 
   const rows = (Array.isArray(invoiceRows) ? invoiceRows : [])
     .map((row) => {
-      const salesIncl = toNumber(row.amount_incl_vat);
+      const salesIncl = toNumber(row.gross_amount_incl_vat ?? row.amount_incl_vat);
       const fifoPaid = toNumber(row.fifo_paid);
       const fifoOpen = row.fifo_remaining == null
-        ? Math.max(0, salesIncl - fifoPaid)
+        ? Math.max(0, salesIncl - fifoPaid - toNumber(row.credit_note_settled))
         : toNumber(row.fifo_remaining);
       // Book side comes from outstanding upload when present — not from forced Paid/Open.
       const hasBookOpen = row.outstanding_pending != null;
@@ -1301,7 +1350,7 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
   };
 
   const allRows = (Array.isArray(invoiceRows) ? invoiceRows : []).map((row) => {
-    const salesIncl = toNumber(row.amount_incl_vat);
+    const salesIncl = toNumber(row.gross_amount_incl_vat ?? row.amount_incl_vat);
     const cashSettled = toNumber(row.fifo_paid);
     const creditChunks = (Array.isArray(row.fifo_credit_notes)
       ? row.fifo_credit_notes
@@ -1400,9 +1449,10 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
- * Paid = cash FIFO + VAT-inclusive credit notes allocated to the invoice; Open / Status follow the
- * residual after both. Nested credit notes under an invoice are for display. Outstanding upload
- * is kept on each row for Tally comparison screens — it does not rewrite Paid/Open.
+ * Referenced credit notes first reduce that invoice's sales (VAT-incl); Paid is cash FIFO only
+ * against the reduced bill. Leftover CN after the referenced invoice follows oldest-open FIFO onto
+ * later vouchers. Nested credit notes under an invoice explain the sales reduction. Outstanding
+ * upload is kept on each row for Tally comparison — it does not rewrite Paid/Open.
  * Cash FIFO alone drives payment-days; avg days also includes open unpaid older than the paid-only
  * avg (open age can raise, never reduce, the metric).
  * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
@@ -1455,6 +1505,8 @@ export function buildPaymentSettlementLedger({
       credit_date: row.credit_date,
       voucher_number: row.credit_voucher,
       amount: toNumber(row.amount),
+      amount_excl_vat: toNumber(row.amount_excl_vat ?? row.amount),
+      sales_reduction: Boolean(row.sales_reduction),
       days: null,
     });
     fifoCreditNotesByInvoice.set(key, list);
@@ -1474,16 +1526,23 @@ export function buildPaymentSettlementLedger({
     const fifoCreditNotes = fifoCreditNotesByInvoice.get(key) || [];
     const fifoCreditSettled = fifoCreditNotes.reduce((total, row) => total + toNumber(row.amount), 0);
     const fifoRemaining = toNumber(invoice.remaining);
+    const amountExclVat = toNumber(invoice.amount_excl_vat);
     const amountInclVat = toNumber(invoice.amount);
+    const grossExclVat = toNumber(invoice.gross_amount_excl_vat ?? amountExclVat);
+    const grossInclVat = toNumber(invoice.gross_amount ?? amountInclVat);
+    const fifoCreditExcl = fifoCreditNotes.reduce(
+      (total, row) => total + toNumber(row.amount_excl_vat ?? row.amount),
+      0,
+    );
     const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number)) || null;
     if (outstandingMatch) {
       matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
     }
 
-    // Paid = cash FIFO + VAT-inclusive credit notes allocated to this invoice.
-    // Open is the FIFO residual after both. Never force either to the outstanding upload.
+    // Paid is cash only. Credit notes reduce Open / billable AR but must not inflate Paid
+    // (otherwise a return looks like extra cash on top of full gross sales).
     const remaining = fifoRemaining;
-    const paidAmount = fifoPaid + fifoCreditSettled;
+    const paidAmount = fifoPaid;
     const outstandingPending = hasOutstandingRows
       ? (outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0)
       : null;
@@ -1495,9 +1554,11 @@ export function buildPaymentSettlementLedger({
 
     let status = "Open";
     if (remaining <= 0.009) {
-      status = amountInclVat > 0.009 || paidAmount > 0.009 ? "Paid" : "Open";
+      status = amountInclVat > 0.009 || paidAmount > 0.009 || fifoCreditSettled > 0.009
+        ? "Paid"
+        : "Open";
       if (remaining <= 0.009 && amountInclVat <= 0.009 && paidAmount <= 0.009) status = "Paid";
-    } else if (paidAmount > 0.009 && remaining > 0.009) {
+    } else if ((paidAmount > 0.009 || fifoCreditSettled > 0.009) && remaining > 0.009) {
       status = "Partial";
     }
 
@@ -1512,11 +1573,14 @@ export function buildPaymentSettlementLedger({
     return {
       invoice_date: invoice.invoice_date,
       voucher_number: invoice.voucher_number,
-      amount_excl_vat: toNumber(invoice.amount_excl_vat),
+      amount_excl_vat: amountExclVat,
       amount_incl_vat: amountInclVat,
+      gross_amount_excl_vat: grossExclVat,
+      gross_amount_incl_vat: grossInclVat,
       paid_amount: paidAmount,
       fifo_paid: fifoPaid,
       credit_note_settled: fifoCreditSettled,
+      credit_note_excl_settled: fifoCreditExcl,
       remaining,
       fifo_remaining: fifoRemaining,
       outstanding_pending: outstandingPending,
@@ -1545,6 +1609,7 @@ export function buildPaymentSettlementLedger({
       paid_amount: 0,
       fifo_paid: 0,
       credit_note_settled: 0,
+      credit_note_excl_settled: 0,
       remaining: toNumber(row.pending_amount),
       fifo_remaining: null,
       outstanding_pending: toNumber(row.pending_amount),
@@ -1664,8 +1729,14 @@ export function buildPaymentSettlementLedger({
     return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
   });
 
-  const invoiceSalesExclVat = invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0);
-  const invoiceSalesInclVat = invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0);
+  const invoiceSalesExclVat = invoiceRows.reduce(
+    (total, row) => total + toNumber(row.gross_amount_excl_vat ?? row.amount_excl_vat),
+    0,
+  );
+  const invoiceSalesInclVat = invoiceRows.reduce(
+    (total, row) => total + toNumber(row.gross_amount_incl_vat ?? row.amount_incl_vat),
+    0,
+  );
   const reversedSalesExclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_excl_vat), 0);
   const reversedSalesInclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_incl_vat), 0);
   // KPI Sales includes reversed invoices (still excluded from FIFO / avg days).

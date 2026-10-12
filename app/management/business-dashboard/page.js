@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
@@ -24,7 +24,7 @@ import {
   formatBiReportPeriodRange,
   resolveBiReportPeriod,
 } from "../../lib/biReportPeriod";
-import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
+import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
 const TEXT = {
@@ -93,7 +93,8 @@ export default function BusinessDashboardPage() {
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [dashboard, setDashboard] = useState(null);
-  const [growthLoading, setGrowthLoading] = useState(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [growthLoading, setGrowthLoading] = useState(false);
   const [growthReport, setGrowthReport] = useState(null);
   const [growthDraft, setGrowthDraft] = useState(() => emptyGrowthFilters());
   const [growthApplied, setGrowthApplied] = useState(() => emptyGrowthFilters());
@@ -104,19 +105,19 @@ export default function BusinessDashboardPage() {
   const [brandApplied, setBrandApplied] = useState(() => ({ ...emptyGrowthFilters(), itemNameContains: "MADIBA" }));
   const [brandSearch, setBrandSearch] = useState("");
   const [brandStatusFilter, setBrandStatusFilter] = useState([]);
-  const [customerLoading, setCustomerLoading] = useState(true);
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [customerReport, setCustomerReport] = useState(null);
   const [customerDraft, setCustomerDraft] = useState(() => emptyCustomerGrowthFilters());
   const [customerApplied, setCustomerApplied] = useState(() => emptyCustomerGrowthFilters());
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerStatusFilter, setCustomerStatusFilter] = useState([]);
-  const [itemLoading, setItemLoading] = useState(true);
+  const [itemLoading, setItemLoading] = useState(false);
   const [itemReport, setItemReport] = useState(null);
   const [itemDraft, setItemDraft] = useState(() => emptyItemGrowthFilters());
   const [itemApplied, setItemApplied] = useState(() => emptyItemGrowthFilters());
   const [itemSearch, setItemSearch] = useState("");
   const [itemStatusFilter, setItemStatusFilter] = useState([]);
-  const [salesmanLoading, setSalesmanLoading] = useState(true);
+  const [salesmanLoading, setSalesmanLoading] = useState(false);
   const [salesmanReport, setSalesmanReport] = useState(null);
   const [salesmanDraft, setSalesmanDraft] = useState(() => emptySalesmanMomFilters());
   const [salesmanApplied, setSalesmanApplied] = useState(() => emptySalesmanMomFilters());
@@ -127,6 +128,12 @@ export default function BusinessDashboardPage() {
   const [customPeriodFrom, setCustomPeriodFrom] = useState("");
   const [customPeriodTo, setCustomPeriodTo] = useState("");
   const [reportFocus, setReportFocus] = useState("");
+  const overviewCacheKeyRef = useRef("");
+  const growthCacheKeyRef = useRef("");
+  const customerCacheKeyRef = useRef("");
+  const itemCacheKeyRef = useRef("");
+  const salesmanCacheKeyRef = useRef("");
+  const salesMixPeriodKeyRef = useRef("");
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
       dateFrom: customPeriodFrom,
@@ -257,6 +264,120 @@ export default function BusinessDashboardPage() {
 
     const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
+      setOverviewLoading(false);
+      setError((current) => current || "BI dashboard timed out. Please refresh.");
+    });
+
+    async function loadOverview() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        stopSafetyTimer();
+        setOverviewLoading(false);
+        return;
+      }
+
+      const overviewKey = JSON.stringify(periodRange);
+      if (
+        overviewCacheKeyRef.current === overviewKey
+        && growthReport
+        && customerReport
+        && itemReport
+        && salesmanReport
+      ) {
+        stopSafetyTimer();
+        setOverviewLoading(false);
+        return;
+      }
+
+      setOverviewLoading(true);
+      setError("");
+
+      try {
+        const session = await resolveAuthSession(supabase, 12000);
+        if (cancelled) return;
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/overview",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ filters: applyBiReportPeriod(emptyGrowthFilters(), periodRange) }),
+          },
+          60000,
+        );
+
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load BI dashboard.");
+        }
+
+        if (payload.growth) {
+          setGrowthReport(payload.growth);
+          growthCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+            ...applyBiReportPeriod(emptyGrowthFilters(), periodRange),
+            groupBy: "category",
+          }));
+          salesMixPeriodKeyRef.current = payload.growth.salesMix
+            ? `${normalizeGrowthFilters(payload.growth.filters).dateFrom}|${normalizeGrowthFilters(payload.growth.filters).dateTo}`
+            : "";
+        }
+        if (payload.customer) {
+          setCustomerReport(payload.customer);
+          // Overview omits cohorts; force a full customer fetch when that tab opens.
+          customerCacheKeyRef.current = "";
+        }
+        if (payload.item) {
+          setItemReport(payload.item);
+          itemCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+            ...applyBiReportPeriod(emptyItemGrowthFilters(), periodRange),
+            groupBy: "item",
+          }));
+        }
+        if (payload.salesman) {
+          setSalesmanReport(payload.salesman);
+          salesmanCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+            ...applyBiReportPeriod(emptySalesmanMomFilters(), periodRange),
+            groupBy: "salesman",
+          }));
+        }
+        if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
+        overviewCacheKeyRef.current = overviewKey;
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || "Unable to load BI dashboard.");
+        overviewCacheKeyRef.current = "";
+      } finally {
+        stopSafetyTimer();
+        if (!cancelled) setOverviewLoading(false);
+      }
+    }
+
+    if (view !== "overview") {
+      stopSafetyTimer();
+      setOverviewLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
+    loadOverview();
+
+    return () => {
+      cancelled = true;
+      stopSafetyTimer();
+    };
+  }, [view, periodRange]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const stopSafetyTimer = startReportSafetyTimer(() => {
+      if (cancelled) return;
       setGrowthLoading(false);
       setError((current) => current || "Category growth timed out. Please refresh.");
     });
@@ -264,6 +385,30 @@ export default function BusinessDashboardPage() {
     async function loadGrowth() {
       const supabase = getSupabaseClient();
       if (!supabase) {
+        stopSafetyTimer();
+        setGrowthLoading(false);
+        return;
+      }
+
+      const requestedFilters = view === "madiba"
+        ? { ...brandApplied, itemNameContains: "MADIBA" }
+        : view === "sales-mix" ? salesMixApplied : growthApplied;
+      const normalizedKey = JSON.stringify(normalizeGrowthFilters(requestedFilters));
+      const periodKey = `${normalizeGrowthFilters(requestedFilters).dateFrom}|${normalizeGrowthFilters(requestedFilters).dateTo}`;
+
+      if (view === "category-growth" && growthCacheKeyRef.current === normalizedKey) {
+        stopSafetyTimer();
+        setGrowthLoading(false);
+        return;
+      }
+
+      if (view === "sales-mix" && salesMixPeriodKeyRef.current === periodKey) {
+        stopSafetyTimer();
+        setGrowthLoading(false);
+        return;
+      }
+
+      if (view === "madiba" && growthCacheKeyRef.current === `madiba:${normalizedKey}`) {
         stopSafetyTimer();
         setGrowthLoading(false);
         return;
@@ -285,11 +430,7 @@ export default function BusinessDashboardPage() {
               Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              filters: view === "madiba"
-                ? { ...brandApplied, itemNameContains: "MADIBA" }
-                : view === "sales-mix" ? salesMixApplied : growthApplied,
-            }),
+            body: JSON.stringify({ filters: requestedFilters }),
           },
           60000,
         );
@@ -300,18 +441,31 @@ export default function BusinessDashboardPage() {
         }
 
         setGrowthReport(payload);
+        // Tab fetches can replace the overview category payload; force overview to refresh next time.
+        overviewCacheKeyRef.current = "";
+        if (view === "category-growth") {
+          growthCacheKeyRef.current = normalizedKey;
+          salesMixPeriodKeyRef.current = payload.salesMix ? periodKey : "";
+        } else if (view === "madiba") {
+          growthCacheKeyRef.current = `madiba:${normalizedKey}`;
+        } else if (view === "sales-mix") {
+          salesMixPeriodKeyRef.current = payload.salesMix ? periodKey : "";
+        }
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load category growth.");
         setGrowthReport(null);
+        growthCacheKeyRef.current = "";
+        salesMixPeriodKeyRef.current = "";
+        overviewCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setGrowthLoading(false);
       }
     }
 
-    if (view !== "category-growth" && view !== "madiba" && view !== "sales-mix" && view !== "overview") {
+    if (view !== "category-growth" && view !== "madiba" && view !== "sales-mix") {
       stopSafetyTimer();
       setGrowthLoading(false);
       return () => {
@@ -345,6 +499,13 @@ export default function BusinessDashboardPage() {
         return;
       }
 
+      const requestKey = `cohorts:${JSON.stringify(normalizeGrowthFilters(customerApplied))}`;
+      if (customerCacheKeyRef.current === requestKey) {
+        stopSafetyTimer();
+        setCustomerLoading(false);
+        return;
+      }
+
       setCustomerLoading(true);
       setError("");
 
@@ -372,18 +533,20 @@ export default function BusinessDashboardPage() {
         }
 
         setCustomerReport(payload);
+        customerCacheKeyRef.current = requestKey;
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load customer growth.");
         setCustomerReport(null);
+        customerCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setCustomerLoading(false);
       }
     }
 
-    if (view !== "customer-growth" && view !== "overview") {
+    if (view !== "customer-growth") {
       stopSafetyTimer();
       setCustomerLoading(false);
       return () => {
@@ -417,6 +580,13 @@ export default function BusinessDashboardPage() {
         return;
       }
 
+      const requestKey = JSON.stringify(normalizeGrowthFilters(itemApplied));
+      if (itemCacheKeyRef.current === requestKey) {
+        stopSafetyTimer();
+        setItemLoading(false);
+        return;
+      }
+
       setItemLoading(true);
       setError("");
 
@@ -444,18 +614,20 @@ export default function BusinessDashboardPage() {
         }
 
         setItemReport(payload);
+        itemCacheKeyRef.current = requestKey;
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load item growth.");
         setItemReport(null);
+        itemCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setItemLoading(false);
       }
     }
 
-    if (view !== "item-growth" && view !== "overview") {
+    if (view !== "item-growth") {
       stopSafetyTimer();
       setItemLoading(false);
       return () => {
@@ -489,6 +661,13 @@ export default function BusinessDashboardPage() {
         return;
       }
 
+      const requestKey = JSON.stringify(normalizeGrowthFilters(salesmanApplied));
+      if (salesmanCacheKeyRef.current === requestKey) {
+        stopSafetyTimer();
+        setSalesmanLoading(false);
+        return;
+      }
+
       setSalesmanLoading(true);
       setError("");
 
@@ -516,18 +695,20 @@ export default function BusinessDashboardPage() {
         }
 
         setSalesmanReport(payload);
+        salesmanCacheKeyRef.current = requestKey;
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load salesman performance.");
         setSalesmanReport(null);
+        salesmanCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setSalesmanLoading(false);
       }
     }
 
-    if (view !== "salesman-mom" && view !== "overview") {
+    if (view !== "salesman-mom") {
       stopSafetyTimer();
       setSalesmanLoading(false);
       return () => {
@@ -725,7 +906,7 @@ export default function BusinessDashboardPage() {
           {view === "overview" ? (
             <BiOverviewDashboard
               language={language}
-              loading={growthLoading || salesmanLoading || customerLoading || itemLoading}
+              loading={overviewLoading}
               growthReport={visibleGrowthReport}
               salesmanReport={visibleSalesmanReport}
               customerReport={visibleCustomerReport}

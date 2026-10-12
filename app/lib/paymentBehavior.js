@@ -1352,10 +1352,11 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
- * Paid / Open / Status follow cash FIFO (+ nested credit notes for display). Outstanding upload
+ * Paid = cash FIFO + VAT-inclusive credit notes allocated to the invoice; Open / Status follow the
+ * residual after both. Nested credit notes under an invoice are for display. Outstanding upload
  * is kept on each row for Tally comparison screens — it does not rewrite Paid/Open.
- * FIFO drives payment-days; avg days also includes open unpaid older than the paid-only avg
- * (open age can raise, never reduce, the metric).
+ * Cash FIFO alone drives payment-days; avg days also includes open unpaid older than the paid-only
+ * avg (open age can raise, never reduce, the metric).
  * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
  */
 export function buildPaymentSettlementLedger({
@@ -1422,6 +1423,8 @@ export function buildPaymentSettlementLedger({
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
     });
     const fifoPaid = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
+    const fifoCreditNotes = fifoCreditNotesByInvoice.get(key) || [];
+    const fifoCreditSettled = fifoCreditNotes.reduce((total, row) => total + toNumber(row.amount), 0);
     const fifoRemaining = toNumber(invoice.remaining);
     const amountInclVat = toNumber(invoice.amount);
     const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number)) || null;
@@ -1429,9 +1432,10 @@ export function buildPaymentSettlementLedger({
       matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
     }
 
-    // Paid / Open always follow FIFO cash allocation — never force to outstanding.
+    // Paid = cash FIFO + VAT-inclusive credit notes allocated to this invoice.
+    // Open is the FIFO residual after both. Never force either to the outstanding upload.
     const remaining = fifoRemaining;
-    const paidAmount = fifoPaid;
+    const paidAmount = fifoPaid + fifoCreditSettled;
     const outstandingPending = hasOutstandingRows
       ? (outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0)
       : null;
@@ -1443,8 +1447,8 @@ export function buildPaymentSettlementLedger({
 
     let status = "Open";
     if (remaining <= 0.009) {
-      status = amountInclVat > 0.009 || fifoPaid > 0.009 ? "Paid" : "Open";
-      if (remaining <= 0.009 && amountInclVat <= 0.009 && fifoPaid <= 0.009) status = "Paid";
+      status = amountInclVat > 0.009 || paidAmount > 0.009 ? "Paid" : "Open";
+      if (remaining <= 0.009 && amountInclVat <= 0.009 && paidAmount <= 0.009) status = "Paid";
     } else if (paidAmount > 0.009 && remaining > 0.009) {
       status = "Partial";
     }
@@ -1464,6 +1468,7 @@ export function buildPaymentSettlementLedger({
       amount_incl_vat: amountInclVat,
       paid_amount: paidAmount,
       fifo_paid: fifoPaid,
+      credit_note_settled: fifoCreditSettled,
       remaining,
       fifo_remaining: fifoRemaining,
       outstanding_pending: outstandingPending,
@@ -1476,7 +1481,7 @@ export function buildPaymentSettlementLedger({
       item_codes: Array.isArray(invoice.item_codes) ? [...invoice.item_codes] : [],
       settlements,
       credit_notes: [],
-      fifo_credit_notes: fifoCreditNotesByInvoice.get(key) || [],
+      fifo_credit_notes: fifoCreditNotes,
     };
   });
 
@@ -1491,6 +1496,7 @@ export function buildPaymentSettlementLedger({
       amount_incl_vat: toNumber(row.pending_amount),
       paid_amount: 0,
       fifo_paid: 0,
+      credit_note_settled: 0,
       remaining: toNumber(row.pending_amount),
       fifo_remaining: null,
       outstanding_pending: toNumber(row.pending_amount),
@@ -1500,6 +1506,7 @@ export function buildPaymentSettlementLedger({
       open_days: row.open_days || 0,
       settlements: [],
       credit_notes: [],
+      fifo_credit_notes: [],
     });
   });
 

@@ -214,13 +214,15 @@ export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
                 OR has_column_privilege(current_user, relation.oid, attribute.attnum, 'UPDATE WITH GRANT OPTION')))
         )
     ) AS write_${table}`);
+  // Scope write probes to app schemas only. Default Supabase extension grants
+  // (net/cron/etc.) must not fail readonly preflight or force PUBLIC privilege revokes.
   const sequenceWriteCheck = `EXISTS (
       SELECT 1 FROM pg_class AS sequence
       JOIN pg_depend AS dependency ON dependency.objid = sequence.oid AND dependency.classid = 'pg_class'::regclass
         AND dependency.refclassid = 'pg_class'::regclass AND dependency.deptype = 'a'
       JOIN pg_class AS relation ON relation.oid = dependency.refobjid
       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      WHERE sequence.relkind = 'S' AND namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+      WHERE sequence.relkind = 'S' AND namespace.nspname IN ('public', 'supabase_migrations')
         AND (has_sequence_privilege(current_user, sequence.oid, 'USAGE')
           OR has_sequence_privilege(current_user, sequence.oid, 'UPDATE')
           OR has_sequence_privilege(current_user, sequence.oid, 'USAGE WITH GRANT OPTION')
@@ -229,7 +231,7 @@ export function readonlySecuritySql(membershipPrivilege, serverVersionNum) {
   const anyRelationWriteCheck = `EXISTS (
       SELECT 1 FROM pg_class AS relation
       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      WHERE namespace.nspname <> 'information_schema' AND namespace.nspname !~ '^pg_'
+      WHERE namespace.nspname IN ('public', 'supabase_migrations')
         AND (has_table_privilege(current_user, relation.oid, 'INSERT')
           OR has_table_privilege(current_user, relation.oid, 'UPDATE')
           OR has_table_privilege(current_user, relation.oid, 'DELETE')
@@ -433,7 +435,8 @@ export function readonlyPrivilegeIssues(privileges = {}) {
     "session_createdb", "current_createdb", "session_createrole", "current_createrole",
     "session_replication", "current_replication",
     "database_create", "public_create", "migration_schema_create", "owns_database",
-    "database_temp", "any_schema_create", "owns_any_schema", "owns_any_relation", "owns_any_database_object", "write_any_relation",
+    // database_temp is omitted: Supabase PUBLIC commonly has TEMP; do not revoke PUBLIC to pass preflight.
+    "any_schema_create", "owns_any_schema", "owns_any_relation", "owns_any_database_object", "write_any_relation",
     "write_target_sequences", "ledger_column_write",
     "owns_public_schema", "owns_migration_schema", "ledger_insert", "ledger_update",
     "ledger_delete", "ledger_truncate", "ledger_insert_grant", "ledger_update_grant", "ledger_delete_grant",

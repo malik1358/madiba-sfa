@@ -504,11 +504,14 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 /**
  * Pair invoices with credit notes that fully reverse them.
  *
- * 1) Same-day or next-day full amount (classic void / reissue cancel).
- * 2) Any later date when amount AND items+qty exactly match (full mirror CN).
+ * 1) Explicit Ref. No. → voucher (amount match) claims first — oldest CN first — so
+ *    identical same-day baskets (e.g. 1818/1819/1820) do not steal each other's CN.
+ *    A CN dated before its referenced invoice is still allowed when the reference
+ *    names that voucher (Tally forward Ref. No.); blank / unreferenced early CNs
+ *    must not reverse a later reissue.
+ * 2) Same-day or next-day full amount (classic void / reissue cancel).
+ * 3) Any later date when amount AND items+qty exactly match (full mirror CN).
  *
- * A CN dated BEFORE an invoice must not reverse that later sale — that pattern
- * is a live reissue (e.g. CN 121 voids 2384 on 31 Dec; sale 2397 on 1 Jan stays open).
  * Orphan / blank CNs stay unpaired when a vouchered CN already covers the void.
  */
 export function findImmediateCreditNoteReversals(
@@ -522,15 +525,91 @@ export function findImmediateCreditNoteReversals(
   }));
   const reversals = [];
   const reversedKeys = new Set();
+  const invoiceList = Array.isArray(invoices) ? invoices : [];
 
-  // Oldest invoice first so same-day voids claim CNs before any later reissue.
-  const orderedInvoices = [...(Array.isArray(invoices) ? invoices : [])].sort((left, right) => {
+  function noteAmountMatchesInvoice(note, invoiceAmount) {
+    return amountsMatch(note.remaining, invoiceAmount)
+      || amountsMatch(note.amount, invoiceAmount);
+  }
+
+  function noteRefsInvoice(note, invoice) {
+    const noteRef = normalizeRef(note.reference);
+    const invoiceRef = normalizeRef(invoice.voucher_number);
+    if (!noteRef || !invoiceRef) return false;
+    return noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef);
+  }
+
+  function pushReversal(invoice, note, days) {
+    note.remaining = 0;
+    const invoiceAmount = toNumber(invoice.amount);
+    const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+    reversedKeys.add(key);
+    reversals.push({
+      invoice_date: invoice.invoice_date,
+      voucher_number: invoice.voucher_number,
+      amount_excl_vat: toNumber(invoice.amount_excl_vat),
+      amount_incl_vat: invoiceAmount,
+      credit_note_date: note.credit_date,
+      credit_note_voucher: note.voucher_number,
+      credit_note_amount: toNumber(note.amount),
+      credit_note_reference: note.reference || "",
+      reversal_days: days,
+      status: "Reversed",
+    });
+  }
+
+  // Pass 1: referenced CNs claim their named invoice before fingerprint matching.
+  // Oldest credit note first so an earlier explicit void (e.g. CN 44 → 1820) wins
+  // over a later same-ref mirror; the later CN can still void another same-amount bill.
+  const notesByDate = [...unusedNotes].sort((left, right) => {
+    const byDate = String(left.credit_date || "").localeCompare(String(right.credit_date || ""));
+    if (byDate !== 0) return byDate;
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
+  for (const note of notesByDate) {
+    if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) continue;
+    if (!normalizeRef(note.reference)) continue;
+
+    const targets = invoiceList
+      .map((invoice, index) => {
+        const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+        if (reversedKeys.has(key)) return null;
+        const invoiceAmount = toNumber(invoice.amount);
+        if (invoiceAmount <= AMOUNT_TOLERANCE) return null;
+        if (!noteRefsInvoice(note, invoice)) return null;
+        if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
+        const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
+        if (offset == null) return null;
+        const exactMirror = itemsAndQtyExactlyMatch(note.items, invoice.items);
+        return {
+          invoice,
+          index,
+          offset,
+          score: (offset >= 0 ? 2000 : 0)
+            + (exactMirror ? 500 : 0)
+            - Math.abs(offset)
+            - index,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    const best = targets[0];
+    if (!best) continue;
+    pushReversal(best.invoice, note, best.offset);
+  }
+
+  // Pass 2: fingerprint / ±1-day window for notes and invoices still free.
+  const orderedInvoices = [...invoiceList].sort((left, right) => {
     const byDate = String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
     if (byDate !== 0) return byDate;
     return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
   });
 
   for (const invoice of orderedInvoices) {
+    const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+    if (reversedKeys.has(key)) continue;
     const invoiceAmount = toNumber(invoice.amount);
     if (invoiceAmount <= AMOUNT_TOLERANCE) continue;
 
@@ -538,15 +617,11 @@ export function findImmediateCreditNoteReversals(
       .map((note, index) => {
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
 
-        // CN must be on/after the invoice. Never reverse a later sale with an earlier CN.
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
         if (offset == null || offset < 0) return null;
         const days = offset;
 
-        const amountOk = amountsMatch(note.remaining, invoiceAmount)
-          || amountsMatch(note.amount, invoiceAmount);
-        // Full reverse only — partial credit notes stay in the normal ledger.
-        if (!amountOk) return null;
+        if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
 
         const noteVoucher = String(note.voucher_number || "").trim();
         const noteRef = normalizeRef(note.reference || note.voucher_number);
@@ -567,11 +642,7 @@ export function findImmediateCreditNoteReversals(
           && itemsAndQtyExactlyMatch(note.items, invoice.items);
         const withinWindow = days <= maxDays;
 
-        // Outside the ±1 day window: only exact amount + exact items/qty mirrors reverse.
         if (!withinWindow && !exactMirror) return null;
-
-        // Inside the window: when both sides have items, require overlap (or ref) so a
-        // same-amount CN does not reverse the wrong bill.
         if (withinWindow && noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) {
           return null;
         }
@@ -583,7 +654,7 @@ export function findImmediateCreditNoteReversals(
           score: (exactMirror ? 5000 : 0)
             + (refHit ? 1000 : 0)
             + (itemOverlap * 50)
-            + (amountOk ? 100 : 0)
+            + 100
             + (noteVoucher ? 25 : 0)
             - days,
         };
@@ -593,22 +664,7 @@ export function findImmediateCreditNoteReversals(
 
     const best = candidates[0];
     if (!best) continue;
-
-    best.note.remaining = 0;
-    const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
-    reversedKeys.add(key);
-    reversals.push({
-      invoice_date: invoice.invoice_date,
-      voucher_number: invoice.voucher_number,
-      amount_excl_vat: toNumber(invoice.amount_excl_vat),
-      amount_incl_vat: invoiceAmount,
-      credit_note_date: best.note.credit_date,
-      credit_note_voucher: best.note.voucher_number,
-      credit_note_amount: toNumber(best.note.amount),
-      credit_note_reference: best.note.reference || "",
-      reversal_days: best.days,
-      status: "Reversed",
-    });
+    pushReversal(invoice, best.note, best.days);
   }
 
   return { reversals, reversedKeys };

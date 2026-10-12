@@ -33,9 +33,32 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 ## Vercel
 
 - Framework: Next.js. `npm run build` / `npm run start`.
-- `vercel.json` registers one cron: `GET/POST` path `/api/cron/inactivity-push` on `*/10 * * * *`. Other schedules are GitHub Actions because Hobby cron limits were a problem for the 8-hour price sync and the KSA midnight jobs.
+- **Production only.** There is no cloud staging and no Vercel Preview usage. `vercel.json` → `git.deploymentEnabled` keeps automatic Git deployments on `main` only (`"**": false`, `"main": true`). Feature branches, PRs, and legacy `staging` branches must not create Vercel builds. GitHub Actions `Build` remains the PR validation path.
+- `vercel.json` also registers one cron: `GET/POST` path `/api/cron/inactivity-push` on `*/10 * * * *`. Other schedules are GitHub Actions because Hobby cron limits were a problem for the 8-hour price sync and the KSA midnight jobs.
 - Server actions accept bodies up to 20mb (`next.config.mjs`) for uploads.
 - Do not set `APP_ORIGIN` to a unique deployment URL (`*.vercel.app` preview host). Inactivity and late-login links use it. Production example in `.env.example` is `https://madiba-sfa.vercel.app`.
+
+### Disable preview deployments (operator checklist)
+
+Repo config alone is not enough until every open branch carries the new `vercel.json`, and project settings apply immediately to all Git events. Do both.
+
+**Already applied (2026-10-10) via Vercel API (no production env vars changed):**
+
+| Project | Action |
+| --- | --- |
+| `madiba-sfa` (`prj_IQgqkii5oWNqViDVpAndqua1lLdI`) | Production Branch already `main`. Ignored Build Step set to only build production: `if [ "$VERCEL_ENV" == "production" ]; then exit 1; else exit 0; fi`. Prioritize production builds already on. Elastic Standard (4 vCPU). No deploy hooks. |
+| `madiba-sfa-staging` (`prj_Wc51ggmzgJNLHWsI098gpqVtgxm3`) | Not Git-linked. Ignored Build Step set to always skip (`exit 0`). Project paused. |
+
+**Still required:**
+
+1. Merge the `git.deploymentEnabled` change on `main` (this file’s `vercel.json`) so non-`main` branches stop creating deployments entirely (stronger than Ignored Build Step alone).
+2. Optional: Deployments → filter Preview → delete stale preview deployments to reduce Function Storage.
+3. Verify after the next feature-branch push: GitHub Actions `Build` only — no successful Vercel Preview. Merging to `main` should still create one Production deployment.
+4. Do **not** change production environment variables, Supabase URLs/keys, or `APP_ORIGIN` as part of this cost control.
+
+### Build CPU cost notes
+
+Vercel bills **Build CPU Minutes** ≈ wall-clock build minutes × assigned vCPUs (Elastic often 4+). Preview builds for every PR push were the dominant cost when the team opened hundreds of PRs per month. After preview shutdown, expect roughly one production build per merge to `main`, plus rare redeploys. GitHub Actions `npm run build` on PRs does not bill Vercel Build CPU.
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 

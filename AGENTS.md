@@ -114,7 +114,7 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 - Local PC is development and staging. Validate and test locally before opening a PR.
 - Temporary feature / AI branches isolate changes. Open pull requests into `main`.
-- Production is `main` only (Vercel production + production Supabase).
+- Production is `main` only (Vercel production + production Supabase). Vercel Preview deployments are disabled (`vercel.json` `git.deploymentEnabled`); PR validation is GitHub Actions `Build`.
 - Never point local/dev at production Supabase keys.
 - Do not commit generated Android build output, `.next`, or env files.
 

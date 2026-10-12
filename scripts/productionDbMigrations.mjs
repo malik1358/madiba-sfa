@@ -14,6 +14,80 @@ export const ALLOWLISTED_MIGRATIONS = Object.freeze([
   { version: "20261002130000", file: "20261002130000_attachments.sql" },
 ]);
 
+/**
+ * Verified production ledger timestamp ↔ repository filename timestamp pairs (same migration name).
+ * Preflight treats the ledger version as covering the repo version when the ledger name matches.
+ * This does not insert, rename, or delete ledger rows and must not be used to skip unapplied DDL.
+ */
+export const MIGRATION_VERSION_ALIASES = Object.freeze([
+  { ledgerVersion: "20260909124154", repoVersion: "20260909160000", name: "inactivity_email_cycle_log" },
+  { ledgerVersion: "20260909133524", repoVersion: "20260909180000", name: "stock_take_line_changes" },
+  { ledgerVersion: "20260910111058", repoVersion: "20260910120000", name: "missing_invoice_pg_cron" },
+  { ledgerVersion: "20260912132201", repoVersion: "20260912180000", name: "collection_visits_rls" },
+  { ledgerVersion: "20260919090321", repoVersion: "20260919120000", name: "items_master_tally_unit" },
+  { ledgerVersion: "20261010072051", repoVersion: "20261010120000", name: "profiles_role_report_user" },
+  { ledgerVersion: "20261010123534", repoVersion: "20261010170000", name: "madiba_store_customer_gps_guard" },
+]);
+
+/**
+ * Ledger-only historical rows with no matching supabase/migrations file.
+ * Kept as an auditable trail; never invent no-op migration files for these.
+ */
+export const LEDGER_ONLY_HISTORY = Object.freeze([
+  {
+    version: "20260912061615",
+    name: "add_sales_profit_amount",
+    source: "sql/add_sales_profit_amount.sql (not under supabase/migrations/)",
+  },
+  {
+    version: "20261010115510",
+    name: "restore_junaid_activity_reminders_after_leave",
+    source: "production one-off data repair; no repo migration file",
+  },
+]);
+
+/**
+ * Repository migrations that must never run (or be history-repaired as applied) on production.
+ * Excluded from unrelated-pending blockers only after explicit quarantine.
+ */
+export const PRODUCTION_QUARANTINED_MIGRATIONS = Object.freeze([
+  {
+    version: "20260816000001",
+    file: "20260816000001_populate_test_invoices.sql",
+    reason: "test-data seed; must never execute or be marked applied on production",
+  },
+]);
+
+/**
+ * Repo versions attested present in the production schema but absent from the ledger
+ * (pre-ledger baseline / history gap). Clears unrelated-pending blockers only.
+ * Does not write the ledger and does not treat allowlisted pending DDL as applied.
+ * Uncertain migrations are intentionally omitted (fail closed).
+ */
+export const ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING = Object.freeze([
+  "20260808000000",
+  "20260816000000",
+  "20260816000002",
+  "20260817000000",
+  "20260822120000",
+  "20260822153000",
+  "20260822160000",
+  "20260824120000",
+  "20260825120000",
+  "20260828180000",
+  "20260831153000",
+  "20260904120000",
+  "20260904160000",
+  "20260904180000",
+  "20260907120000",
+  "20260908120000",
+  "20260908140000",
+  "20260909120000",
+  "20260914120000",
+  "20260914140000",
+  "20260929120000",
+]);
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TARGET_TABLES = ["sales_orders", "collection_visits", "customer_documents", "attachments"];
 const PREFLIGHT_DATA_COLUMNS = Object.freeze([
@@ -119,7 +193,9 @@ const SQL = {
         AND constraint_row.contype = 'p' AND constraint_row.convalidated
         AND NOT constraint_row.condeferrable AND array_length(constraint_row.conkey, 1) = 1
         AND constraint_row.conkey[1] = attribute.attnum) AS ledger_version_unique;`,
+  /** Readonly role is granted SELECT on version only; names are loaded via the migration URL. */
   ledger: `SELECT version::text AS version FROM supabase_migrations.schema_migrations ORDER BY version;`,
+  ledgerNamed: `SELECT version::text AS version, name::text AS name FROM supabase_migrations.schema_migrations ORDER BY version;`,
   tables: `SELECT expected.table_name, relation.oid IS NOT NULL AS exists,
     COALESCE(relation.relkind IN ('r', 'p'), false) AS is_table,
     COALESCE(relation.relrowsecurity, false) AS rls_enabled,
@@ -573,17 +649,166 @@ export function assertMutationAllowed(stage) {
   if (mutationGate !== "apply") throw new Error(`preflight mode forbids mutation: ${stage}`);
 }
 
-export function migrationScope(repoVersions, ledgerVersions) {
+export function normalizeLedgerEntries(ledgerVersionsOrEntries) {
+  if (!Array.isArray(ledgerVersionsOrEntries)) throw new Error("ledger entries must be an array");
+  return ledgerVersionsOrEntries.map((item, index) => {
+    if (typeof item === "string") return { version: item, name: null };
+    if (!item || typeof item !== "object") throw new Error(`ledger entry ${index} is invalid`);
+    const version = String(item.version || "");
+    if (!/^[0-9]{14}$/.test(version)) throw new Error(`ledger entry ${index} has invalid version`);
+    const name = item.name == null || item.name === "" ? null : String(item.name);
+    return { version, name };
+  });
+}
+
+export function assertMigrationReconciliationConfig() {
+  const issues = [];
+  const allow = new Set(ALLOWLISTED_MIGRATIONS.map((migration) => migration.version));
+  const quarantine = new Set(PRODUCTION_QUARANTINED_MIGRATIONS.map((migration) => migration.version));
+  const attested = new Set(ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING);
+  const ledgerOnly = new Set(LEDGER_ONLY_HISTORY.map((entry) => entry.version));
+  const aliasLedger = new Set();
+  const aliasRepo = new Set();
+
+  for (const alias of MIGRATION_VERSION_ALIASES) {
+    if (!/^[0-9]{14}$/.test(alias.ledgerVersion) || !/^[0-9]{14}$/.test(alias.repoVersion)) {
+      issues.push(`alias ${alias.name} has invalid version format`);
+    }
+    if (alias.ledgerVersion === alias.repoVersion) issues.push(`alias ${alias.name} maps a version to itself`);
+    if (aliasLedger.has(alias.ledgerVersion)) issues.push(`duplicate alias ledger version ${alias.ledgerVersion}`);
+    if (aliasRepo.has(alias.repoVersion)) issues.push(`duplicate alias repo version ${alias.repoVersion}`);
+    aliasLedger.add(alias.ledgerVersion);
+    aliasRepo.add(alias.repoVersion);
+    if (allow.has(alias.ledgerVersion) || allow.has(alias.repoVersion)) {
+      issues.push(`alias ${alias.name} intersects allowlisted migrations`);
+    }
+    if (quarantine.has(alias.ledgerVersion) || quarantine.has(alias.repoVersion)) {
+      issues.push(`alias ${alias.name} intersects quarantined migrations`);
+    }
+    if (attested.has(alias.repoVersion) || attested.has(alias.ledgerVersion)) {
+      issues.push(`alias ${alias.name} intersects attested history-missing list`);
+    }
+    if (ledgerOnly.has(alias.ledgerVersion) || ledgerOnly.has(alias.repoVersion)) {
+      issues.push(`alias ${alias.name} intersects ledger-only history`);
+    }
+  }
+
+  for (const version of allow) {
+    if (attested.has(version)) issues.push(`allowlisted version must not be attested history-missing: ${version}`);
+    if (quarantine.has(version)) issues.push(`allowlisted version must not be quarantined: ${version}`);
+    if (ledgerOnly.has(version)) issues.push(`allowlisted version must not be ledger-only: ${version}`);
+  }
+  for (const version of quarantine) {
+    if (attested.has(version)) issues.push(`quarantined version must not be attested: ${version}`);
+    if (ledgerOnly.has(version)) issues.push(`quarantined version must not be ledger-only: ${version}`);
+  }
+  for (const entry of LEDGER_ONLY_HISTORY) {
+    if (attested.has(entry.version)) issues.push(`ledger-only version must not be attested: ${entry.version}`);
+  }
+  if (new Set(ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING).size !== ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING.length) {
+    issues.push("attested history-missing list has duplicate versions");
+  }
+  if (issues.length) throw new Error(`migration reconciliation config invalid: ${issues.join("; ")}`);
+}
+
+/**
+ * Classify repo vs ledger versions for production preflight.
+ * Accepts ledger version strings or { version, name } rows. Alias / ledger-only
+ * recognition requires names (fail closed when a mapped ledger row omits name).
+ */
+export function migrationScope(repoVersions, ledgerVersionsOrEntries) {
+  assertMigrationReconciliationConfig();
+  if (!Array.isArray(repoVersions)) throw new Error("repo versions must be an array");
+  const repo = repoVersions.map((version) => String(version));
+  const ledgerEntries = normalizeLedgerEntries(ledgerVersionsOrEntries);
+  const ledgerVersions = ledgerEntries.map((entry) => entry.version);
   const ledger = new Set(ledgerVersions);
+  const ledgerByVersion = new Map(ledgerEntries.map((entry) => [entry.version, entry]));
   const allowlist = new Set(ALLOWLISTED_MIGRATIONS.map((migration) => migration.version));
-  const pending = repoVersions.filter((version) => !ledger.has(version));
-  const unrelatedPending = pending.filter((version) => !allowlist.has(version));
-  const latestAllowed = ALLOWLISTED_MIGRATIONS.at(-1).version;
+  const quarantine = new Set(PRODUCTION_QUARANTINED_MIGRATIONS.map((migration) => migration.version));
+  const attested = new Set(ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING);
+  const ledgerOnlyByVersion = new Map(LEDGER_ONLY_HISTORY.map((entry) => [entry.version, entry]));
+
+  const reconciliationIssues = [];
+  const matchedAliases = [];
+  const coveredRepoByAlias = new Set();
+
+  for (const alias of MIGRATION_VERSION_ALIASES) {
+    const entry = ledgerByVersion.get(alias.ledgerVersion);
+    if (!entry) continue;
+    if (entry.name == null) {
+      reconciliationIssues.push(`ledger version ${alias.ledgerVersion} missing name required for alias ${alias.name}`);
+      continue;
+    }
+    if (entry.name !== alias.name) {
+      reconciliationIssues.push(
+        `alias name mismatch for ${alias.ledgerVersion}: ledger has "${entry.name}", expected "${alias.name}"`,
+      );
+      continue;
+    }
+    if (ledger.has(alias.repoVersion)) {
+      reconciliationIssues.push(
+        `duplicate migration history for ${alias.name}: ledger has both ${alias.ledgerVersion} and ${alias.repoVersion}`,
+      );
+      continue;
+    }
+    if (!repo.includes(alias.repoVersion)) {
+      reconciliationIssues.push(`alias ${alias.name} repo version ${alias.repoVersion} missing from repository`);
+      continue;
+    }
+    matchedAliases.push(alias);
+    coveredRepoByAlias.add(alias.repoVersion);
+  }
+
+  const recognizedLedgerOnly = [];
+  for (const [version, meta] of ledgerOnlyByVersion) {
+    if (!ledger.has(version)) continue;
+    const entry = ledgerByVersion.get(version);
+    if (entry.name == null) {
+      reconciliationIssues.push(`ledger-only version ${version} missing name required for ${meta.name}`);
+      continue;
+    }
+    if (entry.name !== meta.name) {
+      reconciliationIssues.push(
+        `ledger-only name mismatch for ${version}: ledger has "${entry.name}", expected "${meta.name}"`,
+      );
+      continue;
+    }
+    if (repo.includes(version)) {
+      reconciliationIssues.push(`ledger-only version ${version} unexpectedly present in repository`);
+      continue;
+    }
+    recognizedLedgerOnly.push(meta);
+  }
+
+  const pending = repo.filter((version) => !ledger.has(version) && !coveredRepoByAlias.has(version));
+  const quarantinedPending = pending.filter((version) => quarantine.has(version));
+  const attestedHistoryMissing = pending.filter((version) => attested.has(version));
+  const allowlistedPending = pending.filter((version) => allowlist.has(version));
+  const unrelatedPending = pending.filter(
+    (version) => !allowlist.has(version) && !quarantine.has(version) && !attested.has(version),
+  );
+
+  const recognizedLedgerVersions = new Set([
+    ...ledgerVersions.filter((version) => repo.includes(version)),
+    ...matchedAliases.map((alias) => alias.ledgerVersion),
+    ...recognizedLedgerOnly.map((entry) => entry.version),
+  ]);
+  const untrackedApplied = ledgerVersions.filter((version) => !recognizedLedgerVersions.has(version));
+
   return {
     pending,
+    allowlistedPending,
+    quarantinedPending,
+    attestedHistoryMissing,
+    coveredByAlias: [...coveredRepoByAlias].sort(),
+    matchedAliases,
+    recognizedLedgerOnly,
     unrelatedPending,
     blockingUnrelatedPending: unrelatedPending,
-    untrackedApplied: ledgerVersions.filter((version) => !repoVersions.includes(version)),
+    untrackedApplied,
+    reconciliationIssues,
+    ledgerVersions,
   };
 }
 
@@ -754,7 +979,36 @@ function collectReadonlyPreflight(dbUrl) {
 
   const repoVersions = readdirSync(path.join(ROOT, "supabase", "migrations"))
     .map((file) => /^([0-9]{14})_.+\.sql$/.exec(file)?.[1]).filter(Boolean).sort();
-  return { identity, ledgerVersions, repoVersions, tables, columns, indexes, constraints, policies, tableSet, columnSet, duplicates: new Map() };
+  return {
+    identity,
+    ledgerVersions,
+    repoVersions,
+    tables,
+    columns,
+    indexes,
+    constraints,
+    policies,
+    tableSet,
+    columnSet,
+    duplicates: new Map(),
+  };
+}
+
+function collectNamedLedgerEntries(migrationUrl, readonlyLedgerVersions) {
+  const named = normalizeLedgerEntries(query(migrationUrl, SQL.ledgerNamed, "migration ledger names").map((row) => ({
+    version: row.version,
+    name: row.name,
+  })));
+  const readonlySet = new Set(readonlyLedgerVersions);
+  const namedVersions = named.map((entry) => entry.version);
+  const namedSet = new Set(namedVersions);
+  if (readonlySet.size !== namedSet.size || [...readonlySet].some((version) => !namedSet.has(version))) {
+    throw new Error("migration ledger version set differs between readonly and migration connections");
+  }
+  for (const entry of named) {
+    if (entry.name == null) throw new Error(`migration ledger version ${entry.version} has a null name`);
+  }
+  return named;
 }
 
 function assertIntegrityVisibility(dbUrl, tables) {
@@ -792,15 +1046,17 @@ function collectIntegrityCounts(dbUrl, tableSet, columnSet) {
 
 function collectPreflight(readUrl, migrationUrl) {
   const schema = collectReadonlyPreflight(readUrl);
+  schema.ledgerEntries = collectNamedLedgerEntries(migrationUrl, schema.ledgerVersions);
   schema.duplicates = collectIntegrityCounts(migrationUrl, schema.tableSet, schema.columnSet);
   return schema;
 }
 
 function blockersFor(schema) {
-  const scope = migrationScope(schema.repoVersions, schema.ledgerVersions);
+  const scope = migrationScope(schema.repoVersions, schema.ledgerEntries || schema.ledgerVersions);
   const states = assessMigrationSchema(schema);
   const blockers = [
     ...states.flatMap((state) => state.issues.map((issue) => `${state.version}: ${issue}`)),
+    ...scope.reconciliationIssues.map((issue) => `migration reconciliation: ${issue}`),
     ...scope.unrelatedPending.map((version) => `unrelated pending migration ${version}`),
     ...scope.untrackedApplied.map((version) => `applied migration ${version} is absent from current main`),
     ...[...schema.duplicates.entries()].filter(([, count]) => count > 0).map(([key, count]) => `${key}: ${count} duplicate/orphan groups`),
@@ -904,6 +1160,10 @@ function writeAudit(report) {
     ...rows,
     "",
     `- Older/unrelated pending migrations: ${report.unrelatedPending?.length ? report.unrelatedPending.map((version) => `\`${version}\``).join(", ") : "none"}`,
+    `- Alias-covered repo versions: ${report.coveredByAlias?.length ? report.coveredByAlias.map((version) => `\`${version}\``).join(", ") : "none"}`,
+    `- Attested schema-present / history-missing: ${report.attestedHistoryMissing?.length ? report.attestedHistoryMissing.map((version) => `\`${version}\``).join(", ") : "none"}`,
+    `- Quarantined pending (not applied): ${report.quarantinedPending?.length ? report.quarantinedPending.map((version) => `\`${version}\``).join(", ") : "none"}`,
+    `- Recognized ledger-only history: ${report.recognizedLedgerOnly?.length ? report.recognizedLedgerOnly.map((entry) => `\`${entry.version}\``).join(", ") : "none"}`,
     `- Execution status: **${report.execution || "not run"}**`,
     `- Post-execution verification: **${report.postVerification || "not run"}**`,
   ];
@@ -937,6 +1197,10 @@ export async function runMigrationWorkflow(env = process.env) {
     report.tls = bool(schema.identity.tls);
     report.states = states;
     report.unrelatedPending = scope.unrelatedPending;
+    report.coveredByAlias = scope.coveredByAlias;
+    report.attestedHistoryMissing = scope.attestedHistoryMissing;
+    report.quarantinedPending = scope.quarantinedPending;
+    report.recognizedLedgerOnly = scope.recognizedLedgerOnly;
     report.inventory = schemaInventory(schema);
     report.integrity = integritySummary(schema);
     if (blockers.length) {

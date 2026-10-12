@@ -98,6 +98,15 @@ Preflight verifies that the migration ledger has the required repair columns (`v
 
 The job summary records the actor, SHA, project ref, allowlisted versions, preflight, execution and post-verification status, without database URLs or raw CLI output. Any failure after an execution or history-recording attempt is classified as potentially committed; inspect the runner audit and database schema/ledger before retrying. A migration that committed but whose history record failed is reported as schema-present/history-missing; rerunning a reviewed apply records that verified schema in the ledger without re-executing SQL. Conflicts, partial schema, unrelated pending migrations, and untracked applied versions block execution and require separate investigation. Never use `db push`, `migration up`, or manually mark a version applied to bypass a blocker.
 
+**Migration history reconciliation (runner-side, no ledger writes):** Preflight classifies repo vs `supabase_migrations.schema_migrations` using frozen tables in `scripts/productionDbMigrations.mjs`:
+
+- `MIGRATION_VERSION_ALIASES` — dashboard timestamp ↔ repo filename timestamp for the same migration `name`. The ledger row stays authoritative; the repo timestamp is treated as covered only when the migration-role ledger query returns the expected name. This does **not** insert a second ledger row.
+- `LEDGER_ONLY_HISTORY` — production-only ledger rows with no `supabase/migrations/` file (for example `add_sales_profit_amount`, `restore_junaid_activity_reminders_after_leave`). Recognized as historical; do **not** add empty stub migration files that could later be mistaken for applied DDL.
+- `ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING` — repo versions attested present in the production schema but absent from the ledger. Clears unrelated-pending blockers only; does **not** run SQL or call `migration repair`.
+- `PRODUCTION_QUARANTINED_MIGRATIONS` — currently `20260816000001_populate_test_invoices` (test-data seed). Remains pending in classification but never blocks allowlisted work and must never be executed or history-repaired as applied on production.
+
+Readonly credentials keep `SELECT` on ledger `version` only. Named ledger rows (for alias / ledger-only verification) are loaded on `PRODUCTION_DB_MIGRATION_URL` and must match the readonly version set exactly; name mismatches, duplicate alias pairs, and unknown ledger/repo versions fail closed. Allowlisted states stay distinct: `20260930190000` may be schema-present/history-missing; `20261002120000` and `20261002130000` stay genuinely pending until a separately authorized apply. Uncertain migrations omitted from the attested list continue to block.
+
 Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
 
 ### Production database access provisioning

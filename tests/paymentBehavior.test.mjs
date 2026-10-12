@@ -43,6 +43,34 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
+test("matchPaymentsFifo treats negative Payment vouchers as receipt-side reversals", () => {
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-01-15", amount: 1150, vch_no: "R1" },
+      { receipt_date: "2026-01-20", amount: -230, vch_no: "PV-1", vch_type: "Payment" },
+    ],
+  );
+
+  assert.equal(allocations.length, 1);
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 920);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 230);
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Paper" },
+    ],
+    receipts: [
+      { receipt_date: "2026-01-15", amount: 1150, vch_no: "R1" },
+      { receipt_date: "2026-01-20", amount: -230, vch_no: "PV-1", vch_type: "Payment" },
+    ],
+  });
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 920);
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 230);
+});
+
 test("matchPaymentsFifo applies an advance receipt to the next customer invoice", () => {
   const { allocations, invoices, unmatchedReceiptAmount } = matchPaymentsFifo(
     [

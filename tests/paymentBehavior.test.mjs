@@ -1148,3 +1148,117 @@ test("same-amount CN with different items does not reverse outside the 1-day win
   assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1"), true);
   assert.equal(ledger.creditNotes.some((row) => row.voucher_number === "CN-9"), true);
 });
+
+test("referenced CNs claim their voucher before same-amount twins steal them (1198)", () => {
+  const basket = [
+    { item_code: "A003457", quantity: 1, sales_amount: 81, category: "Personal Care" },
+    { item_code: "A004082", quantity: 10, sales_amount: 1190, category: "Stationery" },
+  ];
+  const transactions = [
+    // Early CN 44 names 1820 before that bill's date (Tally forward Ref. No.).
+    ...basket.map((row) => ({
+      transaction_date: "2025-11-13",
+      voucher_number: "44",
+      voucher_type: "Credit Note",
+      reference: "1820",
+      ...row,
+      quantity: Math.abs(row.quantity),
+      sales_amount: Math.abs(row.sales_amount),
+    })),
+    // Same-day void of 1730 by CN 43.
+    ...basket.flatMap((row) => [
+      {
+        transaction_date: "2025-11-13",
+        voucher_number: "1730",
+        voucher_type: "Sales",
+        ...row,
+      },
+      {
+        transaction_date: "2025-11-13",
+        voucher_number: "43",
+        voucher_type: "Credit Note",
+        reference: "1730",
+        ...row,
+        quantity: -row.quantity,
+        sales_amount: -row.sales_amount,
+      },
+    ]),
+    // Three identical reissue baskets; CN refs must win over oldest-first fingerprint.
+    ...["1818", "1819", "1820"].flatMap((voucher) => basket.map((row) => ({
+      transaction_date: "2025-11-19",
+      voucher_number: voucher,
+      voucher_type: "Sales",
+      ...row,
+    }))),
+    ...basket.map((row) => ({
+      transaction_date: "2025-11-19",
+      voucher_number: "045",
+      voucher_type: "Credit Note",
+      reference: "1819",
+      ...row,
+      quantity: -row.quantity,
+      sales_amount: -row.sales_amount,
+    })),
+    ...basket.map((row) => ({
+      transaction_date: "2025-11-19",
+      voucher_number: "046",
+      voucher_type: "Credit Note",
+      reference: "1820",
+      ...row,
+      quantity: -row.quantity,
+      sales_amount: -row.sales_amount,
+    })),
+  ];
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions,
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-12",
+  });
+
+  const byInvoice = Object.fromEntries(
+    (ledger.reversedInvoices || []).map((row) => [row.voucher_number, row.credit_note_voucher]),
+  );
+  assert.equal(byInvoice["1730"], "43");
+  assert.equal(byInvoice["1820"], "44");
+  assert.equal(byInvoice["1819"], "045");
+  // Leftover same-day mirror (046 refs 1820, already voided by 44) clears the twin 1818.
+  assert.equal(byInvoice["1818"], "046");
+  assert.equal(ledger.invoices.length, 0);
+});
+
+test("blank early CN still must not reverse a next-day reissue", () => {
+  const item = { item_code: "P-100", quantity: 10, category: "Paper", sales_amount: 1000 };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-12-31", voucher_number: "2384", ...item },
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "121",
+        voucher_type: "Credit Note",
+        reference: "2384",
+        ...item,
+        sales_amount: -1000,
+        quantity: -10,
+      },
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "",
+        voucher_type: "Credit Note",
+        ...item,
+        sales_amount: -1000,
+        quantity: -10,
+      },
+      { transaction_date: "2026-01-01", voucher_number: "2397", ...item },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "2384");
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "2397"), true);
+});
+

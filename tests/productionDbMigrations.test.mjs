@@ -1,14 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALLOWLISTED_MIGRATIONS,
+  ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING,
   INTEGRITY_SCANS,
+  LEDGER_ONLY_HISTORY,
+  MIGRATION_VERSION_ALIASES,
   PRODUCTION_PROJECT_REF,
+  PRODUCTION_QUARANTINED_MIGRATIONS,
   PRODUCTION_SESSION_POOLER_HOST,
   assertIntegrityScanSql,
+  assertMigrationReconciliationConfig,
   assertMutationAllowed,
   assessMigrationSchema,
   buildIntegrityScanScript,
@@ -20,6 +25,7 @@ import {
   migrationLedgerRepairIssues,
   migrationRoleIssues,
   migrationScope,
+  normalizeLedgerEntries,
   parseIntegrityScanCounts,
   roleMembershipPrivilegeForVersion,
   readonlySecuritySql,
@@ -29,6 +35,27 @@ import {
   validateProductionDatabaseUrl,
   validateWorkflowContext,
 } from "../scripts/productionDbMigrations.mjs";
+
+/** Production ledger inventory captured during the 2026-10-12 read-only reconciliation audit. */
+const PRODUCTION_LEDGER_AUDIT = Object.freeze([
+  { version: "20260909124154", name: "inactivity_email_cycle_log" },
+  { version: "20260909133524", name: "stock_take_line_changes" },
+  { version: "20260910111058", name: "missing_invoice_pg_cron" },
+  { version: "20260912061615", name: "add_sales_profit_amount" },
+  { version: "20260912132201", name: "collection_visits_rls" },
+  { version: "20260919090321", name: "items_master_tally_unit" },
+  { version: "20261009120000", name: "kpi_targets_local_item_sales" },
+  { version: "20261010072051", name: "profiles_role_report_user" },
+  { version: "20261010115510", name: "restore_junaid_activity_reminders_after_leave" },
+  { version: "20261010123534", name: "madiba_store_customer_gps_guard" },
+]);
+
+function repoVersionsFromMigrationsDir() {
+  return readdirSync(path.join(repoRoot, "supabase", "migrations"))
+    .map((file) => /^([0-9]{14})_.+\.sql$/.exec(file)?.[1])
+    .filter(Boolean)
+    .sort();
+}
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflow = readFileSync(path.join(repoRoot, ".github/workflows/production-db-migrations.yml"), "utf8");
@@ -198,6 +225,201 @@ test("preflight separates allowlisted work from older and newer unrelated pendin
   assert.deepEqual(scope.pending, ["20260930190000", "20261002120000", "20261002130000", "20261003120000", "20261101120000"]);
   assert.deepEqual(scope.unrelatedPending, ["20261003120000", "20261101120000"]);
   assert.deepEqual(scope.blockingUnrelatedPending, ["20261003120000", "20261101120000"]);
+});
+
+test("reconciliation config is internally consistent and excludes allowlisted versions", () => {
+  assert.doesNotThrow(() => assertMigrationReconciliationConfig());
+  const allow = new Set(ALLOWLISTED_MIGRATIONS.map((migration) => migration.version));
+  for (const alias of MIGRATION_VERSION_ALIASES) {
+    assert.equal(allow.has(alias.ledgerVersion), false);
+    assert.equal(allow.has(alias.repoVersion), false);
+  }
+  for (const version of ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING) {
+    assert.equal(allow.has(version), false);
+  }
+  for (const entry of PRODUCTION_QUARANTINED_MIGRATIONS) {
+    assert.equal(allow.has(entry.version), false);
+  }
+});
+
+test("version aliases cover repo timestamps without duplicating ledger rows", () => {
+  const repo = [
+    "20260909160000",
+    "20260909180000",
+    "20260910120000",
+    "20260912180000",
+    "20260919120000",
+    "20261009120000",
+    "20261010120000",
+    "20261010170000",
+  ];
+  const scope = migrationScope(repo, PRODUCTION_LEDGER_AUDIT);
+  assert.deepEqual(scope.coveredByAlias, [
+    "20260909160000",
+    "20260909180000",
+    "20260910120000",
+    "20260912180000",
+    "20260919120000",
+    "20261010120000",
+    "20261010170000",
+  ]);
+  assert.equal(scope.matchedAliases.length, 7);
+  assert.deepEqual(scope.untrackedApplied, []);
+  assert.equal(scope.pending.includes("20260909160000"), false);
+  assert.equal(scope.reconciliationIssues.length, 0);
+});
+
+test("ledger-only history is recognized without inventing repo migration files", () => {
+  const scope = migrationScope(
+    ["20261009120000"],
+    [
+      { version: "20261009120000", name: "kpi_targets_local_item_sales" },
+      { version: "20260912061615", name: "add_sales_profit_amount" },
+      { version: "20261010115510", name: "restore_junaid_activity_reminders_after_leave" },
+    ],
+  );
+  assert.deepEqual(
+    scope.recognizedLedgerOnly.map((entry) => entry.version).sort(),
+    LEDGER_ONLY_HISTORY.map((entry) => entry.version).sort(),
+  );
+  assert.deepEqual(scope.untrackedApplied, []);
+  assert.equal(scope.reconciliationIssues.length, 0);
+  assert.equal(scope.pending.includes("20260912061615"), false);
+});
+
+test("duplicate ledger rows for an alias pair fail closed", () => {
+  const scope = migrationScope(
+    ["20260909160000"],
+    [
+      { version: "20260909124154", name: "inactivity_email_cycle_log" },
+      { version: "20260909160000", name: "inactivity_email_cycle_log" },
+    ],
+  );
+  assert.match(scope.reconciliationIssues.join(" "), /duplicate migration history/);
+  assert.deepEqual(scope.coveredByAlias, []);
+});
+
+test("alias name mismatch fails closed and leaves ledger version untracked", () => {
+  const scope = migrationScope(
+    ["20260909160000"],
+    [{ version: "20260909124154", name: "wrong_name" }],
+  );
+  assert.match(scope.reconciliationIssues.join(" "), /alias name mismatch/);
+  assert.deepEqual(scope.untrackedApplied, ["20260909124154"]);
+  assert.deepEqual(scope.pending, ["20260909160000"]);
+});
+
+test("missing ledger name fails closed for alias and ledger-only recognition", () => {
+  const aliasScope = migrationScope(
+    ["20260909160000"],
+    [{ version: "20260909124154", name: null }],
+  );
+  assert.match(aliasScope.reconciliationIssues.join(" "), /missing name required for alias/);
+  assert.deepEqual(aliasScope.untrackedApplied, ["20260909124154"]);
+
+  const onlyScope = migrationScope([], [{ version: "20261010115510", name: null }]);
+  assert.match(onlyScope.reconciliationIssues.join(" "), /missing name required for restore_junaid/);
+  assert.deepEqual(onlyScope.untrackedApplied, ["20261010115510"]);
+});
+
+test("unapplied migrations remain pending and are not treated as applied", () => {
+  const scope = migrationScope(
+    [
+      "20260930190000",
+      "20261002120000",
+      "20261002130000",
+      "20261003120000",
+    ],
+    PRODUCTION_LEDGER_AUDIT,
+  );
+  assert.deepEqual(scope.allowlistedPending, [
+    "20260930190000",
+    "20261002120000",
+    "20261002130000",
+  ]);
+  assert.deepEqual(scope.unrelatedPending, ["20261003120000"]);
+  assert.equal(scope.pending.includes("20261002120000"), true);
+  assert.equal(scope.attestedHistoryMissing.includes("20261002120000"), false);
+  assert.equal(scope.coveredByAlias.includes("20261002120000"), false);
+});
+
+test("schema-present history-missing allowlisted request_id stays classified for history repair only", () => {
+  const historyGap = assessMigrationSchema(emptySchema({
+    columns: [{ table_name: "sales_orders", column_name: "request_id", data_type: "uuid", is_nullable: "YES" }],
+    indexes: [{
+      table_name: "sales_orders",
+      index_name: "sales_orders_request_id_key",
+      definition: "CREATE UNIQUE INDEX sales_orders_request_id_key ON public.sales_orders USING btree (request_id) WHERE (request_id IS NOT NULL)",
+    }],
+  }));
+  assert.equal(historyGap[0].version, "20260930190000");
+  assert.equal(historyGap[0].status, "schema-present-history-missing");
+  assert.equal(migrationActionForState(historyGap[0].status), "record-history");
+  assert.equal(historyGap[1].status, "pending");
+  assert.equal(historyGap[2].status, "pending");
+  assert.equal(migrationActionForState(historyGap[1].status), "execute");
+  assert.equal(migrationActionForState(historyGap[2].status), "execute");
+});
+
+test("quarantined test-data migration is excluded from unrelated pending blockers", () => {
+  assert.equal(PRODUCTION_QUARANTINED_MIGRATIONS[0].version, "20260816000001");
+  const scope = migrationScope(
+    ["20260816000001", "20261003120000", "20260930190000"],
+    [],
+  );
+  assert.deepEqual(scope.quarantinedPending, ["20260816000001"]);
+  assert.deepEqual(scope.unrelatedPending, ["20261003120000"]);
+  assert.equal(scope.pending.includes("20260816000001"), true);
+});
+
+test("attested history-missing versions clear unrelated blockers without marking allowlisted DDL applied", () => {
+  const attested = ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING[0];
+  const scope = migrationScope(
+    [attested, "20260930190000", "20261002120000", "20261002130000", "20260819000000"],
+    [],
+  );
+  assert.deepEqual(scope.attestedHistoryMissing, [attested]);
+  assert.deepEqual(scope.allowlistedPending, [
+    "20260930190000",
+    "20261002120000",
+    "20261002130000",
+  ]);
+  assert.deepEqual(scope.unrelatedPending, ["20260819000000"]);
+});
+
+test("unknown ledger versions and unknown repo pending fail closed", () => {
+  const scope = migrationScope(
+    ["20269999120000", "20260930190000"],
+    [{ version: "20269999000000", name: "mystery_remote_migration" }],
+  );
+  assert.deepEqual(scope.untrackedApplied, ["20269999000000"]);
+  assert.deepEqual(scope.unrelatedPending, ["20269999120000"]);
+  assert.deepEqual(scope.allowlistedPending, ["20260930190000"]);
+});
+
+test("production audit inventory reconciles aliases and ledger-only rows against current main", () => {
+  const repo = repoVersionsFromMigrationsDir();
+  const scope = migrationScope(repo, PRODUCTION_LEDGER_AUDIT);
+  assert.equal(scope.reconciliationIssues.length, 0);
+  assert.deepEqual(scope.untrackedApplied, []);
+  assert.equal(scope.matchedAliases.length, MIGRATION_VERSION_ALIASES.length);
+  assert.equal(scope.recognizedLedgerOnly.length, LEDGER_ONLY_HISTORY.length);
+  assert.deepEqual(scope.quarantinedPending, ["20260816000001"]);
+  assert.deepEqual(scope.allowlistedPending, [
+    "20260930190000",
+    "20261002120000",
+    "20261002130000",
+  ]);
+  // Uncertain migrations intentionally remain blockers until separately attested.
+  for (const version of [
+    "20260819000000",
+    "20260824163000",
+    "20260831120000",
+    "20260914190000",
+  ]) {
+    assert.equal(scope.unrelatedPending.includes(version), true, version);
+  }
+  assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 10);
 });
 
 test("production database URL requires verified TLS and is pinned to production", () => {

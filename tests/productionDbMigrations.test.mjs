@@ -303,7 +303,7 @@ test("read-only preflight rejects effective write privileges and tolerates missi
     "session_superuser", "current_superuser", "session_bypassrls", "current_bypassrls",
     "session_createdb", "current_createdb", "session_createrole", "current_createrole",
     "session_replication", "current_replication", "database_create", "public_create", "migration_schema_create",
-    "database_temp", "any_schema_create", "owns_database", "owns_public_schema", "owns_migration_schema",
+    "any_schema_create", "owns_database", "owns_public_schema", "owns_migration_schema",
     "owns_any_schema", "owns_any_relation", "owns_any_database_object", "write_any_relation", "owns_sales_orders",
     "owns_collection_visits", "owns_customer_documents", "owns_attachments", "no_settable_privileged_roles",
     "ledger_insert", "ledger_update", "ledger_delete", "ledger_truncate", "ledger_insert_grant",

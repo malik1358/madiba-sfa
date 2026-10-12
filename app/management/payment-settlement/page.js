@@ -32,8 +32,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Paid and Open follow cash FIFO on each invoice (not forced to the outstanding upload). Use Outstanding Compare for Tally vs computed gaps. Avg days uses paid receipts, then only open invoices older than that paid avg. Immediate credit-note reversals stay in Sales but are excluded from avg days.",
-    ar: "المدفوع والمفتوح يتبعان التحصيل حسب الأقدم أولاً لكل فاتورة (دون إجبار ملف المستحقات). استخدم مقارنة المستحقات لفروق تالي. متوسط الأيام من الإيصالات المدفوعة ثم فقط الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
+    en: "Paid is cash FIFO plus VAT-inclusive credit notes on each invoice; Open is the residual after both (not forced to the outstanding upload). Use Outstanding Compare for Tally vs computed gaps. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate credit-note reversals stay in Sales but are excluded from avg days.",
+    ar: "المدفوع = التحصيل حسب الأقدم أولاً + إشعارات دائنة شاملة الضريبة لكل فاتورة؛ المفتوح هو المتبقي بعدهما (دون إجبار ملف المستحقات). استخدم مقارنة المستحقات لفروق تالي. متوسط الأيام من الإيصالات المدفوعة فقط ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
   },
 };
 
@@ -567,8 +567,8 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Machine Open is FIFO (sales − cash applied). Tally Open is the outstanding upload per invoice.
-                  Open Δ highlights where they disagree — use{" "}
+                  Paid is cash FIFO plus VAT-inclusive credit notes. Machine Open is the residual after both.
+                  Tally Open is the outstanding upload per invoice. Open Δ highlights where they disagree — use{" "}
                   <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below for the full gap report.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">

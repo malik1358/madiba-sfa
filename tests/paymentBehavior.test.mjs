@@ -593,8 +593,46 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 420);
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 420);
   const inv1 = ledger.invoices.find((row) => row.voucher_number === "INV1");
-  assert.equal(Number(inv1.paid_amount.toFixed(2)), 500);
+  // Paid column = cash FIFO + VAT-inclusive CN (200 excl → 230 incl).
+  assert.equal(Number(inv1.fifo_paid.toFixed(2)), 500);
+  assert.equal(Number(inv1.credit_note_settled.toFixed(2)), 230);
+  assert.equal(Number(inv1.paid_amount.toFixed(2)), 730);
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
+});
+
+test("Paid column includes VAT-inclusive credit note with cash receipts (invoice 2395-style)", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "2395", sales_amount: 10220, category: "Paper" },
+      {
+        transaction_date: "2026-02-10",
+        voucher_number: "56",
+        voucher_type: "Credit Note",
+        reference: "2395",
+        sales_amount: -1320,
+        category: "Paper",
+      },
+    ],
+    receipts: [
+      { receipt_date: "2026-02-16", amount: 7855, vch_no: "314" },
+      { receipt_date: "2026-02-22", amount: 2380, vch_no: "362" },
+    ],
+    outstandingInvoices: [],
+    todayIso: "2026-03-01",
+  });
+
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "2395");
+  assert.ok(invoice);
+  assert.equal(Number(invoice.amount_excl_vat.toFixed(2)), 10220);
+  assert.equal(Number(invoice.amount_incl_vat.toFixed(2)), 11753);
+  assert.equal(Number(invoice.fifo_paid.toFixed(2)), 10235);
+  // 1320 excl × 1.15 = 1518 incl — VAT on the credit note must enter Paid.
+  assert.equal(Number(invoice.credit_note_settled.toFixed(2)), 1518);
+  assert.equal(Number(invoice.paid_amount.toFixed(2)), 11753);
+  assert.equal(Number(invoice.remaining.toFixed(2)), 0);
+  assert.equal(invoice.status, "Paid");
+  assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 1518);
+  assert.equal(Number(ledger.totals.credit_note_excl_vat.toFixed(2)), 1320);
 });
 
 test("credit notes settle their referenced invoice before falling back to FIFO", () => {

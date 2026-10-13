@@ -7,6 +7,8 @@ import {
   BILL_MISMATCH_REVERSED,
   buildOutstandingReconcileRow,
   classifyOutstandingBillMismatch,
+  formatOutstandingCompareDelta,
+  hasOutstandingCompareMoneyDifference,
   normalizeOutstandingReconcileDataset,
   sortOutstandingReconcileRows,
   summarizeOutstandingBillMismatches,
@@ -45,6 +47,19 @@ test("buildOutstandingReconcileRow flags SFA vs Tally customer differences", () 
     tallyOutstanding: 500,
   });
   assert.equal(nettedGaps.has_difference, true);
+});
+
+test("Show differences only uses money gaps, not invoice-only branch issues", () => {
+  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 150, gap_count: 0 }), true);
+  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 0.01, gap_count: 0 }), false);
+  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 0, gap_count: 2 }), false);
+  assert.equal(hasOutstandingCompareMoneyDifference({ difference: -25, invoice_gap_count: 0 }), true);
+  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: null }), false);
+
+  assert.equal(formatOutstandingCompareDelta(0.01), "0");
+  assert.equal(formatOutstandingCompareDelta(0), "0");
+  assert.equal(formatOutstandingCompareDelta(12.5), "+12.5");
+  assert.equal(formatOutstandingCompareDelta(-3.25), "-3.25");
 });
 
 test("summarize and sort rank rows by absolute difference", () => {

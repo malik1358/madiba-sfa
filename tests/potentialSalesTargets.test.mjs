@@ -97,7 +97,7 @@ test("potential target section renders escaped customer details and totals in bo
       ...customer,
       potential_sale_expected: 20000,
       salesman_code: "SM001",
-      last_visit_by_salesman: { SM001: "2026-10-03" },
+      last_visit_by_salesman: { SM001: "2026-09-28" },
     }, { ...customer, is_active: false }],
     ...options,
   });
@@ -106,12 +106,44 @@ test("potential target section renders escaped customer details and totals in bo
   assert.match(section.html, /Shop &lt;One&gt;/);
   assert.match(section.html, /#0f4c5c/);
   assert.match(section.text, /Last Visit Date/);
-  assert.match(section.text, /Shop <One> \| - \| 2026-10-03 \| 2026-09-21/);
+  assert.match(section.text, /Shop <One> \| - \| 2026-09-28 \| 2026-09-21/);
   assert.match(section.text, /Potential Sale Expected \(SAR\)/);
   assert.match(section.text, /2026-09-21 \| 16 \| 14,999\.99 \| 20,000\.00/);
   assert.match(section.text, /Potential Sale Expected 20,000\.00 SAR/);
   assert.doesNotMatch(buildPotentialSalesTargetsSection({ rows: [customer], ...options }).text, /NaN/);
   assert.match(buildPotentialSalesTargetsSection({ ...options }).text, /No qualifying customers/);
+});
+
+test("potential target email section omits visits within the last eight KSA days", () => {
+  const todayKey = "2026-10-13";
+  const base = {
+    ...customer,
+    salesman_code: "SM001",
+    last_invoice_date: "2026-09-20",
+    invoices: [{ pending_amount: 14999.99, invoice_date: "2026-09-20" }],
+  };
+  const recent = buildPotentialSalesTargetsSection({
+    todayKey,
+    rows: [{ ...base, customer_code: "RECENT", last_visit_by_salesman: { SM001: "2026-10-12" } }],
+  });
+  const exactlyEight = buildPotentialSalesTargetsSection({
+    todayKey,
+    rows: [{ ...base, customer_code: "DAY8", last_visit_by_salesman: { SM001: "2026-10-05" } }],
+  });
+  const older = buildPotentialSalesTargetsSection({
+    todayKey,
+    rows: [{ ...base, customer_code: "OLDER", last_visit_by_salesman: { SM001: "2026-10-04" } }],
+  });
+  const neverVisited = buildPotentialSalesTargetsSection({
+    todayKey,
+    rows: [{ ...base, customer_code: "NEVER", last_visit_by_salesman: {} }],
+  });
+  assert.equal(recent.customerCount, 0);
+  assert.equal(exactlyEight.customerCount, 0);
+  assert.equal(older.customerCount, 1);
+  assert.equal(neverVisited.customerCount, 1);
+  assert.match(older.text, /OLDER/);
+  assert.match(neverVisited.text, /NEVER/);
 });
 
 test("expected sale uses the recent three-month peak then falls back to six completed months", () => {

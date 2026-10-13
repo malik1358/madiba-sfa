@@ -74,8 +74,14 @@ export function buildPotentialSalesTargetsSection({
   rows = [],
   todayKey = getKsaDateString(),
   title = "Potential Sales Target Customers",
+  visitGapDays = 8,
 } = {}) {
   const targets = rows.filter((row) => isPotentialSalesTarget(row, { todayKey }))
+    .filter((row) => !potentialSalesTargetVisitedWithinDays(row, {
+      todayKey,
+      days: visitGapDays,
+      salesmanCode: potentialSalesTargetSalesmanCode(row),
+    }))
     .sort((left, right) => (Number(right.potential_sale_expected) || 0) - (Number(left.potential_sale_expected) || 0)
       || String(left.last_invoice_date || left.latest_transaction_date)
         .localeCompare(String(right.last_invoice_date || right.latest_transaction_date))

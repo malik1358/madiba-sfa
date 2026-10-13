@@ -151,21 +151,27 @@ export function useCustomerData({ setError, setMessage }) {
       }
 
       const scope = accessScope || (await fetchSalesScopeCached()).scope;
-      const historyPromise = fetchCustomerHistoryCached(
-        session.access_token,
-        scope,
-        customer.customer_code,
-        {
-          customerName: customer.customer_name || "",
-          // Settlement math (FIFO paid/open) must never show a stale cached snapshot
-          // after an upload; always hit the network here, like Payment Settlement does.
-          revalidate: true,
-          onUpdate: (freshHistory) => {
-            setTransactions(freshHistory.transactions || []);
-            setPeerTransactions(freshHistory.peerTransactions || []);
-            setReceipts(freshHistory.receipts || []);
+      // Cache-first so the detail screen unlocks immediately. Uploads already wipe the
+      // shared history cache and trigger refreshSelectedCustomerHistory for fresh FIFO math.
+      // Blocking revalidate here left the UI on "Loading customer history..." for the full
+      // server round-trip (receipt dataset + peer scan + cache write) with no timeout.
+      const historyPromise = withTimeout(
+        fetchCustomerHistoryCached(
+          session.access_token,
+          scope,
+          customer.customer_code,
+          {
+            customerName: customer.customer_name || "",
+            onUpdate: (freshHistory) => {
+              if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
+              setTransactions(freshHistory.transactions || []);
+              setPeerTransactions(freshHistory.peerTransactions || []);
+              setReceipts(freshHistory.receipts || []);
+            },
           },
-        },
+        ),
+        LOAD_TIMEOUT_MS,
+        'Customer history load timed out. Please try again.',
       );
 
       const visitsPromise = fetch(

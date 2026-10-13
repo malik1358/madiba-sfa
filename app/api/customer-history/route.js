@@ -39,7 +39,13 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 14;
+const CACHE_VERSION = 15;
+const RECEIPT_DATASET_MEMORY_TTL_MS = 60_000;
+
+let receiptDatasetMemory = {
+  loadedAt: 0,
+  dataset: null,
+};
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -158,19 +164,45 @@ function parseJson(value) {
   }
 }
 
+async function loadReceiptDatasetCached(admin) {
+  const now = Date.now();
+  if (
+    receiptDatasetMemory.dataset
+    && (now - receiptDatasetMemory.loadedAt) < RECEIPT_DATASET_MEMORY_TTL_MS
+  ) {
+    return receiptDatasetMemory.dataset;
+  }
+
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", RECEIPT_DATASET_KEY)
+    .maybeSingle();
+  if (error) throw error;
+
+  const dataset = normalizeReceiptDataset(parseJson(data?.setting_value));
+  receiptDatasetMemory = { loadedAt: now, dataset };
+  return dataset;
+}
+
 async function loadCustomerReceipts(admin, customerCode, customerName = "") {
   try {
-    const { data, error } = await admin
-      .from("system_settings")
-      .select("setting_value")
-      .eq("setting_key", RECEIPT_DATASET_KEY)
-      .maybeSingle();
-    if (error) throw error;
-    const dataset = normalizeReceiptDataset(parseJson(data?.setting_value));
+    const dataset = await loadReceiptDatasetCached(admin);
     return findReceiptsForCustomer(dataset, customerCode, customerName);
   } catch {
     return [];
   }
+}
+
+function shouldIncludePeerTransactions({ fullHistory = false, includePeers = false } = {}) {
+  // Settlement / full-ledger loads are already heavy (day-1 sales + receipt register).
+  // Peer rows are only for Quick Order suggestions — skip them unless explicitly requested.
+  if (includePeers) return true;
+  return !fullHistory;
+}
+
+function writeCachedInBackground(admin, cacheKey, payload) {
+  void writeCached(admin, cacheKey, payload).catch(() => {});
 }
 
 function monthKey(value) {
@@ -807,9 +839,18 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
     .map(({ __stamp, ...row }) => row);
 }
 
-async function refreshCustomerCache(admin, customerCode, cacheKey, scope, customerName = "", { fullHistory = false } = {}) {
+async function refreshCustomerCache(
+  admin,
+  customerCode,
+  cacheKey,
+  scope,
+  customerName = "",
+  { fullHistory = false, includePeers = false } = {},
+) {
   const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
-  const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
+  const peerTransactions = shouldIncludePeerTransactions({ fullHistory, includePeers })
+    ? await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode)
+    : [];
   const payload = {
     version: CACHE_VERSION,
     updatedAt: new Date().toISOString(),
@@ -819,7 +860,7 @@ async function refreshCustomerCache(admin, customerCode, cacheKey, scope, custom
     peerTransactions,
   };
 
-  await writeCached(admin, cacheKey, payload);
+  writeCachedInBackground(admin, cacheKey, payload);
   return payload;
 }
 
@@ -843,6 +884,8 @@ export async function GET(request) {
       || scopeParam === "settlement";
     // Bulk reconciliation scans: skip peer rows and cache writes.
     const lite = String(url.searchParams.get("lite") || "").trim() === "1";
+    const includePeers = String(url.searchParams.get("includePeers") || "").trim() === "1";
+    const wantPeers = shouldIncludePeerTransactions({ fullHistory, includePeers });
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
@@ -857,8 +900,10 @@ export async function GET(request) {
     await ensureCustomerVisible(admin, customerCode, customerName, scope);
 
     const key = cacheKeyFor(customerCode, scope, { fullHistory });
-    const cached = await loadCached(admin, key);
-    const receipts = await loadCustomerReceipts(admin, customerCode, customerName);
+    const [cached, receipts] = await Promise.all([
+      loadCached(admin, key),
+      loadCustomerReceipts(admin, customerCode, customerName),
+    ]);
 
     const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;
 
@@ -889,7 +934,9 @@ export async function GET(request) {
 
       if (cachedTransactions.length === 0) {
         const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
-        const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
+        const peerTransactions = wantPeers
+          ? await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode)
+          : [];
         const payload = {
           version: CACHE_VERSION,
           updatedAt: new Date().toISOString(),
@@ -898,7 +945,7 @@ export async function GET(request) {
           transactions: fresh.transactions,
           peerTransactions,
         };
-        await writeCached(admin, key, payload);
+        writeCachedInBackground(admin, key, payload);
 
         return NextResponse.json({
           success: true,
@@ -917,7 +964,10 @@ export async function GET(request) {
 
       if (stale) {
         // Return previous data immediately, refresh snapshot in background.
-        void refreshCustomerCache(admin, customerCode, key, scope, customerName, { fullHistory }).catch(() => {});
+        void refreshCustomerCache(admin, customerCode, key, scope, customerName, {
+          fullHistory,
+          includePeers: wantPeers,
+        }).catch(() => {});
       }
 
       const transactions = await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions, customerName);
@@ -932,13 +982,15 @@ export async function GET(request) {
         isRefreshing: stale,
         source: "cache",
         transactions,
-        peerTransactions: Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
+        peerTransactions: wantPeers && Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
         receipts,
       });
     }
 
     const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
-    const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
+    const peerTransactions = wantPeers
+      ? await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode)
+      : [];
     const payload = {
       version: CACHE_VERSION,
       updatedAt: new Date().toISOString(),
@@ -947,7 +999,7 @@ export async function GET(request) {
       transactions: fresh.transactions,
       peerTransactions,
     };
-    await writeCached(admin, key, payload);
+    writeCachedInBackground(admin, key, payload);
 
     return NextResponse.json({
       success: true,

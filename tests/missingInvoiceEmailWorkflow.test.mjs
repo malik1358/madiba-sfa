@@ -19,7 +19,7 @@ async function runWorkflow(t, responses, env = {}) {
     requests.push({ url: request.url, method: request.method, headers: request.headers, body });
     const result = responses[Math.min(requests.length - 1, responses.length - 1)];
     response.writeHead(result.status, { "Content-Type": "application/json" });
-    response.end(JSON.stringify(result.body));
+    response.end(result.raw ?? JSON.stringify(result.body));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -27,10 +27,10 @@ async function runWorkflow(t, responses, env = {}) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const endpoint = `http://127.0.0.1:${server.address().port}/api/cron/missing-invoice-email`;
   assert.ok(script.includes("https://madiba-sfa.vercel.app/api/cron/missing-invoice-email"));
-  // Keep real curl retry behavior, but shorten the production backoff for local tests.
+  // Execute the actual shell and curl requests without waiting through the production backoff.
   const localScript = script
     .replaceAll("https://madiba-sfa.vercel.app/api/cron/missing-invoice-email", endpoint)
-    .replace("--retry-delay 10", "--retry-delay 1");
+    .replace("sleep 10", "sleep 0");
   const child = spawn("bash", ["-e", "-c", localScript], {
     cwd: directory,
     env: {
@@ -54,10 +54,10 @@ async function runWorkflow(t, responses, env = {}) {
 const success = { status: 200, body: { success: true, skipped: true, reason: "sent_recently" } };
 
 test("missing invoice workflow uses bounded retries and preserves the request timeout", () => {
-  assert.match(script, /--retry 2\b/);
-  assert.match(script, /--retry-delay 10\b/);
+  assert.match(script, /for attempt in 1 2 3/);
+  assert.match(script, /sleep 10/);
   assert.match(script, /--max-time 180\b/);
-  assert.doesNotMatch(script, /--retry-all-errors|--fail\b/);
+  assert.doesNotMatch(script, /--retry|--fail\b/);
 });
 
 test("missing invoice workflow does not retry a successful suppressed send", async (t) => {
@@ -68,37 +68,49 @@ test("missing invoice workflow does not retry a successful suppressed send", asy
   assert.match(result.output, /sent_recently/);
 });
 
-for (const status of [408, 429, 500, 502, 503, 504]) {
-  test(`missing invoice workflow recovers from HTTP ${status}`, async (t) => {
-    const result = await runWorkflow(t, [
-      { status, body: { success: false, error: "Internal server error." } },
-      success,
-    ]);
-    assert.equal(result.code, 0);
-    assert.equal(result.requests.length, 2);
-    for (const request of result.requests) {
-      assert.equal(request.method, "POST");
-      assert.equal(request.headers["x-cron-secret"], "workflow-test-value");
-      assert.equal(request.headers["content-type"], "application/json");
-      assert.equal(request.body, "{}");
-    }
-    assert.match(result.output, /succeeded with HTTP 200/);
-    assert.doesNotMatch(result.output, /"error":"Internal server error\."/);
-  });
-}
+test("missing invoice workflow recovers from the observed pre-delivery HTTP 500", async (t) => {
+  const result = await runWorkflow(t, [
+    { status: 500, body: { success: false, error: "Internal server error." } },
+    success,
+  ]);
+  assert.equal(result.code, 0);
+  assert.equal(result.requests.length, 2);
+  for (const request of result.requests) {
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers["x-cron-secret"], "workflow-test-value");
+    assert.equal(request.headers["content-type"], "application/json");
+    assert.equal(request.body, "{}");
+  }
+  assert.match(result.output, /succeeded with HTTP 200/);
+  assert.doesNotMatch(result.output, /"error":"Internal server error\."/);
+});
 
 test("missing invoice workflow still fails after exhausting transient retries", async (t) => {
   const result = await runWorkflow(t, [
-    { status: 500, body: { error: "first failure" } },
-    { status: 500, body: { error: "second failure" } },
-    { status: 500, body: { error: "final failure" } },
+    { status: 500, body: { success: false, error: "Internal server error.", attempt: 1 } },
+    { status: 500, body: { success: false, error: "Internal server error.", attempt: 2 } },
+    { status: 500, body: { success: false, error: "Internal server error.", attempt: 3 } },
   ]);
   assert.equal(result.code, 1);
   assert.equal(result.requests.length, 3);
   assert.match(result.output, /failed with HTTP 500/);
-  assert.match(result.output, /"error":"final failure"/);
-  assert.doesNotMatch(result.output, /"error":"first failure"|"error":"second failure"/);
+  assert.match(result.output, /"attempt":3/);
+  assert.doesNotMatch(result.output, /"attempt":1|"attempt":2/);
 });
+
+for (const response of [
+  { status: 500, body: { success: false, failedCount: 1, sentCount: 0, error: "Internal server error." } },
+  { status: 500, body: { success: false, error: "Server configuration is incomplete." } },
+  { status: 500, raw: "<html>Internal server error</html>" },
+  { status: 502, body: { error: "Bad gateway" } },
+  { status: 504, body: { error: "Gateway timeout" } },
+]) {
+  test(`missing invoice workflow does not retry an ambiguous failure: ${JSON.stringify(response)}`, async (t) => {
+    const result = await runWorkflow(t, [response]);
+    assert.equal(result.code, 1);
+    assert.equal(result.requests.length, 1);
+  });
+}
 
 test("missing invoice workflow does not retry unauthorized requests", async (t) => {
   const result = await runWorkflow(t, [{ status: 401, body: { error: "Unauthorized" } }]);
@@ -118,6 +130,16 @@ test("missing invoice workflow preserves the configured URL fallback", async (t)
     "/api/cron/missing-invoice-email",
   ]);
   assert.match(result.output, /retrying default endpoint/);
+});
+
+test("missing invoice workflow does not use URL fallback after a reported delivery failure", async (t) => {
+  const result = await runWorkflow(t, [
+    { status: 500, body: { success: false, failedCount: 1, error: "Send marker write failed" } },
+    success,
+  ], { usePrimary: true });
+  assert.equal(result.code, 1);
+  assert.equal(result.requests.length, 1);
+  assert.doesNotMatch(result.output, /retrying default endpoint/);
 });
 
 test("missing invoice workflow still rejects a missing cron secret", async (t) => {

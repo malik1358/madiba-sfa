@@ -251,7 +251,7 @@ KPI target edits notify affected salespeople after the save and CC their complet
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
 
-The Missing Invoice Email backup uses curl `--retry 2 --retry-delay 10`: up to three attempts per endpoint for curl's transient failures (timeouts and HTTP 408/429/500/502/503/504), with the existing 180-second per-attempt limit. Successful requests and HTTP 401 are not retried. URL fallback and the server's existing recent-send/midnight markers are unchanged; persistent failures still fail the job and print the final response. If failures persist, inspect the production function/database logs—the generic HTTP 500 response alone does not identify the failing dependency. No migration or secret changes are required.
+The Missing Invoice Email backup retries the observed pre-delivery HTTP 500 (`success: false`, `error: "Internal server error."`, no `failedCount`) up to twice, waiting 10 seconds between attempts and retaining the 180-second per-attempt limit. It does not retry ambiguous gateway/transport failures or reported delivery failures: the latter include `failedCount` and may mean mail was sent but saving its marker failed. URL fallback also stops on reported delivery failures. Existing recent-send/midnight markers remain unchanged; persistent failures still fail the job and print the final response. If failures persist, inspect the production function/database logs—the generic HTTP 500 response alone does not identify the failing dependency. No migration or secret changes are required.
 
 ### Customer GPS digest activation and recovery
 

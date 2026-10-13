@@ -49,7 +49,7 @@ Helper functions in the baseline migration:
 
 `sql/merge_sales_batch_by_dates.sql` and migration `20260819000000_merge_sales_batch_by_dates.sql` merge batches by date. Do not activate or delete the active batch from a feature change.
 
-**SECURITY (production):** `public.merge_sales_batch_by_dates(bigint, date[])` and `public.refresh_import_batch_stats(bigint)` are `SECURITY DEFINER` and must allow `EXECUTE` for `service_role` only. Production was found granting `EXECUTE` to `PUBLIC` / `anon` / `authenticated` (HIGH for merge). Manual remediation (not a migration, not auto-applied): `sql/security_revoke_sales_batch_rpc_execute.sql` — apply only with separate production approval. App caller: `/api/import-sales` via `SUPABASE_SERVICE_ROLE_KEY` only.
+**SECURITY (production):** `public.merge_sales_batch_by_dates(bigint, date[])` and `public.refresh_import_batch_stats(bigint)` are `SECURITY DEFINER` and must allow `EXECUTE` for `service_role` only. Production previously granted `EXECUTE` to `PUBLIC` / `anon` / `authenticated` (HIGH for merge); authorized apply of `sql/security_revoke_sales_batch_rpc_execute.sql` locked EXECUTE to `service_role`. That SQL remains manual-only (not a migration, not auto-applied) — do not re-run unless privileges drift again. App caller: `/api/import-sales` via `SUPABASE_SERVICE_ROLE_KEY` only.
 
 ## Customers, prospects, GPS
 

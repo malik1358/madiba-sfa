@@ -32,8 +32,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Referenced credit notes reduce that invoice's sales (with VAT) before cash; Paid is cash only. Leftover CN applies to later open vouchers. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
-    ar: "إشعار دائن بمرجع يخفض مبيعات تلك الفاتورة (مع الضريبة) قبل التحصيل؛ المدفوع نقد فقط. المتبقي من الإشعار يطبق على فواتير لاحقة. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
+    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
+    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
 
@@ -125,11 +125,10 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
             {" · "}
             {note.voucher_number || "—"}
             {note.credit_date ? ` · ${note.credit_date}` : ""}
-            {" · reduces sales"}
+            {" · settles like receipt"}
           </td>
-          <td>{formatMoney(-Math.abs(note.amount_excl_vat ?? note.amount))}</td>
-          <td>{formatMoney(-Math.abs(note.amount))}</td>
-          <td />
+          <td colSpan={2} />
+          <td>{formatMoney(note.amount)}</td>
           <td colSpan={3} />
           <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
           <td>Not in avg days</td>
@@ -586,8 +585,8 @@ export default function PaymentSettlementPage() {
                 </div>
                 <p className="moduleHint">
                   Partial credit notes, later credit notes, and sales returns (not same-day / next-day
-                  full invoice reversals). Orphans cross to a same-amount invoice ±1 day (items when
-                  available). Reduce net sales; never counted as cash or avg days to pay.
+                  full invoice reversals). Settlement nests them under the voucher FIFO applied them to.
+                  They reduce Open and count in Paid when settled; never in avg days to pay.
                 </p>
                 <ExportableTable filename="payment-settlement-credit-notes" sheetName="CreditNotes" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
@@ -648,9 +647,9 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Referenced credit notes reduce Sales (VAT-incl) on that invoice; Paid is cash only. Leftover CN
-                  goes to later open vouchers. Machine Open is the residual after both. Tally Open is the
-                  outstanding upload. Open Δ — use{" "}
+                  Referenced credit notes settle the next voucher after the named Ref like a receipt and count in
+                  Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
+                  is the outstanding upload. Open Δ — use{" "}
                   <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">

@@ -42,7 +42,7 @@ jobs:
               status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
                 -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
                 -H "Content-Type: application/json" \
-                --data '{}')"
+                --data '{}')" || return $?
               # Delivery/marker failures may have sent mail already; retry only the observed pre-delivery error.
               if [[ "$status_code" != "500" || "$attempt" -eq 3 ]] || ! jq -e \
                 '.success == false and .error == "Internal server error." and (has("failedCount") | not)' response.json >/dev/null 2>&1; then

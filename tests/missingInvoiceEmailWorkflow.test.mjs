@@ -18,6 +18,10 @@ async function runWorkflow(t, responses, env = {}) {
     for await (const chunk of request) body += chunk;
     requests.push({ url: request.url, method: request.method, headers: request.headers, body });
     const result = responses[Math.min(requests.length - 1, responses.length - 1)];
+    if (result.disconnect) {
+      request.socket.destroy();
+      return;
+    }
     response.writeHead(result.status, { "Content-Type": "application/json" });
     response.end(result.raw ?? JSON.stringify(result.body));
   });
@@ -140,6 +144,13 @@ test("missing invoice workflow does not use URL fallback after a reported delive
   assert.equal(result.code, 1);
   assert.equal(result.requests.length, 1);
   assert.doesNotMatch(result.output, /retrying default endpoint/);
+});
+
+test("missing invoice workflow aborts without retries or URL fallback after connection loss", async (t) => {
+  const result = await runWorkflow(t, [{ disconnect: true }], { usePrimary: true });
+  assert.notEqual(result.code, 0);
+  assert.equal(result.requests.length, 1);
+  assert.doesNotMatch(result.output, /retrying/);
 });
 
 test("missing invoice workflow still rejects a missing cron secret", async (t) => {

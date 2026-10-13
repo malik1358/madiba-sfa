@@ -128,9 +128,14 @@ export async function fileHash(file, algorithm = "sha256") {
 }
 
 export async function fetchResponse(url, options = {}, fetchImpl = fetch) {
+  const { timeoutMs = 300000, ...requestOptions } = options;
   let response;
   try {
-    response = await fetchImpl(url, { ...options, redirect: "error", signal: AbortSignal.timeout(300000) });
+    response = await fetchImpl(url, {
+      ...requestOptions,
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
   } catch {
     throw new Error("Backup API connection failed; raw details suppressed");
   }
@@ -155,9 +160,33 @@ export function storageClient(config, fetchImpl = fetch) {
     ) }) }),
     download: (bucket, objectPath) => fetchResponse(
       `${config.supabaseUrl}/storage/v1/object/authenticated/${encodeURIComponent(bucket)}/${objectPath.split("/").map(encodeURIComponent).join("/")}`,
-      { headers }, fetchImpl,
+      { headers, timeoutMs: 900000 }, fetchImpl,
     ),
   };
+}
+
+const SAFE_STORAGE_ERRORS = new Set([
+  "No Storage buckets found; full backup refused",
+  "Invalid Storage bucket",
+  "Storage download has no body",
+  "Storage download size mismatch",
+  "Storage buckets changed during backup; retry",
+  "Storage files changed during backup; retry",
+  "Backup API connection failed; raw details suppressed",
+  "Backup API returned invalid JSON",
+  "Storage listing failed; backup is incomplete",
+  "Unsafe Storage object name",
+]);
+
+export function safeStorageError(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (SAFE_STORAGE_ERRORS.has(message)) return message;
+  if (/^Backup API request failed \(HTTP \d+\); raw details suppressed$/.test(message)) return message;
+  if (["ENOSPC", "EACCES", "EPERM", "ENOENT"].includes(error?.code)) return classifyLocalFileFailure(error);
+  if (error?.code === "ERR_STRING_TOO_LONG" || /heap out of memory|array buffer allocation failed/i.test(message)) {
+    return "Storage object too large for runner memory; download failed closed.";
+  }
+  return null;
 }
 
 function storageFingerprint(files) {
@@ -201,22 +230,37 @@ async function downloadStorageObject(storage, file, destination) {
     await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
   } catch (error) {
     await rm(destination, { force: true });
+    const safe = safeStorageError(error);
+    if (safe) throw new BackupDiagnosticError(safe);
+    if (isTransientStorageError(error)) throw new Error("Backup API connection failed; raw details suppressed");
     throw error;
   }
   return response;
 }
 
 export async function exportStorage(config, payload, fetchImpl = fetch, options = {}) {
+  try {
+    return await exportStorageOnce(config, payload, fetchImpl, options);
+  } catch (error) {
+    const safe = safeStorageError(error) || (error instanceof BackupDiagnosticError ? error.message : null);
+    if (safe) throw new BackupDiagnosticError(`Storage stage failed. ${safe}`);
+    throw error;
+  }
+}
+
+async function exportStorageOnce(config, payload, fetchImpl = fetch, options = {}) {
   const storage = storageClient(config, fetchImpl);
   const buckets = await storage.buckets();
   if (!Array.isArray(buckets) || !buckets.length) throw new Error("No Storage buckets found; full backup refused");
-  await mkdir(path.join(payload, "objects"));
+  await mkdir(path.join(payload, "objects"), { recursive: true });
   const files = [];
   for (const bucket of buckets) {
     if (typeof bucket.id !== "string" || !bucket.id) throw new Error("Invalid Storage bucket");
     files.push(...await listStorageFiles(storage, bucket.id));
   }
-  for (const file of files) {
+  console.log(`Storage export: ${files.length} object(s) across ${buckets.length} bucket(s).`);
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
     const objectId = createHash("sha256").update(JSON.stringify([file.bucket, file.path])).digest("hex");
     file.archivePath = `objects/${objectId}`;
     const destination = path.join(payload, file.archivePath);
@@ -229,6 +273,9 @@ export async function exportStorage(config, payload, fetchImpl = fetch, options 
     file.contentType = response.headers.get("content-type") || file.metadata.mimetype || "application/octet-stream";
     file.cacheControl = response.headers.get("cache-control") || "max-age=3600";
     if (Number.isFinite(file.metadata.size) && file.bytes !== file.metadata.size) throw new Error("Storage download size mismatch");
+    if ((index + 1) % 50 === 0 || index + 1 === files.length) {
+      console.log(`Storage download progress: ${index + 1}/${files.length} objects.`);
+    }
   }
   const after = [];
   const latestBuckets = await storage.buckets();
@@ -338,7 +385,23 @@ export async function runBackup(config, options = {}) {
     };
     if (config.mode === "full") {
       console.log("Exporting and checking all Storage buckets.");
-      manifest.storage = await exportStorage(config, payload, fetchImpl);
+      manifest.storage = await withTransientRetries(
+        async (attempt) => {
+          if (attempt > 1) {
+            console.log(`Retrying Storage export after snapshot change or transient failure (attempt ${attempt}).`);
+            await rm(path.join(payload, "objects"), { recursive: true, force: true });
+            await rm(path.join(payload, "storage-manifest.json"), { force: true });
+          }
+          return exportStorage(config, payload, fetchImpl);
+        },
+        {
+          attempts: 3,
+          baseDelayMs: 5000,
+          isRetryable: (error) => /Storage (buckets|files) changed during backup|Backup API connection failed|HTTP (408|425|429|5\d\d)/i.test(
+            error instanceof Error ? error.message : "",
+          ),
+        },
+      );
       console.log("Archiving source and verifying Git history.");
       await run("git", ["bundle", "create", path.join(payload, "repository.bundle"), "--all"], { cwd: repo });
       await run("git", ["bundle", "verify", path.join(payload, "repository.bundle")], { cwd: repo });

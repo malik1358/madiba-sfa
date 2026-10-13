@@ -4,6 +4,24 @@ import { summarizeSalesCoverageGaps } from "./salesCoverage.js";
 export const OUTSTANDING_RECONCILE_KEY = "outstanding_reconcile_dataset_v1";
 export const OUTSTANDING_RECONCILE_TOLERANCE = 0.02;
 
+/**
+ * True when the customer-level money gap is above tolerance.
+ * Invoice-only gaps that net to ~0 at customer total are branch issues, not money differences.
+ */
+export function hasOutstandingCompareMoneyDifference(row = {}, tolerance = OUTSTANDING_RECONCILE_TOLERANCE) {
+  const delta = row.open_delta ?? row.difference;
+  if (delta == null || Number.isNaN(Number(delta))) return false;
+  return Math.abs(Number(delta)) > tolerance;
+}
+
+/** Format open Δ for Outstanding Compare; values within tolerance display as "0". */
+export function formatOutstandingCompareDelta(value, tolerance = OUTSTANDING_RECONCILE_TOLERANCE) {
+  const number = Number(value || 0);
+  if (Math.abs(number) <= tolerance) return "0";
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
 /** Why a Tally bill could not be attached to a sales invoice. */
 export const BILL_MISMATCH_OTHER_CUSTOMER = "ref_other_customer";
 export const BILL_MISMATCH_REVERSED = "ref_reversed";

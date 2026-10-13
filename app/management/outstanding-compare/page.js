@@ -17,6 +17,9 @@ import {
   BILL_MISMATCH_MISSING,
   BILL_MISMATCH_OTHER_CUSTOMER,
   BILL_MISMATCH_REVERSED,
+  OUTSTANDING_RECONCILE_TOLERANCE,
+  formatOutstandingCompareDelta,
+  hasOutstandingCompareMoneyDifference,
   summarizeOutstandingBillMismatches,
 } from "../../lib/outstandingReconcile.js";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -134,11 +137,11 @@ const CUSTOMER_COLUMNS = [
   { key: "diff", labelKey: "difference" },
 ];
 
-const DIFF_TOLERANCE = 0.02;
+const DIFF_TOLERANCE = OUTSTANDING_RECONCILE_TOLERANCE;
 
 function hasCompareDifference(row) {
-  return row.delta_status === "ready"
-    && (Math.abs(Number(row.open_delta || 0)) > DIFF_TOLERANCE || Number(row.gap_count || 0) > 0);
+  // Money gaps only — invoice gaps that net to ~0 stay available when the filter is off (Branch issue).
+  return row.delta_status === "ready" && hasOutstandingCompareMoneyDifference(row, DIFF_TOLERANCE);
 }
 
 function formatMoney(value) {
@@ -150,16 +153,13 @@ function formatCount(value) {
 }
 
 function formatDelta(value) {
-  const number = Number(value || 0);
-  if (Math.abs(number) <= 0.009) return "0";
-  const sign = number > 0 ? "+" : "";
-  return `${sign}${number.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return formatOutstandingCompareDelta(value, DIFF_TOLERANCE);
 }
 
 function deltaClass(value) {
   const number = Number(value || 0);
-  if (number > 0.02) return "moduleBiMonthCell--up";
-  if (number < -0.02) return "moduleBiMonthCell--down";
+  if (number > DIFF_TOLERANCE) return "moduleBiMonthCell--up";
+  if (number < -DIFF_TOLERANCE) return "moduleBiMonthCell--down";
   return "";
 }
 
@@ -263,6 +263,9 @@ export default function OutstandingComparePage() {
           salesman_name: String(row.salesman_name || row.current_salesman_code || "").trim(),
           open_delta: delta?.status === "ready" ? Number(delta.open_delta || 0) : null,
           computed_open: delta?.status === "ready" ? Number(delta.computed_open || 0) : null,
+          tally_open: delta?.status === "ready"
+            ? Number(delta.tally_open ?? customerOutstandingTotal(row))
+            : null,
           gap_count: delta?.status === "ready" ? Number(delta.gap_count || 0) : 0,
           delta_status: delta?.status || "pending",
         };
@@ -307,7 +310,7 @@ export default function OutstandingComparePage() {
       if (row.delta_status === "loading") return "…";
       return "—";
     }
-    return formatMoney(row.outstanding_total);
+    return formatMoney(row.tally_open != null ? row.tally_open : row.outstanding_total);
   }, []);
 
   const {
@@ -320,7 +323,9 @@ export default function OutstandingComparePage() {
   const customerFooter = useMemo(() => {
     const ready = visibleCustomers.filter((row) => row.delta_status === "ready");
     return {
-      total: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_total || 0), 0),
+      total: visibleCustomers.reduce((sum, row) => sum + Number(
+        row.tally_open != null ? row.tally_open : row.outstanding_total || 0,
+      ), 0),
       computed: ready.reduce((sum, row) => sum + Number(row.computed_open || 0), 0),
       diff: ready.reduce((sum, row) => sum + Number(row.open_delta || 0), 0),
       diffReady: ready.length,
@@ -716,8 +721,12 @@ export default function OutstandingComparePage() {
                           </Link>
                         </td>
                         <td>{customer.salesman_name || "—"}</td>
-                        <td className={outstandingCellClass(customer.outstanding_total)}>
-                          {formatMoney(customer.outstanding_total)}
+                        <td className={outstandingCellClass(
+                          customer.tally_open != null ? customer.tally_open : customer.outstanding_total,
+                        )}>
+                          {formatMoney(
+                            customer.tally_open != null ? customer.tally_open : customer.outstanding_total,
+                          )}
                         </td>
                         <td className={`moduleBiTotalCol ${
                           customer.delta_status === "ready"

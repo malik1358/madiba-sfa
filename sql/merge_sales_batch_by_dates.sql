@@ -116,3 +116,12 @@ BEGIN
   WHERE id = p_batch_id;
 END;
 $$;
+
+-- Least privilege: service_role only (matches migration 20260819000000 intent).
+-- Production drift historically left PUBLIC/anon/authenticated EXECUTE; see
+-- sql/security_revoke_sales_batch_rpc_execute.sql for the production remediation.
+REVOKE ALL ON FUNCTION public.merge_sales_batch_by_dates(bigint, date[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.merge_sales_batch_by_dates(bigint, date[]) TO service_role;
+
+REVOKE ALL ON FUNCTION public.refresh_import_batch_stats(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.refresh_import_batch_stats(bigint) TO service_role;

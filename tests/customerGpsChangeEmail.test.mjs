@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildGpsChangeEmail, claimGpsChangeEmail, runGpsChangeEmailCycle } from "../app/lib/customerGpsChangeEmailServer.js";
-import { gpsReportRow } from "../app/lib/customerGpsReport.js";
+import { attachDayGpsChangeCounts, gpsReportRow } from "../app/lib/customerGpsReport.js";
 import { buildModuleAccess } from "../app/lib/moduleAccess.js";
 
 const env = { SMTP_HOST: "test.invalid", SMTP_FROM: "reports@example.com" };
@@ -41,14 +41,58 @@ test("failed send releases claim but delivered email keeps claim on marker failu
   assert.equal(released, 1);
 });
 
-test("email includes actor, KSA timestamp, both maps and distance; escapes HTML", () => {
-  const row = gpsReportRow({ customer_code: "1415", updated_by_name: "<script>Salesman</script>", created_at: "2026-10-04T09:30:00Z", latitude: 24.71, longitude: 46.6, previous_latitude: 24.7, previous_longitude: 46.6, source: "salesman_accepted" }, "Shop");
-  const email = buildGpsChangeEmail("2026-10-04", [row]);
+test("email includes actor, KSA timestamp, both maps, distance and change counts; escapes HTML", () => {
+  const base = {
+    customer_code: "1415",
+    updated_by_name: "<script>Salesman</script>",
+    created_at: "2026-10-04T09:30:00Z",
+    latitude: 24.71,
+    longitude: 46.6,
+    previous_latitude: 24.7,
+    previous_longitude: 46.6,
+    source: "salesman_accepted",
+  };
+  const rows = attachDayGpsChangeCounts([
+    { ...gpsReportRow(base, "Shop"), times_total: 5 },
+    { ...gpsReportRow({ ...base, created_at: "2026-10-04T10:30:00Z", latitude: 24.72 }, "Shop"), times_total: 5 },
+  ]);
+  const email = buildGpsChangeEmail("2026-10-04", rows);
   assert.match(email.html, /&lt;script&gt;/);
-  assert.ok(email.html.includes(row.old_map_url));
-  assert.ok(email.html.includes(row.new_map_url));
-  assert.ok(email.text.includes(row.distance_meters.toFixed(1)));
+  assert.ok(email.html.includes(rows[0].old_map_url));
+  assert.ok(email.html.includes(rows[0].new_map_url));
+  assert.ok(email.text.includes(rows[0].distance_meters.toFixed(1)));
   assert.match(email.text, /12:30/);
+  assert.match(email.html, /Times today/);
+  assert.match(email.html, /Total times/);
+  assert.match(email.html, />2</);
+  assert.match(email.html, />5</);
+  assert.match(email.html, /font-weight:700/);
+  assert.match(email.text, /today 2/);
+  assert.match(email.text, /total 5/);
+});
+
+test("force and test recipient bypass the daily claim marker", async () => {
+  let claimed = 0;
+  const claimSend = async () => { claimed += 1; return { settingKey: "test", claim: "test" }; };
+  const messages = [];
+  const forced = await runGpsChangeEmailCycle({}, options({
+    force: true,
+    claimSend,
+    send: async (message) => messages.push(message),
+  }));
+  assert.equal(claimed, 0);
+  assert.equal(forced.forced, true);
+  assert.match(messages[0].subject, /^\[TEST\]/);
+
+  const tested = await runGpsChangeEmailCycle({}, options({
+    claimSend,
+    env: { ...env, CUSTOMER_GPS_CHANGE_EMAIL_TEST_TO: "malik@pinasz.com" },
+    send: async (message) => messages.push(message),
+  }));
+  assert.equal(claimed, 0);
+  assert.equal(tested.forced, true);
+  assert.deepEqual(tested.to, ["malik@pinasz.com"]);
+  assert.match(messages[1].subject, /^\[TEST\]/);
 });
 
 test("GPS digest rejects open days and unconfigured mail instead of silently succeeding", async () => {

@@ -67,6 +67,40 @@ export async function hydrateGpsHistory(admin, history) {
   return history.map((row) => gpsReportRow(row, names.get(row.customer_code) || ""));
 }
 
+export function attachDayGpsChangeCounts(rows) {
+  const dayCounts = new Map();
+  for (const row of rows) {
+    const code = String(row.customer_code || "").trim();
+    if (!code) continue;
+    dayCounts.set(code, (dayCounts.get(code) || 0) + 1);
+  }
+  return rows.map((row) => {
+    const code = String(row.customer_code || "").trim();
+    return { ...row, times_today: dayCounts.get(code) || 0 };
+  });
+}
+
+export async function loadAcceptedGpsChangeTotals(admin, customerCodes) {
+  const codes = [...new Set((customerCodes || []).map((code) => String(code || "").trim()).filter(Boolean))];
+  const totals = new Map(codes.map((code) => [code, 0]));
+  if (!codes.length) return totals;
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await admin.from("customer_gps_history")
+      .select("customer_code")
+      .eq("source", CUSTOMER_GPS_SOURCE.salesmanAccepted)
+      .in("customer_code", codes)
+      .range(offset, offset + 999);
+    if (error) throw error;
+    for (const row of data || []) {
+      const code = String(row.customer_code || "").trim();
+      if (!totals.has(code)) continue;
+      totals.set(code, (totals.get(code) || 0) + 1);
+    }
+    if ((data || []).length < 1000) break;
+  }
+  return totals;
+}
+
 export async function loadAcceptedGpsChanges(admin, date) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
@@ -75,5 +109,12 @@ export async function loadAcceptedGpsChanges(admin, date) {
     rows.push(...(data || []));
     if ((data || []).length < 1000) break;
   }
-  return (await hydrateGpsHistory(admin, rows)).filter((row) => row.acceptance === "confirmed_salesman");
+  const accepted = attachDayGpsChangeCounts(
+    (await hydrateGpsHistory(admin, rows)).filter((row) => row.acceptance === "confirmed_salesman"),
+  );
+  const totals = await loadAcceptedGpsChangeTotals(admin, accepted.map((row) => row.customer_code));
+  return accepted.map((row) => {
+    const code = String(row.customer_code || "").trim();
+    return { ...row, times_total: totals.get(code) || row.times_today || 0 };
+  });
 }

@@ -257,7 +257,7 @@ Production release preparation is dated **2026-10-06**, pending PR CI and merge;
 
 No new schema migration is required. Verify the existing `customer_gps_history` schema is present; if absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or `sql/setup_customer_gps_history.sql` separately in Supabase before using history/report/digest. Git deployment does not apply SQL.
 
-Each report date is protected by an atomic `system_settings` key `customer_gps_change_email:<date>`: `sending` with a claim `token` and `claimedAt`, followed after delivery by `sent` with `sentAt` and `changeCount`. Duplicate runs skip existing keys. Provider failure releases only the caller's own claim. An interrupted `sending` claim requires inspection of provider delivery before manual recovery; do not clear it blindly. If email sends but saving the sent marker fails, keep the claim to prevent duplicate delivery. There is no force-send bypass.
+Each report date is protected by an atomic `system_settings` key `customer_gps_change_email:<date>`: `sending` with a claim `token` and `claimedAt`, followed after delivery by `sent` with `sentAt` and `changeCount`. Duplicate runs skip existing keys. Provider failure releases only the caller's own claim. An interrupted `sending` claim requires inspection of provider delivery before manual recovery; do not clear it blindly. If email sends but saving the sent marker fails, keep the claim to prevent duplicate delivery. Manual workflow dispatch may pass `date`, `force=true`, and optional `to=` for a `[TEST]` resend that skips the claim marker and does not rewrite it.
 
 ## Local development
 

@@ -488,7 +488,7 @@ export async function fetchCustomerHistoryCached(accessToken, scope, customerCod
   const customerName = options.customerName || "";
   // Settlement / unpaid math needs every sales month (day 1 → now), not the 6-month BI window.
   const fullHistory = options.fullHistory !== false;
-  return fetchWithLocalCache(
+  return fetchWithLocalCacheResilient(
     customerHistoryCacheKey(scope, customerCode, { fullHistory }),
     CACHE_TTL.customerHistoryMs,
     () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName, { fullHistory }),

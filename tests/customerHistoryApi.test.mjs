@@ -64,5 +64,16 @@ test("customer history loads current and full history from the active sales snap
     assert.doesNotMatch(source, /\.from\("sales_raw"\)/);
   }
 
-  assert.match(customerHistoryRoute, /const CACHE_VERSION = 14;/);
+  assert.match(customerHistoryRoute, /const CACHE_VERSION = 15;/);
+  assert.match(customerHistoryRoute, /function shouldIncludePeerTransactions/);
+  assert.match(customerHistoryRoute, /writeCachedInBackground/);
+  assert.match(customerHistoryRoute, /loadReceiptDatasetCached/);
+});
+
+test("customer history skips peer rows on full settlement history unless includePeers=1", () => {
+  assert.match(
+    customerHistoryRoute,
+    /if \(includePeers\) return true;\s*return !fullHistory;/s,
+  );
+  assert.match(customerHistoryRoute, /includePeers/);
 });

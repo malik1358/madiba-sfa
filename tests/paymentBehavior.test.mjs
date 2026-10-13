@@ -71,6 +71,119 @@ test("matchPaymentsFifo treats negative Payment vouchers as receipt-side reversa
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 230);
 });
 
+test("matchPaymentsFifo exact Payment↔Purchase amount pairs go to matchedPurchasePayments", () => {
+  const { matchedPurchasePayments, purchaseAllocations, paymentAppliedToSales } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2025-09-02", amount: 10608.75, vch_no: "46", vch_type: "Purchase" },
+      { receipt_date: "2025-09-02", amount: -10608.75, vch_no: "374", vch_type: "Payment" },
+      { receipt_date: "2025-10-02", amount: 10608.75, vch_no: "90", vch_type: "Purchase" },
+      { receipt_date: "2025-10-15", amount: -10608.75, vch_no: "604", vch_type: "Payment" },
+    ],
+  );
+
+  assert.equal(matchedPurchasePayments.length, 2);
+  assert.equal(purchaseAllocations.length, 0);
+  assert.equal(Number(paymentAppliedToSales.toFixed(2)), 0);
+  assert.equal(matchedPurchasePayments[0].purchase_voucher, "46");
+  assert.equal(matchedPurchasePayments[0].payment_voucher, "374");
+  assert.equal(matchedPurchasePayments[0].match_days, 0);
+  assert.equal(matchedPurchasePayments[1].purchase_voucher, "90");
+  assert.equal(matchedPurchasePayments[1].payment_voucher, "604");
+  assert.equal(matchedPurchasePayments[1].match_days, 13);
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
+    ],
+    receipts: [
+      { receipt_date: "2025-09-02", amount: 10608.75, vch_no: "46", vch_type: "Purchase" },
+      { receipt_date: "2025-09-02", amount: -10608.75, vch_no: "374", vch_type: "Payment" },
+      { receipt_date: "2025-10-02", amount: 10608.75, vch_no: "90", vch_type: "Purchase" },
+      { receipt_date: "2025-10-15", amount: -10608.75, vch_no: "604", vch_type: "Payment" },
+    ],
+  });
+  assert.equal(ledger.matchedPurchasePayments.length, 2);
+  assert.equal(Number(ledger.totals.matched_purchase_payment_amount.toFixed(2)), 21217.5);
+  assert.equal(ledger.purchases.length, 0);
+});
+
+test("matchPaymentsFifo settles dual-party Payment against Purchase before sales", () => {
+  const {
+    allocations,
+    invoices,
+    purchaseAllocations,
+    purchases,
+    paymentAppliedToPurchases,
+    paymentAppliedToSales,
+  } = matchPaymentsFifo(
+    [
+      // Paper +15% VAT → 57,500 incl; receipt 35,436.10 leaves AR open.
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 50000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-02-11", amount: 70437.5, vch_no: "51", vch_type: "Purchase" },
+      { receipt_date: "2026-02-14", amount: 39387.5, vch_no: "58", vch_type: "Purchase" },
+      { receipt_date: "2026-02-19", amount: -99679.39, vch_no: "Sep//Bpmt0125", vch_type: "Payment" },
+      { receipt_date: "2026-01-25", amount: 35436.1, vch_no: "140", vch_type: "Receipt" },
+    ],
+  );
+
+  assert.equal(Number(paymentAppliedToPurchases.toFixed(2)), 99679.39);
+  assert.equal(Number(paymentAppliedToSales.toFixed(2)), 0);
+  assert.equal(purchaseAllocations.length, 2);
+  assert.equal(Number(purchaseAllocations[0].amount.toFixed(2)), 70437.5);
+  assert.equal(purchaseAllocations[0].purchase_voucher, "51");
+  assert.equal(Number(purchaseAllocations[1].amount.toFixed(2)), 29241.89);
+  assert.equal(purchaseAllocations[1].purchase_voucher, "58");
+  assert.equal(Number(purchases[0].remaining.toFixed(2)), 0);
+  assert.equal(Number(purchases[1].remaining.toFixed(2)), 10145.61);
+  // Purchase must not inflate AR collections / settle the sales invoice beyond the real receipt.
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].vch_no, "140");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 35436.1);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 22063.9);
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 50000, category: "Paper" },
+    ],
+    receipts: [
+      { receipt_date: "2026-02-11", amount: 70437.5, vch_no: "51", vch_type: "Purchase" },
+      { receipt_date: "2026-02-14", amount: 39387.5, vch_no: "58", vch_type: "Purchase" },
+      { receipt_date: "2026-02-19", amount: -99679.39, vch_no: "Sep//Bpmt0125", vch_type: "Payment" },
+      { receipt_date: "2026-01-25", amount: 35436.1, vch_no: "140", vch_type: "Receipt" },
+    ],
+  });
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 35436.1);
+  assert.equal(Number(ledger.totals.payment_applied_to_purchases.toFixed(2)), 99679.39);
+  assert.equal(Number(ledger.totals.open_purchase_amount.toFixed(2)), 10145.61);
+  assert.ok(ledger.settlementEvents.some((row) => (
+    row.target_kind === "purchase" && row.vch_no === "Sep//Bpmt0125"
+  )));
+});
+
+test("matchPaymentsFifo Payment leftover after Purchases reverses sales cash", () => {
+  const { allocations, invoices, paymentAppliedToPurchases, paymentAppliedToSales } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-01-05", amount: 400, vch_no: "P1", vch_type: "Purchase" },
+      { receipt_date: "2026-01-10", amount: 1150, vch_no: "R1", vch_type: "Receipt" },
+      { receipt_date: "2026-01-20", amount: -600, vch_no: "PV-1", vch_type: "Payment" },
+    ],
+  );
+
+  assert.equal(Number(paymentAppliedToPurchases.toFixed(2)), 400);
+  assert.equal(Number(paymentAppliedToSales.toFixed(2)), 200);
+  assert.equal(allocations.length, 1);
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 950);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 200);
+});
+
 test("matchPaymentsFifo applies an advance receipt to the next customer invoice", () => {
   const { allocations, invoices, unmatchedReceiptAmount } = matchPaymentsFifo(
     [

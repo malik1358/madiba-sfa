@@ -32,8 +32,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
-    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
+    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover reverses sales cash. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
+    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يعكس تحصيل المبيعات. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
 
@@ -63,6 +63,7 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
+  if (status === "Matched") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
     return "paymentSettleStatus paymentSettleStatus--credit";
   }
@@ -142,7 +143,8 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
 function DatewiseDayRow({ row, open, onToggle }) {
   const invoices = Array.isArray(row.invoices) ? row.invoices : [];
   const receipts = Array.isArray(row.receipts) ? row.receipts : [];
-  const detailCount = invoices.length + receipts.length;
+  const purchases = Array.isArray(row.purchases) ? row.purchases : [];
+  const detailCount = invoices.length + receipts.length + purchases.length;
 
   return (
     <>
@@ -191,13 +193,32 @@ function DatewiseDayRow({ row, open, onToggle }) {
           <td>{formatMoney(invoice.remaining)}</td>
         </tr>
       ))}
+      {open && purchases.map((purchase, index) => (
+        <tr
+          key={`${row.date}-pur-${purchase.vch_no || index}`}
+          className="paymentSettleChildRow"
+        >
+          <td style={{ paddingLeft: 28 }}>
+            Purchase{purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
+          </td>
+          <td />
+          <td />
+          <td>{formatMoney(purchase.amount)}</td>
+          <td />
+          <td />
+          <td />
+        </tr>
+      ))}
       {open && receipts.map((receipt, index) => (
         <tr
           key={`${row.date}-rcpt-${receipt.vch_no || index}`}
           className="paymentSettleChildRow"
         >
           <td style={{ paddingLeft: 28 }}>
-            Receipt{receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
+            {receipt.kind === "payment" || Number(receipt.amount) < 0
+              ? "Payment"
+              : "Receipt"}
+            {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
           </td>
           <td />
           <td />
@@ -1007,6 +1028,64 @@ export default function PaymentSettlementPage() {
 
               <section className="moduleSection">
                 <div className="moduleSectionHeader">
+                  <h2>Payment Matched to Purchase</h2>
+                  <span>
+                    {formatCount(ledger.totals.matched_purchase_payment_count || 0)} exact amount pairs
+                  </span>
+                </div>
+                <p className="moduleHint">
+                  Dual customer+supplier Payments that match a Purchase bill for the exact same
+                  amount (within SAR 0.02). Same-day pairs are preferred. Partial FIFO purchase
+                  settlements stay in Settlement Events.
+                </p>
+                <ExportableTable filename="payment-settlement-purchase-matches" sheetName="PurchaseMatches" className="moduleTableWrap">
+                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                    <thead>
+                      <tr>
+                        <th>Purchase Date</th>
+                        <th>Purchase Voucher</th>
+                        <th>Purchase Amount</th>
+                        <th>Payment Date</th>
+                        <th>Payment Voucher</th>
+                        <th>Payment Amount</th>
+                        <th>Match Days</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(ledger.matchedPurchasePayments || []).map((row) => (
+                        <tr key={`${row.purchase_date}::${row.purchase_voucher}::${row.payment_voucher}`}>
+                          <td>{row.purchase_date || "—"}</td>
+                          <td>{row.purchase_voucher || "—"}</td>
+                          <td>{formatMoney(row.purchase_amount)}</td>
+                          <td>{row.payment_date || "—"}</td>
+                          <td>{row.payment_voucher || "—"}</td>
+                          <td>{formatMoney(row.amount)}</td>
+                          <td>{row.match_days != null ? row.match_days : "—"}</td>
+                          <td><span className={statusClass("Matched")}>Matched</span></td>
+                        </tr>
+                      ))}
+                      {!(ledger.matchedPurchasePayments || []).length && (
+                        <tr>
+                          <td colSpan={8}>No exact Payment↔Purchase amount matches for this customer.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}><strong>Total</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.matched_purchase_payment_amount || 0)}</strong></td>
+                        <td colSpan={2} />
+                        <td><strong>{formatMoney(ledger.totals.matched_purchase_payment_amount || 0)}</strong></td>
+                        <td colSpan={2} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ExportableTable>
+              </section>
+
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
@@ -1069,20 +1148,22 @@ export default function PaymentSettlementPage() {
                   <table className="moduleTable moduleBiTable paymentSettleTable">
                     <thead>
                       <tr>
-                        <th>Receipt Date</th>
-                        <th>Receipt No</th>
-                        <th>Applied To Sales Date</th>
-                        <th>Voucher</th>
+                        <th>Date</th>
+                        <th>Voucher No</th>
+                        <th>Applied To</th>
+                        <th>Target Date</th>
+                        <th>Target Voucher</th>
                         <th>Amount</th>
                         <th>Days to Pay</th>
                       </tr>
                     </thead>
                     <tbody>
                       {ledger.settlementEvents.map((row, index) => (
-                        <tr key={`${row.receipt_date}-${row.voucher_number}-${index}`}>
+                        <tr key={`${row.receipt_date}-${row.voucher_number}-${row.vch_no}-${index}`}>
                           <td>{row.receipt_date}</td>
                           <td>{row.vch_no || "—"}</td>
-                          <td>{row.invoice_date}</td>
+                          <td>{row.target_kind === "purchase" ? "Purchase" : "Sales"}</td>
+                          <td>{row.invoice_date || "—"}</td>
                           <td>{row.voucher_number || "—"}</td>
                           <td>{formatMoney(row.amount)}</td>
                           <td>{row.days != null ? row.days : "—"}</td>
@@ -1090,7 +1171,7 @@ export default function PaymentSettlementPage() {
                       ))}
                       {!ledger.settlementEvents.length && (
                         <tr>
-                          <td colSpan={6}>No settlements yet — need both sales and receipt uploads for this customer.</td>
+                          <td colSpan={7}>No settlements yet — need both sales and receipt uploads for this customer.</td>
                         </tr>
                       )}
                     </tbody>

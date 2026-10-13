@@ -6,6 +6,26 @@ import { runGpsChangeEmailCycle } from "../../../lib/customerGpsChangeEmailServe
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+async function readParams(request) {
+  const url = new URL(request.url);
+  const queryDate = url.searchParams.get("date");
+  const queryForce = url.searchParams.get("force");
+  const queryTo = url.searchParams.get("to");
+  if (String(request.method || "").toUpperCase() === "GET") {
+    return { date: queryDate || "", force: queryForce, to: queryTo || "" };
+  }
+  try {
+    const body = await request.json();
+    return {
+      date: body?.date || queryDate || "",
+      force: body?.force ?? queryForce,
+      to: body?.to || queryTo || "",
+    };
+  } catch {
+    return { date: queryDate || "", force: queryForce, to: queryTo || "" };
+  }
+}
+
 async function handleRequest(request) {
   if (!isCronAuthorized(request)) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   try {
@@ -13,8 +33,16 @@ async function handleRequest(request) {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) throw new Error("Server configuration is incomplete.");
     const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-    const date = new URL(request.url).searchParams.get("date") || "";
-    const result = await runGpsChangeEmailCycle(admin, { date });
+    const { date, force, to } = await readParams(request);
+    const result = await runGpsChangeEmailCycle(admin, {
+      date,
+      force,
+      env: {
+        ...process.env,
+        ...(String(force || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_FORCE: "true" } : {}),
+        ...(String(to || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_TEST_TO: String(to).trim() } : {}),
+      },
+    });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "GPS digest failed." }, { status: 500 });

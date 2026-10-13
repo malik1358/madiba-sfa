@@ -136,7 +136,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`, `matched-receipt-email`
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
-- `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`.
+- `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`. Digests include per-customer **Times today** / **Total times** counts. Authorized `force` / test-`to` query params resend without claiming the daily marker.
 - `salesman-visit-plan-email`, `mobile-snapshot`
 
 ## Authentication

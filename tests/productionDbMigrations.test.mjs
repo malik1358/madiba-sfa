@@ -375,7 +375,7 @@ test("quarantined test-data migration is excluded from unrelated pending blocker
 test("attested history-missing versions clear unrelated blockers without marking allowlisted DDL applied", () => {
   const attested = ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING[0];
   const scope = migrationScope(
-    [attested, "20260930190000", "20261002120000", "20261002130000", "20260819000000"],
+    [attested, "20260930190000", "20261002120000", "20261002130000", "20261003120000"],
     [],
   );
   assert.deepEqual(scope.attestedHistoryMissing, [attested]);
@@ -384,7 +384,7 @@ test("attested history-missing versions clear unrelated blockers without marking
     "20261002120000",
     "20261002130000",
   ]);
-  assert.deepEqual(scope.unrelatedPending, ["20260819000000"]);
+  assert.deepEqual(scope.unrelatedPending, ["20261003120000"]);
 });
 
 test("unknown ledger versions and unknown repo pending fail closed", () => {
@@ -410,16 +410,35 @@ test("production audit inventory reconciles aliases and ledger-only rows against
     "20261002120000",
     "20261002130000",
   ]);
-  // Uncertain migrations intentionally remain blockers until separately attested.
+  // Phase 1 attestations: previously uncertain blockers, now schema-present attested.
   for (const version of [
     "20260819000000",
     "20260824163000",
     "20260831120000",
     "20260914190000",
   ]) {
-    assert.equal(scope.unrelatedPending.includes(version), true, version);
+    assert.equal(scope.attestedHistoryMissing.includes(version), true, version);
+    assert.equal(scope.unrelatedPending.includes(version), false, version);
   }
+  assert.equal(PRODUCTION_QUARANTINED_MIGRATIONS.some((m) => m.version === "20260816000001"), true);
   assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 10);
+});
+
+test("phase1 attested versions stay out of quarantine and allowlist", () => {
+  const phase1 = [
+    "20260819000000",
+    "20260824163000",
+    "20260831120000",
+    "20260914190000",
+  ];
+  const quarantine = new Set(PRODUCTION_QUARANTINED_MIGRATIONS.map((m) => m.version));
+  const allowlist = new Set(ALLOWLISTED_MIGRATIONS.map((m) => m.version));
+  for (const version of phase1) {
+    assert.equal(ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING.includes(version), true, version);
+    assert.equal(quarantine.has(version), false, version);
+    assert.equal(allowlist.has(version), false, version);
+  }
+  assert.doesNotThrow(() => assertMigrationReconciliationConfig());
 });
 
 test("production database URL requires verified TLS and is pinned to production", () => {

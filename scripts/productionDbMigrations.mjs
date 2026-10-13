@@ -63,18 +63,33 @@ export const PRODUCTION_QUARANTINED_MIGRATIONS = Object.freeze([
  * (pre-ledger baseline / history gap). Clears unrelated-pending blockers only.
  * Does not write the ledger and does not treat allowlisted pending DDL as applied.
  * Uncertain migrations are intentionally omitted (fail closed).
+ *
+ * Phase 1 (2026-10-13 read-only production audit, project ynmtlzyqvmurpmfretji):
+ * - 20260819000000 — merge/refresh DEFINER RPCs present; prosrc md5 matches migration;
+ *   EXECUTE only for postgres owner + service_role (PUBLIC/anon/authenticated revoked).
+ * - 20260824163000 — key-only: system_settings.android_apk_min_version_v1 exists with
+ *   expected JSON shape; live minVersionCode is ops-managed and must NOT be overwritten
+ *   by replaying the historical UPSERT (migration embeds 24; production may differ).
+ * - 20260831120000 — customers.previous_salesman_code text, idx_customers_previous_salesman,
+ *   customers_select policy includes previous_salesman_code path.
+ * - 20260914190000 — dirty-code cleanup scope empty: 0 master rows matching
+ *   ^[0-9]+C?[[:space:]]+.+ with or without clean twin; 0 sales_raw/sales_orders/invoices
+ *   rows on that pattern. Aggregate counts only; no customer PII selected.
  */
 export const ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING = Object.freeze([
   "20260808000000",
   "20260816000000",
   "20260816000002",
   "20260817000000",
+  "20260819000000",
   "20260822120000",
   "20260822153000",
   "20260822160000",
   "20260824120000",
+  "20260824163000",
   "20260825120000",
   "20260828180000",
+  "20260831120000",
   "20260831153000",
   "20260904120000",
   "20260904160000",
@@ -85,6 +100,7 @@ export const ATTESTED_SCHEMA_PRESENT_HISTORY_MISSING = Object.freeze([
   "20260909120000",
   "20260914120000",
   "20260914140000",
+  "20260914190000",
   "20260929120000",
 ]);
 

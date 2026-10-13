@@ -16,7 +16,9 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
-  if (status === "Matched") return "paymentSettleStatus paymentSettleStatus--paid";
+  if (status === "Matched" || status === "Applied") {
+    return "paymentSettleStatus paymentSettleStatus--paid";
+  }
   if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
     return "paymentSettleStatus paymentSettleStatus--credit";
   }
@@ -453,11 +455,11 @@ export default function InvoiceSettlement({
           <div>
             <h3>Payment Matched to Purchase</h3>
             <p className="auditSectionNote">
-              Dual-party Payments that match a Purchase for the exact same amount (within SAR 0.02).
-              Partial purchase settlements stay in Settlement Events.
+              Dual-party Payments applied to Purchases (Matched = exact amount; Applied = FIFO).
+              Leftover Payment after Purchases settles open sales invoices.
             </p>
           </div>
-          <span>{formatCount(totals.matched_purchase_payment_count || 0)} exact pairs</span>
+          <span>{formatCount(totals.matched_purchase_payment_count || 0)} applications</span>
         </div>
 
         <ExportableTable filename={`${filenamePrefix}-purchase-matches`} sheetName="PurchaseMatches" className="moduleTableWrap" style={{ marginTop: "10px" }}>
@@ -484,12 +486,16 @@ export default function InvoiceSettlement({
                   <td>{row.payment_voucher || "—"}</td>
                   <td>{formatMoney(row.amount)}</td>
                   <td>{row.match_days != null ? row.match_days : "—"}</td>
-                  <td><span className={statusClass("Matched")}>Matched</span></td>
+                  <td>
+                    <span className={statusClass(row.status || "Matched")}>
+                      {row.status || "Matched"}
+                    </span>
+                  </td>
                 </tr>
               ))}
               {!matchedPurchasePayments.length && (
                 <tr>
-                  <td colSpan={8}>No exact Payment↔Purchase amount matches for this customer.</td>
+                  <td colSpan={8}>No Payment↔Purchase applications for this customer.</td>
                 </tr>
               )}
             </tbody>

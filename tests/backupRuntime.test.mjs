@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, backupStage, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, isTransientStorageError, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage, withTransientRetries } from "../scripts/backup/run-backup.mjs";
+import { BackupDiagnosticError, backupStage, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, isTransientStorageError, runBackup, safeBackupConfigError, safeStorageError, validateDatabaseArchiveCoverage, withTransientRetries } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -112,6 +112,31 @@ test("isTransientStorageError and withTransientRetries classify retries", async 
     throw new Error("permanent");
   }, { attempts: 3, baseDelayMs: 1, sleep: async () => {} }), /permanent/);
   assert.equal(attempts, 1);
+});
+
+test("safeStorageError surfaces allowlisted Storage failures without raw details", async () => {
+  assert.equal(safeStorageError(new Error("Storage files changed during backup; retry")), "Storage files changed during backup; retry");
+  assert.equal(safeStorageError(new Error("Backup API request failed (HTTP 503); raw details suppressed")), "Backup API request failed (HTTP 503); raw details suppressed");
+  assert.equal(safeStorageError(new Error("secret path /tmp/foo")), null);
+  const payload = await mkdtemp(path.join(tmpdir(), "madiba-storage-safe-"));
+  try {
+    const fetchImpl = async (url) => {
+      if (url.endsWith("/bucket")) return Response.json([{ id: "documents" }]);
+      if (url.includes("/list/")) return Response.json([{ name: "file", id: "file", metadata: { size: 4 }, updated_at: "1" }]);
+      return new Response("nope", { status: 503 });
+    };
+    await assert.rejects(
+      exportStorage({ supabaseUrl: "https://example.test", serviceKey: "fake" }, payload, fetchImpl, {
+        downloadAttempts: 1, downloadBaseDelayMs: 1, sleep: async () => {},
+      }),
+      (error) => {
+        assert.ok(error instanceof BackupDiagnosticError);
+        assert.match(error.message, /Storage stage failed.*HTTP 503/);
+        assert.ok(!error.message.includes("secret"));
+        return true;
+      },
+    );
+  } finally { await rm(payload, { recursive: true, force: true }); }
 });
 
 async function databaseFixture(options = {}) {

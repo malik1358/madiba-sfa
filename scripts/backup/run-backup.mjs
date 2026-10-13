@@ -1,11 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { backupName, listStorageFiles, readBackupConfig, retentionCandidates } from "./backup-policy.mjs";
 
@@ -166,7 +164,49 @@ function storageFingerprint(files) {
   return JSON.stringify(files.map((file) => [file.bucket, file.path, file.updatedAt, file.metadata.size]).sort());
 }
 
-export async function exportStorage(config, payload, fetchImpl = fetch) {
+export function isTransientStorageError(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const code = error?.code;
+  if (code === "ERR_ASSERTION" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EPIPE" || code === "UND_ERR_SOCKET") return true;
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") return true;
+  return /Backup API connection failed|HTTP (408|425|429|5\d\d)|fetch failed|socket|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR|paused|aborted|network/i.test(message);
+}
+
+export async function withTransientRetries(operation, {
+  attempts = 4,
+  baseDelayMs = 1000,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  isRetryable = isTransientStorageError,
+} = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryable(error)) throw error;
+      await sleep(baseDelayMs * (2 ** (attempt - 1)));
+    }
+  }
+  throw lastError;
+}
+
+async function downloadStorageObject(storage, file, destination) {
+  await rm(destination, { force: true });
+  const response = await storage.download(file.bucket, file.path);
+  // Prefer arrayBuffer over Readable.fromWeb+pipeline: Undici can throw
+  // assert(!this.paused) when the socket closes under stream backpressure.
+  try {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    await rm(destination, { force: true });
+    throw error;
+  }
+  return response;
+}
+
+export async function exportStorage(config, payload, fetchImpl = fetch, options = {}) {
   const storage = storageClient(config, fetchImpl);
   const buckets = await storage.buckets();
   if (!Array.isArray(buckets) || !buckets.length) throw new Error("No Storage buckets found; full backup refused");
@@ -180,9 +220,10 @@ export async function exportStorage(config, payload, fetchImpl = fetch) {
     const objectId = createHash("sha256").update(JSON.stringify([file.bucket, file.path])).digest("hex");
     file.archivePath = `objects/${objectId}`;
     const destination = path.join(payload, file.archivePath);
-    const response = await storage.download(file.bucket, file.path);
-    if (!response.body) throw new Error("Storage download has no body");
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(destination, { flags: "wx", mode: 0o600 }));
+    const response = await withTransientRetries(
+      () => downloadStorageObject(storage, file, destination),
+      { attempts: options.downloadAttempts, baseDelayMs: options.downloadBaseDelayMs, sleep: options.sleep },
+    );
     file.bytes = (await stat(destination)).size;
     file.sha256 = await fileHash(destination);
     file.contentType = response.headers.get("content-type") || file.metadata.mimetype || "application/octet-stream";

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, backupStage, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage } from "../scripts/backup/run-backup.mjs";
+import { BackupDiagnosticError, backupStage, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, isTransientStorageError, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage, withTransientRetries } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -52,6 +52,66 @@ test("Storage changes during export fail instead of publishing an incomplete sna
     };
     await assert.rejects(exportStorage({ supabaseUrl: "https://example.test", serviceKey: "fake" }, payload, fetchImpl), /changed/);
   } finally { await rm(payload, { recursive: true, force: true }); }
+});
+
+test("transient Storage download failures retry and succeed", async () => {
+  const payload = await mkdtemp(path.join(tmpdir(), "madiba-storage-retry-"));
+  let downloads = 0;
+  try {
+    const fetchImpl = async (url) => {
+      if (url.endsWith("/bucket")) return Response.json([{ id: "documents", public: false }]);
+      if (url.includes("/list/")) return Response.json([{ name: "receipt.pdf", id: "file", metadata: { size: 4 }, updated_at: "2026-10-05" }]);
+      downloads += 1;
+      if (downloads === 1) {
+        const error = new Error("paused");
+        error.code = "ERR_ASSERTION";
+        throw error;
+      }
+      return new Response("test", { headers: { "content-type": "application/pdf" } });
+    };
+    const summary = await exportStorage(
+      { supabaseUrl: "https://example.test", serviceKey: "fake" },
+      payload,
+      fetchImpl,
+      { downloadAttempts: 3, downloadBaseDelayMs: 1, sleep: async () => {} },
+    );
+    assert.equal(summary.files, 1);
+    assert.equal(downloads, 2);
+  } finally { await rm(payload, { recursive: true, force: true }); }
+});
+
+test("non-transient Storage download failures do not retry", async () => {
+  const payload = await mkdtemp(path.join(tmpdir(), "madiba-storage-noretry-"));
+  let downloads = 0;
+  try {
+    const fetchImpl = async (url) => {
+      if (url.endsWith("/bucket")) return Response.json([{ id: "documents" }]);
+      if (url.includes("/list/")) return Response.json([{ name: "file", id: "file", metadata: { size: 4 }, updated_at: "2026-10-05" }]);
+      downloads += 1;
+      return new Response("secret", { status: 403 });
+    };
+    await assert.rejects(
+      exportStorage(
+        { supabaseUrl: "https://example.test", serviceKey: "fake" },
+        payload,
+        fetchImpl,
+        { downloadAttempts: 4, downloadBaseDelayMs: 1, sleep: async () => {} },
+      ),
+      /HTTP 403/,
+    );
+    assert.equal(downloads, 1);
+  } finally { await rm(payload, { recursive: true, force: true }); }
+});
+
+test("isTransientStorageError and withTransientRetries classify retries", async () => {
+  assert.equal(isTransientStorageError(Object.assign(new Error("paused"), { code: "ERR_ASSERTION" })), true);
+  assert.equal(isTransientStorageError(new Error("Backup API request failed (HTTP 403); raw details suppressed")), false);
+  let attempts = 0;
+  await assert.rejects(withTransientRetries(async () => {
+    attempts += 1;
+    throw new Error("permanent");
+  }, { attempts: 3, baseDelayMs: 1, sleep: async () => {} }), /permanent/);
+  assert.equal(attempts, 1);
 });
 
 async function databaseFixture(options = {}) {

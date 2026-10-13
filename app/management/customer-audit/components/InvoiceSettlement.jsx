@@ -16,6 +16,7 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
+  if (status === "Matched") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
     return "paymentSettleStatus paymentSettleStatus--credit";
   }
@@ -197,6 +198,9 @@ export default function InvoiceSettlement({
   const summary = ledger.summary || {};
   const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
   const reversed = Array.isArray(ledger.reversedInvoices) ? ledger.reversedInvoices : [];
+  const matchedPurchasePayments = Array.isArray(ledger.matchedPurchasePayments)
+    ? ledger.matchedPurchasePayments
+    : [];
   const creditNotes = Array.isArray(ledger.creditNotes) ? ledger.creditNotes : [];
   const invoicePaidTotal = Number(totals.paid_amount || 0) - Number(totals.reversed_sales_incl_vat || 0);
   const salesInclVat = Number(
@@ -438,6 +442,64 @@ export default function InvoiceSettlement({
                 <td><strong>{formatMoney(totals.reversed_sales_excl_vat || 0)}</strong></td>
                 <td><strong>{formatMoney(totals.reversed_sales_incl_vat || 0)}</strong></td>
                 <td colSpan={5} />
+              </tr>
+            </tfoot>
+          </table>
+        </ExportableTable>
+      </section>
+
+      <section className="auditSection">
+        <div className="auditTransactionHeader">
+          <div>
+            <h3>Payment Matched to Purchase</h3>
+            <p className="auditSectionNote">
+              Dual-party Payments that match a Purchase for the exact same amount (within SAR 0.02).
+              Partial purchase settlements stay in Settlement Events.
+            </p>
+          </div>
+          <span>{formatCount(totals.matched_purchase_payment_count || 0)} exact pairs</span>
+        </div>
+
+        <ExportableTable filename={`${filenamePrefix}-purchase-matches`} sheetName="PurchaseMatches" className="moduleTableWrap" style={{ marginTop: "10px" }}>
+          <table className="moduleTable moduleBiTable paymentSettleTable">
+            <thead>
+              <tr>
+                <th>Purchase Date</th>
+                <th>Purchase Voucher</th>
+                <th>Purchase Amount</th>
+                <th>Payment Date</th>
+                <th>Payment Voucher</th>
+                <th>Payment Amount</th>
+                <th>Match Days</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matchedPurchasePayments.map((row) => (
+                <tr key={`${row.purchase_date}::${row.purchase_voucher}::${row.payment_voucher}`}>
+                  <td>{row.purchase_date || "—"}</td>
+                  <td>{row.purchase_voucher || "—"}</td>
+                  <td>{formatMoney(row.purchase_amount)}</td>
+                  <td>{row.payment_date || "—"}</td>
+                  <td>{row.payment_voucher || "—"}</td>
+                  <td>{formatMoney(row.amount)}</td>
+                  <td>{row.match_days != null ? row.match_days : "—"}</td>
+                  <td><span className={statusClass("Matched")}>Matched</span></td>
+                </tr>
+              ))}
+              {!matchedPurchasePayments.length && (
+                <tr>
+                  <td colSpan={8}>No exact Payment↔Purchase amount matches for this customer.</td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={2}><strong>Total</strong></td>
+                <td><strong>{formatMoney(totals.matched_purchase_payment_amount || 0)}</strong></td>
+                <td colSpan={2} />
+                <td><strong>{formatMoney(totals.matched_purchase_payment_amount || 0)}</strong></td>
+                <td colSpan={2} />
               </tr>
             </tfoot>
           </table>

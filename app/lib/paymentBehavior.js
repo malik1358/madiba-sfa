@@ -670,12 +670,47 @@ export function findImmediateCreditNoteReversals(
   return { reversals, reversedKeys };
 }
 
+/**
+ * Purchase vouchers from a dual customer+supplier day book / party ledger.
+ * They open supplier AP and must not be treated as cash collections.
+ */
+export function isPurchaseVoucherType(vchType) {
+  const text = String(vchType || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  if (text === "purchase") return true;
+  if (text.startsWith("purchase ")) return true;
+  if (text.includes("purchase voucher")) return true;
+  return false;
+}
+
+/** Purchase register rows (AP bills) sorted oldest-first. */
+export function buildPurchaseRegisterRows(receipts = []) {
+  return (Array.isArray(receipts) ? receipts : [])
+    .filter((row) => isPurchaseVoucherType(row?.vch_type))
+    .map((row) => ({
+      purchase_date: dateOnly(row?.receipt_date),
+      amount: Math.abs(toNumber(row?.amount)),
+      vch_no: String(row?.vch_no || "").trim(),
+      vch_type: String(row?.vch_type || "Purchase").trim() || "Purchase",
+    }))
+    .filter((row) => row.purchase_date && row.amount > 0)
+    .sort((left, right) => {
+      if (left.purchase_date !== right.purchase_date) {
+        return left.purchase_date.localeCompare(right.purchase_date);
+      }
+      return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+    });
+}
+
 export function buildSortedReceipts(receipts = []) {
   return (Array.isArray(receipts) ? receipts : [])
+    // Purchases are AP bills, not cash collections / payments.
+    .filter((row) => !isPurchaseVoucherType(row?.vch_type))
     .map((row) => ({
       receipt_date: dateOnly(row?.receipt_date),
       amount: toNumber(row?.amount),
       vch_no: String(row?.vch_no || "").trim(),
+      vch_type: String(row?.vch_type || "").trim(),
     }))
     // Keep Payment vouchers stored as negative amounts so collected totals net correctly.
     .filter((row) => row.receipt_date && Math.abs(row.amount) > 0)
@@ -702,6 +737,8 @@ export function buildSortedReceipts(receipts = []) {
  * A CN with an explicit Ref. No. skips that named invoice and settles the next
  * open voucher(s) after it — the referenced bill keeps its full sales and cash only.
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
+ * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
+ * leftover then reverses prior cash settlements LIFO (or raises newest sales open).
  */
 export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
@@ -724,7 +761,12 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
 
   const allocations = [];
   const creditNoteAllocations = [];
+  const purchaseAllocations = [];
+  const matchedPurchasePayments = [];
+  const purchases = [];
   let unmatchedReceiptAmount = 0;
+  let paymentAppliedToPurchases = 0;
+  let paymentAppliedToSales = 0;
 
   const events = [
     ...unpairedNotes.map((note) => ({
@@ -735,24 +777,36 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       voucher_number: note.voucher_number || "",
       reference: note.reference || "",
     })),
+    ...buildPurchaseRegisterRows(receipts).map((row) => ({
+      kind: "purchase",
+      date: row.purchase_date,
+      amount: row.amount,
+      vch_no: row.vch_no,
+    })),
     ...buildSortedReceipts(receipts).map((row) => ({
       kind: row.amount < 0 ? "payment" : "receipt",
       date: row.receipt_date,
       amount: Math.abs(row.amount),
       signed_amount: row.amount,
       vch_no: row.vch_no,
+      vch_type: row.vch_type || "",
     })),
   ]
     .filter((row) => row.date && row.amount > 0)
     .sort((left, right) => {
       if (left.date !== right.date) return left.date.localeCompare(right.date);
-      // Same day: credit notes, then receipts, then payment reversals.
+      // Same day: CN → purchase (open AP) → receipts → payment (settle AP then AR).
       const kindRank = (kind) => (
-        kind === "credit_note" ? 0 : kind === "receipt" ? 1 : 2
+        kind === "credit_note" ? 0
+          : kind === "purchase" ? 1
+            : kind === "receipt" ? 2
+              : 3
       );
       const rankDelta = kindRank(left.kind) - kindRank(right.kind);
       if (rankDelta !== 0) return rankDelta;
-      return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+      return String(left.vch_no || left.voucher_number || "").localeCompare(
+        String(right.vch_no || right.voucher_number || ""),
+      );
     });
 
   function hasOlderOpenInvoice(list, cashInvoice) {
@@ -800,7 +854,82 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     return Math.max(0, remaining - applied);
   }
 
-  /** Payment vouchers (negative receipts) reverse prior cash settlements LIFO so Open rises. */
+  /**
+   * Exact full-bill Payment↔Purchase pairs (same amount within tolerance), like
+   * immediate CN reversals. Prefer same-day, then closest earlier purchase.
+   */
+  function claimExactPurchasePayment(event) {
+    const candidates = purchases
+      .filter((purchase) => (
+        toNumber(purchase.remaining) > AMOUNT_TOLERANCE
+        && amountsMatch(purchase.amount, event.amount)
+        && amountsMatch(purchase.remaining, purchase.amount)
+        && (!purchase.purchase_date || !event.date || purchase.purchase_date <= event.date)
+      ))
+      .map((purchase) => {
+        const dayGap = Math.abs(isoDayOffset(purchase.purchase_date, event.date) ?? 9999);
+        return {
+          purchase,
+          sameDay: purchase.purchase_date === event.date,
+          dayGap,
+        };
+      })
+      .sort((left, right) => {
+        if (left.sameDay !== right.sameDay) return left.sameDay ? -1 : 1;
+        if (left.dayGap !== right.dayGap) return left.dayGap - right.dayGap;
+        if (left.purchase.purchase_date !== right.purchase.purchase_date) {
+          return left.purchase.purchase_date.localeCompare(right.purchase.purchase_date);
+        }
+        return String(left.purchase.vch_no || "").localeCompare(String(right.purchase.vch_no || ""));
+      });
+
+    const best = candidates[0];
+    if (!best) return event.amount;
+
+    const purchase = best.purchase;
+    const applied = toNumber(purchase.remaining);
+    purchase.remaining = 0;
+    purchase.exact_matched = true;
+    paymentAppliedToPurchases += applied;
+    matchedPurchasePayments.push({
+      purchase_date: purchase.purchase_date,
+      purchase_voucher: purchase.vch_no,
+      purchase_amount: toNumber(purchase.amount),
+      payment_date: event.date,
+      payment_voucher: event.vch_no,
+      amount: applied,
+      match_days: isoDaysBetween(event.date, purchase.purchase_date),
+      status: "Matched",
+    });
+    return 0;
+  }
+
+  /** Apply Payment to open Purchase bills: exact full match first, then oldest-open FIFO. */
+  function applyPaymentToPurchases(event) {
+    let remaining = claimExactPurchasePayment(event);
+    if (remaining <= AMOUNT_TOLERANCE) return 0;
+
+    for (const purchase of purchases) {
+      if (remaining <= 0.009) break;
+      if (purchase.remaining <= 0.009) continue;
+      if (purchase.exact_matched) continue;
+      const applied = Math.min(remaining, purchase.remaining);
+      if (applied <= 0.009) continue;
+      purchase.remaining = Math.max(0, purchase.remaining - applied);
+      remaining = Math.max(0, remaining - applied);
+      paymentAppliedToPurchases += applied;
+      purchaseAllocations.push({
+        purchase_date: purchase.purchase_date,
+        purchase_voucher: purchase.vch_no,
+        payment_date: event.date,
+        vch_no: event.vch_no,
+        amount: applied,
+      });
+    }
+    return remaining;
+  }
+
+  /** Leftover Payment after Purchases: reverse prior cash settlements LIFO so Open rises. */
   function reversePaymentFromSettlements(event) {
     let toRestore = event.amount;
     for (let index = allocations.length - 1; index >= 0 && toRestore > 0.009; index -= 1) {
@@ -831,8 +960,22 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   for (const event of events) {
     let remaining = event.amount;
 
+    if (event.kind === "purchase") {
+      purchases.push({
+        purchase_date: event.date,
+        vch_no: event.vch_no || "",
+        amount: event.amount,
+        remaining: event.amount,
+      });
+      continue;
+    }
+
     if (event.kind === "payment") {
-      reversePaymentFromSettlements(event);
+      remaining = applyPaymentToPurchases(event);
+      if (remaining > 0.009) {
+        paymentAppliedToSales += remaining;
+        reversePaymentFromSettlements({ ...event, amount: remaining });
+      }
       continue;
     }
 
@@ -888,6 +1031,11 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     invoices,
     allocations,
     creditNoteAllocations,
+    purchaseAllocations,
+    matchedPurchasePayments,
+    purchases,
+    paymentAppliedToPurchases,
+    paymentAppliedToSales,
     unmatchedReceiptAmount,
     reversedInvoices: reversals,
   };
@@ -1500,6 +1648,11 @@ export function buildPaymentSettlementLedger({
     invoices,
     allocations,
     creditNoteAllocations,
+    purchaseAllocations = [],
+    matchedPurchasePayments = [],
+    purchases = [],
+    paymentAppliedToPurchases = 0,
+    paymentAppliedToSales = 0,
     unmatchedReceiptAmount,
     reversedInvoices = [],
   } = matchPaymentsFifo(transactions, receipts);
@@ -1701,13 +1854,35 @@ export function buildPaymentSettlementLedger({
     current.receipts.push({
       vch_no: row.vch_no,
       amount: toNumber(row.amount),
+      vch_type: row.vch_type || (toNumber(row.amount) < 0 ? "Payment" : "Receipt"),
+      kind: toNumber(row.amount) < 0 ? "payment" : "receipt",
     });
     collectionsByDateMap.set(row.receipt_date, current);
+  });
+
+  const purchasesByDateMap = new Map();
+  buildPurchaseRegisterRows(receipts).forEach((row) => {
+    const current = purchasesByDateMap.get(row.purchase_date) || {
+      date: row.purchase_date,
+      purchase_count: 0,
+      purchase_amount: 0,
+      purchases: [],
+    };
+    current.purchase_count += 1;
+    current.purchase_amount += toNumber(row.amount);
+    current.purchases.push({
+      vch_no: row.vch_no,
+      amount: toNumber(row.amount),
+      vch_type: row.vch_type || "Purchase",
+      kind: "purchase",
+    });
+    purchasesByDateMap.set(row.purchase_date, current);
   });
 
   const allDates = [...new Set([
     ...salesByDateMap.keys(),
     ...collectionsByDateMap.keys(),
+    ...purchasesByDateMap.keys(),
   ])].sort();
 
   const datewise = allDates.map((date) => {
@@ -1726,6 +1901,12 @@ export function buildPaymentSettlementLedger({
       collected_amount: 0,
       receipts: [],
     };
+    const dayPurchases = purchasesByDateMap.get(date) || {
+      date,
+      purchase_count: 0,
+      purchase_amount: 0,
+      purchases: [],
+    };
     return {
       date,
       invoice_count: sales.invoice_count,
@@ -1733,22 +1914,63 @@ export function buildPaymentSettlementLedger({
       sales_incl_vat: sales.sales_incl_vat,
       receipt_count: collections.receipt_count,
       collected_amount: collections.collected_amount,
+      purchase_count: dayPurchases.purchase_count,
+      purchase_amount: dayPurchases.purchase_amount,
       paid_against_sales: sales.paid_amount,
       open_sales_amount: sales.open_amount,
       invoices: sales.invoices || [],
       receipts: collections.receipts || [],
+      purchases: dayPurchases.purchases || [],
     };
   });
 
-  const settlementEvents = [...allocations]
-    .sort((left, right) => {
-      if (left.receipt_date !== right.receipt_date) {
-        return left.receipt_date.localeCompare(right.receipt_date);
-      }
-      if (left.invoice_date !== right.invoice_date) {
-        return left.invoice_date.localeCompare(right.invoice_date);
-      }
-      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  const purchaseSettlementEvents = purchaseAllocations.map((row) => ({
+    kind: "payment_purchase",
+    target_kind: "purchase",
+    receipt_date: row.payment_date,
+    vch_no: row.vch_no,
+    invoice_date: row.purchase_date,
+    voucher_number: row.purchase_voucher,
+    amount: toNumber(row.amount),
+    days: null,
+  }));
+
+  const settlementEvents = [
+    ...allocations.map((row) => ({ ...row, kind: "receipt", target_kind: "sales" })),
+    ...purchaseSettlementEvents,
+  ].sort((left, right) => {
+    if (left.receipt_date !== right.receipt_date) {
+      return left.receipt_date.localeCompare(right.receipt_date);
+    }
+    if (left.invoice_date !== right.invoice_date) {
+      return String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    }
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
+  const matchedPurchasePaymentRows = [...matchedPurchasePayments].sort((left, right) => {
+    if (left.payment_date !== right.payment_date) {
+      return String(left.payment_date || "").localeCompare(String(right.payment_date || ""));
+    }
+    return String(left.payment_voucher || "").localeCompare(String(right.payment_voucher || ""));
+  });
+
+  // Exact Payment↔Purchase pairs live in their own table (like CN reversals).
+  const purchaseRows = purchases
+    .filter((row) => !row.exact_matched)
+    .map((row) => {
+      const paid = toNumber(row.amount) - toNumber(row.remaining);
+      let status = "Open";
+      if (toNumber(row.remaining) <= 0.009) status = "Paid";
+      else if (paid > 0.009) status = "Partial";
+      return {
+        purchase_date: row.purchase_date,
+        voucher_number: row.vch_no,
+        amount: toNumber(row.amount),
+        paid_amount: paid,
+        remaining: toNumber(row.remaining),
+        status,
+      };
     });
 
   const openSalesAmount = invoiceRows.reduce((total, row) => total + toNumber(row.remaining), 0);
@@ -1773,7 +1995,10 @@ export function buildPaymentSettlementLedger({
   const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
   const salesInclVat = invoiceSalesInclVat + reversedSalesInclVat;
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
-  const collectedAmount = buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0);
+  // AR collected = cash receipts + Payment leftovers that hit sales.
+  // Payments that settled Purchases stay on the AP side and are added back.
+  const cashRegisterSum = buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0);
+  const collectedAmount = cashRegisterSum + toNumber(paymentAppliedToPurchases);
 
   // Credit notes already paired as immediate reversals are not deducted again.
   // Remaining credit notes reduce billable sales so: Sales − CN − Collected = Open.
@@ -1847,6 +2072,15 @@ export function buildPaymentSettlementLedger({
     balance_delta: balanceDelta,
     sales_collected_matches_open: Math.abs(balanceDelta) <= 0.02,
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
+    payment_applied_to_purchases: toNumber(paymentAppliedToPurchases),
+    payment_applied_to_sales: toNumber(paymentAppliedToSales),
+    open_purchase_amount: purchaseRows.reduce((total, row) => total + toNumber(row.remaining), 0),
+    purchase_count: purchaseRows.length,
+    matched_purchase_payment_count: matchedPurchasePaymentRows.length,
+    matched_purchase_payment_amount: matchedPurchasePaymentRows.reduce(
+      (total, row) => total + toNumber(row.amount),
+      0,
+    ),
     invoice_count: invoiceRows.length,
     paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,
     partial_invoice_count: invoiceRows.filter((row) => row.status === "Partial").length,
@@ -1877,6 +2111,9 @@ export function buildPaymentSettlementLedger({
     outstandingCompareTotals: outstandingCompare.totals,
     datewise,
     settlementEvents,
+    purchases: purchaseRows,
+    purchaseAllocations,
+    matchedPurchasePayments: matchedPurchasePaymentRows,
     outstandingInvoices: outstanding.invoices,
   };
 }

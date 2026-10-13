@@ -251,6 +251,8 @@ KPI target edits notify affected salespeople after the save and CC their complet
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
 
+The Missing Invoice Email backup uses curl `--retry 2 --retry-delay 10`: up to three attempts per endpoint for curl's transient failures (timeouts and HTTP 408/429/500/502/503/504), with the existing 180-second per-attempt limit. Successful requests and HTTP 401 are not retried. URL fallback and the server's existing recent-send/midnight markers are unchanged; persistent failures still fail the job and print the final response. If failures persist, inspect the production function/database logs—the generic HTTP 500 response alone does not identify the failing dependency. No migration or secret changes are required.
+
 ### Customer GPS digest activation and recovery
 
 Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries and does not skip Friday.

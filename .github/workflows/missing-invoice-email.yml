@@ -37,7 +37,7 @@ jobs:
 
           post_report() {
             local target_url="$1"
-            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+            curl -sS -L --post301 --post302 --post303 --max-time 180 --retry 2 --retry-delay 10 -o response.json -w "%{http_code}" -X POST "$target_url" \
               -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
               -H "Content-Type: application/json" \
               --data '{}'

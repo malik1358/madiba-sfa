@@ -12,6 +12,7 @@ import {
   ORDER_STATUS_PENDING_INVOICE_CREATION,
   ORDER_STATUS_REJECTED,
   ORDER_STATUS_STOCK_UNAVAILABLE,
+  MAX_ORDER_INVOICE_UPLOAD_BYTES,
   canApprovePendingOrders,
   displayInvoiceStatus,
   isOrderCreatedBeforeLegacyInvoiceCutoff,
@@ -26,6 +27,10 @@ import {
   shouldShowPendingApprovalActions,
   statusForRejectionReason,
 } from "../app/lib/orderApproval.js";
+
+test("invoice PDF upload stays under the Vercel request body limit", () => {
+  assert.equal(MAX_ORDER_INVOICE_UPLOAD_BYTES, 4 * 1024 * 1024);
+});
 
 test("orders needing approval display Pending for approval", () => {
   assert.equal(displayInvoiceStatus(null, { approvalRequired: true }), ORDER_STATUS_PENDING_APPROVAL);

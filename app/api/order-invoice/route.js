@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   attachComparisonToMeta,
@@ -21,6 +21,7 @@ import {
   ORDER_STATUS_PENDING_INVOICE_CREATION,
   ORDER_STATUS_REJECTED,
   ORDER_REJECTION_REASON_LEGACY_UNINVOICED,
+  MAX_ORDER_INVOICE_UPLOAD_BYTES,
   canApprovePendingOrders,
   isPendingForApprovalStatus,
   isPendingForInvoiceCreationStatus,
@@ -369,6 +370,14 @@ export async function POST(request) {
         return NextResponse.json({ success: false, error: "Only PDF invoices are allowed." }, { status: 400 });
       }
 
+      if (Number(file.size || 0) > MAX_ORDER_INVOICE_UPLOAD_BYTES) {
+        const maxMb = (MAX_ORDER_INVOICE_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+        return NextResponse.json({
+          success: false,
+          error: `Invoice PDF is too large. Use a file under ${maxMb} MB.`,
+        }, { status: 413 });
+      }
+
       const order = await ensureOrderVisible(admin, orderId, scope);
       await ensureAttachmentBucket(admin, INVOICE_BUCKET);
 
@@ -377,6 +386,14 @@ export async function POST(request) {
       const customerCode = normalizeCode(order.customer_code) || "UNKNOWN";
 
       const arrayBuffer = await file.arrayBuffer();
+      if (arrayBuffer.byteLength > MAX_ORDER_INVOICE_UPLOAD_BYTES) {
+        const maxMb = (MAX_ORDER_INVOICE_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+        return NextResponse.json({
+          success: false,
+          error: `Invoice PDF is too large. Use a file under ${maxMb} MB.`,
+        }, { status: 413 });
+      }
+
       const { stored, attachmentId: invoiceAttachmentId } = await storeAttachment(admin, {
         category: ATTACHMENT_CATEGORIES.orderInvoice,
         keyInput: { customerCode, orderId, fileName: file.name || "invoice.pdf", now },
@@ -439,30 +456,34 @@ export async function POST(request) {
       }
       const hydrated = toClientInvoiceMeta(enriched);
 
-      let uploadEmail = null;
-      try {
-        uploadEmail = await sendInvoiceUploadNotification(admin, {
-          orderId,
-          invoiceBuffer: arrayBuffer,
-          invoiceFileName: file.name || "invoice.pdf",
-          uploaderUserId: scope.userId,
-          uploadedAtIso: nowIso,
-        });
-      } catch (error) {
-        uploadEmail = {
-          skipped: false,
-          sent: false,
-          failed: true,
-          error: String(error?.message || error),
-        };
-        console.error("[invoice-upload-email]", uploadEmail.error);
-      }
+      // Email after the HTTP response so SMTP/Resend + order-PDF build cannot
+      // time out the upload and surface as browser "Failed to fetch".
+      const invoiceBytesForEmail = Buffer.from(arrayBuffer);
+      const invoiceFileNameForEmail = file.name || "invoice.pdf";
+      const uploaderUserIdForEmail = scope.userId;
+      after(async () => {
+        try {
+          if (!supabaseUrl || !serviceKey) return;
+          const mailAdmin = createClient(supabaseUrl, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          await sendInvoiceUploadNotification(mailAdmin, {
+            orderId,
+            invoiceBuffer: invoiceBytesForEmail,
+            invoiceFileName: invoiceFileNameForEmail,
+            uploaderUserId: uploaderUserIdForEmail,
+            uploadedAtIso: nowIso,
+          });
+        } catch (error) {
+          console.error("[invoice-upload-email]", String(error?.message || error));
+        }
+      });
 
       return NextResponse.json({
         success: true,
         item: hydrated,
         prospectLink,
-        ...(uploadEmail ? { uploadEmail } : {}),
+        uploadEmail: { queued: true },
       });
     }
 

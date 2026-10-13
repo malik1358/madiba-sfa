@@ -14,6 +14,9 @@ export const ORDER_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 export const ORDER_STATUS_WAITING_OVERDUE_COLLECTION = "Waiting for overdue collection";
 export const ORDER_STATUS_INVOICE_MADE = "Invoice made";
 
+// Stay under Vercel's ~4.5MB serverless request body limit (multipart overhead included).
+export const MAX_ORDER_INVOICE_UPLOAD_BYTES = 4 * 1024 * 1024;
+
 export const ORDER_REJECTION_REASON_CREDIT_LIMIT = "Credit limit";
 export const ORDER_REJECTION_REASON_DISCOUNT_PRICE = "Discount or price problem";
 export const ORDER_REJECTION_REASON_STOCK = "Stock not available";

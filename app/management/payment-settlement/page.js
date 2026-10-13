@@ -63,7 +63,9 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
-  if (status === "Matched") return "paymentSettleStatus paymentSettleStatus--paid";
+  if (status === "Matched" || status === "Applied") {
+    return "paymentSettleStatus paymentSettleStatus--paid";
+  }
   if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
     return "paymentSettleStatus paymentSettleStatus--credit";
   }
@@ -1030,13 +1032,13 @@ export default function PaymentSettlementPage() {
                 <div className="moduleSectionHeader">
                   <h2>Payment Matched to Purchase</h2>
                   <span>
-                    {formatCount(ledger.totals.matched_purchase_payment_count || 0)} exact amount pairs
+                    {formatCount(ledger.totals.matched_purchase_payment_count || 0)} purchase applications
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Dual customer+supplier Payments that match a Purchase bill for the exact same
-                  amount (within SAR 0.02). Same-day pairs are preferred. Partial FIFO purchase
-                  settlements stay in Settlement Events.
+                  Dual customer+supplier Payments applied to Purchase bills. Exact same-amount pairs
+                  are Matched; other amounts are Applied oldest-open FIFO. Leftover Payment after
+                  Purchases settles open sales invoices.
                 </p>
                 <ExportableTable filename="payment-settlement-purchase-matches" sheetName="PurchaseMatches" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
@@ -1062,12 +1064,16 @@ export default function PaymentSettlementPage() {
                           <td>{row.payment_voucher || "—"}</td>
                           <td>{formatMoney(row.amount)}</td>
                           <td>{row.match_days != null ? row.match_days : "—"}</td>
-                          <td><span className={statusClass("Matched")}>Matched</span></td>
+                          <td>
+                            <span className={statusClass(row.status || "Matched")}>
+                              {row.status || "Matched"}
+                            </span>
+                          </td>
                         </tr>
                       ))}
                       {!(ledger.matchedPurchasePayments || []).length && (
                         <tr>
-                          <td colSpan={8}>No exact Payment↔Purchase amount matches for this customer.</td>
+                          <td colSpan={8}>No Payment↔Purchase applications for this customer.</td>
                         </tr>
                       )}
                     </tbody>

@@ -738,7 +738,7 @@ export function buildSortedReceipts(receipts = []) {
  * open voucher(s) after it — the referenced bill keeps its full sales and cash only.
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
- * leftover then reverses prior cash settlements LIFO (or raises newest sales open).
+ * leftover then settles open sales invoices like a receipt (party-ledger netting).
  */
 export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
@@ -814,11 +814,6 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       && other.remaining > 0.009
       && other.invoice_date
       && other.invoice_date < cashInvoice.invoice_date);
-  }
-
-  function findInvoice(invoiceDate, voucherNumber) {
-    const key = invoiceKey(invoiceDate, voucherNumber);
-    return invoices.find((invoice) => invoiceKey(invoice.invoice_date, invoice.voucher_number) === key) || null;
   }
 
   function applyToInvoice(event, invoice, remaining) {
@@ -929,32 +924,34 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     return remaining;
   }
 
-  /** Leftover Payment after Purchases: reverse prior cash settlements LIFO so Open rises. */
-  function reversePaymentFromSettlements(event) {
-    let toRestore = event.amount;
-    for (let index = allocations.length - 1; index >= 0 && toRestore > 0.009; index -= 1) {
-      const allocation = allocations[index];
-      if (!allocation || toNumber(allocation.amount) <= 0.009) continue;
-      if (allocation.receipt_date && event.date && allocation.receipt_date > event.date) continue;
-      const take = Math.min(toRestore, toNumber(allocation.amount));
-      if (take <= 0.009) continue;
-      allocation.amount = Math.max(0, toNumber(allocation.amount) - take);
-      const invoice = findInvoice(allocation.invoice_date, allocation.voucher_number);
-      if (invoice) {
-        invoice.remaining = Math.max(0, toNumber(invoice.remaining) + take);
-      }
-      toRestore = Math.max(0, toRestore - take);
+  /**
+   * Leftover Payment after Purchases: settle open sales like a receipt so dual-party
+   * Payments can reduce Machine Open toward Tally (party-ledger netting).
+   */
+  function applyPaymentLeftoverToSales(event, remaining) {
+    let left = remaining;
+    const settleEvent = {
+      kind: "receipt",
+      date: event.date,
+      amount: left,
+      vch_no: event.vch_no,
+    };
+    for (const invoice of invoices) {
+      if (left <= 0.009) break;
+      if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
+      if (invoice.remaining <= 0.009) continue;
+      if (settleEvent.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
+      left = applyToInvoice(settleEvent, invoice, left);
+      invoice.cash_first_receipt_used = true;
     }
-    for (let index = allocations.length - 1; index >= 0; index -= 1) {
-      if (toNumber(allocations[index]?.amount) <= 0.009) allocations.splice(index, 1);
+    for (const invoice of invoices) {
+      if (left <= 0.009) break;
+      left = applyToInvoice(settleEvent, invoice, left);
     }
-    // Leftover payment with nothing to reverse still increases AR on the newest invoice.
-    if (toRestore > 0.009 && invoices.length > 0) {
-      const newest = invoices[invoices.length - 1];
-      newest.remaining = Math.max(0, toNumber(newest.remaining) + toRestore);
-      toRestore = 0;
-    }
-    return toRestore;
+    const applied = Math.max(0, remaining - left);
+    paymentAppliedToSales += applied;
+    unmatchedReceiptAmount += Math.max(0, left);
+    return left;
   }
 
   for (const event of events) {
@@ -973,8 +970,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     if (event.kind === "payment") {
       remaining = applyPaymentToPurchases(event);
       if (remaining > 0.009) {
-        paymentAppliedToSales += remaining;
-        reversePaymentFromSettlements({ ...event, amount: remaining });
+        applyPaymentLeftoverToSales(event, remaining);
       }
       continue;
     }
@@ -1948,7 +1944,20 @@ export function buildPaymentSettlementLedger({
     return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
   });
 
-  const matchedPurchasePaymentRows = [...matchedPurchasePayments].sort((left, right) => {
+  const matchedPurchasePaymentRows = [
+    ...matchedPurchasePayments.map((row) => ({ ...row, status: row.status || "Matched" })),
+    // Non-exact FIFO slices so payments like Sep//Bpmt0125 appear as adjusted to Purchases.
+    ...purchaseAllocations.map((row) => ({
+      purchase_date: row.purchase_date,
+      purchase_voucher: row.purchase_voucher,
+      purchase_amount: null,
+      payment_date: row.payment_date,
+      payment_voucher: row.vch_no,
+      amount: toNumber(row.amount),
+      match_days: isoDaysBetween(row.payment_date, row.purchase_date),
+      status: "Applied",
+    })),
+  ].sort((left, right) => {
     if (left.payment_date !== right.payment_date) {
       return String(left.payment_date || "").localeCompare(String(right.payment_date || ""));
     }
@@ -1995,10 +2004,13 @@ export function buildPaymentSettlementLedger({
   const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
   const salesInclVat = invoiceSalesInclVat + reversedSalesInclVat;
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
-  // AR collected = cash receipts + Payment leftovers that hit sales.
-  // Payments that settled Purchases stay on the AP side and are added back.
-  const cashRegisterSum = buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0);
-  const collectedAmount = cashRegisterSum + toNumber(paymentAppliedToPurchases);
+  // AR collected = positive collection receipts + Payment leftovers that settled sales.
+  // Purchase-side Payments stay on AP and do not reduce AR collected.
+  const cashRows = buildSortedReceipts(receipts);
+  const positiveReceiptSum = cashRows
+    .filter((row) => toNumber(row.amount) > 0)
+    .reduce((total, row) => total + toNumber(row.amount), 0);
+  const collectedAmount = positiveReceiptSum + toNumber(paymentAppliedToSales);
 
   // Credit notes already paired as immediate reversals are not deducted again.
   // Remaining credit notes reduce billable sales so: Sales − CN − Collected = Open.

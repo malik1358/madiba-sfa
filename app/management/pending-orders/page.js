@@ -59,6 +59,7 @@ import {
   ORDER_STATUS_WAITING_CREDIT_APPLICATION,
   ORDER_STATUS_WAITING_STOCK_TRANSFER,
   ORDER_STATUS_WAITING_OVERDUE_COLLECTION,
+  MAX_ORDER_INVOICE_UPLOAD_BYTES,
   canApprovePendingOrders,
   displayInvoiceStatus,
   isPendingForApprovalStatus,
@@ -1628,6 +1629,12 @@ export default function PendingOrdersPage() {
       return;
     }
 
+    if (Number(selectedInvoiceFile.size || 0) > MAX_ORDER_INVOICE_UPLOAD_BYTES) {
+      const maxMb = (MAX_ORDER_INVOICE_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+      setError(`Invoice PDF is too large. Use a file under ${maxMb} MB.`);
+      return;
+    }
+
     setUploadingInvoice(true);
     setError("");
 
@@ -1663,7 +1670,14 @@ export default function PendingOrdersPage() {
       }));
       setSelectedInvoiceFile(null);
     } catch (err) {
-      setError(err.message || "Unable to upload invoice PDF.");
+      const raw = String(err?.message || err || "");
+      if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+        setError(
+          "Network error while uploading. Refresh the page — if status shows Invoice made, the file is already saved. Otherwise retry with a smaller PDF (under 4 MB).",
+        );
+      } else {
+        setError(raw || "Unable to upload invoice PDF.");
+      }
     } finally {
       setUploadingInvoice(false);
     }

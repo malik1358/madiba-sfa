@@ -4,6 +4,7 @@ import {
   buildDailySupplierOrderRow,
   DAILY_SUPPLIER_ORDER_EMAIL_LAST_SENT_KEY,
   defaultSupplierOrderSinceIso,
+  dedupeDailySupplierOrders,
   groupDailySupplierOrders,
   parseDailySupplierOrderLastSent,
   resolveDailySupplierOrderDigestCc,
@@ -94,6 +95,7 @@ function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) 
   const to = [];
   const cc = [];
   if (user) to.push(user);
+  // Hierarchy bosses are no longer CCed on salesman emails; they get a consolidated digest instead.
   parseEmailList(Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails).forEach((address) => {
     const normalized = normalizeDeliverableEmail(address) || address;
     if (!normalized) return;
@@ -101,6 +103,13 @@ function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) 
     cc.push(normalized);
   });
   return { to, cc };
+}
+
+function bossDisplayName(boss = {}) {
+  const name = String(boss?.salesman_name || "").trim();
+  const code = String(boss?.salesman_code || "").trim();
+  if (name && code) return `${name} (${code})`;
+  return name || code || "Team";
 }
 
 async function fetchPagedRows(admin, table, select, applyFilters) {
@@ -424,6 +433,8 @@ export async function runDailySupplierOrderEmailCycle(admin, {
   const results = [];
   let sentCount = 0;
   let failedCount = 0;
+  const usedDigestEmails = new Set();
+  const bossOrdersById = new Map();
 
   if (sendToUsers) {
     for (const group of groups) {
@@ -440,17 +451,24 @@ export async function runDailySupplierOrderEmailCycle(admin, {
         rows,
         includeSalesman: false,
         asOfLabel,
+        audience: "salesman",
       });
-      const chainEmails = resolveReportingChainFromAuth({
+      const chain = resolveReportingChainFromAuth({
         actorUserId: group.profile?.id,
         profiles,
         authUsers,
-      }).map((boss) => normalizeDeliverableEmail(boss?.report_email) || normalizeDeliverableEmail(boss?.email))
-        .filter(Boolean);
+      });
+      chain.forEach((boss) => {
+        if (!boss?.id) return;
+        if (!bossOrdersById.has(boss.id)) {
+          bossOrdersById.set(boss.id, { boss, orders: [] });
+        }
+        bossOrdersById.get(boss.id).orders.push(...group.orders);
+      });
       const recipients = salesmanOrderRecipients({
         reportEmail: group.profile?.report_email,
         email: group.profile?.email,
-        chainEmails,
+        chainEmails: [],
       });
       if (!recipients.to.length) {
         results.push({ salesmanName, skipped: true, reason: "no_recipients", orderCount: rows.length });
@@ -460,7 +478,6 @@ export async function runDailySupplierOrderEmailCycle(admin, {
         const sent = await send({
           ...message,
           to: recipients.to,
-          ...(recipients.cc.length ? { cc: recipients.cc } : {}),
         }, env);
         sentCount += 1;
         results.push({
@@ -468,7 +485,8 @@ export async function runDailySupplierOrderEmailCycle(admin, {
           skipped: false,
           orderCount: rows.length,
           to: recipients.to,
-          cc: recipients.cc,
+          cc: [],
+          kind: "salesman",
           provider: sent?.provider || null,
         });
       } catch (error) {
@@ -479,31 +497,87 @@ export async function runDailySupplierOrderEmailCycle(admin, {
           failed: true,
           orderCount: rows.length,
           to: recipients.to,
-          cc: recipients.cc,
+          cc: [],
+          kind: "salesman",
           error: error.message || "Unable to send email",
         });
       }
     }
   }
 
+  const bossDigests = [...bossOrdersById.values()].sort((left, right) => (
+    String(left.boss?.salesman_name || left.boss?.salesman_code || "").localeCompare(
+      String(right.boss?.salesman_name || right.boss?.salesman_code || ""),
+    )
+  ));
+  for (const { boss, orders: bossOrders } of bossDigests) {
+    const inbox = normalizeDeliverableEmail(boss?.report_email) || normalizeDeliverableEmail(boss?.email);
+    const uniqueOrders = dedupeDailySupplierOrders(bossOrders);
+    const digestRows = buildRowsForOrders(uniqueOrders, { metaByOrder, orderValues, invoiceValues });
+    if (!inbox || !digestRows.length) continue;
+    const bossName = bossDisplayName(boss);
+    const message = buildDailySupplierOrderEmail({
+      date: reportDate,
+      salesmanName: bossName,
+      rows: digestRows,
+      includeSalesman: true,
+      asOfLabel,
+      audience: "boss",
+    });
+    try {
+      const sent = await send({ ...message, to: [inbox] }, env);
+      sentCount += 1;
+      usedDigestEmails.add(inbox);
+      results.push({
+        salesmanName: bossName,
+        skipped: false,
+        orderCount: digestRows.length,
+        to: [inbox],
+        cc: [],
+        kind: "boss_digest",
+        provider: sent?.provider || null,
+      });
+    } catch (error) {
+      failedCount += 1;
+      results.push({
+        salesmanName: bossName,
+        skipped: false,
+        failed: true,
+        orderCount: digestRows.length,
+        to: [inbox],
+        cc: [],
+        kind: "boss_digest",
+        error: error.message || "Unable to send email",
+      });
+    }
+  }
+
   const digestRows = buildRowsForOrders(orders, { metaByOrder, orderValues, invoiceValues });
-  if (digestTo.length) {
+  const filteredDigestTo = digestTo.filter((email) => !usedDigestEmails.has(email));
+  const filteredDigestCc = digestCc.filter((email) => !usedDigestEmails.has(email));
+  if (filteredDigestTo.length) {
     const message = buildDailySupplierOrderEmail({
       date: reportDate,
       salesmanName: "",
       rows: digestRows,
       includeSalesman: true,
       asOfLabel,
+      audience: "digest",
     });
     try {
-      const sent = await send({ ...message, to: digestTo, cc: digestCc }, env);
+      const sent = await send({
+        ...message,
+        to: filteredDigestTo,
+        ...(filteredDigestCc.length ? { cc: filteredDigestCc } : {}),
+      }, env);
       sentCount += 1;
       results.push({
         salesmanName: "all",
         skipped: false,
         orderCount: digestRows.length,
-        to: digestTo,
-        cc: digestCc,
+        to: filteredDigestTo,
+        cc: filteredDigestCc,
+        kind: "company_digest",
         provider: sent?.provider || null,
       });
     } catch (error) {
@@ -513,8 +587,9 @@ export async function runDailySupplierOrderEmailCycle(admin, {
         skipped: false,
         failed: true,
         orderCount: digestRows.length,
-        to: digestTo,
-        cc: digestCc,
+        to: filteredDigestTo,
+        cc: filteredDigestCc,
+        kind: "company_digest",
         error: error.message || "Unable to send email",
       });
     }

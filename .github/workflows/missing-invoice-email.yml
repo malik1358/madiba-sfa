@@ -37,15 +37,27 @@ jobs:
 
           post_report() {
             local target_url="$1"
-            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
-              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
-              -H "Content-Type: application/json" \
-              --data '{}'
+            local attempt status_code
+            for attempt in 1 2 3; do
+              status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+                -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+                -H "Content-Type: application/json" \
+                --data '{}')" || return $?
+              # Delivery/marker failures may have sent mail already; retry only the observed pre-delivery error.
+              if [[ "$status_code" != "500" || "$attempt" -eq 3 ]] || ! jq -e \
+                '.success == false and .error == "Internal server error." and (has("failedCount") | not)' response.json >/dev/null 2>&1; then
+                printf '%s' "$status_code"
+                return
+              fi
+              echo "Missing invoice email returned a pre-delivery HTTP 500; retrying in 10 seconds (attempt $attempt/3)." >&2
+              sleep 10
+            done
           }
 
           status_code="$(post_report "$MISSING_INVOICE_EMAIL_URL_EFFECTIVE")"
 
-          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$MISSING_INVOICE_EMAIL_URL_EFFECTIVE" != "$DEFAULT_MISSING_INVOICE_EMAIL_URL" ]]; then
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$MISSING_INVOICE_EMAIL_URL_EFFECTIVE" != "$DEFAULT_MISSING_INVOICE_EMAIL_URL" ]] \
+            && ! jq -e '.failedCount > 0' response.json >/dev/null 2>&1; then
             echo "Primary MISSING_INVOICE_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
             MISSING_INVOICE_EMAIL_URL_EFFECTIVE="$DEFAULT_MISSING_INVOICE_EMAIL_URL"
             status_code="$(post_report "$MISSING_INVOICE_EMAIL_URL_EFFECTIVE")"

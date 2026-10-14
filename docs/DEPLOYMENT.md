@@ -251,6 +251,8 @@ KPI target edits notify affected salespeople after the save and CC their complet
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
 
+The Missing Invoice Email backup retries the observed pre-delivery HTTP 500 (`success: false`, `error: "Internal server error."`, no `failedCount`) up to twice, waiting 10 seconds between attempts and retaining the 180-second per-attempt limit. It does not retry ambiguous gateway/transport failures or reported delivery failures: the latter include `failedCount` and may mean mail was sent but saving its marker failed. URL fallback also stops on reported delivery failures. Existing recent-send/midnight markers remain unchanged; persistent failures still fail the job and print the final response. If failures persist, inspect the production function/database logs—the generic HTTP 500 response alone does not identify the failing dependency. No migration or secret changes are required.
+
 ### Customer GPS digest activation and recovery
 
 Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries and does not skip Friday.

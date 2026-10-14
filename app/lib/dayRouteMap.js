@@ -174,18 +174,50 @@ const WORKDAY_STOP_TYPES = new Set([
   "LUNCH_BREAK_IN",
 ]);
 
+const WORKDAY_ONCE_TYPES = new Set([
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+]);
+
 export function buildWorkdayRouteStops(points = [], idleGaps = []) {
   const stops = [];
-  (points || []).forEach((point) => {
-    if (!WORKDAY_STOP_TYPES.has(String(point.type || "").toUpperCase())) return;
-    const mapLabel = routePointLabel(point);
+  const seenOnce = new Set();
+  let lastEndOfDay = null;
+
+  // One Login / Lunch out / Lunch in; last Logout only (extra morning punches are not separate sessions).
+  [...(points || [])]
+    .sort((left, right) => Number(left.ts || 0) - Number(right.ts || 0))
+    .forEach((point) => {
+      const type = String(point.type || "").toUpperCase();
+      if (!WORKDAY_STOP_TYPES.has(type)) return;
+      if (type === "END_OF_DAY") {
+        lastEndOfDay = point;
+        return;
+      }
+      if (WORKDAY_ONCE_TYPES.has(type)) {
+        if (seenOnce.has(type)) return;
+        seenOnce.add(type);
+      }
+      const mapLabel = routePointLabel(point);
+      stops.push({
+        kind: "workday",
+        ts: point.ts,
+        label: mapLabel,
+        mapsUrl: buildGooglePlaceUrl({ ...point, mapLabel }),
+      });
+    });
+
+  if (lastEndOfDay) {
+    const mapLabel = routePointLabel(lastEndOfDay);
     stops.push({
       kind: "workday",
-      ts: point.ts,
+      ts: lastEndOfDay.ts,
       label: mapLabel,
-      mapsUrl: buildGooglePlaceUrl({ ...point, mapLabel }),
+      mapsUrl: buildGooglePlaceUrl({ ...lastEndOfDay, mapLabel }),
     });
-  });
+  }
+
   (idleGaps || []).forEach((gap) => {
     stops.push(idlePlaceForGap(points, gap));
   });

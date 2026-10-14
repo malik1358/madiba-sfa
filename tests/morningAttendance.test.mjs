@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   canAccessWithoutMorningAttendance,
+  insertMorningAttendanceOnce,
   isInlineMorningAttendancePath,
   isMorningAttendanceRequiredForRole,
+  isMorningAttendanceUniqueViolation,
   WORKDAY_GATE_READY_EVENT,
   WORKDAY_TIMES_UPDATED_EVENT,
   todayAttendanceBounds,
@@ -42,4 +44,86 @@ test("morning attendance is required for every role except admin", () => {
 
 test("workday gate ready event stays aligned with workday times updated event", () => {
   assert.equal(WORKDAY_GATE_READY_EVENT, WORKDAY_TIMES_UPDATED_EVENT);
+});
+
+test("unique-index conflict on morning attendance is recognized", () => {
+  assert.equal(isMorningAttendanceUniqueViolation({ code: "23505" }), true);
+  assert.equal(
+    isMorningAttendanceUniqueViolation({
+      message: 'duplicate key value violates unique constraint "daily_activity_logs_one_morning_per_ksa_day"',
+    }),
+    true,
+  );
+  assert.equal(isMorningAttendanceUniqueViolation({ code: "42P01" }), false);
+});
+
+test("insertMorningAttendanceOnce skips insert when a row already exists today", async () => {
+  const calls = [];
+  const supabase = {
+    from(table) {
+      calls.push(table);
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        gte() {
+          return this;
+        },
+        lte() {
+          return this;
+        },
+        limit() {
+          return Promise.resolve({ data: [{ id: 42 }], error: null });
+        },
+        insert() {
+          throw new Error("insert should not run when attendance already exists");
+        },
+      };
+    },
+  };
+
+  const result = await insertMorningAttendanceOnce(supabase, "user-1", "{}");
+  assert.deepEqual(result, { alreadyExists: true });
+  assert.deepEqual(calls, ["daily_activity_logs"]);
+});
+
+test("insertMorningAttendanceOnce treats unique violation as already exists", async () => {
+  let selectCount = 0;
+  const supabase = {
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        gte() {
+          return this;
+        },
+        lte() {
+          return this;
+        },
+        limit() {
+          selectCount += 1;
+          return Promise.resolve({ data: selectCount === 1 ? [] : [{ id: 7 }], error: null });
+        },
+        insert() {
+          return Promise.resolve({
+            error: {
+              code: "23505",
+              message: 'duplicate key value violates unique constraint "daily_activity_logs_one_morning_per_ksa_day"',
+            },
+          });
+        },
+      };
+    },
+  };
+
+  const result = await insertMorningAttendanceOnce(supabase, "user-1", "{}");
+  assert.deepEqual(result, { alreadyExists: true });
+  assert.equal(selectCount, 1);
 });

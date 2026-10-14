@@ -6,6 +6,7 @@ import {
   MORNING_ATTENDANCE_COMPLETE_EVENT,
   canAccessWithoutMorningAttendance,
   hasMorningAttendanceToday,
+  insertMorningAttendanceOnce,
   isInlineMorningAttendancePath,
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
@@ -156,17 +157,14 @@ export default function MorningAttendanceRedirect() {
       const location = await requireGpsLocation({ role });
       const platform = await resolveGpsCapturePlatform();
       const note = buildGpsActivityNote("MORNING_ATTENDANCE", location, { note: null, platform });
-      const { error: insertError } = await supabase.from("daily_activity_logs").insert({
-        user_id: session.user.id,
-        entry_type: "MORNING_ATTENDANCE",
-        note,
-      });
-      if (insertError) throw insertError;
+      const result = await insertMorningAttendanceOnce(supabase, session.user.id, note);
 
-      queueTransactionAlert(session.access_token, {
-        transactionType: "MORNING_ATTENDANCE",
-        referenceKey: `activity:${session.user.id}:MORNING_ATTENDANCE:${note}`,
-      });
+      if (!result.alreadyExists) {
+        queueTransactionAlert(session.access_token, {
+          transactionType: "MORNING_ATTENDANCE",
+          referenceKey: `activity:${session.user.id}:MORNING_ATTENDANCE:${note}`,
+        });
+      }
       writeGateReadyState(session.user.id, true);
       setAttendanceComplete(true);
       notifyMorningAttendanceComplete();

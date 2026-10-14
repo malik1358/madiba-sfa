@@ -66,6 +66,7 @@ import {
   resolveGpsCapturePlatform,
 } from "../../lib/geo";
 import {
+  insertMorningAttendanceOnce,
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
   notifyWorkdayTimesUpdated,
@@ -1153,27 +1154,37 @@ export default function MyDayPage({ mode = "default" } = {}) {
         }),
       };
 
-      const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
-      if (insertError) throw insertError;
+      let insertedFresh = true;
+      if (entryType === "MORNING_ATTENDANCE") {
+        const result = await insertMorningAttendanceOnce(supabase, session.user.id, payload.note);
+        insertedFresh = !result.alreadyExists;
+      } else {
+        const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
+        if (insertError) throw insertError;
+      }
 
-      queueTransactionAlert(session.access_token, {
-        transactionType: entryType,
-        referenceKey: `activity:${session.user.id}:${entryType}:${payload.note}`,
-      });
+      if (insertedFresh) {
+        queueTransactionAlert(session.access_token, {
+          transactionType: entryType,
+          referenceKey: `activity:${session.user.id}:${entryType}:${payload.note}`,
+        });
 
-      const optimisticRow = {
-        id: `local-${Date.now()}`,
-        user_id: session.user.id,
-        entry_type: entryType,
-        note: payload.note,
-        created_at: new Date().toISOString(),
-      };
-      setTodayLogs((current) => [optimisticRow, ...current]);
+        const optimisticRow = {
+          id: `local-${Date.now()}`,
+          user_id: session.user.id,
+          entry_type: entryType,
+          note: payload.note,
+          created_at: new Date().toISOString(),
+        };
+        setTodayLogs((current) => [optimisticRow, ...current]);
+      }
       setCurrentUserId(session.user.id);
 
       setMessage(entryType === "NOTE"
         ? (location ? "Note saved with GPS." : "Note saved.")
-        : (location ? `${entryType} logged with GPS.` : `${entryType} logged.`));
+        : (insertedFresh
+          ? (location ? `${entryType} logged with GPS.` : `${entryType} logged.`)
+          : "Morning attendance is already logged for today."));
 
       if (entryType === "MORNING_ATTENDANCE") {
         notifyMorningAttendanceComplete();
@@ -1205,6 +1216,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }
 
   async function handleAttendanceAction(entryType) {
+    if (entryType === "MORNING_ATTENDANCE" && morningAttendanceComplete) return;
     if (entryType === "LUNCH_BREAK_OUT" && lunchOutComplete) return;
     if (entryType === "LUNCH_BREAK_IN" && (lunchInComplete || !lunchOutComplete)) return;
 

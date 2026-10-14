@@ -95,6 +95,8 @@ Field visit reports used by the current UI are also stored in `system_settings`:
 - Transactions: `VISIT_REPORT`, `ORDER_DRAFT`, `ORDER_EDITED`, `ORDER_SUBMITTED`, `PROSPECT_FOLLOW_UP`, `NOTE`
 - Workday and GPS: `GPS_PING`, `MORNING_ATTENDANCE`, `LUNCH_BREAK_OUT`, `LUNCH_BREAK_IN`, `END_OF_DAY`
 
+Unique index `daily_activity_logs_one_morning_per_ksa_day` (migration `20261014120000_one_morning_attendance_per_ksa_day.sql`) allows at most one `MORNING_ATTENDANCE` row per `user_id` per Asia/Riyadh calendar day. Apply that migration in Supabase before relying on the DB hard stop; the app also refuses duplicate punches via `insertMorningAttendanceOnce`.
+
 RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also lets `is_admin()` read them. Managers reading other users’ activity go through API routes with the service role.
 
 ## Orders

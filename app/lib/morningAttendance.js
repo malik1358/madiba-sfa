@@ -93,6 +93,17 @@ export function writeGateReadyState(userId, attendanceComplete, referenceDate = 
   writeStorageRaw(window.sessionStorage, key, payload);
 }
 
+export const MORNING_ATTENDANCE_ALREADY_LOGGED_MESSAGE = "Morning attendance is already logged for today.";
+
+export function isMorningAttendanceUniqueViolation(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  return code === "23505"
+    || message.includes("daily_activity_logs_one_morning_per_ksa_day")
+    || details.includes("daily_activity_logs_one_morning_per_ksa_day");
+}
+
 export async function hasMorningAttendanceToday(supabase, userId) {
   if (!supabase || !userId) return false;
 
@@ -115,6 +126,36 @@ export async function hasMorningAttendanceToday(supabase, userId) {
   }
 
   return Boolean(data?.[0]?.id);
+}
+
+/**
+ * Insert morning attendance at most once per KSA calendar day.
+ * Concurrent retries treat an existing row (or unique-index conflict) as success.
+ */
+export async function insertMorningAttendanceOnce(supabase, userId, note) {
+  if (!supabase || !userId) {
+    throw new Error("Missing supabase client or user.");
+  }
+
+  if (await hasMorningAttendanceToday(supabase, userId)) {
+    return { alreadyExists: true };
+  }
+
+  const { error } = await supabase.from("daily_activity_logs").insert({
+    user_id: userId,
+    entry_type: "MORNING_ATTENDANCE",
+    note,
+  });
+
+  if (!error) {
+    return { alreadyExists: false };
+  }
+
+  if (isMorningAttendanceUniqueViolation(error) || await hasMorningAttendanceToday(supabase, userId)) {
+    return { alreadyExists: true };
+  }
+
+  throw error;
 }
 
 export function notifyMorningAttendanceComplete() {

@@ -97,6 +97,27 @@ test("longest idle place uses GPS inside the gap and names the next customer", (
   assert.equal(workdayStops.some((stop) => stop.kind === "idle"), true);
 });
 
+test("workday route stops keep only the first Login and last Logout", () => {
+  const points = buildDayRoutePoints([
+    { savedAt: "2026-10-13T06:19:00.000Z", transactionType: "MORNING_ATTENDANCE", transactionLabel: "Login", entryLatitude: 24.71, entryLongitude: 46.67 },
+    { savedAt: "2026-10-13T07:52:00.000Z", transactionType: "MORNING_ATTENDANCE", transactionLabel: "Login", entryLatitude: 24.72, entryLongitude: 46.68 },
+    { savedAt: "2026-10-13T10:27:00.000Z", transactionType: "LUNCH_BREAK_OUT", transactionLabel: "Lunch out", entryLatitude: 24.73, entryLongitude: 46.69 },
+    { savedAt: "2026-10-13T13:49:00.000Z", transactionType: "LUNCH_BREAK_IN", transactionLabel: "Lunch in", entryLatitude: 24.74, entryLongitude: 46.70 },
+    { savedAt: "2026-10-13T14:58:00.000Z", transactionType: "MORNING_ATTENDANCE", transactionLabel: "Login", entryLatitude: 24.75, entryLongitude: 46.71 },
+    { savedAt: "2026-10-13T17:00:00.000Z", transactionType: "END_OF_DAY", transactionLabel: "Logout", entryLatitude: 24.76, entryLongitude: 46.72 },
+    { savedAt: "2026-10-13T18:15:00.000Z", transactionType: "END_OF_DAY", transactionLabel: "Logout", entryLatitude: 24.77, entryLongitude: 46.73 },
+  ]);
+
+  const stops = buildWorkdayRouteStops(points, []);
+  const labels = stops.map((stop) => stop.label);
+  assert.equal(labels.filter((label) => /Login/i.test(label)).length, 1);
+  assert.match(labels[0], /9:19 am/);
+  assert.equal(labels.filter((label) => /Logout/i.test(label)).length, 1);
+  assert.match(labels.at(-1), /9:15 pm/);
+  assert.equal(labels.filter((label) => /Lunch out/i.test(label)).length, 1);
+  assert.equal(labels.filter((label) => /Lunch in/i.test(label)).length, 1);
+});
+
 test("resolveDayRouteWorkingHours uses near visits before lunch out and after lunch in", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T06:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },

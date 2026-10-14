@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { gpsReportRange, gpsReportRow, parseGpsReportDate } from "../app/lib/customerGpsReport.js";
+import {
+  attachDayGpsChangeCounts,
+  gpsReportRange,
+  gpsReportRow,
+  loadAcceptedGpsChangeTotals,
+  parseGpsReportDate,
+} from "../app/lib/customerGpsReport.js";
 import { markVisitsWithAcceptedGpsHistory } from "../app/lib/dailyVisitReportStats.js";
 
 test("GPS report uses exact KSA calendar boundaries including Friday", () => {
@@ -29,4 +35,43 @@ test("new approval sources preserve daily visit report accepted labels", () => {
     const result = markVisitsWithAcceptedGpsHistory([entry], [{ ...entry, previous_latitude: 24.7, previous_longitude: 46.6, updated_by: "salesman-1", created_at: entry.saved_at, source }]);
     assert.equal(result[0].meta?.gpsLocationUpdateAccepted, true);
   }
+});
+
+test("day change counts mark repeated customers on the same report day", () => {
+  const counted = attachDayGpsChangeCounts([
+    { customer_code: "1207" },
+    { customer_code: "1207" },
+    { customer_code: "1315" },
+  ]);
+  assert.equal(counted[0].times_today, 2);
+  assert.equal(counted[1].times_today, 2);
+  assert.equal(counted[2].times_today, 1);
+});
+
+test("lifetime salesman-accepted totals are counted per customer code", async () => {
+  const calls = [];
+  const admin = {
+    from() {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        in(_column, codes) { calls.push(codes); return this; },
+        range() {
+          return Promise.resolve({
+            data: [
+              { customer_code: "1207" },
+              { customer_code: "1207" },
+              { customer_code: "1315" },
+            ],
+            error: null,
+          });
+        },
+      };
+    },
+  };
+  const totals = await loadAcceptedGpsChangeTotals(admin, ["1207", "1315", "1092"]);
+  assert.deepEqual(calls[0], ["1207", "1315", "1092"]);
+  assert.equal(totals.get("1207"), 2);
+  assert.equal(totals.get("1315"), 1);
+  assert.equal(totals.get("1092"), 0);
 });

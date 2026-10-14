@@ -4,6 +4,19 @@ on:
   schedule:
     - cron: "40 21 * * *"
   workflow_dispatch:
+    inputs:
+      date:
+        description: "Optional completed KSA calendar day YYYY-MM-DD (default previous day)"
+        required: false
+        default: ""
+      force:
+        description: "Force/test resend without claiming the daily marker (true/false)"
+        required: false
+        default: "false"
+      to:
+        description: "Optional test To override (comma-separated). Leaves the daily marker untouched."
+        required: false
+        default: ""
 
 permissions: {}
 concurrency:
@@ -17,11 +30,38 @@ jobs:
       - name: Send previous KSA day GPS change digest
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if [[ -z "$CRON_SECRET" ]]; then
             echo "CRON_SECRET secret is missing"
             exit 1
           fi
+          export DATE_VALUE="$(printf '%s' "${INPUT_DATE:-}" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export FORCE_VALUE="$(printf '%s' "${INPUT_FORCE:-}" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+          export TO_VALUE="$(printf '%s' "${INPUT_TO:-}" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          QUERY="$(python3 - <<'PY'
+          import os, urllib.parse
+          parts = []
+          date = os.environ.get("DATE_VALUE", "").strip()
+          if date:
+              parts.append("date=" + urllib.parse.quote(date, safe=""))
+          force = os.environ.get("FORCE_VALUE", "").strip().lower()
+          event = os.environ.get("EVENT_NAME", "")
+          if event == "workflow_dispatch" and force in ("true", "1", "yes"):
+              parts.append("force=true")
+          to = os.environ.get("TO_VALUE", "").strip()
+          if to:
+              parts.append("to=" + urllib.parse.quote(to, safe=",@.+_-"))
+          print("&".join(parts))
+          PY
+          )"
+          URL="https://madiba-sfa.vercel.app/api/cron/customer-gps-change-email"
+          if [[ -n "$QUERY" ]]; then
+            URL="${URL}?${QUERY}"
+          fi
           curl --fail-with-body --silent --show-error --max-time 180 \
-            -X POST 'https://madiba-sfa.vercel.app/api/cron/customer-gps-change-email' \
+            -X POST "$URL" \
             -H "x-cron-secret: $CRON_SECRET"

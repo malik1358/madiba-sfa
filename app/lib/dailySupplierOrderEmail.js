@@ -291,6 +291,42 @@ function renderTable(rows, { includeSalesman = false } = {}) {
   </table>`;
 }
 
+function groupEmailRowsBySalesman(rows = []) {
+  const groups = new Map();
+  (rows || []).forEach((row) => {
+    const salesman = String(row?.salesman || "").trim() || "Unknown salesman";
+    const key = salesman.toUpperCase();
+    if (!groups.has(key)) groups.set(key, { salesman, rows: [] });
+    groups.get(key).rows.push(row);
+  });
+  return [...groups.values()].sort((left, right) => left.salesman.localeCompare(right.salesman));
+}
+
+function renderSalesmanTables(rows) {
+  return groupEmailRowsBySalesman(rows).map(({ salesman, rows: salesmanRows }) => `
+    <h3 style="margin:20px 0 8px;color:#0f4c81;font-size:16px;">${escapeHtml(salesman)}</h3>
+    ${renderTable(salesmanRows)}`.trim()).join("");
+}
+
+function textSalesmanTables(rows) {
+  return groupEmailRowsBySalesman(rows)
+    .map(({ salesman, rows: salesmanRows }) => `${salesman}\n${textTable(salesmanRows, false)}`)
+    .join("\n\n");
+}
+
+export function dedupeDailySupplierOrders(orders = []) {
+  const seen = new Set();
+  const unique = [];
+  (orders || []).forEach((order) => {
+    const orderId = String(order?.id || "").trim();
+    const key = orderId || `fallback:${unique.length}:${String(order?.order_number || "").trim()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(order);
+  });
+  return unique;
+}
+
 function summaryCards(totals) {
   return `<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0 0;margin:0 0 16px;">
   <tr>
@@ -343,16 +379,28 @@ export function buildDailySupplierOrderEmail({
   rows = [],
   includeSalesman = false,
   asOfLabel = "",
+  audience = "",
 } = {}) {
   const totals = summarizeDailySupplierOrderRows(rows);
   const who = String(salesmanName || "").trim();
+  const normalizedAudience = String(audience || "").trim().toLowerCase()
+    || (includeSalesman ? (who ? "boss" : "digest") : "salesman");
   const subject = who
     ? `Orders raised ${date} — ${who} (${totals.orders})`
     : `Orders raised ${date} — all salesmen (${totals.orders})`;
   const cutoff = String(asOfLabel || "").trim();
-  const intro = who
+  const intro = normalizedAudience === "salesman"
     ? `All submitted orders you raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, plus any older orders still waiting on billing. Every invoice status is included for comparison. Values include VAT.`
-    : `All submitted orders raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`;
+    : normalizedAudience === "boss"
+      ? `All submitted orders raised by your team for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`
+      : `All submitted orders raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`;
+  const footer = normalizedAudience === "salesman"
+    ? "This list includes every submitted order raised that day (Invoice made, pending, or not uploaded), plus older orders still waiting on billing. Totals include VAT. Invoice made is taken from the attached invoice PDF when available. Bosses receive a separate consolidated team email."
+    : normalizedAudience === "boss"
+      ? "This team digest groups subordinate salesman orders in one email so bosses do not need to track repeated CC copies. Totals include VAT. Invoice made is taken from the attached invoice PDF when available."
+      : "This digest groups all included orders in one email by salesman. Totals include VAT. Invoice made is taken from the attached invoice PDF when available.";
+  const tableHtml = includeSalesman ? renderSalesmanTables(rows) : renderTable(rows);
+  const tableText = includeSalesman ? textSalesmanTables(rows) : textTable(rows, false);
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,118,110,0.12);">
@@ -365,8 +413,8 @@ export function buildDailySupplierOrderEmail({
       <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
       ${who ? `<p style="margin:0 0 16px;"><span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#ecfeff;border:1px solid #67e8f9;color:#0e7490;font-weight:800;">${escapeHtml(who)}</span></p>` : ""}
       ${summaryCards(totals)}
-      ${renderTable(rows, { includeSalesman })}
-      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">This list includes every submitted order raised that day (Invoice made, pending, or not uploaded), plus older orders still waiting on billing. Totals include VAT. Invoice made is taken from the attached invoice PDF when available. Hierarchy bosses are copied on each salesman email.</p>
+      ${tableHtml}
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">${escapeHtml(footer)}</p>
     </div>
   </div>
 </div>`;
@@ -376,7 +424,7 @@ export function buildDailySupplierOrderEmail({
     intro,
     who,
     "",
-    textTable(rows, includeSalesman),
+    tableText,
   ].filter(Boolean).join("\n");
 
   return { subject, text, html, orderCount: totals.orders, totals };

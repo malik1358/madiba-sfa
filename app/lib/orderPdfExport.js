@@ -144,12 +144,8 @@ export async function saveOrShareOrderPdf(doc, fileName, options = {}) {
       if (isShareCancelledError(error)) {
         return { method: "cancelled", fileName: safeName };
       }
-      // Outdated APKs or incomplete Cap sync surface "Filesystem/Share plugin is not
-      // implemented on android". Fall through to the browser download path instead of
-      // blocking the salesman with a hard error dialog.
-      if (!isMissingNativePluginError(error) && !String(error?.message || "").includes("Sharing is not available")) {
-        // Still fall through for other share/write failures so PDF delivery is not blocked.
-      }
+      // Outdated APKs / missing native plugins throw "Filesystem plugin is not
+      // implemented on android". Fall through so PDF delivery is not blocked.
     }
   }
 

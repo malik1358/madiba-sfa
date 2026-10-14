@@ -27,6 +27,8 @@ export const MIGRATION_VERSION_ALIASES = Object.freeze([
   { ledgerVersion: "20260919090321", repoVersion: "20260919120000", name: "items_master_tally_unit" },
   { ledgerVersion: "20261010072051", repoVersion: "20261010120000", name: "profiles_role_report_user" },
   { ledgerVersion: "20261010123534", repoVersion: "20261010170000", name: "madiba_store_customer_gps_guard" },
+  // Applied via Supabase at apply-time stamp shortly after PR #552 merge; repo file keeps 20261014120000.
+  { ledgerVersion: "20261014070840", repoVersion: "20261014120000", name: "one_morning_attendance_per_ksa_day" },
 ]);
 
 /**

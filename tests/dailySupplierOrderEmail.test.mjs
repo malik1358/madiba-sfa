@@ -152,6 +152,7 @@ test("buildDailySupplierOrderEmail includes values with VAT and a total row", ()
   assert.match(message.html, /1,725.00/);
   assert.match(message.html, /1,702.00/);
   assert.match(message.html, /background:#dcfce7/);
+  assert.match(message.html, /Bosses receive a separate consolidated team email/);
   assert.equal(message.orderCount, 2);
   assert.equal(message.totals.orderValue, 1725);
   assert.equal(message.totals.invoiceValue, 1702);
@@ -162,7 +163,7 @@ test("resolveDailySupplierOrderDigestRecipients uses the invoice-ops list", () =
   assert.deepEqual(resolveDailySupplierOrderDigestCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
 });
 
-test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest after sales upload", async () => {
+test("runDailySupplierOrderEmailCycle emails each salesman, one boss team digest, and a company digest", async () => {
   const sent = [];
   const saved = [];
   const result = await runDailySupplierOrderEmailCycle({}, {
@@ -187,6 +188,19 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         submitted_at: "2026-09-10T06:43:00.000Z",
         updated_at: "2026-09-10T06:43:00.000Z",
       },
+      {
+        id: 379,
+        order_number: "379",
+        customer_code: "C2",
+        customer_name: "Second Shop",
+        salesman_code: "BL",
+        salesman_name: "Belal",
+        status: "SUBMITTED",
+        created_by: "u2",
+        created_at: "2026-09-10T07:10:00.000Z",
+        submitted_at: "2026-09-10T07:10:00.000Z",
+        updated_at: "2026-09-10T07:10:00.000Z",
+      },
     ]),
     loadProfiles: async () => ([
       {
@@ -195,6 +209,15 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         salesman_name: "ABDUL REHMAN",
         email: "abdul@madiba.com",
         report_email: "abdul.report@madiba.com",
+        role: "salesman",
+        is_active: true,
+      },
+      {
+        id: "u2",
+        salesman_code: "BL",
+        salesman_name: "Belal",
+        email: "belal@madiba.com",
+        report_email: "belal.report@madiba.com",
         role: "salesman",
         is_active: true,
       },
@@ -210,12 +233,16 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
     ]),
     loadMeta: async () => new Map([
       ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-10T08:00:00.000Z" }],
+      ["379", { status: "Invoice not uploaded", statusUpdatedAt: "2026-09-10T08:05:00.000Z" }],
     ]),
     loadValues: async () => ({
-      values: new Map([["378", 1000]]),
-      linesByOrder: new Map([["378", [{ item_code: "A1", quantity: 10, rate: 100, line_value: 1000 }]]]),
+      values: new Map([["378", 1000], ["379", 500]]),
+      linesByOrder: new Map([
+        ["378", [{ item_code: "A1", quantity: 10, rate: 100, line_value: 1000 }]],
+        ["379", [{ item_code: "B1", quantity: 5, rate: 100, line_value: 500 }]],
+      ]),
     }),
-    loadInvoiceValues: async () => new Map([["378", 980]]),
+    loadInvoiceValues: async () => new Map([["378", 980], ["379", 0]]),
     loadLastSentMarker: async () => ({ date: "", lastSentAt: "2026-09-08T00:00:00.000Z" }),
     saveLastSentMarker: async (_admin, marker) => {
       saved.push(marker);
@@ -231,6 +258,15 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         },
       },
       {
+        id: "u2",
+        user_metadata: {
+          salesman_code: "BL",
+          salesman_name: "Belal",
+          head_salesman_code: "MGR",
+          head_salesman_name: "Boss One",
+        },
+      },
+      {
         id: "boss1",
         user_metadata: {
           salesman_code: "MGR",
@@ -241,16 +277,29 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
   });
 
   assert.equal(result.skipped, false);
-  assert.equal(result.sentCount, 2);
-  assert.equal(result.orderCount, 1);
-  assert.equal(sent[0].to[0], "abdul.report@madiba.com");
-  assert.deepEqual(sent[0].cc, ["boss.report@madiba.com"]);
+  assert.equal(result.sentCount, 4);
+  assert.equal(result.orderCount, 2);
+  const salesmanMails = sent.filter((message) => /— ABDUL REHMAN|— Belal/.test(message.subject) && !/Boss One/.test(message.subject));
+  assert.equal(salesmanMails.length, 2);
+  salesmanMails.forEach((message) => {
+    assert.equal(message.cc, undefined);
+  });
   assert.match(sent[0].html, /1,127.00/);
   assert.match(sent[0].html, /Invoice made/);
   assert.match(sent[0].html, /incl\. VAT/);
   assert.match(sent[0].html, /MADIBA SFA/);
-  assert.deepEqual(sent[1].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
-  assert.match(sent[1].html, /ABDUL REHMAN/);
+  assert.match(sent[0].html, /Bosses receive a separate consolidated team email/);
+  const bossDigest = sent.find((message) => message.to?.[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.equal(bossDigest.cc, undefined);
+  assert.match(bossDigest.subject, /Boss One/);
+  assert.match(bossDigest.html, /ABDUL REHMAN/);
+  assert.match(bossDigest.html, /Belal/);
+  assert.match(bossDigest.html, /subordinates/);
+  assert.equal(sent.filter((message) => message.to?.[0] === "boss.report@madiba.com").length, 1);
+  const companyDigest = sent.find((message) => message.to?.join(",") === DEFAULT_MISSING_INVOICE_EMAIL_TO.join(","));
+  assert.ok(companyDigest);
+  assert.match(companyDigest.html, /ABDUL REHMAN/);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].trigger, "sales-upload");
 });

@@ -343,16 +343,26 @@ export function buildDailySupplierOrderEmail({
   rows = [],
   includeSalesman = false,
   asOfLabel = "",
+  audience = "",
 } = {}) {
   const totals = summarizeDailySupplierOrderRows(rows);
   const who = String(salesmanName || "").trim();
+  const normalizedAudience = String(audience || "").trim().toLowerCase()
+    || (includeSalesman ? (who ? "boss" : "digest") : "salesman");
   const subject = who
     ? `Orders raised ${date} — ${who} (${totals.orders})`
     : `Orders raised ${date} — all salesmen (${totals.orders})`;
   const cutoff = String(asOfLabel || "").trim();
-  const intro = who
+  const intro = normalizedAudience === "salesman"
     ? `All submitted orders you raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, plus any older orders still waiting on billing. Every invoice status is included for comparison. Values include VAT.`
-    : `All submitted orders raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`;
+    : normalizedAudience === "boss"
+      ? `All submitted orders raised by your subordinates for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`
+      : `All submitted orders raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`;
+  const footer = normalizedAudience === "salesman"
+    ? "This list includes every submitted order raised that day (Invoice made, pending, or not uploaded), plus older orders still waiting on billing. Totals include VAT. Invoice made is taken from the attached invoice PDF when available. Bosses receive a separate consolidated team email."
+    : normalizedAudience === "boss"
+      ? "This team digest groups all included subordinate orders in one email so bosses do not need to track repeated CC copies. Totals include VAT."
+      : "This digest groups all included orders in one email by salesman. Totals include VAT. Invoice made is taken from the attached invoice PDF when available.";
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,118,110,0.12);">
@@ -366,7 +376,7 @@ export function buildDailySupplierOrderEmail({
       ${who ? `<p style="margin:0 0 16px;"><span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#ecfeff;border:1px solid #67e8f9;color:#0e7490;font-weight:800;">${escapeHtml(who)}</span></p>` : ""}
       ${summaryCards(totals)}
       ${renderTable(rows, { includeSalesman })}
-      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">This list includes every submitted order raised that day (Invoice made, pending, or not uploaded), plus older orders still waiting on billing. Totals include VAT. Invoice made is taken from the attached invoice PDF when available. Hierarchy bosses are copied on each salesman email.</p>
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">${escapeHtml(footer)}</p>
     </div>
   </div>
 </div>`;

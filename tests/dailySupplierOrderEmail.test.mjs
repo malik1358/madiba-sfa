@@ -162,7 +162,7 @@ test("resolveDailySupplierOrderDigestRecipients uses the invoice-ops list", () =
   assert.deepEqual(resolveDailySupplierOrderDigestCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
 });
 
-test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest after sales upload", async () => {
+test("runDailySupplierOrderEmailCycle emails each salesman plus one boss digest and company digest", async () => {
   const sent = [];
   const saved = [];
   const result = await runDailySupplierOrderEmailCycle({}, {
@@ -187,6 +187,19 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         submitted_at: "2026-09-10T06:43:00.000Z",
         updated_at: "2026-09-10T06:43:00.000Z",
       },
+      {
+        id: 379,
+        order_number: "379",
+        customer_code: "C2",
+        customer_name: "Sara Shop",
+        salesman_code: "SM2",
+        salesman_name: "Sara",
+        status: "SUBMITTED",
+        created_by: "u2",
+        created_at: "2026-09-10T07:00:00.000Z",
+        submitted_at: "2026-09-10T07:00:00.000Z",
+        updated_at: "2026-09-10T07:00:00.000Z",
+      },
     ]),
     loadProfiles: async () => ([
       {
@@ -195,6 +208,15 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         salesman_name: "ABDUL REHMAN",
         email: "abdul@madiba.com",
         report_email: "abdul.report@madiba.com",
+        role: "salesman",
+        is_active: true,
+      },
+      {
+        id: "u2",
+        salesman_code: "SM2",
+        salesman_name: "Sara",
+        email: "sara@madiba.com",
+        report_email: "sara.report@madiba.com",
         role: "salesman",
         is_active: true,
       },
@@ -210,12 +232,16 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
     ]),
     loadMeta: async () => new Map([
       ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-10T08:00:00.000Z" }],
+      ["379", { status: "Invoice not uploaded" }],
     ]),
     loadValues: async () => ({
-      values: new Map([["378", 1000]]),
-      linesByOrder: new Map([["378", [{ item_code: "A1", quantity: 10, rate: 100, line_value: 1000 }]]]),
+      values: new Map([["378", 1000], ["379", 200]]),
+      linesByOrder: new Map([
+        ["378", [{ item_code: "A1", quantity: 10, rate: 100, line_value: 1000 }]],
+        ["379", [{ item_code: "B1", quantity: 2, rate: 100, line_value: 200 }]],
+      ]),
     }),
-    loadInvoiceValues: async () => new Map([["378", 980]]),
+    loadInvoiceValues: async () => new Map([["378", 980], ["379", null]]),
     loadLastSentMarker: async () => ({ date: "", lastSentAt: "2026-09-08T00:00:00.000Z" }),
     saveLastSentMarker: async (_admin, marker) => {
       saved.push(marker);
@@ -231,6 +257,15 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         },
       },
       {
+        id: "u2",
+        user_metadata: {
+          salesman_code: "SM2",
+          salesman_name: "Sara",
+          head_salesman_code: "MGR",
+          head_salesman_name: "Boss One",
+        },
+      },
+      {
         id: "boss1",
         user_metadata: {
           salesman_code: "MGR",
@@ -241,18 +276,69 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
   });
 
   assert.equal(result.skipped, false);
-  assert.equal(result.sentCount, 2);
-  assert.equal(result.orderCount, 1);
-  assert.equal(sent[0].to[0], "abdul.report@madiba.com");
-  assert.deepEqual(sent[0].cc, ["boss.report@madiba.com"]);
-  assert.match(sent[0].html, /1,127.00/);
-  assert.match(sent[0].html, /Invoice made/);
-  assert.match(sent[0].html, /incl\. VAT/);
-  assert.match(sent[0].html, /MADIBA SFA/);
-  assert.deepEqual(sent[1].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
-  assert.match(sent[1].html, /ABDUL REHMAN/);
+  assert.equal(result.sentCount, 4);
+  assert.equal(result.orderCount, 2);
+  const salesmanMail = sent.find((message) => message.to[0] === "abdul.report@madiba.com");
+  assert.ok(salesmanMail);
+  assert.equal(salesmanMail.cc, undefined);
+  assert.match(salesmanMail.html, /1,127.00/);
+  assert.match(salesmanMail.html, /Invoice made/);
+  assert.match(salesmanMail.html, /incl\. VAT/);
+  assert.match(salesmanMail.html, /MADIBA SFA/);
+  assert.match(salesmanMail.html, /Bosses receive a separate consolidated team email/);
+  const saraMail = sent.find((message) => message.to[0] === "sara.report@madiba.com");
+  assert.ok(saraMail);
+  assert.equal(saraMail.cc, undefined);
+  const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.match(bossDigest.subject, /Boss One/);
+  assert.match(bossDigest.html, /your team/);
+  assert.match(bossDigest.html, /ABDUL REHMAN \(AR\)/);
+  assert.match(bossDigest.html, /Sara \(SM2\)/);
+  assert.match(bossDigest.html, /do not need to track repeated CC copies/);
+  const companyDigest = sent.find((message) => Array.isArray(message.to) && message.to[0] === DEFAULT_MISSING_INVOICE_EMAIL_TO[0]);
+  assert.ok(companyDigest);
+  assert.deepEqual(companyDigest.to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
+  assert.match(companyDigest.html, /ABDUL REHMAN/);
+  assert.match(companyDigest.html, /Sara/);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].trigger, "sales-upload");
+});
+
+test("buildDailySupplierOrderEmail boss audience uses per-salesman sections", () => {
+  const message = buildDailySupplierOrderEmail({
+    date: "2026-10-13",
+    salesmanName: "Boss One (MGR)",
+    includeSalesman: true,
+    audience: "boss",
+    rows: [
+      {
+        order: "378",
+        customer: "Dhawi Salem",
+        salesman: "ABDUL REHMAN (AR)",
+        orderStatus: "SUBMITTED",
+        invoiceStatus: "Invoice made",
+        createdAt: "13/10/2026, 09:43",
+        orderValue: 1150,
+        invoiceValue: 1127,
+      },
+      {
+        order: "379",
+        customer: "Sara Shop",
+        salesman: "Sara (SM2)",
+        orderStatus: "SUBMITTED",
+        invoiceStatus: "Invoice not uploaded",
+        createdAt: "13/10/2026, 10:00",
+        orderValue: 230,
+        invoiceValue: null,
+      },
+    ],
+  });
+  assert.match(message.subject, /Boss One/);
+  assert.match(message.html, /your team/);
+  assert.match(message.html, /<h3[^>]*>ABDUL REHMAN \(AR\)<\/h3>/);
+  assert.match(message.html, /<h3[^>]*>Sara \(SM2\)<\/h3>/);
+  assert.doesNotMatch(message.html, /Hierarchy bosses are copied/);
 });
 
 test("runDailySupplierOrderEmailCycle skips cron when already sent for the report date", async () => {

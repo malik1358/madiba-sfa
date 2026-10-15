@@ -74,7 +74,9 @@ import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisi
 import {
   buildCurrentWorkingHoursEntry,
   formatWorkingHoursWhatsappLines,
+  loadTodayWorkingHoursEntries,
   loadWorkingHoursTillMessage,
+  WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
 } from "../../lib/workingHoursWhatsapp";
 import { getSupabaseClient } from "../../lib/supabase";
 
@@ -1147,6 +1149,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const activeRowKeyRef = useRef("");
   const urlCustomerFilterAppliedRef = useRef(false);
   const prefilledCollectionOpenedRef = useRef(false);
+  const workingHoursEntriesRef = useRef([]);
   const { showPopup } = useAppPopup();
 
   usePopupMessages({ error });
@@ -1170,8 +1173,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
     try {
       const session = await resolveAuthSession(supabase, 8000);
       if (!session?.user?.id) return;
-      const count = await fetchTodayCollectionVisitCount(supabase, session.user.id);
+      const [count, hoursEntries] = await Promise.all([
+        fetchTodayCollectionVisitCount(supabase, session.user.id),
+        loadTodayWorkingHoursEntries(supabase, session.user.id).catch(() => []),
+      ]);
       setTodayVisitCount(count);
+      if (Array.isArray(hoursEntries)) {
+        workingHoursEntriesRef.current = hoursEntries;
+      }
     } catch {
       // Ignore count lookup failures for WhatsApp preview.
     }
@@ -2023,6 +2032,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
       // when the queued save syncs.
       const visitSavedAt = new Date().toISOString();
       const visitCustomer = locationUpdate.customer || row;
+      const currentHoursEntry = buildCurrentWorkingHoursEntry({
+        transactionType: "COLLECTION_VISIT",
+        savedAt: visitSavedAt,
+        location: gps,
+        customer: visitCustomer,
+        customerCode: row.customer_code,
+      });
       const [visitDistance, workingHours] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
@@ -2037,16 +2053,17 @@ export default function PaymentCollectionsView({ view = "due" }) {
           userId: session.user.id,
           savedAt: visitSavedAt,
           skipTimeline: true,
-          timelineTimeoutMs: 1200,
-          currentEntry: buildCurrentWorkingHoursEntry({
-            transactionType: "COLLECTION_VISIT",
-            savedAt: visitSavedAt,
-            location: gps,
-            customer: visitCustomer,
-            customerCode: row.customer_code,
-          }),
+          timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
+          localEntries: workingHoursEntriesRef.current,
+          currentEntry: currentHoursEntry,
         }),
       ]);
+      if (workingHours?.known !== false) {
+        workingHoursEntriesRef.current = [
+          ...(workingHoursEntriesRef.current || []),
+          currentHoursEntry,
+        ];
+      }
       const avgDaysToPay = resolveLocalAvgDaysToPay(row);
 
       const summaryText = buildVisitSummary(

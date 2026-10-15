@@ -19,7 +19,7 @@ test("formatWorkingHoursWhatsappLines shows dash when unknown", () => {
   );
 });
 
-test("formatWorkingHoursWhatsappLines shows computed day-route value", () => {
+test("formatWorkingHoursWhatsappLines shows computed attendance value", () => {
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: true, value: "3h 26m", minutes: 206 }),
     ["", "Working hours: 3h 26m"],
@@ -30,54 +30,64 @@ test("formatWorkingHoursWhatsappLines shows computed day-route value", () => {
   );
 });
 
-test("resolveWorkingHoursTillMessage counts near stops up to the message time", () => {
+test("resolveWorkingHoursTillMessage uses login to message time without lunch", () => {
   const hours = resolveWorkingHoursTillMessage({
     entries: [
-      { savedAt: "2026-09-07T06:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },
-      { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
-      { savedAt: "2026-09-07T09:00:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
-      { savedAt: "2026-09-07T10:47:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
-      { savedAt: "2026-09-07T12:14:00.000Z", transactionType: "LUNCH_BREAK_IN" },
-      { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "COLLECTION_VISIT", isFarFromCustomer: false },
+      { savedAt: "2026-10-15T05:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },
     ],
-    untilAt: "2026-09-07T09:00:00.000Z",
+    untilAt: "2026-10-15T08:05:00.000Z",
   });
 
   assert.equal(hours.known, true);
-  assert.equal(hours.minutes, 86);
-  assert.equal(hours.value, "1h 26m");
+  assert.equal(hours.minutes, 185);
+  assert.equal(hours.value, "3h 5m");
 });
 
-test("resolveWorkingHoursTillMessage includes the current stop as the endpoint", () => {
+test("resolveWorkingHoursTillMessage excludes lunch break from the total", () => {
   const hours = resolveWorkingHoursTillMessage({
     entries: [
-      { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+      { savedAt: "2026-10-15T05:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },
+      { savedAt: "2026-10-15T09:00:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+      { savedAt: "2026-10-15T10:00:00.000Z", transactionType: "LUNCH_BREAK_IN" },
     ],
-    untilAt: "2026-09-07T09:00:00.000Z",
+    untilAt: "2026-10-15T12:00:00.000Z",
+  });
+
+  // 05:00→09:00 = 4h, 10:00→12:00 = 2h → 6h
+  assert.equal(hours.known, true);
+  assert.equal(hours.minutes, 360);
+  assert.equal(hours.value, "6h");
+});
+
+test("resolveWorkingHoursTillMessage ignores punches after the message time", () => {
+  const hours = resolveWorkingHoursTillMessage({
+    entries: [
+      { savedAt: "2026-10-15T05:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },
+      { savedAt: "2026-10-15T09:00:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+      { savedAt: "2026-10-15T10:00:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+      { savedAt: "2026-10-15T14:00:00.000Z", transactionType: "END_OF_DAY" },
+    ],
+    untilAt: "2026-10-15T08:05:00.000Z",
+  });
+
+  assert.equal(hours.minutes, 185);
+  assert.equal(hours.value, "3h 5m");
+});
+
+test("resolveWorkingHoursTillMessage returns 0h when login is missing", () => {
+  const hours = resolveWorkingHoursTillMessage({
+    entries: [],
+    untilAt: "2026-10-15T08:05:00.000Z",
     currentEntry: {
-      savedAt: "2026-09-07T09:00:00.000Z",
+      savedAt: "2026-10-15T08:05:00.000Z",
       transactionType: "COLLECTION_VISIT",
-      isFarFromCustomer: false,
+      isFarFromCustomer: true,
     },
   });
 
   assert.equal(hours.known, true);
-  assert.equal(hours.minutes, 86);
-  assert.equal(hours.value, "1h 26m");
-});
-
-test("resolveWorkingHoursTillMessage ignores stops after the message time", () => {
-  const hours = resolveWorkingHoursTillMessage({
-    entries: [
-      { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
-      { savedAt: "2026-09-07T09:00:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
-      { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "COLLECTION_VISIT", isFarFromCustomer: false },
-    ],
-    untilAt: "2026-09-07T09:00:00.000Z",
-  });
-
-  assert.equal(hours.minutes, 86);
-  assert.equal(hours.value, "1h 26m");
+  assert.equal(hours.minutes, 0);
+  assert.equal(hours.value, "0h");
 });
 
 test("buildCurrentWorkingHoursEntry marks far GPS stops", () => {
@@ -106,12 +116,12 @@ test("patchWhatsappSummaryWorkingHours inserts after visit date/time", () => {
   assert.match(patched, /Visit date\/time: 07\/09\/2026 10:34\nWorking hours: 2h 10m\nOutcome:/);
 });
 
-test("patchWhatsappSummaryWorkingHours replaces an existing working hours line", () => {
+test("patchWhatsappSummaryWorkingHours replaces an existing working hours dash", () => {
   const patched = patchWhatsappSummaryWorkingHours(
     "Visit date/time: 07/09/2026 10:34\nWorking hours: -\nOutcome: Paid",
-    { known: true, value: "1h", minutes: 60 },
+    { known: true, value: "3h 5m", minutes: 185 },
   );
 
-  assert.match(patched, /Working hours: 1h/);
+  assert.match(patched, /Working hours: 3h 5m/);
   assert.doesNotMatch(patched, /Working hours: -/);
 });

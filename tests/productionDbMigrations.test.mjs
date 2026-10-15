@@ -49,6 +49,7 @@ const PRODUCTION_LEDGER_AUDIT = Object.freeze([
   { version: "20261010115510", name: "restore_junaid_activity_reminders_after_leave" },
   { version: "20261010123534", name: "madiba_store_customer_gps_guard" },
   { version: "20261014070840", name: "one_morning_attendance_per_ksa_day" },
+  { version: "20261015071140", name: "customer_shares" },
 ]);
 
 function repoVersionsFromMigrationsDir() {
@@ -254,6 +255,7 @@ test("version aliases cover repo timestamps without duplicating ledger rows", ()
     "20261010120000",
     "20261010170000",
     "20261014120000",
+    "20261015120000",
   ];
   const scope = migrationScope(repo, PRODUCTION_LEDGER_AUDIT);
   assert.deepEqual(scope.coveredByAlias, [
@@ -265,11 +267,13 @@ test("version aliases cover repo timestamps without duplicating ledger rows", ()
     "20261010120000",
     "20261010170000",
     "20261014120000",
+    "20261015120000",
   ]);
-  assert.equal(scope.matchedAliases.length, 8);
+  assert.equal(scope.matchedAliases.length, 9);
   assert.deepEqual(scope.untrackedApplied, []);
   assert.equal(scope.pending.includes("20260909160000"), false);
   assert.equal(scope.pending.includes("20261014120000"), false);
+  assert.equal(scope.pending.includes("20261015120000"), false);
   assert.equal(scope.reconciliationIssues.length, 0);
 });
 
@@ -323,6 +327,62 @@ test("morning attendance alias requires exact name and fails closed on conflict"
     [
       { version: "20261014070840", name: "one_morning_attendance_per_ksa_day" },
       { version: "20261014120000", name: "one_morning_attendance_per_ksa_day" },
+    ],
+  );
+  assert.match(duplicatePair.reconciliationIssues.join(" "), /duplicate migration history/);
+  assert.deepEqual(duplicatePair.coveredByAlias, []);
+});
+
+test("customer shares apply-time ledger stamp aliases repo file and is not scheduled for SQL", () => {
+  const scope = migrationScope(
+    [
+      "20260930190000",
+      "20261002120000",
+      "20261002130000",
+      "20261015120000",
+    ],
+    [
+      { version: "20261015071140", name: "customer_shares" },
+    ],
+  );
+  assert.deepEqual(scope.coveredByAlias, ["20261015120000"]);
+  assert.equal(scope.unrelatedPending.includes("20261015120000"), false);
+  assert.equal(scope.pending.includes("20261015120000"), false);
+  assert.deepEqual(scope.untrackedApplied, []);
+  assert.equal(scope.allowlistedPending.includes("20261015120000"), false);
+  assert.deepEqual(scope.allowlistedPending, [
+    "20260930190000",
+    "20261002120000",
+    "20261002130000",
+  ]);
+  assert.equal(scope.matchedAliases.length, 1);
+  assert.equal(scope.matchedAliases[0].ledgerVersion, "20261015071140");
+  assert.equal(scope.reconciliationIssues.length, 0);
+  assert.equal(
+    MIGRATION_VERSION_ALIASES.some(
+      (alias) => alias.ledgerVersion === "20261015071140"
+        && alias.repoVersion === "20261015120000"
+        && alias.name === "customer_shares",
+    ),
+    true,
+  );
+});
+
+test("customer shares alias requires exact name and fails closed on conflict", () => {
+  const wrongName = migrationScope(
+    ["20261015120000"],
+    [{ version: "20261015071140", name: "wrong_customer_shares_name" }],
+  );
+  assert.match(wrongName.reconciliationIssues.join(" "), /alias name mismatch/);
+  assert.deepEqual(wrongName.untrackedApplied, ["20261015071140"]);
+  assert.deepEqual(wrongName.pending, ["20261015120000"]);
+  assert.deepEqual(wrongName.coveredByAlias, []);
+
+  const duplicatePair = migrationScope(
+    ["20261015120000"],
+    [
+      { version: "20261015071140", name: "customer_shares" },
+      { version: "20261015120000", name: "customer_shares" },
     ],
   );
   assert.match(duplicatePair.reconciliationIssues.join(" "), /duplicate migration history/);
@@ -481,9 +541,11 @@ test("production audit inventory reconciles aliases and ledger-only rows against
     assert.equal(scope.unrelatedPending.includes(version), false, version);
   }
   assert.equal(PRODUCTION_QUARANTINED_MIGRATIONS.some((m) => m.version === "20260816000001"), true);
-  assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 11);
+  assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 12);
   assert.equal(scope.unrelatedPending.includes("20261014120000"), false);
   assert.equal(scope.coveredByAlias.includes("20261014120000"), true);
+  assert.equal(scope.unrelatedPending.includes("20261015120000"), false);
+  assert.equal(scope.coveredByAlias.includes("20261015120000"), true);
 });
 
 test("phase1 attested versions stay out of quarantine and allowlist", () => {

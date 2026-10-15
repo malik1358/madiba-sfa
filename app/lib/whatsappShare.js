@@ -291,5 +291,25 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     }
   }
 
-  return { success: false, reason: "files-not-supported" };
+  // Native/Web Share could not attach files (outdated APK, WebView limits, etc.).
+  // Still open WhatsApp with the summary text; callers show the attach-manually hint.
+  if (!message) {
+    return { success: false, reason: "files-not-supported" };
+  }
+
+  const textResult = await shareTextOnWhatsapp(message, {
+    ...options,
+    preferNativeShare: false,
+    preferWhatsappUrl: true,
+  });
+
+  if (!textResult.success) {
+    return textResult;
+  }
+
+  return {
+    ...textResult,
+    fallback: true,
+    reason: "files-not-supported",
+  };
 }

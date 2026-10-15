@@ -31,6 +31,8 @@ export const MIGRATION_VERSION_ALIASES = Object.freeze([
   { ledgerVersion: "20261014070840", repoVersion: "20261014120000", name: "one_morning_attendance_per_ksa_day" },
   // Applied via Supabase at apply-time stamp after PR #556; repo file keeps 20261015120000.
   { ledgerVersion: "20261015071140", repoVersion: "20261015120000", name: "customer_shares" },
+  // Applied via Supabase at apply-time stamp; repo file keeps 20261015080745.
+  { ledgerVersion: "20261015081431", repoVersion: "20261015080745", name: "product_catalogue_photos" },
 ]);
 
 /**

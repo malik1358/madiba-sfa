@@ -21,6 +21,7 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Sales order/);
   assert.match(summary, /Order #: 210/);
   assert.match(summary, /Salesman: Abdul/);
+  assert.match(summary, /Working hours: -/);
   assert.match(summary, /Amount without VAT: 1,000/);
   assert.match(summary, /VAT 15%: 150/);
   assert.match(summary, /Amount after VAT: 1,150/);
@@ -29,6 +30,25 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Est. waiting: -/);
   assert.match(summary, /Payment: CASH/);
   assert.match(summary, /Region: dammam/);
+});
+
+test("buildOrderWhatsappSummary includes working hours till the order", () => {
+  const summary = buildOrderWhatsappSummary({
+    orderId: 210,
+    statusLabel: "Submitted",
+    customerCode: "1542",
+    customerName: "Sultan",
+    salesmanCode: "ABD01",
+    salesmanName: "Abdul",
+    itemCount: 1,
+    totalQuantity: 1,
+    grandTotal: 100,
+    paymentType: "cash",
+    pricingRegion: "dammam",
+    workingHours: { known: true, value: "2h 5m", minutes: 125 },
+  }, "en");
+
+  assert.match(summary, /Working hours: 2h 5m/);
 });
 
 test("buildOrderWhatsappSummary keeps gloves VAT at zero", () => {

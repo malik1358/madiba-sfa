@@ -1,6 +1,7 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
+import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -37,6 +38,7 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryProbability: "Payment probability",
   summarySalesman: "Salesman",
   summaryVisitDateTime: "Visit date/time",
+  workingHours: "Working hours",
   summaryOutcome: "Outcome",
   summaryAmountReceived: "Amount received",
   summaryReceiptMode: "Receipt mode",
@@ -150,6 +152,9 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
     `${labels.summaryCode}: ${row.customer_code || "-"}`,
     `${labels.summarySalesman}: ${row.salesman_name || row.salesman_code || "-"}`,
     `${labels.summaryVisitDateTime}: ${visitDateTime}`,
+    ...formatWorkingHoursWhatsappLines(options.workingHours, {
+      workingHours: labels.workingHours,
+    }).filter(Boolean),
     `${labels.summaryOutcome}: ${outcomeText || labels.summaryNotSpecified}`,
   ];
 

@@ -111,6 +111,17 @@ async function blobToBase64(blob) {
   return btoa(binary);
 }
 
+async function canUseNativeFileShare() {
+  if (!(await isNativeMobilePlatform())) return false;
+
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    return Capacitor.isPluginAvailable("Filesystem") && Capacitor.isPluginAvailable("Share");
+  } catch {
+    return false;
+  }
+}
+
 async function shareFilesViaCapacitor(files, text, dialogTitle, title) {
   const { Filesystem, Directory } = await import("@capacitor/filesystem");
   const { Share } = await import("@capacitor/share");
@@ -208,6 +219,10 @@ export async function shareTextOnWhatsapp(text, options = {}) {
 
   if (!preferWhatsappUrl && await isNativeMobilePlatform()) {
     try {
+      const { Capacitor } = await import("@capacitor/core");
+      if (!Capacitor.isPluginAvailable("Share")) {
+        throw new Error("\"Share\" plugin is not implemented on android");
+      }
       const { Share } = await import("@capacitor/share");
       await Share.share({
         text: message,
@@ -244,7 +259,7 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
 
-  if (await isNativeMobilePlatform()) {
+  if (await canUseNativeFileShare()) {
     try {
       await shareFilesViaCapacitor(shareFiles, message, dialogTitle, title);
       return { success: true, method: "capacitor-share-files" };
@@ -253,6 +268,7 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
       if (cancelled) {
         return { success: false, reason: "cancelled" };
       }
+      // Missing native Filesystem/Share (outdated APK) falls through to Web Share / WhatsApp URL.
     }
   }
 

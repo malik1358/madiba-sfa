@@ -45,6 +45,11 @@ import {
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
+import {
+  buildCurrentWorkingHoursEntry,
+  loadWorkingHoursTillMessage,
+  patchWhatsappSummaryWorkingHours,
+} from "../../lib/workingHoursWhatsapp.js";
 import { promoteEntryGpsToCustomerIfMissing } from "../../lib/customerGpsHistory.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
@@ -1169,8 +1174,8 @@ export async function POST(request) {
       );
     }
 
-    // Recompute distance/waiting with the service role so prior collection visits
-    // are visible even when client RLS cannot read them. Matches Collection Report.
+    // Recompute distance/waiting and working hours with the service role so prior
+    // collection visits are visible even when client RLS cannot read them.
     if (finalSummaryText && Number.isFinite(latitude) && Number.isFinite(longitude)) {
       try {
         const { data: customerRow } = await admin
@@ -1178,16 +1183,49 @@ export async function POST(request) {
           .select("customer_code,latitude,longitude")
           .eq("customer_code", customerCode)
           .maybeSingle();
-        const visitDistance = await loadVisitDistanceMetrics({
-          supabase: admin,
-          userId: user.id,
-          location: { latitude, longitude },
-          customer: customerRow || {},
-          savedAt: savedAtIso,
-        });
+        const location = { latitude, longitude };
+        const customer = customerRow || {};
+        const [visitDistance, workingHours] = await Promise.all([
+          loadVisitDistanceMetrics({
+            supabase: admin,
+            userId: user.id,
+            location,
+            customer,
+            savedAt: savedAtIso,
+          }),
+          loadWorkingHoursTillMessage({
+            supabase: admin,
+            userId: user.id,
+            savedAt: savedAtIso,
+            currentEntry: buildCurrentWorkingHoursEntry({
+              transactionType: "COLLECTION_VISIT",
+              savedAt: savedAtIso,
+              location,
+              customer,
+              customerCode,
+            }),
+          }),
+        ]);
         finalSummaryText = patchCollectionVisitSummaryVisitDistance(finalSummaryText, visitDistance);
+        finalSummaryText = patchWhatsappSummaryWorkingHours(finalSummaryText, workingHours);
       } catch (distanceError) {
         console.warn("Unable to recompute visit distance for WhatsApp summary:", distanceError);
+      }
+    } else if (finalSummaryText) {
+      try {
+        const workingHours = await loadWorkingHoursTillMessage({
+          supabase: admin,
+          userId: user.id,
+          savedAt: savedAtIso,
+          currentEntry: buildCurrentWorkingHoursEntry({
+            transactionType: "COLLECTION_VISIT",
+            savedAt: savedAtIso,
+            customerCode,
+          }),
+        });
+        finalSummaryText = patchWhatsappSummaryWorkingHours(finalSummaryText, workingHours);
+      } catch (hoursError) {
+        console.warn("Unable to recompute working hours for WhatsApp summary:", hoursError);
       }
     }
 

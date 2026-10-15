@@ -57,6 +57,10 @@ import {
   resolveLocalAvgDaysToPay,
 } from "../../lib/avgDaysWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
+import {
+  buildCurrentWorkingHoursEntry,
+  loadWorkingHoursTillMessage,
+} from "../../lib/workingHoursWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
 import {
   buildGpsActivityNote,
@@ -1425,14 +1429,32 @@ export default function MyDayPage({ mode = "default" } = {}) {
       const capturedAt = new Date().toISOString();
       // Prefer local customer data and skip the activity timeline so visit saves
       // stay as fast as offline-first collection entry on flaky mobile data.
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location,
-        customer,
-        savedAt: capturedAt,
-        skipTimeline: true,
-      });
+      // Working hours still attempt a short timeline fetch so WhatsApp can show
+      // cumulative hours till this message without blocking the save path.
+      const [visitDistance, workingHours] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location,
+          customer,
+          savedAt: capturedAt,
+          skipTimeline: true,
+        }),
+        loadWorkingHoursTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: 1200,
+          currentEntry: buildCurrentWorkingHoursEntry({
+            transactionType: "VISIT_REPORT",
+            savedAt: capturedAt,
+            location,
+            customer,
+            customerCode: customer.customer_code,
+          }),
+        }),
+      ]);
       const customerCodeKey = String(customer.customer_code || "").trim().toUpperCase();
       let avgDaysToPay = resolveLocalAvgDaysToPay(customer);
       if (!avgDaysToPay && customerCodeKey) {
@@ -1452,11 +1474,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
-        visitForm,
+        visitForm: { ...visitForm, visitAt: capturedAt },
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
-        visitAt: capturedAt,
+        workingHours,
         avgDaysToPay,
       });
       void copyTextToClipboard(summaryText);

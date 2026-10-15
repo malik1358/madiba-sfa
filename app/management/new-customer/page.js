@@ -32,6 +32,10 @@ import { fetchVisibleCustomersCached, upsertLocalVisibleCustomer } from "../../l
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
+import {
+  buildCurrentWorkingHoursEntry,
+  loadWorkingHoursTillMessage,
+} from "../../lib/workingHoursWhatsapp";
 import { copyTextToClipboard } from "../../lib/whatsappShare";
 import {
   formatExistingCustomerDuplicateMessage,
@@ -755,14 +759,30 @@ export default function NewCustomerPage() {
         latitude: parsedGps?.lat ?? null,
         longitude: parsedGps?.lng ?? null,
       };
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location,
-        customer: prospectCustomer,
-        savedAt: capturedAt,
-        skipTimeline: true,
-      });
+      const [visitDistance, workingHours] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location,
+          customer: prospectCustomer,
+          savedAt: capturedAt,
+          skipTimeline: true,
+        }),
+        loadWorkingHoursTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: 1200,
+          currentEntry: buildCurrentWorkingHoursEntry({
+            transactionType: "VISIT_REPORT",
+            savedAt: capturedAt,
+            location,
+            customer: prospectCustomer,
+            customerCode,
+          }),
+        }),
+      ]);
 
       const result = await postJsonResilient({
         url: "/api/prospects",
@@ -827,6 +847,7 @@ export default function NewCustomerPage() {
         salesmanName,
         salesmanCode,
         visitDistance,
+        workingHours,
         visitAt: capturedAt,
       });
 

@@ -4,7 +4,13 @@ export function buildScopeHash(scope) {
     .map((code) => String(code || "").trim().toUpperCase())
     .filter(Boolean)
     .sort();
-  return codes.join("|") || "none";
+  const shared = [...(scope?.sharedCustomerCodes || [])]
+    .map((code) => String(code || "").trim().toUpperCase().replace(/\s+/g, " "))
+    .filter(Boolean)
+    .sort();
+  const salesmanPart = codes.join("|") || "none";
+  if (!shared.length) return salesmanPart;
+  return `${salesmanPart}#share:${shared.join(",")}`;
 }
 
 export function buildSnapshotKey(collectionScope, customerScope) {

@@ -1,6 +1,7 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
+import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
 
 function formatDateOnly(value) {
   return formatKsaDateOnly(value, "");
@@ -38,6 +39,7 @@ export function buildFieldVisitWhatsappSummary({
   visitDistance = {},
   includeOutstanding = true,
   avgDaysToPay = null,
+  workingHours = null,
 } = {}) {
   const labels = {
     title: "Field visit report",
@@ -45,6 +47,7 @@ export function buildFieldVisitWhatsappSummary({
     code: "Code",
     salesman: "Salesman",
     visitDateTime: "Visit date/time",
+    workingHours: "Working hours",
     outcome: "Outcome",
     nextVisit: "Next visit",
     notes: "Notes",
@@ -71,6 +74,7 @@ export function buildFieldVisitWhatsappSummary({
     `${labels.code}: ${customer.customer_code || "-"}`,
     `${labels.salesman}: ${salesman}`,
     `${labels.visitDateTime}: ${visitDateTime}`,
+    ...formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }).filter(Boolean),
     `${labels.outcome}: ${outcome || labels.notSpecified}`,
     `${labels.nextVisit}: ${nextVisit || labels.notSpecified}`,
   ];

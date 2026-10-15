@@ -72,11 +72,39 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
 
   assert.match(summary, /Queue priority: 3/);
   assert.match(summary, /Customer: Acme Trading/);
+  assert.match(summary, /Working hours: -/);
   assert.match(summary, /0-30: 1,000/);
   assert.match(summary, /Visit number today: 2/);
   assert.match(summary, />120: 0\n\nGPS: -/);
   assert.match(summary, /Distance from customer: -/);
   assert.match(summary, /Est. waiting: -/);
+});
+
+test("buildCollectionVisitSummary includes working hours till the visit", () => {
+  const summary = buildCollectionVisitSummary(
+    {
+      customer_name: "Acme Trading",
+      customer_code: "1009",
+      salesman_name: "Junaid",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "FUNDS_RECEIVED",
+      amountReceived: "100",
+      receiptMode: "CASH",
+      nextVisitAt: "2026-08-30",
+    },
+    {
+      workingHours: { known: true, value: "3h 26m", minutes: 206 },
+      visitAt: "2026-09-07T15:00:00.000Z",
+    },
+  );
+
+  assert.match(summary, /Working hours: 3h 26m/);
 });
 
 test("buildCollectionVisitSummary includes last visit date, outcome, remarks, and amount when present", () => {

@@ -1,3 +1,4 @@
+import { resolveDayRouteWorkingHours } from "./dayRouteMap.js";
 import { countUniqueGpsLocations } from "./geo.js";
 import { formatKsaTime, getKsaDateTimeParts } from "./workdayActivity.js";
 
@@ -240,6 +241,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   visitedUniqueCustomers: "تمت زيارة {count} عميل مختلف.",
   collectionByCustomer: "{customer}: تم تحصيل {amount} ريال.",
   collectionByCustomerNone: "{customer}: لا تحصيل.",
+  workingHours: "ساعات العمل: {value}.",
 };
 
 export const COLLECTION_DAY_SUMMARY_LABELS = {
@@ -274,6 +276,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   visitedUniqueCustomers: "Visited {count} unique customer(s).",
   collectionByCustomer: "{customer}: {amount} ﷼ collected.",
   collectionByCustomerNone: "{customer}: no collection.",
+  workingHours: "Working hours: {value}.",
 };
 
 function fill(template, values) {
@@ -611,6 +614,50 @@ function describeCustomerCollection(customer, labels) {
   });
 }
 
+function buildDaySummaryWorkingHoursEntries(visits = [], workdayEvents = null) {
+  const entries = [];
+  const events = workdayEvents || {};
+
+  if (events.loginAt) {
+    entries.push({ savedAt: events.loginAt, transactionType: "MORNING_ATTENDANCE" });
+  }
+  if (events.lunchOutAt) {
+    entries.push({ savedAt: events.lunchOutAt, transactionType: "LUNCH_BREAK_OUT" });
+  }
+  if (events.lunchInAt) {
+    entries.push({ savedAt: events.lunchInAt, transactionType: "LUNCH_BREAK_IN" });
+  }
+  if (events.logoutAt) {
+    entries.push({ savedAt: events.logoutAt, transactionType: "END_OF_DAY" });
+  }
+
+  (events.activities || []).forEach((activity) => {
+    const type = String(activity?.entryType || activity?.transactionType || activity?.transaction_type || "")
+      .trim()
+      .toUpperCase();
+    const at = activity?.savedAt || activity?.saved_at;
+    if (!at || !type) return;
+    if (type === "ORDER_DRAFT" || type === "ORDER_EDITED") return;
+    entries.push({
+      savedAt: at,
+      transactionType: type,
+      isFarFromCustomer: Boolean(activity?.isFarFromCustomer),
+    });
+  });
+
+  (visits || []).forEach((visit) => {
+    const at = visit?.saved_at || visit?.savedAt;
+    if (!at) return;
+    entries.push({
+      savedAt: at,
+      transactionType: "COLLECTION_VISIT",
+      isFarFromCustomer: Boolean(visit?.isFarFromCustomer),
+    });
+  });
+
+  return entries;
+}
+
 export function buildCollectionDaySummary(visits, customerLocationByCode = {}, lunchEvents = null, labels = COLLECTION_DAY_SUMMARY_LABELS) {
   const sorted = [...(visits || [])].sort((left, right) => visitTimestamp(left) - visitTimestamp(right));
   const fieldVisitStats = resolveFieldVisitStats(lunchEvents);
@@ -630,6 +677,14 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
       lunchInAt: workday.events?.lunchInAt,
     })
     : [];
+  const workingHours = resolveDayRouteWorkingHours(
+    buildDaySummaryWorkingHoursEntries(sorted, workday.events),
+    idleGaps,
+  );
+  const workingHoursItem = makeSummaryItem(
+    "working_hours",
+    fill(labels.workingHours || "Working hours: {value}.", { value: workingHours.value || "0h" }),
+  );
 
   const hasFieldDay = Boolean(sorted.length || fieldVisitStats?.uniqueCustomers);
   const headerItem = hasFieldDay
@@ -683,6 +738,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
 
   const items = [
     headerItem,
+    workingHoursItem,
     ...collectionCustomerItems,
     ...(orderItem ? [orderItem] : []),
     ...workday.statusItems,
@@ -696,6 +752,8 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
     stats,
     segments,
     idleGaps,
+    workingHoursMinutes: workingHours.minutes,
+    workingHoursLabel: workingHours.value,
   };
 }
 

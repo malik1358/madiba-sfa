@@ -11,6 +11,10 @@ import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '..
 import { resolveOrderMakerFromScope } from '../../../lib/orderSalesman';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
+import {
+  buildCurrentWorkingHoursEntry,
+  loadWorkingHoursTillMessage,
+} from '../../../lib/workingHoursWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 import { normalizePaymentType, normalizePricingType } from '../../../lib/regionalPricing';
@@ -382,14 +386,24 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location,
-        customer: selectedCustomer,
-        savedAt: capturedAt,
-        skipTimeline: true,
-      });
+      const [visitDistance, workingHours] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location,
+          customer: selectedCustomer,
+          savedAt: capturedAt,
+          skipTimeline: true,
+        }),
+        // Draft saves are not near-stop endpoints; hours are prior stops only.
+        loadWorkingHoursTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: 1200,
+        }),
+      ]);
 
       const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
       const orderMaker = resolveOrderMakerFromScope(accessScope);
@@ -488,6 +502,7 @@ export function useOrder({
           orderId: existingServerOrderId || pendingOrderId,
           orderNumber: allottedOrderNumber,
           visitDistance,
+          workingHours,
         };
       }
 
@@ -516,6 +531,7 @@ export function useOrder({
         orderId: payload.orderId,
         orderNumber: confirmedNumber,
         visitDistance,
+        workingHours,
       };
     } catch (err) {
       setError(friendlyErrorMessage(err, 'Unable to save draft order.'));
@@ -580,14 +596,30 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location,
-        customer: selectedCustomer,
-        savedAt: capturedAt,
-        skipTimeline: true,
-      });
+      const [visitDistance, workingHours] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location,
+          customer: selectedCustomer,
+          savedAt: capturedAt,
+          skipTimeline: true,
+        }),
+        loadWorkingHoursTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: 1200,
+          currentEntry: buildCurrentWorkingHoursEntry({
+            transactionType: 'ORDER_SUBMITTED',
+            savedAt: capturedAt,
+            location,
+            customer: selectedCustomer,
+            customerCode: selectedCustomer?.customer_code,
+          }),
+        }),
+      ]);
 
       const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
       const orderMaker = resolveOrderMakerFromScope(accessScope);
@@ -689,6 +721,7 @@ export function useOrder({
           orderId: existingServerOrderId || pendingOrderId,
           orderNumber: allottedOrderNumber,
           visitDistance,
+          workingHours,
         };
       }
 
@@ -722,6 +755,7 @@ export function useOrder({
         orderId: payload.orderId,
         orderNumber: confirmedNumber,
         visitDistance,
+        workingHours,
       };
     } catch (err) {
       setError(friendlyErrorMessage(err, 'Unable to submit order.'));

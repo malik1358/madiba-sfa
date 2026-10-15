@@ -71,6 +71,11 @@ import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsap
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
+import {
+  buildCurrentWorkingHoursEntry,
+  formatWorkingHoursWhatsappLines,
+  loadWorkingHoursTillMessage,
+} from "../../lib/workingHoursWhatsapp";
 import { getSupabaseClient } from "../../lib/supabase";
 
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
@@ -326,6 +331,7 @@ const TEXT = {
   summaryProbability: { en: "Payment probability", ar: "احتمالية التحصيل" },
   summarySalesman: { en: "Salesman", ar: "المندوب" },
   summaryVisitDateTime: { en: "Visit date/time", ar: "تاريخ ووقت الزيارة" },
+  summaryWorkingHours: { en: "Working hours", ar: "ساعات العمل" },
   summaryOutcome: { en: "Outcome", ar: "النتيجة" },
   summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
@@ -494,6 +500,9 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
     `${t("summaryCode")}: ${row.customer_code || "-"}`,
     `${t("summarySalesman")}: ${getSalesmanLabel(row) || "-"}`,
     `${t("summaryVisitDateTime")}: ${visitDateTime}`,
+    ...formatWorkingHoursWhatsappLines(options.workingHours, {
+      workingHours: t("summaryWorkingHours"),
+    }).filter(Boolean),
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
 
@@ -2012,14 +2021,32 @@ export default function PaymentCollectionsView({ view = "due" }) {
       // even when the visit itself can be queued offline. Distance-from-customer
       // still uses GPS + customer coords; the API patches previous-visit distance
       // when the queued save syncs.
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location: gps,
-        customer: locationUpdate.customer || row,
-        savedAt: new Date().toISOString(),
-        skipTimeline: true,
-      });
+      const visitSavedAt = new Date().toISOString();
+      const visitCustomer = locationUpdate.customer || row;
+      const [visitDistance, workingHours] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location: gps,
+          customer: visitCustomer,
+          savedAt: visitSavedAt,
+          skipTimeline: true,
+        }),
+        loadWorkingHoursTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: visitSavedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: 1200,
+          currentEntry: buildCurrentWorkingHoursEntry({
+            transactionType: "COLLECTION_VISIT",
+            savedAt: visitSavedAt,
+            location: gps,
+            customer: visitCustomer,
+            customerCode: row.customer_code,
+          }),
+        }),
+      ]);
       const avgDaysToPay = resolveLocalAvgDaysToPay(row);
 
       const summaryText = buildVisitSummary(
@@ -2031,7 +2058,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
-          visitAt: new Date().toISOString(),
+          workingHours,
+          visitAt: visitSavedAt,
           avgDaysToPay,
           lastVisit: row?.latest_collection || null,
         },

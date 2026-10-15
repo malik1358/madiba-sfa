@@ -49,9 +49,27 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /61-90: 500/);
   assert.match(summary, />90: 300/);
   assert.match(summary, /Total: 2,800/);
+  assert.match(summary, /Visit date\/time:.*\nWorking hours: -/);
   assert.match(summary, /GPS: -/);
   assert.match(summary, /Distance from customer: -/);
   assert.match(summary, /Est. waiting: -/);
+});
+
+test("buildFieldVisitWhatsappSummary includes working hours till the visit", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "1542",
+      customer_name: "Sultan Accessories",
+    },
+    visitForm: {
+      outcome: "ORDER_TAKEN",
+      visitAt: "2026-09-07T09:00:00.000Z",
+    },
+    salesmanName: "OSAMA",
+    workingHours: { known: true, value: "1h 26m", minutes: 86 },
+  });
+
+  assert.match(summary, /Working hours: 1h 26m/);
 });
 
 test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the end", () => {

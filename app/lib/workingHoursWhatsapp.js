@@ -1,14 +1,21 @@
 import { isFarFromCustomer } from "./customerLocation.js";
-import { resolveDayRouteWorkingHours } from "./dayRouteMap.js";
+import { extractWorkdayTimesFromRoute } from "./dayRouteMap.js";
 import { todayAttendanceBounds } from "./morningAttendance.js";
 import {
   timelineRowFromActivityLog,
   timelineRowFromCollectionVisit,
 } from "./visitDistanceWhatsapp.js";
+import {
+  calculateWorkingHoursMinutes,
+  formatWorkingHours,
+} from "./workdayActivity.js";
 
 export const WORKING_HOURS_WHATSAPP_LABELS = {
   workingHours: "Working hours",
 };
+
+/** Soft deadline for offline-first WhatsApp builds; still falls back to attendance punches already loaded. */
+export const WORKING_HOURS_WHATSAPP_TIMEOUT_MS = 8000;
 
 export const WORKING_HOURS_ACTIVITY_ENTRY_TYPES = [
   "VISIT_REPORT",
@@ -69,18 +76,33 @@ export function formatWorkingHoursWhatsappLine(hours = null, labels = {}) {
   return formatWorkingHoursWhatsappLines(hours, labels).filter(Boolean).join("\n");
 }
 
+function formatKnownWorkingHours(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return { known: true, minutes: 0, value: "0h", ranges: [] };
+  }
+  return {
+    known: true,
+    minutes,
+    value: formatWorkingHours(minutes) || "0h",
+    ranges: [],
+  };
+}
+
 /**
- * Compute day-route working hours from entries at or before untilAt.
- * Optionally append the current stop (this WhatsApp message's visit/order).
+ * Working hours till the WhatsApp message time = attendance clock
+ * (login → lunch out + lunch in → message time / logout), matching User Activity /
+ * My Day attendance hours with openEndedAt = the visit/order timestamp.
+ * This is intentional for per-message WhatsApp; the Working Hours report still
+ * uses day-route near-stop segments.
  */
 export function resolveWorkingHoursTillMessage({
   entries = [],
   untilAt = "",
-  idleGaps = [],
   currentEntry = null,
 } = {}) {
   const cutoffTs = Date.parse(String(untilAt || ""));
   const cutoff = Number.isFinite(cutoffTs) ? cutoffTs : Date.now();
+  const cutoffIso = new Date(cutoff).toISOString();
 
   const prior = (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -91,45 +113,38 @@ export function resolveWorkingHoursTillMessage({
         ...entry,
         savedAt: at,
         transactionType: entryType(entry),
-        isFarFromCustomer: Boolean(entry?.isFarFromCustomer),
       };
     })
     .filter(Boolean);
 
   if (currentEntry) {
-    const at = currentEntry.savedAt || currentEntry.saved_at || untilAt || new Date(cutoff).toISOString();
+    const at = currentEntry.savedAt || currentEntry.saved_at || untilAt || cutoffIso;
     const type = entryType(currentEntry) || "VISIT_REPORT";
     const currentTs = Date.parse(String(at || ""));
     if (at && Number.isFinite(currentTs) && currentTs <= cutoff + 1000) {
-      const alreadyPresent = prior.some((entry) => (
-        entryType(entry) === type
-        && Math.abs(rowTimestamp(entry) - currentTs) < 2000
-        && String(entry.customerCode || entry.customer_code || "")
-          === String(currentEntry.customerCode || currentEntry.customer_code || "")
-      ));
-      if (!alreadyPresent) {
-        prior.push({
-          ...currentEntry,
-          savedAt: at,
-          transactionType: type,
-          isFarFromCustomer: Boolean(currentEntry.isFarFromCustomer),
-        });
-      }
+      prior.push({
+        ...currentEntry,
+        savedAt: at,
+        transactionType: type,
+      });
     }
   }
 
-  const gaps = (idleGaps || []).filter((gap) => {
-    const start = Date.parse(gap?.fromAt);
-    return Number.isFinite(start) && start <= cutoff;
+  const times = extractWorkdayTimesFromRoute(prior);
+  const logoutTs = Date.parse(String(times.logoutAt || ""));
+  const logoutAt = Number.isFinite(logoutTs) && logoutTs <= cutoff
+    ? times.logoutAt
+    : null;
+
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: times.loginAt,
+    lunchOutAt: times.lunchOutAt,
+    lunchInAt: times.lunchInAt,
+    logoutAt,
+    openEndedAt: cutoffIso,
   });
 
-  const resolved = resolveDayRouteWorkingHours(prior, gaps);
-  return {
-    known: true,
-    minutes: Number(resolved.minutes || 0),
-    value: resolved.value || "0h",
-    ranges: resolved.ranges || [],
-  };
+  return formatKnownWorkingHours(minutes == null ? 0 : minutes);
 }
 
 export function workingHoursEntryFromTimelineRow(row) {
@@ -184,46 +199,53 @@ export async function loadTodayWorkingHoursEntries(supabase, userId) {
   const { startIso, endIso } = todayAttendanceBounds();
   const rows = [];
 
-  try {
-    const { data, error } = await supabase
-      .from("daily_activity_logs")
-      .select("id,user_id,entry_type,note,created_at")
-      .eq("user_id", userId)
-      .in("entry_type", WORKING_HOURS_ACTIVITY_ENTRY_TYPES)
-      .gte("created_at", startIso)
-      .lte("created_at", endIso)
-      .order("created_at", { ascending: true })
-      .limit(400);
-    if (!error) {
-      (data || []).forEach((row) => {
-        const entry = workingHoursEntryFromTimelineRow(timelineRowFromActivityLogForHours(row));
-        if (entry) rows.push(entry);
-      });
-    }
-  } catch {
-    // Ignore missing tables or RLS errors; WhatsApp still includes Working hours as "-".
+  const [activityResult, collectionResult] = await Promise.all([
+    (async () => {
+      try {
+        return await supabase
+          .from("daily_activity_logs")
+          .select("id,user_id,entry_type,note,created_at")
+          .eq("user_id", userId)
+          .in("entry_type", WORKING_HOURS_ACTIVITY_ENTRY_TYPES)
+          .gte("created_at", startIso)
+          .lte("created_at", endIso)
+          .order("created_at", { ascending: true })
+          .limit(400);
+      } catch {
+        return { data: null, error: true };
+      }
+    })(),
+    (async () => {
+      try {
+        return await supabase
+          .from("collection_visits")
+          .select("id,saved_at,latitude,longitude,created_by,customer_code")
+          .eq("created_by", userId)
+          .gte("saved_at", startIso)
+          .lte("saved_at", endIso)
+          .order("saved_at", { ascending: true })
+          .limit(200);
+      } catch {
+        return { data: null, error: true };
+      }
+    })(),
+  ]);
+
+  if (!activityResult?.error && activityResult?.data) {
+    activityResult.data.forEach((row) => {
+      const entry = workingHoursEntryFromTimelineRow(timelineRowFromActivityLogForHours(row));
+      if (entry) rows.push(entry);
+    });
   }
 
-  try {
-    const { data, error } = await supabase
-      .from("collection_visits")
-      .select("id,saved_at,latitude,longitude,created_by,customer_code")
-      .eq("created_by", userId)
-      .gte("saved_at", startIso)
-      .lte("saved_at", endIso)
-      .order("saved_at", { ascending: true })
-      .limit(200);
-    if (!error) {
-      (data || []).forEach((row) => {
-        const entry = workingHoursEntryFromTimelineRow({
-          ...timelineRowFromCollectionVisit(row),
-          customerCode: row.customer_code,
-        });
-        if (entry) rows.push(entry);
+  if (!collectionResult?.error && collectionResult?.data) {
+    collectionResult.data.forEach((row) => {
+      const entry = workingHoursEntryFromTimelineRow({
+        ...timelineRowFromCollectionVisit(row),
+        customerCode: row.customer_code,
       });
-    }
-  } catch {
-    // Ignore missing tables or RLS errors.
+      if (entry) rows.push(entry);
+    });
   }
 
   return rows.sort((left, right) => rowTimestamp(left) - rowTimestamp(right));
@@ -231,8 +253,9 @@ export async function loadTodayWorkingHoursEntries(supabase, userId) {
 
 /**
  * Load cumulative working hours until the WhatsApp message time.
- * When skipTimeline is true (offline-first saves), returns unknown "-" unless
- * localEntries are provided. A short timelineTimeoutMs can still attempt a fetch.
+ * Prefer today's attendance punches. On timeout/offline, still compute from
+ * whatever entries are available (including currentEntry) so WhatsApp shows
+ * "0h" / a real total instead of "-" on queueFirst saves.
  */
 export async function loadWorkingHoursTillMessage({
   supabase,
@@ -240,39 +263,41 @@ export async function loadWorkingHoursTillMessage({
   savedAt = "",
   currentEntry = null,
   skipTimeline = false,
-  timelineTimeoutMs = 0,
+  timelineTimeoutMs = WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
   localEntries = null,
-  idleGaps = [],
 } = {}) {
   const capturedAt = savedAt || new Date().toISOString();
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
 
-  let entries = Array.isArray(localEntries) ? localEntries : null;
+  const cachedEntries = Array.isArray(localEntries) ? localEntries : null;
+  let entries = cachedEntries;
 
-  if (!entries && !offline && (!skipTimeline || timelineTimeoutMs > 0)) {
+  if (!offline && (!skipTimeline || timelineTimeoutMs > 0)) {
     try {
       const timelinePromise = loadTodayWorkingHoursEntries(supabase, userId);
-      entries = timelineTimeoutMs > 0
-        ? await Promise.race([
-          timelinePromise,
+      if (timelineTimeoutMs > 0) {
+        const loaded = await Promise.race([
+          timelinePromise.then((rows) => ({ ok: true, rows })),
           new Promise((resolve) => {
-            setTimeout(() => resolve(null), timelineTimeoutMs);
+            setTimeout(() => resolve({ ok: false, rows: null }), timelineTimeoutMs);
           }),
-        ])
-        : await timelinePromise;
+        ]);
+        // Prefer a completed fetch; on timeout keep any prefetched punches so
+        // queueFirst WhatsApp still shows login→now hours instead of "0h"/"-".
+        entries = loaded.ok ? loaded.rows : (cachedEntries || []);
+      } else {
+        entries = await timelinePromise;
+      }
     } catch {
-      entries = null;
+      entries = cachedEntries || [];
     }
   }
 
-  if (!entries) {
-    return { known: false, minutes: null, value: "-", ranges: [] };
-  }
+  if (!entries) entries = [];
 
   return resolveWorkingHoursTillMessage({
     entries,
     untilAt: capturedAt,
-    idleGaps,
     currentEntry,
   });
 }

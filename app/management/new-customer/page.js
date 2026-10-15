@@ -35,6 +35,7 @@ import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import {
   buildCurrentWorkingHoursEntry,
   loadWorkingHoursTillMessage,
+  WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
 } from "../../lib/workingHoursWhatsapp";
 import { copyTextToClipboard } from "../../lib/whatsappShare";
 import {
@@ -773,7 +774,7 @@ export default function NewCustomerPage() {
           userId: session.user.id,
           savedAt: capturedAt,
           skipTimeline: true,
-          timelineTimeoutMs: 1200,
+          timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
           currentEntry: buildCurrentWorkingHoursEntry({
             transactionType: "VISIT_REPORT",
             savedAt: capturedAt,

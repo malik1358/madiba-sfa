@@ -14,6 +14,7 @@ import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import {
   buildCurrentWorkingHoursEntry,
   loadWorkingHoursTillMessage,
+  WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
 } from '../../../lib/workingHoursWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
@@ -395,13 +396,12 @@ export function useOrder({
           savedAt: capturedAt,
           skipTimeline: true,
         }),
-        // Draft saves are not near-stop endpoints; hours are prior stops only.
         loadWorkingHoursTillMessage({
           supabase,
           userId: session.user.id,
           savedAt: capturedAt,
           skipTimeline: true,
-          timelineTimeoutMs: 1200,
+          timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
         }),
       ]);
 
@@ -610,7 +610,7 @@ export function useOrder({
           userId: session.user.id,
           savedAt: capturedAt,
           skipTimeline: true,
-          timelineTimeoutMs: 1200,
+          timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
           currentEntry: buildCurrentWorkingHoursEntry({
             transactionType: 'ORDER_SUBMITTED',
             savedAt: capturedAt,

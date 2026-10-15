@@ -79,7 +79,9 @@ Confirmed field prompt overwrites additionally use text sources `salesman_accept
 
 `follow_ups`: `salesman_code`, `customer_code` or `prospect_id`, `follow_up_date`, `status` `OPEN|COMPLETED|CANCELLED`.
 
-`customer_book_shares`: `source_salesman_id`, `viewer_salesman_id` (both `profiles.id`), `is_active`, unique pair, source and viewer must differ. One-way share.
+`customer_book_shares`: `source_salesman_id`, `viewer_salesman_id` (both `profiles.id`), `is_active`, unique pair, source and viewer must differ. One-way full-book share.
+
+`customer_shares` (migration `20261015120000_customer_shares.sql`): `customer_code`, `viewer_salesman_id` (`profiles.id`), `is_active`, unique (`customer_code`, `viewer_salesman_id`). One-way selective visibility; does not change `customers.current_salesman_code`.
 
 ## Visits and attendance
 

@@ -151,16 +151,17 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 7. Android also gates login/morning attendance on unrestricted battery (`app/lib/androidBatteryOptimization.js`, details in `ANDROID_APK.md`).
 8. Active admins can use the global **Login as** control. `/api/admin/login-as` revalidates the admin profile and target profile, then uses Supabase Admin `generateLink` plus browser `verifyOtp` to create a real target-user session without handling passwords. The admin access/refresh tokens are kept in tab `sessionStorage` for the **Return to admin** control. App APIs and audit fields see the selected user; there is no separate impersonation audit record. No schema migration is required.
 
-Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` may contain `head_salesman_code` and `head_salesman_name`. `app/lib/salesHierarchy.js` walks that chain. Customer book shares are a real table (`customer_book_shares`) plus hardcoded pairs in `app/lib/mutualSalesmanGroups.js`.
+Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` may contain `head_salesman_code` and `head_salesman_name`. `app/lib/salesHierarchy.js` walks that chain. Customer book shares are a real table (`customer_book_shares`) plus hardcoded pairs in `app/lib/mutualSalesmanGroups.js`. Selective per-customer shares use `customer_shares` (viewer profile + customer code) without changing ownership.
 
 `collection_only` in user metadata forces the collector module set even if `profiles.role` is something else.
 
 ## Sales scope
 
-`GET /api/user/sales-scope` (and `app/lib/salesScope.js`) builds the list of salesman codes a user may see. Downstream routes call helpers such as `ensureCustomerVisibleToScope` (`app/lib/customerAccess.js`). A customer is visible when any of these is true:
+`GET /api/user/sales-scope` (and `app/lib/salesScope.js`) builds the list of salesman codes a user may see, plus `sharedCustomerCodes` from `customer_shares` for the caller. Downstream routes call helpers such as `ensureCustomerVisibleToScope` (`app/lib/customerAccess.js`). A customer is visible when any of these is true:
 
 - The caller has all-access (admin/manager paths inside the scope builder).
 - `current_salesman_code` or `previous_salesman_code` matches the scope (assignment helpers).
+- The customer code is in the caller’s selective `customer_shares` list (`sharedCustomerCodes`).
 - The customer appears on `active_sales` for a visible salesman.
 - The customer appears on the outstanding dataset for a visible salesman.
 - The code is a prospect owned by a visible salesman.

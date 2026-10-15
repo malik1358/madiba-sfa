@@ -12,6 +12,7 @@ import {
   customerAssignmentMatchesScope,
   customerHasActiveSalesmanTransfer,
 } from "./customerSalesmanAssignment.js";
+import { customerMatchesSharedCodeSet } from "./customerShares.js";
 import { activeScheduledVisitDate } from "./nextVisitDate.js";
 
 function normalizeCode(value) {
@@ -64,10 +65,15 @@ export function customerMatchesCollectionScope({
   customerInvoices = [],
   scopeMatchers,
   normalizedScopeCodes = [],
+  sharedCustomerCodes = [],
   aggregateRowSalesman = "",
   hasAllAccess = false,
 } = {}) {
   if (hasAllAccess) return true;
+
+  if (customerMatchesSharedCodeSet(customer?.customer_code, sharedCustomerCodes)) {
+    return true;
+  }
 
   const scopeCodeSet = new Set(
     (normalizedScopeCodes || []).map((code) => normalizeCode(code)).filter(Boolean),

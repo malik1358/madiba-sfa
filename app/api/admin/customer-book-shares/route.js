@@ -6,6 +6,10 @@ import {
   loadAllCustomerBookShareRows,
   salesmanLabel,
 } from "../../../lib/customerBookShares.js";
+import {
+  loadAllCustomerShareRows,
+  normalizeCustomerCode,
+} from "../../../lib/customerShares.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -87,6 +91,68 @@ function enrichShares(rows, salesmenById) {
   });
 }
 
+async function loadCustomerNameMap(admin, customerCodes) {
+  const codes = [...new Set((customerCodes || []).map(normalizeCustomerCode).filter(Boolean))];
+  const map = new Map();
+  if (!codes.length) return map;
+
+  for (let start = 0; start < codes.length; start += 200) {
+    const chunk = codes.slice(start, start + 200);
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code")
+      .in("customer_code", chunk);
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      map.set(normalizeCustomerCode(row.customer_code), row);
+    });
+  }
+  return map;
+}
+
+function enrichCustomerShares(rows, salesmenById, customerByCode) {
+  return (rows || []).map((row) => {
+    const code = normalizeCustomerCode(row.customer_code);
+    const customer = customerByCode.get(code) || null;
+    const viewer = salesmenById.get(row.viewer_salesman_id) || null;
+    const ownerCode = String(customer?.current_salesman_code || "").trim();
+    return {
+      id: row.id,
+      customer_code: code,
+      customer_name: customer?.customer_name || "",
+      owner_salesman_code: ownerCode,
+      viewer_salesman_id: row.viewer_salesman_id,
+      is_active: row.is_active !== false,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      viewer_label: salesmanLabel(viewer),
+      viewer_salesman_code: viewer?.salesman_code || "",
+      viewer_salesman_name: viewer?.salesman_name || "",
+    };
+  });
+}
+
+async function searchCustomers(admin, query) {
+  const needle = String(query || "").trim();
+  if (needle.length < 2) return [];
+
+  const pattern = `%${needle.replace(/[%_]/g, "")}%`;
+  const { data, error } = await admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code,is_active")
+    .or(`customer_code.ilike.${pattern},customer_name.ilike.${pattern}`)
+    .eq("is_active", true)
+    .order("customer_name")
+    .limit(20);
+
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    customer_code: normalizeCustomerCode(row.customer_code),
+    customer_name: row.customer_name || "",
+    current_salesman_code: row.current_salesman_code || "",
+  }));
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -96,6 +162,12 @@ export async function GET(request) {
     const admin = createAdmin();
     const auth = await requireManager(admin, request);
     if (auth.error) return auth.error;
+
+    const customerQ = new URL(request.url).searchParams.get("customerQ") || "";
+    if (customerQ) {
+      const matches = await searchCustomers(admin, customerQ);
+      return NextResponse.json({ success: true, customers: matches });
+    }
 
     const salesmen = await listSalesmen(admin);
     const seed = await ensureDefaultCustomerBookShares(admin, salesmen, auth.profile.id);
@@ -108,11 +180,20 @@ export async function GET(request) {
     }
 
     const rows = await loadAllCustomerBookShareRows(admin);
+    const customerShareRows = await loadAllCustomerShareRows(admin);
     const salesmenById = new Map(salesmen.map((row) => [row.id, row]));
+    const customerByCode = await loadCustomerNameMap(
+      admin,
+      (customerShareRows || []).map((row) => row.customer_code),
+    );
 
     return NextResponse.json({
       success: true,
       shares: enrichShares(rows, salesmenById),
+      customerShares: customerShareRows == null
+        ? []
+        : enrichCustomerShares(customerShareRows, salesmenById, customerByCode),
+      customerSharesTableMissing: customerShareRows == null,
       salesmen: salesmen.map((row) => ({
         id: row.id,
         salesman_code: row.salesman_code || "",
@@ -202,6 +283,93 @@ export async function POST(request) {
       });
     }
 
+    if (mode === "create-customer-share") {
+      const customerCode = normalizeCustomerCode(body.customerCode);
+      const viewerId = String(body.viewerSalesmanId || "").trim();
+      if (!customerCode || !viewerId) {
+        return NextResponse.json({ success: false, error: "Choose a customer and who can see them." }, { status: 400 });
+      }
+
+      const salesmen = await listSalesmen(admin);
+      const salesmenById = new Map(salesmen.map((row) => [row.id, row]));
+      if (!salesmenById.has(viewerId)) {
+        return NextResponse.json({ success: false, error: "Viewer salesman was not found." }, { status: 404 });
+      }
+
+      const { data: customer, error: customerError } = await admin
+        .from("customers")
+        .select("customer_code,customer_name,current_salesman_code,is_active")
+        .eq("customer_code", customerCode)
+        .maybeSingle();
+      if (customerError) throw customerError;
+      if (!customer) {
+        return NextResponse.json({ success: false, error: "Customer not found." }, { status: 404 });
+      }
+
+      const ownerCode = normalizeCustomerCode(customer.current_salesman_code);
+      const viewerCode = normalizeCustomerCode(salesmenById.get(viewerId)?.salesman_code);
+      if (ownerCode && viewerCode && ownerCode === viewerCode) {
+        return NextResponse.json({
+          success: false,
+          error: "That salesman already owns this customer. Selective share is only for another salesman.",
+        }, { status: 400 });
+      }
+
+      const { data: existing } = await admin
+        .from("customer_shares")
+        .select("id,is_active")
+        .eq("customer_code", customerCode)
+        .eq("viewer_salesman_id", viewerId)
+        .maybeSingle();
+
+      let saved;
+      if (existing?.id) {
+        const { data, error } = await admin
+          .from("customer_shares")
+          .update({
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id)
+          .select("id,customer_code,viewer_salesman_id,is_active,created_at,updated_at")
+          .single();
+        if (error) throw error;
+        saved = data;
+      } else {
+        const { data, error } = await admin
+          .from("customer_shares")
+          .insert({
+            customer_code: customerCode,
+            viewer_salesman_id: viewerId,
+            is_active: true,
+            created_by: auth.profile.id,
+            updated_at: new Date().toISOString(),
+          })
+          .select("id,customer_code,viewer_salesman_id,is_active,created_at,updated_at")
+          .single();
+        if (error) {
+          if (String(error.message || "").toLowerCase().includes("customer_shares")
+            || String(error.code || "") === "42P01"
+            || String(error.code || "") === "PGRST205") {
+            return NextResponse.json({
+              success: false,
+              error: "Customer shares table is not installed yet. Apply migration 20261015120000_customer_shares.sql in Supabase.",
+              tableMissing: true,
+            }, { status: 503 });
+          }
+          throw error;
+        }
+        saved = data;
+      }
+
+      const customerByCode = new Map([[customerCode, customer]]);
+      return NextResponse.json({
+        success: true,
+        message: "Selected customer share saved.",
+        customerShare: enrichCustomerShares([saved], salesmenById, customerByCode)[0],
+      });
+    }
+
     if (mode === "delete" || mode === "deactivate") {
       const shareId = String(body.shareId || "").trim();
       if (!shareId) {
@@ -220,6 +388,16 @@ export async function POST(request) {
         .eq("id", shareId);
       if (error) throw error;
       return NextResponse.json({ success: true, message: "Customer book share deactivated." });
+    }
+
+    if (mode === "delete-customer-share") {
+      const shareId = String(body.shareId || "").trim();
+      if (!shareId) {
+        return NextResponse.json({ success: false, error: "Share id is required." }, { status: 400 });
+      }
+      const { error } = await admin.from("customer_shares").delete().eq("id", shareId);
+      if (error) throw error;
+      return NextResponse.json({ success: true, message: "Selected customer share removed." });
     }
 
     return NextResponse.json({ success: false, error: "Unsupported mode." }, { status: 400 });

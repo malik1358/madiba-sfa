@@ -26,6 +26,10 @@ import {
   resolveSubordinateUserIds,
 } from "../../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
+import {
+  customerMatchesSharedCodeSet,
+  loadSharedCustomerCodesForViewer,
+} from "../../../lib/customerShares.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
 import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
@@ -203,6 +207,7 @@ async function resolveScopeForUser(admin, user) {
   const shareOptions = shareRows == null ? {} : { shareRows };
   const membersWithTeam = mergeMutualGroupProfiles(members, allProfiles, currentProfile, shareOptions);
   const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
+  const sharedCustomerCodes = await loadSharedCustomerCodesForViewer(admin, currentProfile.id);
   const scopeMatchers = buildSalesmanScopeMatchers(membersWithTeam);
   const outstandingSalesmanIdentities = [
     ...scopeMatchers.codes,
@@ -223,6 +228,7 @@ async function resolveScopeForUser(admin, user) {
   return {
     hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
+    sharedCustomerCodes,
     identitySearchPatterns,
     outstandingSalesmanIdentities,
     scopeMatchers,
@@ -255,6 +261,7 @@ async function fetchVisibleCustomers(admin, scope) {
   let from = 0;
   const rows = [];
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  const sharedCustomerCodes = new Set((scope.sharedCustomerCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
   const historyVisibleCustomerCodes = new Set();
   const outstandingOwnedCustomerCodes = new Set();
 
@@ -346,10 +353,12 @@ async function fetchVisibleCustomers(admin, scope) {
 
     const chunk = (data || []).filter((row) => {
       if (scope.hasAllAccess) return true;
-      if (normalizedScopeCodes.size === 0) return false;
+      if (normalizedScopeCodes.size === 0 && sharedCustomerCodes.size === 0) return false;
       const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
       const rowSalesmanCode = normalizeCode(row.current_salesman_code);
       const previousSalesmanCode = normalizeCode(row.previous_salesman_code);
+
+      if (customerMatchesSharedCodeSet(row.customer_code, sharedCustomerCodes)) return true;
 
       // Always include customers currently assigned to the visible scope, including transfers.
       if (normalizedScopeCodes.has(rowSalesmanCode) || normalizedScopeCodes.has(previousSalesmanCode)) return true;
@@ -374,11 +383,30 @@ async function fetchVisibleCustomers(admin, scope) {
   return rows;
 }
 
+async function fetchSharedCustomersByCode(admin, sharedCodes) {
+  const codes = [...new Set((sharedCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  if (!codes.length) return [];
+
+  const rows = [];
+  for (let start = 0; start < codes.length; start += 200) {
+    const chunk = codes.slice(start, start + 200);
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
+      .eq("is_active", true)
+      .in("customer_code", chunk);
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
 async function fetchBasicVisibleCustomers(admin, scope) {
   const rows = [];
   const pageSize = 1000;
   let from = 0;
   const scopedCodes = [...new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  const sharedCodes = [...new Set((scope.sharedCustomerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
 
   while (true) {
     let query = admin
@@ -389,7 +417,8 @@ async function fetchBasicVisibleCustomers(admin, scope) {
       .range(from, from + pageSize - 1);
 
     if (!scope.hasAllAccess) {
-      if (scopedCodes.length === 0) return [];
+      if (scopedCodes.length === 0 && sharedCodes.length === 0) return [];
+      if (scopedCodes.length === 0) break;
       query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
     }
 
@@ -400,6 +429,17 @@ async function fetchBasicVisibleCustomers(admin, scope) {
     rows.push(...chunk);
     if (chunk.length < pageSize) break;
     from += pageSize;
+  }
+
+  if (!scope.hasAllAccess && sharedCodes.length > 0) {
+    const sharedRows = await fetchSharedCustomersByCode(admin, sharedCodes);
+    const seen = new Set(rows.map((row) => normalizeCode(row.customer_code)));
+    sharedRows.forEach((row) => {
+      const code = normalizeCode(row.customer_code);
+      if (!code || seen.has(code)) return;
+      seen.add(code);
+      rows.push(row);
+    });
   }
 
   return rows;

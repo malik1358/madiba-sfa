@@ -12,6 +12,7 @@ import {
 } from "./prospects.js";
 import { customerSalesmanAssignmentMatchesScope } from "./salesHierarchy.js";
 import { assignedSalesmanCodes } from "./customerSalesmanAssignment.js";
+import { customerMatchesSharedCodeSet } from "./customerShares.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -101,6 +102,10 @@ export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
   if (matchedScope.hasAllAccess) return customer;
 
   if (assignedSalesmanCodes(customer).some((code) => customerSalesmanAssignmentMatchesScope(code, matchedScope))) {
+    return customer;
+  }
+
+  if (customerMatchesSharedCodeSet(customer.customer_code, matchedScope.sharedCustomerCodes)) {
     return customer;
   }
 

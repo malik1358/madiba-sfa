@@ -17,6 +17,7 @@ import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
+import { loadSharedCustomerCodesForViewer } from "../../lib/customerShares.js";
 import {
   OUTSTANDING_DATASET_KEY,
   applySalesVoucherSalesmanToInvoices,
@@ -397,6 +398,7 @@ export async function getSalesScope(admin, userId) {
   let visibleSchedulerProfiles = [profile];
   let canSeeAllSchedulers = false;
   let visibleSchedulerUserIds = [userId];
+  let sharedCustomerCodes = [];
 
   const userRole = String(profile?.role || "").toLowerCase();
   const normalizedProfileCode = String(profile.salesman_code || "").trim().toUpperCase();
@@ -498,8 +500,14 @@ export async function getSalesScope(admin, userId) {
         if (entry?.id) schedulerIdSet.add(entry.id);
       });
       visibleSchedulerUserIds = [...schedulerIdSet];
+      sharedCustomerCodes = await loadSharedCustomerCodesForViewer(admin, profile.id);
     } catch {
       visibleSalesmanCodes = [normalizedProfileCode];
+      try {
+        sharedCustomerCodes = await loadSharedCustomerCodesForViewer(admin, profile.id);
+      } catch {
+        sharedCustomerCodes = [];
+      }
     }
   }
 
@@ -525,6 +533,7 @@ export async function getSalesScope(admin, userId) {
 
   return {
     visibleSalesmanCodes: [...new Set(visibleSalesmanCodes.filter(Boolean))],
+    sharedCustomerCodes: [...new Set((sharedCustomerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))],
     scopeProfiles,
     identitySearchPatterns: [profile.salesman_code],
     hasAllAccess,
@@ -877,6 +886,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       customerInvoices,
       scopeMatchers,
       normalizedScopeCodes: [...normalizedScopeCodes],
+      sharedCustomerCodes: scope.sharedCustomerCodes || [],
       aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code) || "",
       hasAllAccess: scope.hasAllAccess,
     })) {

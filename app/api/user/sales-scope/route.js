@@ -11,6 +11,7 @@ import {
   salesmanScopeIdentities,
 } from "../../../lib/mutualSalesmanGroups.js";
 import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
+import { loadSharedCustomerCodesForViewer } from "../../../lib/customerShares.js";
 import { pricingRegionsFromMetadata } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
@@ -156,6 +157,7 @@ export async function resolveSalesScopeForUserId(admin, userId) {
   const shareOptions = shareRows == null ? {} : { shareRows };
   members = mergeMutualGroupProfiles(members, allProfiles, currentProfile, shareOptions);
   const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
+  const sharedCustomerCodes = await loadSharedCustomerCodesForViewer(admin, currentProfile.id);
 
   const visibleMembers = members.map((profile) => {
     const authUser = authMap.get(profile.id);
@@ -200,6 +202,7 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     hasAllAccess,
     mutualSalesmanCodes: mutualGroupCodes,
     visibleSalesmanCodes,
+    sharedCustomerCodes,
     visibleUserIds,
     visibleMembers,
     hasSubordinates: visibleMembers.some((member) => member.id !== currentProfile.id),

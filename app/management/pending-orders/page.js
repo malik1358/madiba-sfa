@@ -42,7 +42,7 @@ import {
   createOrderPdfDocument,
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
-import { buildTallyOrderExportRows, unitMapFromItems } from "../../lib/tallyItemUnits";
+import { buildTallyOrderExportRows, TALLY_EXPORT_COLUMNS, unitMapFromItems } from "../../lib/tallyItemUnits";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
@@ -1482,6 +1482,7 @@ export default function PendingOrdersPage() {
         pricingRegion: snapshot.pricingRegion,
         paymentType: snapshot.paymentType,
         exportDate: new Date(),
+        orderDate: order.created_at || order.submitted_at,
       });
 
       if (!exportRows.length) {
@@ -1490,7 +1491,7 @@ export default function PendingOrdersPage() {
       }
 
       const XLSX = await import("xlsx");
-      const sheet = XLSX.utils.json_to_sheet(exportRows);
+      const sheet = XLSX.utils.json_to_sheet(exportRows, { header: TALLY_EXPORT_COLUMNS });
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, sheet, "TallyImport");
       const safeOrder = String(orderNumber).replace(/[^\w.-]+/g, "_");

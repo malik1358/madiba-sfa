@@ -3,7 +3,6 @@ import {
   DEFAULT_PRICING_REGION,
   normalizePaymentType,
   normalizePricingRegion,
-  vatAmountFromExcl,
   vatRateForProduct,
 } from "./regionalPricing.js";
 
@@ -11,21 +10,36 @@ export const TALLY_UNIT_SOURCE_EXCEL = "excel_import";
 export const TALLY_UNIT_SOURCE_INVOICE_PDF = "invoice_pdf";
 export const TALLY_UNIT_SOURCE_MANUAL = "manual";
 
+export const TALLY_VOUCHER_CLASS = "e.Invoice.Integration Phase";
+export const TALLY_VAT_LEDGER = "Output VAT 15% - Non Food Division";
+
 export const TALLY_EXPORT_COLUMNS = [
-  "DATE",
-  "VOUCHER TYPE",
-  "PARTY A/C NAME",
-  "ORDER NO",
-  "SALS LEDGER",
-  "COST CENTER",
-  "SALES TEAM",
-  "ITEM NAME",
-  "ITEM QTY",
-  "ITEM RATE",
-  "GODOWN",
-  "OUTPUT VAT",
-  "Item Unit",
+  "Voucher Date",
+  "Voucher Type Name",
+  "Voucher Number",
+  "Voucher.Class",
+  "Ref.No",
+  "Ref.Date",
+  "CUSTOMER NAME",
+  "PriceListName",
+  "Charge.Ledgers VAT/Freight",
+  "Barcode",
+  "Item Name",
+  "order no",
+  "Order.Date",
+  "Tracking No.",
+  "Barcode.Qty",
+  "Barcode.UOM",
+  "Billed Quantity",
+  "Billed Quantity Unit",
+  "Item Rate",
   "Discount",
+  "Amount",
+  "godown",
+  "SALES LEDGER",
+  "SALES TEAM",
+  "COST CENTER",
+  "Narration",
 ];
 
 const KNOWN_UNITS = [
@@ -226,10 +240,83 @@ export function resolveTallySalesRouting(order = {}, pricingRegion = DEFAULT_PRI
   };
 }
 
-export function formatTallyVoucherType(pricingRegion, paymentType) {
+export function resolveTallySalesChannel(order = {}) {
+  const haystack = `${order.sales_channel || ""} ${order.channel || ""} ${order.salesman_code || ""} ${order.salesman_name || ""}`.toUpperCase();
+  if (/\bE-?COMM\b|\bONLINE\b/.test(haystack)) return "ecomm";
+  if (/\bSTORE\b/.test(haystack)) return "store";
+  if (/\bRETAIL\b/.test(haystack)) return "retail";
+  return "wholesale";
+}
+
+export function resolveTallySalesLedger(channel = "wholesale") {
+  if (channel === "ecomm") return "SALES ONLINE";
+  if (channel === "retail" || channel === "store") return "SALES RETAIL";
+  return "SALES WHOLESALE";
+}
+
+/**
+ * Table 1: voucher type and price list.
+ * BM (ZIA / ASRAR) and e-comm use SALES NON FOOD DIVISION / MANUAL.
+ */
+export function resolveTallyVoucherSetup({
+  pricingRegion = DEFAULT_PRICING_REGION,
+  paymentType = DEFAULT_PAYMENT_TYPE,
+  routing = null,
+  channel = "wholesale",
+} = {}) {
   const region = normalizePricingRegion(pricingRegion);
   const payment = normalizePaymentType(paymentType);
-  return `${region} w/s ${payment}`;
+  const salesLedger = resolveTallySalesLedger(channel);
+  const isBm = routing?.costCenter === "BM";
+
+  if (isBm || channel === "ecomm") {
+    return {
+      voucherType: "SALES NON FOOD DIVISION",
+      priceList: "MANUAL",
+      salesLedger,
+    };
+  }
+
+  const regionLabel = region === "dammam" ? "DAMMAM" : region === "jeddah" ? "JEDDAH" : "RIYADH";
+
+  if (channel === "retail" && region !== "jeddah") {
+    return {
+      voucherType: `${regionLabel} RETAIL SALES`,
+      priceList: `${regionLabel} RETAIL`,
+      salesLedger,
+    };
+  }
+
+  if (channel === "store" && region === "riyadh") {
+    return {
+      voucherType: "RIYADH STORE SALES",
+      priceList: "RIYADH STORE",
+      salesLedger,
+    };
+  }
+
+  if (payment === "cash") {
+    return {
+      voucherType: `${regionLabel} CASH SALES`,
+      priceList: `${regionLabel} W/S`,
+      salesLedger,
+    };
+  }
+
+  return {
+    voucherType: `${regionLabel} W/S CREDIT`,
+    priceList: `${regionLabel} W/S`,
+    salesLedger,
+  };
+}
+
+export function formatTallyVoucherType(pricingRegion, paymentType, options = {}) {
+  return resolveTallyVoucherSetup({
+    pricingRegion,
+    paymentType,
+    routing: options.routing,
+    channel: options.channel,
+  }).voucherType;
 }
 
 export function formatTallyDate(value = new Date()) {
@@ -278,6 +365,18 @@ export function discountPercentFromRates(wholesaleRate, netRate) {
 /**
  * Build one Excel row per order line for Tally sales voucher import.
  */
+export function resolveItemBarcode(line = {}, unitMap = {}) {
+  const code = normalizeItemCode(line.item_code);
+  const mapped = unitMap[code] || unitMap[line.item_code] || null;
+  return String(
+    mapped?.barcode
+    || mapped?.tally_barcode
+    || line.barcode
+    || line.tally_barcode
+    || "",
+  ).trim();
+}
+
 export function buildTallyOrderExportRows({
   order,
   lines = [],
@@ -286,12 +385,20 @@ export function buildTallyOrderExportRows({
   pricingRegion = DEFAULT_PRICING_REGION,
   paymentType = DEFAULT_PAYMENT_TYPE,
   exportDate = new Date(),
+  orderDate = null,
 } = {}) {
   const region = normalizePricingRegion(pricingRegion);
   const payment = normalizePaymentType(paymentType);
   const routing = resolveTallySalesRouting(order, region);
-  const voucherType = formatTallyVoucherType(region, payment);
-  const dateText = formatTallyDate(exportDate);
+  const channel = resolveTallySalesChannel(order);
+  const setup = resolveTallyVoucherSetup({
+    pricingRegion: region,
+    paymentType: payment,
+    routing,
+    channel,
+  });
+  const voucherDate = formatTallyDate(exportDate);
+  const orderDateText = formatTallyDate(orderDate || order?.created_at || order?.submitted_at || exportDate);
   const partyName = String(order?.customer_name || order?.customer_code || "").trim() || "-";
   const orderNo = String(orderNumber || order?.order_number || order?.id || "").trim();
 
@@ -299,6 +406,7 @@ export function buildTallyOrderExportRows({
     const qty = Number(line.quantity || 0);
     const rate = Number(line.rate || 0);
     const wholesale = Number(line.wholesaleRate || line.wholesale_rate || rate);
+    const listRate = wholesale > 0 ? wholesale : rate;
     const lineValue = Number(
       line.lineValue
       ?? line.line_value
@@ -308,28 +416,41 @@ export function buildTallyOrderExportRows({
     const vatRate = Number.isFinite(Number(line.vatRate))
       ? Math.max(0, Number(line.vatRate))
       : vatRateForProduct(line);
-    const vatAmount = Number.isFinite(Number(line.vatAmount))
-      ? Number(line.vatAmount)
-      : vatAmountFromExcl(lineValue, vatRate);
     const discount = Number.isFinite(Number(line.discountPercent))
       ? Number(line.discountPercent)
-      : discountPercentFromRates(wholesale, rate);
+      : discountPercentFromRates(listRate, rate);
+    const unit = resolveItemUnit(line, unitMap);
+    const amount = Number.isFinite(lineValue) && lineValue > 0
+      ? round2(lineValue)
+      : round2(qty * (rate > 0 ? rate : listRate));
 
     return {
-      DATE: dateText,
-      "VOUCHER TYPE": voucherType,
-      "PARTY A/C NAME": partyName,
-      "ORDER NO": orderNo,
-      "SALS LEDGER": "sales wholesale",
-      "COST CENTER": routing.costCenter,
-      "SALES TEAM": routing.salesTeam,
-      "ITEM NAME": buildTallyItemName(line, unitMap),
-      "ITEM QTY": round2(qty),
-      "ITEM RATE": round2(rate),
-      GODOWN: routing.godown,
-      "OUTPUT VAT": round2(vatAmount),
-      "Item Unit": resolveItemUnit(line, unitMap),
+      "Voucher Date": voucherDate,
+      "Voucher Type Name": setup.voucherType,
+      "Voucher Number": "",
+      "Voucher.Class": TALLY_VOUCHER_CLASS,
+      "Ref.No": orderNo,
+      "Ref.Date": orderDateText,
+      "CUSTOMER NAME": partyName,
+      PriceListName: setup.priceList,
+      "Charge.Ledgers VAT/Freight": vatRate > 0 ? TALLY_VAT_LEDGER : "",
+      Barcode: resolveItemBarcode(line, unitMap),
+      "Item Name": buildTallyItemName(line, unitMap),
+      "order no": orderNo,
+      "Order.Date": orderDateText,
+      "Tracking No.": "",
+      "Barcode.Qty": round2(qty),
+      "Barcode.UOM": unit,
+      "Billed Quantity": round2(qty),
+      "Billed Quantity Unit": unit,
+      "Item Rate": round2(listRate),
       Discount: round2(discount),
+      Amount: amount,
+      godown: routing.godown,
+      "SALES LEDGER": setup.salesLedger,
+      "SALES TEAM": routing.salesTeam,
+      "COST CENTER": routing.costCenter,
+      Narration: "",
     };
   });
 }

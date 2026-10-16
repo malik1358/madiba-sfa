@@ -27,6 +27,7 @@ Helper functions in the baseline migration:
 
 - `current_salesman_code()`, `current_user_role()`
 - `is_admin()` — role `admin` only
+- `enforce_single_platform_session(p_session_id, p_platform)` — `20261016120000_single_platform_session.sql`. Service role only. Deletes other `auth.sessions` for that user on the same platform (`android` WebView or `web`). Role `admin` is unchanged. Refresh tokens and MFA claims cascade with the session. Production ledger version is `20261016080833` (`single_platform_session`); do not insert a second ledger row or replay the SQL.
 - `is_management()` — role `admin` or `manager` only
 - `activate_sales_batch(p_batch_id)`, `delete_import_batch(p_batch_id)`
 - `set_updated_at()` trigger function

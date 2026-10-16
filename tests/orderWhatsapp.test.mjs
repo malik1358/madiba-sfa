@@ -21,7 +21,7 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Sales order/);
   assert.match(summary, /Order #: 210/);
   assert.match(summary, /Salesman: Abdul/);
-  assert.match(summary, /Working hours: -/);
+  assert.match(summary, /\n\nWorking hours: -\n\n/);
   assert.match(summary, /Amount without VAT: 1,000/);
   assert.match(summary, /VAT 15%: 150/);
   assert.match(summary, /Amount after VAT: 1,150/);
@@ -48,7 +48,7 @@ test("buildOrderWhatsappSummary includes working hours till the order", () => {
     workingHours: { known: true, value: "2h 5m", minutes: 125 },
   }, "en");
 
-  assert.match(summary, /Working hours: 2h 5m/);
+  assert.match(summary, /\n\nWorking hours: 2h 5m\n\n/);
 });
 
 test("buildOrderWhatsappSummary keeps gloves VAT at zero", () => {

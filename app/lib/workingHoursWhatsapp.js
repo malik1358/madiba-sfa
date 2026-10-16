@@ -61,19 +61,20 @@ function entryType(entry) {
 
 /**
  * Format WhatsApp lines for cumulative working hours until the message time.
+ * Always pads with a blank line before and after so the value stands out.
  * Unknown (not loaded) shows "-"; computed zero shows "0h".
  */
 export function formatWorkingHoursWhatsappLines(hours = null, labels = {}) {
   const resolvedLabels = { ...WORKING_HOURS_WHATSAPP_LABELS, ...labels };
-  if (!hours || hours.known === false) {
-    return ["", `${resolvedLabels.workingHours}: -`];
-  }
-  const value = String(hours.value || "0h").trim() || "0h";
-  return ["", `${resolvedLabels.workingHours}: ${value}`];
+  const value = (!hours || hours.known === false)
+    ? "-"
+    : (String(hours.value || "0h").trim() || "0h");
+  return ["", `${resolvedLabels.workingHours}: ${value}`, ""];
 }
 
 export function formatWorkingHoursWhatsappLine(hours = null, labels = {}) {
-  return formatWorkingHoursWhatsappLines(hours, labels).filter(Boolean).join("\n");
+  const lines = formatWorkingHoursWhatsappLines(hours, labels);
+  return lines.find((line) => String(line || "").trim()) || "";
 }
 
 function formatKnownWorkingHours(minutes) {
@@ -316,6 +317,7 @@ export function patchWhatsappSummaryWorkingHours(
 
   const line = formatWorkingHoursWhatsappLine(hours, labels);
   if (!line) return text;
+  const spacedBlock = `\n\n${line}\n\n`;
 
   const labelVariants = [
     labels.workingHours,
@@ -324,9 +326,9 @@ export function patchWhatsappSummaryWorkingHours(
   ].filter(Boolean);
 
   for (const label of labelVariants) {
-    const pattern = new RegExp(`^${escapeRegExp(label)}:\\s*.+$`, "m");
+    const pattern = new RegExp(`(?:\\n\\n|\\n)?^${escapeRegExp(label)}:\\s*.+(?:\\n\\n|\\n)?`, "m");
     if (pattern.test(text)) {
-      return text.replace(pattern, line);
+      return text.replace(pattern, spacedBlock).replace(/\n{3,}/g, "\n\n");
     }
   }
 
@@ -336,14 +338,14 @@ export function patchWhatsappSummaryWorkingHours(
   ];
   for (const pattern of visitDatePatterns) {
     if (pattern.test(text)) {
-      return text.replace(pattern, `$1\n${line}`);
+      return text.replace(pattern, `$1${spacedBlock}`).replace(/\n{3,}/g, "\n\n");
     }
   }
 
   const gpsPattern = /\nGPS:/;
   if (gpsPattern.test(text)) {
-    return text.replace(gpsPattern, `\n${line}\n\nGPS:`);
+    return text.replace(gpsPattern, `${spacedBlock}GPS:`).replace(/\n{3,}/g, "\n\n");
   }
 
-  return `${text.trimEnd()}\n${line}`;
+  return `${text.trimEnd()}${spacedBlock}`.replace(/\n{3,}/g, "\n\n").trimEnd();
 }

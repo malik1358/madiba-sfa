@@ -74,7 +74,7 @@ export function buildFieldVisitWhatsappSummary({
     `${labels.code}: ${customer.customer_code || "-"}`,
     `${labels.salesman}: ${salesman}`,
     `${labels.visitDateTime}: ${visitDateTime}`,
-    ...formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }).filter(Boolean),
+    ...formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }),
     `${labels.outcome}: ${outcome || labels.notSpecified}`,
     `${labels.nextVisit}: ${nextVisit || labels.notSpecified}`,
   ];

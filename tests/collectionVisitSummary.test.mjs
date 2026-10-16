@@ -72,7 +72,7 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
 
   assert.match(summary, /Queue priority: 3/);
   assert.match(summary, /Customer: Acme Trading/);
-  assert.match(summary, /Working hours: -/);
+  assert.match(summary, /\n\nWorking hours: -\n\n/);
   assert.match(summary, /0-30: 1,000/);
   assert.match(summary, /Visit number today: 2/);
   assert.match(summary, />120: 0\n\nGPS: -/);
@@ -104,7 +104,7 @@ test("buildCollectionVisitSummary includes working hours till the visit", () => 
     },
   );
 
-  assert.match(summary, /Working hours: 3h 26m/);
+  assert.match(summary, /\n\nWorking hours: 3h 26m\n\n/);
 });
 
 test("buildCollectionVisitSummary includes last visit date, outcome, remarks, and amount when present", () => {

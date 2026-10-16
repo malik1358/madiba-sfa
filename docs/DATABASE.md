@@ -176,6 +176,7 @@ Schemes and quantity limits are settings, not tables:
 | Key | Used for |
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
+| `app_performance_daily_v1` | Daily app speed samples (`checks[]` with timings, counts, and `baseline` / `collecting` / `steady` / `slower` / `error`). One row per KSA date, last 90 days. No migration. |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
 | `receipt_register_dataset_v1` | Receipt register upload (every collection row with a date and a positive Dr/Cr amount is kept — Receipt, JV-Collection, NSTC JV reclass entries, etc. — so uploads never silently drop a collection). Dual-party day books may also retain **Purchase** rows (AP bills for settlement; not AR collections). **Payment** vouchers are imported only when the upload sets `includePaymentVouchers` (for dual customer/supplier parties; Payment Register Dr columns are accepted and stored as **negative** receipt amounts; settlement applies them to Purchases first, then leftover settles open sales like a receipt). Uploads **upsert by voucher identity** (`receipt_date` + `vch_type` + `vch_no` + customer); they do **not** wipe other receipts on the same dates. Credit notes belong in sales history, not this register — a bad import of CN **899** (`1177C`, 2026-10-01, 10,188.54) was removed from production on 2026-10-13. |
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |

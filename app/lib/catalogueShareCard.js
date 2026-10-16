@@ -20,6 +20,136 @@ const REGION_LABELS = {
   jeddah: ["Jeddah", "جدة"],
 };
 
+const SHARE_ABBREVIATIONS = {
+  CTN: "carton",
+  CARTON: "carton",
+  CARTONS: "cartons",
+  PKT: "packet",
+  PACK: "pack",
+  PACKS: "packs",
+  PC: "piece",
+  PCS: "pieces",
+  GM: "gram",
+  GMS: "grams",
+  GRM: "gram",
+  KG: "kilogram",
+  KGS: "kilograms",
+  ML: "milliliter",
+  MLS: "milliliters",
+  LTR: "liter",
+  LT: "liter",
+  BTL: "bottle",
+  BTLS: "bottles",
+  BOX: "box",
+  BAG: "bag",
+  SET: "set",
+  PR: "pair",
+  PAIR: "pair",
+  ROLL: "roll",
+  JAR: "jar",
+  TIN: "tin",
+  CAN: "can",
+  DOZ: "dozen",
+  TUBE: "tube",
+  TRAY: "tray",
+};
+
+const CATALOGUE_WORD_AR = {
+  carton: "كرتون",
+  cartons: "كراتين",
+  pack: "عبوة",
+  packs: "عبوات",
+  packet: "عبوة",
+  packets: "عبوات",
+  piece: "قطعة",
+  pieces: "قطع",
+  gram: "جم",
+  grams: "جم",
+  kilogram: "كجم",
+  kilograms: "كجم",
+  milliliter: "مل",
+  milliliters: "مل",
+  liter: "لتر",
+  liters: "لتر",
+  bottle: "زجاجة",
+  bottles: "زجاجات",
+  box: "صندوق",
+  boxes: "صناديق",
+  bag: "كيس",
+  bags: "أكياس",
+  set: "طقم",
+  pair: "زوج",
+  roll: "رول",
+  jar: "برطمان",
+  tin: "علبة",
+  can: "علبة",
+  dozen: "دستة",
+  tube: "أنبوب",
+  tray: "صينية",
+  of: "من",
+  and: "و",
+  with: "مع",
+  for: "لـ",
+  white: "أبيض",
+  black: "أسود",
+  blue: "أزرق",
+  red: "أحمر",
+  green: "أخضر",
+  yellow: "أصفر",
+  pink: "وردي",
+  large: "كبير",
+  small: "صغير",
+  medium: "وسط",
+};
+
+export function expandCatalogueShareWords(text) {
+  return String(text || "").replace(/[A-Za-z]+/g, (word) => SHARE_ABBREVIATIONS[word.toUpperCase()] || word);
+}
+
+export function catalogueShareLatinWords(text) {
+  return (String(text || "").match(/[A-Za-z]{2,}/g) || []).filter((word) => !/\d/.test(word));
+}
+
+export function catalogueGlossaryArabic(text) {
+  return expandCatalogueShareWords(text).replace(/[A-Za-z]+/g, (word) => CATALOGUE_WORD_AR[word.toLowerCase()] || word);
+}
+
+export async function translateCatalogueShareText(text, translate) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  const expanded = expandCatalogueShareWords(source).replace(/\s+/g, " ").trim();
+  let arabic = "";
+  if (typeof translate === "function") {
+    try {
+      arabic = String(await translate(expanded) || "").trim();
+    } catch {
+      arabic = "";
+    }
+  }
+  const pending = catalogueShareLatinWords(arabic || expanded);
+  if (!arabic || pending.length) {
+    const replacements = new Map();
+    for (const word of pending) {
+      const local = CATALOGUE_WORD_AR[word.toLowerCase()];
+      if (local) {
+        replacements.set(word.toUpperCase(), local);
+        continue;
+      }
+      if (typeof translate !== "function") continue;
+      try {
+        const one = String(await translate(word) || "").trim();
+        if (one && catalogueShareLatinWords(one).length === 0) replacements.set(word.toUpperCase(), one);
+      } catch {
+        // The next word can still be translated.
+      }
+    }
+    arabic = (arabic || expanded).replace(/[A-Za-z]+/g, (word) => (
+      replacements.get(word.toUpperCase()) || CATALOGUE_WORD_AR[word.toLowerCase()] || word
+    ));
+  }
+  return arabic.replace(/\s+/g, " ").trim();
+}
+
 function bilingual(role, english, arabic) {
   return [
     { role, text: String(english || "").trim(), dir: "ltr" },
@@ -39,16 +169,25 @@ export function buildCatalogueShareLines({
   schemeDiscount = false,
   pricingType = "wholesale",
   region = "riyadh",
+  nameArabic = "",
+  packingArabic = "",
+  unitArabic = "",
 } = {}) {
   const packingValue = String(packing || "").trim() || "Not available";
-  const packingArabic = String(packing || "").trim() || "غير متوفر";
+  const translatedPacking = String(packingArabic || "").trim()
+    || (String(packing || "").trim() ? catalogueGlossaryArabic(packing) : "غير متوفر");
+  const unit = String(sellingUnit || "").trim();
+  const translatedUnit = unit ? (String(unitArabic || "").trim() || catalogueGlossaryArabic(unit)) : "";
+  const translatedName = String(nameArabic || "").trim();
   const lines = [
     { role: "name", text: String(name || "").trim(), dir: "ltr" },
+    ...(translatedName && /[\u0600-\u06FF]/.test(translatedName)
+      ? [{ role: "name", text: translatedName, dir: "rtl" }]
+      : []),
     { role: "code", text: String(code || "").trim(), dir: "ltr" },
-    ...bilingual("packing", `Packing: ${packingValue}`, `التعبئة: ${packingArabic}`),
+    ...bilingual("packing", `Packing: ${packingValue}`, `التعبئة: ${translatedPacking}`),
   ];
-  const unit = String(sellingUnit || "").trim();
-  if (unit) lines.push(...bilingual("unit", `Selling unit: ${unit}`, `وحدة البيع: ${unit}`));
+  if (unit) lines.push(...bilingual("unit", `Selling unit: ${unit}`, `وحدة البيع: ${translatedUnit}`));
   const price = String(priceAmount || "").trim();
   if (price) lines.push(...bilingual("price", `${price} SAR`, `${price} ر.س`));
   else lines.push(...bilingual("price", "Price unavailable", "السعر غير متوفر"));

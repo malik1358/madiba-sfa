@@ -5,7 +5,7 @@ import { useAppPopup } from "./AppPopupProvider";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { buildCatalogueShareFiles } from "../lib/catalogueShareCanvas";
 import {
-  buildCatalogueShareLines, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex,
+  buildCatalogueShareLines, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex, translateCatalogueShareText,
 } from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
@@ -213,26 +213,46 @@ export default function ProductCatalogue({
     return response.blob();
   }
 
+  async function translateSharePhrase(phrase) {
+    const response = await fetch("/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: phrase, from: "en", to: "ar" }),
+      signal: AbortSignal.timeout(12000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) return "";
+    return String(payload.translatedText || "").trim();
+  }
+
   async function shareItem(item, detail, priced, price, hasPrice, discounted) {
     if (sharingCode) return;
-    const lines = buildCatalogueShareLines({
-      name: item.item_name,
-      code: item.item_code,
-      packing: detail.packing,
-      sellingUnit: detail.sellingUnit,
-      priceAmount: hasPrice ? formatMoneyAmount(priced.rate) : "",
-      originalAmount: discounted ? formatMoneyAmount(price) : "",
-      cashDiscount: discounted && priced.applied.cash,
-      valueDiscount: discounted && priced.applied.value,
-      schemeDiscount: discounted && priced.applied.scheme,
-      pricingType,
-      region: pricingRegion,
-    });
-    const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
     setSharingCode(item.item_code);
     setError("");
     let notice = null;
     try {
+      const [nameArabic, packingArabic, unitArabic] = await Promise.all([
+        translateCatalogueShareText(item.item_name, translateSharePhrase),
+        translateCatalogueShareText(detail.packing, translateSharePhrase),
+        translateCatalogueShareText(detail.sellingUnit, translateSharePhrase),
+      ]);
+      const lines = buildCatalogueShareLines({
+        name: item.item_name,
+        nameArabic,
+        code: item.item_code,
+        packing: detail.packing,
+        packingArabic,
+        sellingUnit: detail.sellingUnit,
+        unitArabic,
+        priceAmount: hasPrice ? formatMoneyAmount(priced.rate) : "",
+        originalAmount: discounted ? formatMoneyAmount(price) : "",
+        cashDiscount: discounted && priced.applied.cash,
+        valueDiscount: discounted && priced.applied.value,
+        schemeDiscount: discounted && priced.applied.scheme,
+        pricingType,
+        region: pricingRegion,
+      });
+      const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
       const files = await buildCatalogueShareFiles({
         photos: detail.photos || [],
         lines,

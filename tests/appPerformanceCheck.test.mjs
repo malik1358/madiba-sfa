@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   APP_PERFORMANCE_SETTING_KEY,
   buildDailyPerformanceRecord,
+  buildPerformanceEmail,
   judgeDailySpeed,
   median,
   parsePerformanceHistory,
   runAppPerformanceCheck,
+  shouldEmailPerformanceCheck,
   withDailyCheck,
 } from "../app/lib/appPerformanceCheck.js";
 
@@ -57,15 +59,38 @@ test("small jitter stays steady", () => {
   assert.deepEqual(judged.slower, []);
 });
 
-test("same-day reruns replace that day and history stays capped", () => {
+test("same-hour reruns replace that sample and a later hour is kept", () => {
   const stored = withDailyCheck({
     checks: [
-      { date: "2026-10-01", metrics: steadyMetrics },
-      { date: "2026-10-02", metrics: steadyMetrics },
+      { date: "2026-10-16", slot: "2026-10-16T09", checkedAt: "2026-10-16T06:00:00.000Z", metrics: steadyMetrics },
+      { date: "2026-10-16", slot: "2026-10-16T12", checkedAt: "2026-10-16T09:00:00.000Z", metrics: steadyMetrics },
     ],
-  }, { date: "2026-10-02", metrics: { ...steadyMetrics, db_ping_ms: 55 } }, 2);
-  assert.deepEqual(stored.checks.map((row) => row.date), ["2026-10-01", "2026-10-02"]);
+  }, {
+    date: "2026-10-16",
+    slot: "2026-10-16T12",
+    checkedAt: "2026-10-16T09:05:00.000Z",
+    metrics: { ...steadyMetrics, db_ping_ms: 55 },
+  });
+  assert.deepEqual(stored.checks.map((row) => row.slot), ["2026-10-16T09", "2026-10-16T12"]);
   assert.equal(stored.checks[1].metrics.db_ping_ms, 55);
+});
+
+test("a slower run is emailed once to malik@pinasz.com", () => {
+  const check = buildDailyPerformanceRecord({
+    date: "2026-10-16",
+    checkedAt: "2026-10-16T12:00:00.000Z",
+    metrics: { ...steadyMetrics, recent_orders_ms: 900 },
+    counts: { customers: 10, recent_orders: 2 },
+    errors: {},
+    priorChecks: priorDays(3),
+  });
+  assert.equal(shouldEmailPerformanceCheck(check, null), true);
+  const message = buildPerformanceEmail(check);
+  assert.equal(message.to, "malik@pinasz.com");
+  assert.match(message.subject, /slower/);
+  assert.match(message.text, /900 ms/);
+  assert.equal(shouldEmailPerformanceCheck({ ...check, status: "steady" }, null), false);
+  assert.equal(shouldEmailPerformanceCheck(check, { emailedAt: "2026-10-16T12:00:01.000Z" }), false);
 });
 
 test("probe failures are stored as an error day", () => {

@@ -2,8 +2,8 @@ name: App Performance Check
 
 on:
   schedule:
-    # 05:30 Asia/Riyadh every day, including Friday.
-    - cron: "30 2 * * *"
+    # 09:00, 12:00, 15:00 and 18:00 Asia/Riyadh every day.
+    - cron: "0 6,9,12,15 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -33,6 +33,6 @@ jobs:
           echo "$response"
           status="$(printf '%s' "$response" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')"
           if [[ "$status" == "slower" || "$status" == "error" ]]; then
-            echo "Daily app performance status is $status"
+            echo "App performance status is $status. An email was requested for malik@pinasz.com."
             exit 1
           fi

@@ -246,7 +246,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |
 | `KPI Targets Email` | Manual dispatch only | Operator-selected month; no scheduled sends | `/api/cron/kpi-targets-email` |
-| `app-performance.yml` | `30 2 * * *` | 05:30 KSA every day, including Friday | `/api/cron/app-performance` |
+| `app-performance.yml` | `0 6,9,12,15 * * *` | 09:00, 12:00, 15:00 and 18:00 KSA every day, including Friday. Emails `malik@pinasz.com` when a run is slower or a probe fails. | `/api/cron/app-performance` |
 
 KPI target edits notify affected salespeople after the save and CC their complete reporting chain. To manually send a month to all active KPI-eligible salespeople, run **Actions → KPI Targets Email → Run workflow**, selecting `2026-10` for the October 2026 targets. The workflow uses the existing `CRON_SECRET` and production Vercel host; it adds no secrets or schedule.
 

@@ -33,6 +33,10 @@ export const MIGRATION_VERSION_ALIASES = Object.freeze([
   { ledgerVersion: "20261015071140", repoVersion: "20261015120000", name: "customer_shares" },
   // Applied via Supabase at apply-time stamp; repo file keeps 20261015080745.
   { ledgerVersion: "20261015081431", repoVersion: "20261015080745", name: "product_catalogue_photos" },
+  // Catalogue photos moved onto attachments/R2; applied at 20261015084804, repo file keeps 20261015084023.
+  { ledgerVersion: "20261015084804", repoVersion: "20261015084023", name: "product_catalogue_photos_attachments" },
+  // Applied via Supabase at apply-time stamp; repo file keeps 20261016120000.
+  { ledgerVersion: "20261016080833", repoVersion: "20261016120000", name: "single_platform_session" },
 ]);
 
 /**

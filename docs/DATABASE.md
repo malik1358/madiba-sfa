@@ -27,6 +27,7 @@ Helper functions in the baseline migration:
 
 - `current_salesman_code()`, `current_user_role()`
 - `is_admin()` — role `admin` only
+- `enforce_single_platform_session(p_session_id, p_platform)` — `20261016120000_single_platform_session.sql`. Service role only. Deletes other `auth.sessions` for that user on the same platform (`android` WebView or `web`). Role `admin` is unchanged. Refresh tokens and MFA claims cascade with the session. Production ledger version is `20261016080833` (`single_platform_session`); do not insert a second ledger row or replay the SQL.
 - `is_management()` — role `admin` or `manager` only
 - `activate_sales_batch(p_batch_id)`, `delete_import_batch(p_batch_id)`
 - `set_updated_at()` trigger function
@@ -73,7 +74,7 @@ Confirmed field prompt overwrites additionally use text sources `salesman_accept
 
 `customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`. Nullable `attachment_id` → `attachments.id` for documents uploaded after `20261002130000_attachments.sql`; `file_path` stays populated (NOT NULL).
 
-`attachments` (migration `20261002130000_attachments.sql`): uuid `id`, `category` `receipt_copy|payment_copy|order_invoice|customer_document`, `storage_provider` `supabase|r2` (the provider holding the primary usable copy; `r2` only when R2 accepted the object), `object_key` = `<bucket>/<path>` (unique per provider), `content_type`, `size_bytes`, `sha256`, `md5`, `original_file_name`, `customer_code`, `entity_type` (`collection_visit|sales_order|customer_document`), `entity_id`, `uploaded_by`, `legacy_bucket`, `legacy_path`, `verified_at`, `created_at`. RLS on with no policies: service role only. Signed URLs are never stored.
+`attachments` (migration `20261002130000_attachments.sql`): uuid `id`, `category` `receipt_copy|payment_copy|order_invoice|customer_document|product_catalogue_photo`, `storage_provider` `supabase|r2` (the provider holding the primary usable copy; `r2` only when R2 accepted the object), `object_key` = `<bucket>/<path>` (unique per provider), `content_type`, `size_bytes`, `sha256`, `md5`, `original_file_name`, `customer_code`, `entity_type` (`collection_visit|sales_order|customer_document|product_item`), `entity_id`, `uploaded_by`, `legacy_bucket`, `legacy_path`, `verified_at`, `created_at`. RLS on with no policies: service role only. Signed URLs are never stored.
 
 `prospects`: `prospect_code` unique, `salesman_code`, company and contact fields, lat/long, `potential` `SMALL|MEDIUM|LARGE`, `status` `PROSPECT|FOLLOW_UP|PENDING_APPROVAL|APPROVED|CONVERTED|REJECTED`, `converted_customer_code`, `created_by`.
 
@@ -136,7 +137,7 @@ When `outstanding_customerwise_dataset_v1` contains invoices or rows, that JSON 
 
 ## Catalog, prices, KPIs
 
-Product Catalogue reads existing `items_master`, `products.unit` and stock-take packing metadata, with read-only packing descriptions from AM of the public KSA Price Tag Format sheet (product code B). No photo table or image-storage bucket is introduced. Image persistence is deferred to the separate receipt/image-storage project; current previews are page-only browser memory and do not write to any database. The proposed catalogue-photo migration was removed before application.
+Product Catalogue reads existing `items_master`, `products.unit` and stock-take packing metadata, with read-only packing descriptions from AM of the public KSA Price Tag Format sheet (product code B). Product photos use `attachments` (`category = product_catalogue_photo`, `entity_id` = item code) and the same R2/Supabase attachment facade as receipt copies (migration `20261015084023_product_catalogue_photos_attachments.sql`, production ledger `20261015084804`). Stored objects are resized metadata-free JPEGs. Catalogue GET returns short-lived signed URLs; uploads and deletes are admin/manager-only.
 
 Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` JSON now also contains `retailRegionPriceMaps`, keyed by `riyadh`, `dammam` and `jeddah`; existing wholesale `regionPriceMaps` remain unchanged. Retail prices are published by the existing Apps Script feed, not a new table or public copy of the private costing workbook. The offline pricing content hash includes retail maps. `order_pricing_meta:<id>` and the existing order-history JSON retain `pricingType` (`wholesale` or `retail`); legacy orders default to wholesale. `item_price_history` continues recording wholesale regional history only.
 
@@ -175,6 +176,7 @@ Schemes and quantity limits are settings, not tables:
 | Key | Used for |
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
+| `app_performance_daily_v1` | Daily app speed samples (`checks[]` with timings, counts, and `baseline` / `collecting` / `steady` / `slower` / `error`). One row per KSA date, last 90 days. No migration. |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
 | `receipt_register_dataset_v1` | Receipt register upload (every collection row with a date and a positive Dr/Cr amount is kept — Receipt, JV-Collection, NSTC JV reclass entries, etc. — so uploads never silently drop a collection). Dual-party day books may also retain **Purchase** rows (AP bills for settlement; not AR collections). **Payment** vouchers are imported only when the upload sets `includePaymentVouchers` (for dual customer/supplier parties; Payment Register Dr columns are accepted and stored as **negative** receipt amounts; settlement applies them to Purchases first, then leftover settles open sales like a receipt). Uploads **upsert by voucher identity** (`receipt_date` + `vch_type` + `vch_no` + customer); they do **not** wipe other receipts on the same dates. Credit notes belong in sales history, not this register — a bad import of CN **899** (`1177C`, 2026-10-01, 10,188.54) was removed from production on 2026-10-13. |
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |

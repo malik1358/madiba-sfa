@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppPopup } from "./AppPopupProvider";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { getSupabaseClient } from "../lib/supabase";
-import { catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePreview } from "../lib/productCatalogue";
+import {
+  catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePhoto,
+} from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
 
-function PhotoCarousel({ photos, name, language, onRemove }) {
+function PhotoCarousel({ photos, name, language, onRemove, busy }) {
   const [index, setIndex] = useState(0);
   const [failedUrl, setFailedUrl] = useState("");
   const current = photos[index % Math.max(photos.length, 1)];
@@ -25,7 +28,7 @@ function PhotoCarousel({ photos, name, language, onRemove }) {
             <circle cx="16" cy="18" r="4" stroke="currentColor" strokeWidth="2" />
             <path d="m6 35 11-10 8 7 8-13 10 16" stroke="currentColor" strokeWidth="2" />
           </svg>
-          <span>{current ? (ar ? "تعذر عرض الصورة. اختر صورة أخرى." : "Unable to preview this image. Choose another photo.") : (ar ? "لا توجد صورة بعد" : "No photo yet")}</span>
+          <span>{current ? (ar ? "تعذر عرض الصورة. حدّث الصور." : "Photo unavailable. Refresh photos.") : (ar ? "لا توجد صورة بعد" : "No photo yet")}</span>
         </div>
       )}
       {photos.length > 1 && (
@@ -36,7 +39,7 @@ function PhotoCarousel({ photos, name, language, onRemove }) {
         </div>
       )}
       {current && onRemove && (
-        <button type="button" className={styles.removePhoto} onClick={() => onRemove(current.id)}>{ar ? "إزالة المعاينة" : "Remove preview"}</button>
+        <button type="button" className={styles.removePhoto} disabled={busy} onClick={() => onRemove(current.id)}>{ar ? "حذف الصورة" : "Remove photo"}</button>
       )}
     </div>
   );
@@ -53,26 +56,28 @@ export default function ProductCatalogue({
   newItems, historyLoading, historyReady,
 }) {
   const ar = language === "ar";
+  const { showPopup } = useAppPopup();
   const [details, setDetails] = useState({});
   const [warnings, setWarnings] = useState([]);
   const [canManagePhotos, setCanManagePhotos] = useState(false);
-  const [previewPhotos, setPreviewPhotos] = useState({});
+  const [photosReady, setPhotosReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
   const [page, setPage] = useState(0);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
-  const previewUrls = useRef(new Set());
+  const writeInFlight = useRef(false);
   const mounted = useRef(false);
 
-  const request = useCallback(async () => {
+  const request = useCallback(async (url = "/api/product-catalogue", options = {}) => {
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error("Supabase is not configured.");
     const session = await getSessionWithTimeout(supabase);
     if (!session?.access_token) throw new Error("Please login again.");
-    const { response, payload } = await fetchJsonWithTimeout("/api/product-catalogue", {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    const { response, payload } = await fetchJsonWithTimeout(url, {
+      ...options, headers: { Authorization: `Bearer ${session.access_token}`, ...(options.headers || {}) },
     }, 45000);
-    if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load product packing.");
+    if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load product photos.");
     return payload;
   }, []);
 
@@ -85,8 +90,9 @@ export default function ProductCatalogue({
       setDetails(payload.details);
       setWarnings(payload.warnings || []);
       setCanManagePhotos(payload.canManagePhotos === true);
+      setPhotosReady(payload.photosReady === true);
     } catch (err) {
-      if (mounted.current) setError(err.message || "Unable to load product packing.");
+      if (mounted.current) setError(err.message || "Unable to load photos and packing.");
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -95,37 +101,61 @@ export default function ProductCatalogue({
   useEffect(() => {
     mounted.current = true;
     void refresh();
+    // Signed attachment URLs expire in about five minutes; refresh before then.
+    const timer = setInterval(() => { void refresh(); }, 4 * 60 * 1000);
     return () => {
       mounted.current = false;
-      previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
-      previewUrls.current.clear();
+      clearInterval(timer);
     };
   }, [refresh]);
 
   useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
 
-  function preview(itemCode, file) {
-    if (!file || !canManagePhotos) return;
+  async function upload(itemCode, file) {
+    if (!file || !canManagePhotos || writeInFlight.current) return;
     setError("");
     try {
-      validateCataloguePreview(file);
-      const url = URL.createObjectURL(file);
-      previewUrls.current.add(url);
-      setPreviewPhotos((current) => ({
-        ...current, [itemCode]: [...(current[itemCode] || []), { id: url, url }],
-      }));
+      validateCataloguePhoto(file);
     } catch (err) {
-      setError(err.message || "Unable to preview this photo.");
+      setError(err.message || "Unable to upload this photo.");
+      return;
+    }
+    writeInFlight.current = true;
+    setBusy(itemCode);
+    try {
+      const form = new FormData();
+      form.set("itemCode", itemCode);
+      form.set("photo", file);
+      await request("/api/product-catalogue", { method: "POST", body: form });
+      await refresh();
+    } catch (err) {
+      setError(err.message || "Photo upload failed.");
+    } finally {
+      writeInFlight.current = false;
+      setBusy("");
     }
   }
 
-  function remove(itemCode, photoId) {
-    if (!canManagePhotos) return;
-    setPreviewPhotos((current) => ({
-      ...current, [itemCode]: (current[itemCode] || []).filter((photo) => photo.id !== photoId),
-    }));
-    URL.revokeObjectURL(photoId);
-    previewUrls.current.delete(photoId);
+  async function remove(itemCode, photoId) {
+    if (!canManagePhotos || writeInFlight.current) return;
+    const choice = await showPopup({
+      variant: "warning",
+      message: ar ? "حذف هذه الصورة من كتالوج المنتجات؟" : "Remove this photo from the product catalogue?",
+      choices: [{ id: "cancel", label: ar ? "إلغاء" : "Cancel" }, { id: "remove", label: ar ? "حذف" : "Remove" }],
+    });
+    if (choice !== "remove" || writeInFlight.current) return;
+    writeInFlight.current = true;
+    setBusy(itemCode);
+    setError("");
+    try {
+      await request(`/api/product-catalogue?photoId=${encodeURIComponent(photoId)}`, { method: "DELETE" });
+      await refresh();
+    } catch (err) {
+      setError(err.message || "Unable to remove photo.");
+    } finally {
+      writeInFlight.current = false;
+      setBusy("");
+    }
   }
 
   const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
@@ -211,7 +241,7 @@ export default function ProductCatalogue({
             {categories.map((value) => <option key={value} value={value}>{value === "ALL" ? (ar ? "كل الفئات" : "All categories") : value}</option>)}
           </select>
         </label>
-        <button type="button" className="moduleInlineButton" disabled={loading} onClick={refresh}>{ar ? "تحديث التعبئة" : "Refresh packing"}</button>
+        <button type="button" className="moduleInlineButton" disabled={loading || Boolean(busy)} onClick={refresh}>{ar ? "تحديث الصور" : "Refresh photos"}</button>
       </div>
       <p className="moduleHint">
         {ar ? "الأسعار قبل الضريبة. نوع التسعير والمدينة يطبقان على الطلب. الخصومات والعروض تحسب في مراجعة الطلب." : "Prices exclude VAT. Pricing type and city apply to your order. Cash discounts, value discounts, and schemes are calculated in the order review."}
@@ -220,9 +250,9 @@ export default function ProductCatalogue({
       {unpricedCartCodes.length > 0 && <p role="alert" className={styles.error}>
         {ar ? "بعض أصناف الطلب ليس لها سعر في المدينة ونوع التسعير المحددين. غيّر التسعير أو احذفها من مراجعة الطلب:" : "Some cart items have no price for this city and pricing type. Change pricing or remove them in order review:"} {unpricedCartCodes.join(", ")}
       </p>}
-      <p className={styles.notice}>{ar ? "ربط تخزين الصور مؤجل. الصور للمعاينة فقط في هذه الصفحة ولا يتم رفعها أو حفظها أو مشاركتها، وتختفي عند تحديث الصفحة أو مغادرتها." : "Image storage is not connected yet. Photo previews are only for this page: they are not uploaded, saved, or shared, and disappear when you reload or leave."}</p>
-      {canManagePhotos && <p className="moduleHint">{ar ? "معاينة صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. اختر عدة صور للصنف لتجربة الشرائح." : "Preview JPEG, PNG, or WebP photos, up to 3 MB each. Select more than one photo to try the carousel."}</p>}
-      {loading && <p role="status">{ar ? "جاري تحميل التعبئة..." : "Loading packing..."}</p>}
+      {canManagePhotos && <p className="moduleHint">{ar ? "ارفع صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. يمكن إضافة أكثر من صورة للصنف." : "Upload JPEG, PNG, or WebP photos, up to 3 MB each. Add more than one photo per item for the carousel."}</p>}
+      {canManagePhotos && !photosReady && <p className={styles.notice}>{ar ? "تخزين الصور غير جاهز بعد. طبّق ترحيل الصور في Supabase." : "Photo storage is not ready yet. Apply the product catalogue photos migration in Supabase."}</p>}
+      {loading && <p role="status">{ar ? "جاري تحميل الصور والتعبئة..." : "Loading photos and packing..."}</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {warnings.map((warning) => <p key={warning} className={styles.notice}>{warning}</p>)}
       {!selectedCustomer && <p className={styles.notice}><a href="#catalogue-customer">{ar ? "اختر العميل أدناه لإعداد الطلب." : "Choose a customer below to prepare an order."}</a> {ar ? "يمكنك تصفح جميع المنتجات الآن." : "You can browse all products now."}</p>}
@@ -246,7 +276,7 @@ export default function ProductCatalogue({
           const disabled = !selectedCustomer || !hasPrice;
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
-              <PhotoCarousel photos={previewPhotos[item.item_code] || []} name={item.item_name} language={language}
+              <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)}
                 onRemove={canManagePhotos ? (id) => remove(item.item_code, id) : undefined} />
               <div className={styles.cardBody}>
                 <span className={styles.category}>{item.category}</span>
@@ -276,13 +306,14 @@ export default function ProductCatalogue({
                 </div>
                 {canManagePhotos && (
                   <label className={styles.upload}>
-                    {ar ? "معاينة صورة (غير محفوظة)" : "Preview photo (not saved)"}
+                    {ar ? "رفع صورة" : "Upload photo"}
                     <input type="file" accept="image/jpeg,image/png,image/webp"
-                      aria-label={`${ar ? "معاينة صورة" : "Preview photo"} ${item.item_code}`}
+                      disabled={!photosReady || Boolean(busy)}
+                      aria-label={`${ar ? "رفع صورة" : "Upload photo"} ${item.item_code}`}
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";
-                        preview(item.item_code, file);
+                        void upload(item.item_code, file);
                       }} />
                   </label>
                 )}

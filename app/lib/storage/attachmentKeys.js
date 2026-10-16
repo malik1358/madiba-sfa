@@ -3,6 +3,7 @@ export const ATTACHMENT_BUCKETS = Object.freeze({
   collections: "payment-collections",
   orderInvoices: "order-invoices",
   customerDocuments: "customer-documents",
+  productCatalogue: "product-catalogue",
 });
 
 export const ATTACHMENT_CATEGORIES = Object.freeze({
@@ -10,6 +11,7 @@ export const ATTACHMENT_CATEGORIES = Object.freeze({
   paymentCopy: "payment_copy",
   orderInvoice: "order_invoice",
   customerDocument: "customer_document",
+  productCataloguePhoto: "product_catalogue_photo",
 });
 
 const COLLECTION_COPY_FOLDERS = {
@@ -72,6 +74,15 @@ export function buildCustomerDocumentKey({ customerCode, documentType, fileName,
   return joinObjectKey(ATTACHMENT_BUCKETS.customerDocuments, `${code}/${type}/${nowMs(now)}-${safeName}`);
 }
 
+export function buildProductCataloguePhotoKey({ itemCode, extension, now, uuid } = {}) {
+  const code = keySegment(itemCode, "");
+  if (!code || code.length > 100) throw new Error("Item code is required for catalogue photos.");
+  const ext = String(extension || "jpg").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const id = newUuid(uuid);
+  const folder = Array.from(new TextEncoder().encode(code), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return joinObjectKey(ATTACHMENT_BUCKETS.productCatalogue, `${folder}/${id}.${ext}`);
+}
+
 // "legacy" keeps the historical Supabase paths; "immutable" is used for R2-primary writes.
 export const KEY_LAYOUTS = Object.freeze({ legacy: "legacy", immutable: "immutable" });
 
@@ -129,6 +140,17 @@ export function buildImmutableCustomerDocumentKey({ customerCode, documentType, 
   );
 }
 
+export function buildImmutableProductCataloguePhotoKey({ itemCode, extension, now, uuid } = {}) {
+  const code = keySegment(itemCode, "");
+  if (!code || code.length > 100) throw new Error("Item code is required for catalogue photos.");
+  const ext = String(extension || "jpg").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const { yyyy, mm, dd } = riyadhDateParts(now);
+  return joinObjectKey(
+    ATTACHMENT_BUCKETS.productCatalogue,
+    `${yyyy}/${mm}/${code}/${yyyy}${mm}${dd}-${newUuid(uuid)}.${ext}`,
+  );
+}
+
 const KEY_BUILDERS = {
   [ATTACHMENT_CATEGORIES.receiptCopy]: {
     legacy: (input) => buildCollectionCopyKey({ ...input, kind: "receipt" }),
@@ -145,6 +167,10 @@ const KEY_BUILDERS = {
   [ATTACHMENT_CATEGORIES.customerDocument]: {
     legacy: buildCustomerDocumentKey,
     immutable: buildImmutableCustomerDocumentKey,
+  },
+  [ATTACHMENT_CATEGORIES.productCataloguePhoto]: {
+    legacy: buildProductCataloguePhotoKey,
+    immutable: buildImmutableProductCataloguePhotoKey,
   },
 };
 

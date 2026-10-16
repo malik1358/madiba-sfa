@@ -172,6 +172,7 @@ export async function ensureAttachmentBucket(admin, bucket, provider = DEFAULT_S
   return resolveStorageProvider(provider).ensureBucket(admin, bucket);
 }
 
-export async function deleteObject() {
-  throw new Error("Attachment deletion is not enabled.");
+export async function deleteObject(admin, { key, provider = DEFAULT_STORAGE_PROVIDER }) {
+  if (!key) throw new Error("Attachment object key is required.");
+  return resolveStorageProvider(provider).deleteObject(admin, { key });
 }

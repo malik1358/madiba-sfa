@@ -154,7 +154,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
     `${labels.summaryVisitDateTime}: ${visitDateTime}`,
     ...formatWorkingHoursWhatsappLines(options.workingHours, {
       workingHours: labels.workingHours,
-    }).filter(Boolean),
+    }),
     `${labels.summaryOutcome}: ${outcomeText || labels.summaryNotSpecified}`,
   ];
 

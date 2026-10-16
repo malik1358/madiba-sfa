@@ -49,7 +49,7 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /61-90: 500/);
   assert.match(summary, />90: 300/);
   assert.match(summary, /Total: 2,800/);
-  assert.match(summary, /Visit date\/time:.*\nWorking hours: -/);
+  assert.match(summary, /Visit date\/time:.*\n\nWorking hours: -\n\n/);
   assert.match(summary, /GPS: -/);
   assert.match(summary, /Distance from customer: -/);
   assert.match(summary, /Est. waiting: -/);
@@ -69,7 +69,7 @@ test("buildFieldVisitWhatsappSummary includes working hours till the visit", () 
     workingHours: { known: true, value: "1h 26m", minutes: 86 },
   });
 
-  assert.match(summary, /Working hours: 1h 26m/);
+  assert.match(summary, /\n\nWorking hours: 1h 26m\n\n/);
 });
 
 test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the end", () => {

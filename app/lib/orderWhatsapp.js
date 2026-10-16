@@ -72,7 +72,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     ...formatWorkingHoursWhatsappLines(
       options.workingHours ?? snapshot.workingHours ?? null,
       { workingHours: labels.workingHours },
-    ).filter(Boolean),
+    ),
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,

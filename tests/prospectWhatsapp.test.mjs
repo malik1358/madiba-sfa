@@ -31,7 +31,7 @@ test("buildProspectFollowUpWhatsappSummary matches field visit report format", (
   assert.match(summary, /Customer: Al Noor Trading/);
   assert.match(summary, /Code: PROSPECT-64/);
   assert.match(summary, /Salesman: OSAMA \(S12\)/);
-  assert.match(summary, /Working hours: -/);
+  assert.match(summary, /\n\nWorking hours: -\n\n/);
   assert.match(summary, /Outcome: Order not received/);
   assert.match(summary, /Next visit: 20\/09\/2026/);
   assert.match(summary, /Notes: Order not received/);

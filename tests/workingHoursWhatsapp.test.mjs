@@ -11,22 +11,22 @@ import {
 test("formatWorkingHoursWhatsappLines shows dash when unknown", () => {
   assert.deepEqual(
     formatWorkingHoursWhatsappLines(null),
-    ["", "Working hours: -"],
+    ["", "Working hours: -", ""],
   );
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: false }),
-    ["", "Working hours: -"],
+    ["", "Working hours: -", ""],
   );
 });
 
-test("formatWorkingHoursWhatsappLines shows computed attendance value", () => {
+test("formatWorkingHoursWhatsappLines pads blank lines before and after", () => {
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: true, value: "3h 26m", minutes: 206 }),
-    ["", "Working hours: 3h 26m"],
+    ["", "Working hours: 3h 26m", ""],
   );
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: true, value: "0h", minutes: 0 }),
-    ["", "Working hours: 0h"],
+    ["", "Working hours: 0h", ""],
   );
 });
 
@@ -103,7 +103,7 @@ test("buildCurrentWorkingHoursEntry marks far GPS stops", () => {
   assert.equal(entry.isFarFromCustomer, true);
 });
 
-test("patchWhatsappSummaryWorkingHours inserts after visit date/time", () => {
+test("patchWhatsappSummaryWorkingHours inserts after visit date/time with blank lines", () => {
   const patched = patchWhatsappSummaryWorkingHours(
     [
       "Customer: Test",
@@ -113,15 +113,15 @@ test("patchWhatsappSummaryWorkingHours inserts after visit date/time", () => {
     { known: true, value: "2h 10m", minutes: 130 },
   );
 
-  assert.match(patched, /Visit date\/time: 07\/09\/2026 10:34\nWorking hours: 2h 10m\nOutcome:/);
+  assert.match(patched, /Visit date\/time: 07\/09\/2026 10:34\n\nWorking hours: 2h 10m\n\nOutcome:/);
 });
 
 test("patchWhatsappSummaryWorkingHours replaces an existing working hours dash", () => {
   const patched = patchWhatsappSummaryWorkingHours(
-    "Visit date/time: 07/09/2026 10:34\nWorking hours: -\nOutcome: Paid",
+    "Visit date/time: 07/09/2026 10:34\n\nWorking hours: -\n\nOutcome: Paid",
     { known: true, value: "3h 5m", minutes: 185 },
   );
 
-  assert.match(patched, /Working hours: 3h 5m/);
+  assert.match(patched, /\n\nWorking hours: 3h 5m\n\n/);
   assert.doesNotMatch(patched, /Working hours: -/);
 });

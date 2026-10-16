@@ -504,7 +504,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
     `${t("summaryVisitDateTime")}: ${visitDateTime}`,
     ...formatWorkingHoursWhatsappLines(options.workingHours, {
       workingHours: t("summaryWorkingHours"),
-    }).filter(Boolean),
+    }),
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
 

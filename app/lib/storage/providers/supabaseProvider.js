@@ -30,6 +30,11 @@ export const ATTACHMENT_BUCKET_SETTINGS = Object.freeze({
     fileSizeLimit: MAX_ATTACHMENT_BYTES,
     allowedMimeTypes: ["application/pdf"],
   },
+  [ATTACHMENT_BUCKETS.productCatalogue]: {
+    public: false,
+    fileSizeLimit: 3 * 1024 * 1024,
+    allowedMimeTypes: ["image/jpeg"],
+  },
 });
 
 // Creates a missing bucket as private. Never updates an existing bucket, so an upload cannot change privacy.
@@ -97,4 +102,10 @@ export async function getSignedReadUrl(admin, { key, expiresIn, downloadName }) 
   const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, expiresIn, options);
   if (error || !data?.signedUrl) throw storageError(error, "Unable to create attachment link.");
   return data.signedUrl;
+}
+
+export async function deleteObject(admin, { key }) {
+  const { bucket, path } = splitObjectKey(key);
+  const { error } = await admin.storage.from(bucket).remove([path]);
+  if (error) throw storageError(error, "Unable to delete attachment.");
 }

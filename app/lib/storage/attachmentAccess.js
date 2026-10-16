@@ -13,7 +13,12 @@ const COLLECTION_VISIT_LEGACY_SELECT = "id,customer_code,created_by,receipt_copy
 const CUSTOMER_DOCUMENT_SELECT = "id,customer_code,file_path,original_file_name,attachment_id";
 const CUSTOMER_DOCUMENT_LEGACY_SELECT = "id,customer_code,file_path,original_file_name";
 
-export const LEGACY_ATTACHMENT_KINDS = Object.freeze(Object.values(ATTACHMENT_CATEGORIES));
+export const LEGACY_ATTACHMENT_KINDS = Object.freeze([
+  ATTACHMENT_CATEGORIES.receiptCopy,
+  ATTACHMENT_CATEGORIES.paymentCopy,
+  ATTACHMENT_CATEGORIES.orderInvoice,
+  ATTACHMENT_CATEGORIES.customerDocument,
+]);
 
 const COLLECTION_KIND = {
   [ATTACHMENT_CATEGORIES.receiptCopy]: "receipt",
@@ -132,6 +137,10 @@ async function targetFromRecord(admin, record) {
     owner = record.entity_id ? await loadSalesOrder(admin, record.entity_id) : null;
   } else if (record.category === ATTACHMENT_CATEGORIES.customerDocument) {
     owner = await loadCustomerDocument(admin, "attachment_id", record.id);
+  } else if (record.category === ATTACHMENT_CATEGORIES.productCataloguePhoto) {
+    const itemCode = String(record.entity_id || "").trim();
+    if (!itemCode) return { status: 404 };
+    owner = { item_code: itemCode };
   } else {
     return { status: 404 };
   }
@@ -244,6 +253,23 @@ export async function authorizeAttachmentRead(admin, { user, token, target, deps
     if (target.category === ATTACHMENT_CATEGORIES.customerDocument) {
       const allowed = await canReadCustomerDocument(admin, userId, owner.customer_code, deps);
       return { allowed, reason: allowed ? "customer_scope" : "You do not have access to this customer's documents." };
+    }
+    if (target.category === ATTACHMENT_CATEGORIES.productCataloguePhoto) {
+      const { data: profile, error } = await admin.from("profiles")
+        .select("id,role,salesman_code,is_active")
+        .eq("id", userId)
+        .single();
+      if (error) throw error;
+      const { cataloguePermissions } = await import("../productCatalogue.js");
+      let roleModuleMatrix = null;
+      try {
+        const { loadRoleModuleMatrix } = await import("../roleModuleAccessServer.js");
+        roleModuleMatrix = (await loadRoleModuleMatrix(admin)).matrix;
+      } catch {
+        roleModuleMatrix = null;
+      }
+      const allowed = cataloguePermissions(profile, user, { roleModuleMatrix }).canView;
+      return { allowed, reason: allowed ? "catalogue_scope" : "You do not have access to the product catalogue." };
     }
   } catch (error) {
     console.warn("Attachment access check failed:", error);

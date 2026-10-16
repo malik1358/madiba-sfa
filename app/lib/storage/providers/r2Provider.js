@@ -112,3 +112,10 @@ export async function getSignedReadUrl(_admin, { key, expiresIn, downloadName, e
   const signed = await client.sign(new Request(url.toString(), { method: "GET" }), { aws: { signQuery: true } });
   return signed.url;
 }
+
+export async function deleteObject(_admin, { key, env }) {
+  const { client, config } = r2Context(env);
+  const response = await client.fetch(objectUrl(config, key), { method: "DELETE" });
+  if (response.status === 404) return;
+  if (!response.ok) throw r2Error("delete", response);
+}

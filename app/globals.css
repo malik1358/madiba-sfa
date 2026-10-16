@@ -3831,6 +3831,7 @@ table.auditMatrix td.auditTrendSame {
 
 .appPopupChoices {
   flex-direction: row;
+  flex-wrap: wrap;
   justify-content: center;
   align-items: stretch;
 }

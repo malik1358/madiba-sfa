@@ -9,7 +9,8 @@ import {
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
-  buildCatalogueShareLines, catalogueShareLatinWords, nextCataloguePhotoIndex, translateCatalogueShareText, wrapShareText,
+  buildCatalogueShareLines, catalogueShareLatinWords, catalogueShareTextFromDictionary, catalogueShareUnknownWords,
+  nextCataloguePhotoIndex, translateCatalogueShareText, wrapShareText,
 } from "../app/lib/catalogueShareCard.js";
 import { buildCatalogueShareFiles } from "../app/lib/catalogueShareCanvas.js";
 import {
@@ -494,6 +495,9 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.match(source, /Share on WhatsApp/);
   assert.match(source, /buildCatalogueShareFiles/);
   assert.match(source, /translateCatalogueShareText/);
+  assert.match(source, /Without price/);
+  assert.match(source, /downloadStoredZip/);
+  assert.doesNotMatch(source, /downloadExcelWorkbook/);
   assert.doesNotMatch(source, /whatsappText/);
   assert.doesNotMatch(source, /shareTextOnWhatsapp/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
@@ -527,12 +531,26 @@ test("catalogue carousel advances and share lines put price and packing on the i
   assert.match(text, /قبل الخصم: 15\.00 ر\.س/);
   assert.match(text, /Wholesale · Riyadh · Ex VAT/);
   assert.match(text, /الجملة · الرياض · قبل الضريبة/);
+  const withoutPrice = buildCatalogueShareLines({
+    name: "Vinyl Gloves",
+    code: "G1",
+    packing: "100 PCS / CTN",
+    priceAmount: "12.50",
+    includePrice: false,
+  }).map((line) => line.text).join("\n");
+  assert.match(withoutPrice, /Packing: 100 PCS \/ CTN/);
+  assert.doesNotMatch(withoutPrice, /12\.50|SAR|Price unavailable|السعر/);
   const wrapped = wrapShareText("Packing: BOX ".repeat(12), 80, (value) => value.length * 8);
   assert.ok(wrapped.length > 1);
   assert.equal(wrapped.join(" "), "Packing: BOX ".repeat(12).trim());
 });
 
 test("catalogue share translates every product and packing word into Arabic", async () => {
+  assert.deepEqual(catalogueShareUnknownWords(["100 PCS / CTN", "MADIBA GLOVES", "MADIBA POWDER"]), ["MADIBA", "GLOVES", "POWDER"]);
+  assert.equal(
+    catalogueShareTextFromDictionary("MADIBA GLOVES 100 PCS / CTN", new Map([["MADIBA", "مديبا"], ["GLOVES", "قفازات"]])),
+    "مديبا قفازات 100 قطع / كرتون",
+  );
   assert.equal(await translateCatalogueShareText("CTN OF 4 PACK OF 6 PC"), "كرتون من 4 عبوة من 6 قطعة");
   const name = await translateCatalogueShareText(
     "A003471 MADIBA BABY TALCUM POWDER - WHITE 400 GM",

@@ -5,14 +5,16 @@ import { useAppPopup } from "./AppPopupProvider";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { buildCatalogueShareFiles } from "../lib/catalogueShareCanvas";
 import {
-  buildCatalogueShareLines, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex, translateCatalogueShareText,
+  buildCatalogueShareLines, CATALOGUE_CAROUSEL_MS, catalogueShareLatinWords, catalogueShareTextFromDictionary,
+  catalogueShareUnknownWords, nextCataloguePhotoIndex, translateCatalogueShareText,
 } from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
-  catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePhoto,
+  catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
+import { downloadStoredZip } from "../lib/zipStoredFiles";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
@@ -107,6 +109,8 @@ export default function ProductCatalogue({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [sharingCode, setSharingCode] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
   const [page, setPage] = useState(0);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const writeInFlight = useRef(false);
@@ -201,16 +205,36 @@ export default function ProductCatalogue({
     }
   }
 
-  async function loadSharePhoto(photo) {
+  async function catalogueAccessToken() {
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error(ar ? "الإعداد غير مكتمل." : "Supabase is not configured.");
     const session = await getSessionWithTimeout(supabase);
     if (!session?.access_token) throw new Error(ar ? "يرجى تسجيل الدخول مرة أخرى." : "Please login again.");
+    return session.access_token;
+  }
+
+  async function loadSharePhoto(photo, accessToken) {
+    const token = accessToken || await catalogueAccessToken();
     const response = await fetch(`/api/product-catalogue?photoId=${encodeURIComponent(photo.id)}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) throw new Error(ar ? "تعذر تحميل صورة المنتج." : "Unable to load the product photo.");
     return response.blob();
+  }
+
+  async function mapWithLimit(list, limit, worker) {
+    const results = new Array(list.length);
+    let cursor = 0;
+    async function run() {
+      while (cursor < list.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(list[index], index);
+      }
+    }
+    const workers = Math.min(Math.max(limit, 1), list.length || 1);
+    await Promise.all(Array.from({ length: workers }, () => run()));
+    return results;
   }
 
   async function translateSharePhrase(phrase) {
@@ -225,38 +249,61 @@ export default function ProductCatalogue({
     return String(payload.translatedText || "").trim();
   }
 
-  async function shareItem(item, detail, priced, price, hasPrice, discounted) {
-    if (sharingCode) return;
+  function pricedShareFields(item, includePrice) {
+    const price = Number(priceList[item.item_code]);
+    const hasPrice = hasCataloguePrice(price);
+    const qty = Number(quantities[item.item_code] || 0);
+    const priced = catalogueCardPrice(item, {
+      price, quantity: qty, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
+    });
+    const discounted = hasPrice && priced.rate < price - 0.000001;
+    return {
+      priceAmount: includePrice && hasPrice ? formatMoneyAmount(priced.rate) : "",
+      originalAmount: includePrice && discounted ? formatMoneyAmount(price) : "",
+      cashDiscount: includePrice && discounted && priced.applied.cash,
+      valueDiscount: includePrice && discounted && priced.applied.value,
+      schemeDiscount: includePrice && discounted && priced.applied.scheme,
+    };
+  }
+
+  async function shareLines(item, detail, includePrice, translate = translateSharePhrase) {
+    const [nameArabic, packingArabic, unitArabic] = await Promise.all([
+      translateCatalogueShareText(item.item_name, translate),
+      translateCatalogueShareText(detail.packing, translate),
+      translateCatalogueShareText(detail.sellingUnit, translate),
+    ]);
+    return buildCatalogueShareLines({
+      name: item.item_name,
+      nameArabic,
+      code: item.item_code,
+      packing: detail.packing,
+      packingArabic,
+      sellingUnit: detail.sellingUnit,
+      unitArabic,
+      includePrice,
+      ...pricedShareFields(item, includePrice),
+      pricingType,
+      region: pricingRegion,
+    });
+  }
+
+  function itemDetail(item) {
+    return details[item.item_code] || details[normalizeCatalogueCode(item.item_code)] || {};
+  }
+
+  async function shareItem(item, detail) {
+    if (sharingCode || exporting) return;
     setSharingCode(item.item_code);
     setError("");
     let notice = null;
     try {
-      const [nameArabic, packingArabic, unitArabic] = await Promise.all([
-        translateCatalogueShareText(item.item_name, translateSharePhrase),
-        translateCatalogueShareText(detail.packing, translateSharePhrase),
-        translateCatalogueShareText(detail.sellingUnit, translateSharePhrase),
-      ]);
-      const lines = buildCatalogueShareLines({
-        name: item.item_name,
-        nameArabic,
-        code: item.item_code,
-        packing: detail.packing,
-        packingArabic,
-        sellingUnit: detail.sellingUnit,
-        unitArabic,
-        priceAmount: hasPrice ? formatMoneyAmount(priced.rate) : "",
-        originalAmount: discounted ? formatMoneyAmount(price) : "",
-        cashDiscount: discounted && priced.applied.cash,
-        valueDiscount: discounted && priced.applied.value,
-        schemeDiscount: discounted && priced.applied.scheme,
-        pricingType,
-        region: pricingRegion,
-      });
+      const lines = await shareLines(item, detail, true);
       const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
+      const token = await catalogueAccessToken();
       const files = await buildCatalogueShareFiles({
         photos: detail.photos || [],
         lines,
-        loadPhoto: loadSharePhoto,
+        loadPhoto: (photo) => loadSharePhoto(photo, token),
         fileCode: item.item_code,
       });
       const result = await shareTextAndFilesOnWhatsapp("", files, { title: item.item_name, dialogTitle });
@@ -280,6 +327,7 @@ export default function ProductCatalogue({
   }
 
   const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
+  const exportItems = [...(historyReady ? recommendedItems : []), ...browseItems];
   const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
   const lastPage = Math.max(0, Math.ceil(browseItems.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
@@ -288,6 +336,114 @@ export default function ProductCatalogue({
     ...(historyReady ? [{ key: "new", items: recommendedItems }] : []),
     { key: "all", items: visible },
   ];
+
+  async function exportCatalogue() {
+    if (!exportItems.length || exporting || sharingCode) return;
+    const choice = await showPopup({
+      title: ar ? "تصدير الكتالوج" : "Export catalogue",
+      message: ar
+        ? `تجهيز صور كل المنتجات المطابقة للفلاتر الحالية (${exportItems.length})؟`
+        : `Prepare the same item photos for all ${exportItems.length} products matching the current filters?`,
+      choices: [
+        { id: "cancel", label: ar ? "إلغاء" : "Cancel" },
+        { id: "without", label: ar ? "بدون السعر" : "Without price" },
+        { id: "yes", label: ar ? "مع السعر" : "With price" },
+      ],
+    });
+    if (choice !== "yes" && choice !== "without") return;
+    const includePrice = choice === "yes";
+    setExporting(true);
+    setExportProgress(ar ? "جاري الترجمة" : "Translating");
+    setError("");
+    const files = [];
+    const skipped = [];
+    let notice = null;
+    try {
+      const dictionary = new Map();
+      const unknownWords = catalogueShareUnknownWords(exportItems.flatMap((item) => {
+        const detail = itemDetail(item);
+        return [item.item_name, detail.packing, detail.sellingUnit];
+      }));
+      let translatedCount = 0;
+      await mapWithLimit(unknownWords, 6, async (word) => {
+        const translated = await translateSharePhrase(word);
+        if (translated && catalogueShareLatinWords(translated).length === 0) dictionary.set(word, translated);
+        translatedCount += 1;
+        setExportProgress(ar
+          ? `ترجمة ${translatedCount} / ${unknownWords.length}`
+          : `Translating ${translatedCount} / ${unknownWords.length}`);
+      });
+      const token = await catalogueAccessToken();
+      let prepared = 0;
+      const batches = await mapWithLimit(exportItems, 4, async (item) => {
+        try {
+          const detail = itemDetail(item);
+          const lines = buildCatalogueShareLines({
+            name: item.item_name,
+            nameArabic: catalogueShareTextFromDictionary(item.item_name, dictionary),
+            code: item.item_code,
+            packing: detail.packing,
+            packingArabic: catalogueShareTextFromDictionary(detail.packing, dictionary),
+            sellingUnit: detail.sellingUnit,
+            unitArabic: catalogueShareTextFromDictionary(detail.sellingUnit, dictionary),
+            includePrice,
+            ...pricedShareFields(item, includePrice),
+            pricingType,
+            region: pricingRegion,
+          });
+          const itemFiles = await buildCatalogueShareFiles({
+            photos: detail.photos || [],
+            lines,
+            loadPhoto: (photo) => loadSharePhoto(photo, token),
+            fileCode: item.item_code,
+          });
+          prepared += 1;
+          setExportProgress(ar
+            ? `الصور ${prepared} / ${exportItems.length}`
+            : `Photos ${prepared} / ${exportItems.length}`);
+          return itemFiles;
+        } catch {
+          skipped.push(item.item_code);
+          prepared += 1;
+          setExportProgress(ar
+            ? `الصور ${prepared} / ${exportItems.length}`
+            : `Photos ${prepared} / ${exportItems.length}`);
+          return [];
+        }
+      });
+      files.push(...batches.flat());
+      if (!files.length) throw new Error(ar ? "تعذر تجهيز صور المنتجات." : "Unable to prepare the product photos.");
+      const dialogTitle = ar ? "مشاركة صور الكتالوج" : "Share catalogue photos";
+      const result = await shareTextAndFilesOnWhatsapp("", files, {
+        title: ar ? "كتالوج المنتجات" : "Product catalogue",
+        dialogTitle,
+      });
+      if (!(result.success || result.reason === "cancelled")) {
+        await downloadStoredZip(files, `product-catalogue-${pricingRegion}${includePrice ? "" : "-no-price"}`);
+        notice = {
+          variant: "info",
+          message: ar
+            ? "تعذر إرسال كل الصور دفعة واحدة على واتساب. تم تنزيل الصور معاً."
+            : "WhatsApp could not take every photo at once. The photos were downloaded together.",
+        };
+      }
+    } catch (err) {
+      notice = {
+        variant: "error",
+        message: err.message || (ar ? "تعذر تجهيز صور الكتالوج." : "Unable to prepare the catalogue photos."),
+      };
+    } finally {
+      setExporting(false);
+      setExportProgress("");
+    }
+    if (skipped.length) {
+      setError(ar
+        ? `تعذر تجهيز: ${skipped.join(", ")}`
+        : `Unable to prepare: ${skipped.join(", ")}`);
+    }
+    if (notice) await showPopup(notice);
+  }
+
   return (
     <section className={`moduleSection ${styles.catalogue}`}>
       <div className="moduleSectionHeader">
@@ -363,6 +519,9 @@ export default function ProductCatalogue({
           </select>
         </label>
         <button type="button" className="moduleInlineButton" disabled={loading || Boolean(busy)} onClick={refresh}>{ar ? "تحديث الصور" : "Refresh photos"}</button>
+        <button type="button" className="moduleInlineButton" disabled={loading || exporting || Boolean(sharingCode) || exportItems.length === 0} onClick={() => { void exportCatalogue(); }}>
+          {exporting ? (exportProgress || (ar ? "جاري التجهيز" : "Preparing")) : (ar ? "تصدير" : "Export")}
+        </button>
       </div>
       <p className="moduleHint">
         {ar ? "الأسعار قبل الضريبة. نوع التسعير والمدينة يطبقان على الطلب. الخصومات والعروض تحسب في مراجعة الطلب." : "Prices exclude VAT. Pricing type and city apply to your order. Cash discounts, value discounts, and schemes are calculated in the order review."}
@@ -423,7 +582,7 @@ export default function ProductCatalogue({
                   type="button"
                   className={styles.share}
                   disabled={Boolean(sharingCode) || Boolean(busy)}
-                  onClick={() => { void shareItem(item, detail, priced, price, hasPrice, discounted); }}
+                  onClick={() => { void shareItem(item, detail); }}
                 >
                   {sharingCode === item.item_code
                     ? (ar ? "جاري تجهيز الصورة..." : "Preparing photo...")

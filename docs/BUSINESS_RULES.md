@@ -2,6 +2,10 @@
 
 Rules below are implemented in code. If a screen disagrees with this file, trust the code and update this file. Amounts and dates are KSA (`Asia/Riyadh`) unless a job comment says the window is India time.
 
+## App speed history
+
+- One daily sample at 05:30 KSA records the same public build-info time, Auth health time, settings read, customer count, and two-day order count. History is `system_settings.app_performance_daily_v1`, one row per KSA date, kept for 90 days. The first days are `baseline` / `collecting`. After three earlier samples, a timing is `slower` only when it is both 50% above and at least 200 ms above the median of those earlier days.
+
 ## Roles and gates
 
 - `buildModuleAccess` in `app/lib/moduleAccess.js` decides every management screen. Do not hide a page only with CSS.

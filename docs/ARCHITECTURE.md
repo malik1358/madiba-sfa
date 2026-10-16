@@ -138,6 +138,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
 - `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`. Digests include per-customer **Times today** / **Total times** counts. Authorized `force` / test-`to` query params resend without claiming the daily marker.
 - `salesman-visit-plan-email`, `mobile-snapshot`
+- `app-performance` measures the public build endpoint, Auth health, a settings read, a customer count, and a two-day order count once per KSA day. Results replace that day's row in `system_settings.app_performance_daily_v1` and keep 90 days. A day is `slower` only when a timing is both 50% above and at least 200 ms above the median of earlier days, after three samples exist.
 
 ## Authentication
 

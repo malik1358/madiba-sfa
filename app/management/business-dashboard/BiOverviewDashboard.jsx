@@ -45,6 +45,7 @@ const TEXT = {
   openItem: { en: "Item growth", ar: "نمو الأصناف" },
   openContribution: { en: "Contribution %", ar: "نسبة المساهمة" },
   openSalesMix: { en: "Cash, credit, local and import sales", ar: "مبيعات النقدي والآجل والمحلي والمستورد" },
+  openReceivableDays: { en: "Net receivable days", ar: "أيام الذمم المدينة الصافية" },
   openSalesman: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   openTeams: { en: "Teams, ecom, store", ar: "الفرق والإلكترون والمتجر" },
   openOperations: { en: "Daily operations", ar: "التشغيل اليومي" },
@@ -243,6 +244,10 @@ export default function BiOverviewDashboard({
           <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--teal" view="sales-mix" section="bi-sales-mix" onOpen={onOpen} label={`${t("openReport")}: ${t("openSalesMix")}`}>
             <span>{t("openSalesMix")}</span>
             <strong>{formatOverviewKpi(Number(growthReport?.salesMix?.totals?.cash_sales_amount || 0) + Number(growthReport?.salesMix?.totals?.credit_sales_amount || 0))}</strong>
+          </DashLink>
+          <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--cyan" view="receivable-days" section="bi-receivable-days" onOpen={onOpen} label={`${t("openReport")}: ${t("openReceivableDays")}`}>
+            <span>{t("openReceivableDays")}</span>
+            <strong>YTD</strong>
           </DashLink>
           <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--navy" view="salesman-mom" section="bi-teams" onOpen={onOpen} label={`${t("openReport")}: ${t("openTeams")}`}>
             <span>{t("openTeams")}</span>

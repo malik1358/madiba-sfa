@@ -8,7 +8,8 @@
 .card { background: white; border: 1px solid #dce6e9; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 14px #0f4c5c0b; display: flex; flex-direction: column; }
 .selected { border-color: #0f766e; box-shadow: 0 0 0 2px #0f766e22; }
 .gallery { position: relative; height: 240px; background: #f3f7f8; display: flex; align-items: center; justify-content: center; }
-.gallery img { width: 100%; height: 100%; object-fit: contain; padding: 12px; }
+.gallery img { width: 100%; height: 100%; object-fit: contain; padding: 12px; animation: catalogueFade .4s ease; }
+@keyframes catalogueFade { from { opacity: .4; } to { opacity: 1; } }
 .placeholder { display: grid; justify-items: center; gap: 12px; color: #687f87; padding: 24px; text-align: center; font-size: 14px; }
 .carouselControls { position: absolute; inset-inline: 12px; bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
 .carouselControls span { background: #ffffffed; border-radius: 12px; padding: 4px 10px; font-size: 12px; }
@@ -23,6 +24,8 @@
 .priceRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: auto; }
 .originalPrice { color: #687f87; font-size: 14px; }
 .discountLabel { color: #0f766e; font-size: 12px; font-weight: 700; }
+.share { margin-top: 4px; border: 0; border-radius: 8px; background: #128C7E; color: white; min-height: 40px; padding: 8px 10px; font-weight: 700; cursor: pointer; }
+.share:disabled { opacity: .55; cursor: not-allowed; }
 .qty { display: flex; margin-top: 8px; height: 42px; gap: 6px; }
 .qty button { width: 44px; border: 1px solid #bed3d9; border-radius: 8px; background: #edf6f7; color: #0f4c5c; font-size: 22px; cursor: pointer; }
 .qty input { min-width: 0; width: 100%; text-align: center; border: 1px solid #bed3d9; border-radius: 8px; }
@@ -42,12 +45,14 @@
 .error { background: #fff0f0; color: #9b1c1c; border-radius: 8px; padding: 12px; }
 .notice { background: #fff8e7; color: #735b17; border-radius: 8px; padding: 12px; font-size: 14px; }
 .notice a { color: inherit; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .gallery img { animation: none; } }
 @media (max-width: 580px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .gallery { height: 170px; }
   .cardBody { padding: 12px; }
   .cardBody h3 { font-size: 14px; }
   .price { font-size: 17px; }
+  .share { min-height: 36px; font-size: 12px; padding: 6px; }
   .qty { height: 38px; gap: 3px; }
   .qty button { width: 32px; flex-shrink: 0; }
 }

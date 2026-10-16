@@ -26,6 +26,7 @@ import {
 import {
   deleteObject,
   ensureAttachmentBucket,
+  getObject,
   getSignedReadUrl,
   readAttachmentStorageConfig,
   SIGNED_URL_TTL_SECONDS,
@@ -283,6 +284,18 @@ export async function uploadCataloguePhoto(admin, user, rawCode, file) {
     }
     throw error;
   }
+}
+
+export async function readCataloguePhoto(admin, id) {
+  if (!isAttachmentId(id)) fail("Invalid photo ID.");
+  const photo = await getAttachmentById(admin, id);
+  if (!photo || photo.category !== ATTACHMENT_CATEGORIES.productCataloguePhoto) {
+    fail("Photo not found.", 404);
+  }
+  const ref = attachmentObjectRef(photo);
+  if (!ref) fail("Photo not found.", 404);
+  const bytes = await getObject(admin, { key: ref.key, provider: ref.provider });
+  return { bytes: Buffer.from(bytes), contentType: "image/jpeg" };
 }
 
 export async function deleteCataloguePhoto(admin, id) {

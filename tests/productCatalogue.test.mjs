@@ -9,8 +9,12 @@ import {
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
+  buildCatalogueShareLines, catalogueShareFallbackText, nextCataloguePhotoIndex, wrapShareText,
+} from "../app/lib/catalogueShareCard.js";
+import { buildCatalogueShareFiles } from "../app/lib/catalogueShareCanvas.js";
+import {
   deleteCataloguePhoto, loadCatalogueDetails as loadDetails, loadCatalogueSheetPacking,
-  prepareCataloguePhoto, requireCatalogueAccess, uploadCataloguePhoto,
+  prepareCataloguePhoto, readCataloguePhoto, requireCatalogueAccess, uploadCataloguePhoto,
 } from "../app/lib/productCatalogueServer.js";
 import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel } from "../app/lib/moduleAccess.js";
 import {
@@ -89,6 +93,12 @@ function mockAdmin(tables = {}, options = {}) {
           createSignedUrl: async (path) => ({
             data: { signedUrl: `https://example.invalid/${bucket}/${path}?signed=test` }, error: null,
           }),
+          download: async (path) => {
+            calls.push({ action: "download", bucket, path });
+            const buffer = files.get(`${bucket}/${path}`);
+            if (!buffer) return { data: null, error: { message: "not found" } };
+            return { data: new Blob([buffer]), error: null };
+          },
         };
       },
     },
@@ -102,14 +112,18 @@ function authRequest(header = "Bearer test-token") {
 
 function routeHarness(admin) {
   const source = fs.readFileSync(new URL("../app/api/product-catalogue/route.js", import.meta.url), "utf8");
+  function NextResponse(body, init) {
+    return new Response(body, init);
+  }
+  NextResponse.json = (body, options = {}) => new Response(JSON.stringify(body), {
+    ...options, headers: { ...options.headers, "Content-Type": "application/json" },
+  });
   const context = vm.createContext({
-    NextResponse: { json: (body, options) => new Response(JSON.stringify(body), {
-      ...options, headers: { ...options.headers, "Content-Type": "application/json" },
-    }) },
+    NextResponse,
     createClient: () => admin,
     process: { env: { NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321", SUPABASE_SERVICE_ROLE_KEY: "synthetic-test-key" } },
     console, URL, MAX_PRODUCT_PHOTO_BYTES,
-    deleteCataloguePhoto, loadCatalogueDetails, requireCatalogueAccess, uploadCataloguePhoto,
+    deleteCataloguePhoto, loadCatalogueDetails, readCataloguePhoto, requireCatalogueAccess, uploadCataloguePhoto,
   });
   vm.runInContext(source.replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];\s*/g, "").replace(/export /g, ""), context);
   return context;
@@ -475,6 +489,92 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.match(source, /photosReady/);
   assert.match(source, /Upload photo/);
   assert.match(source, /4 \* 60 \* 1000/);
+  assert.match(source, /CATALOGUE_CAROUSEL_MS/);
+  assert.match(source, /prefers-reduced-motion/);
+  assert.match(source, /Share on WhatsApp/);
+  assert.match(source, /buildCatalogueShareFiles/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
   assert.doesNotMatch(source, /createObjectURL|revokeObjectURL|previewPhotos/);
+});
+
+test("catalogue carousel advances and share lines put price and packing on the image", () => {
+  assert.equal(nextCataloguePhotoIndex(0, 3), 1);
+  assert.equal(nextCataloguePhotoIndex(2, 3), 0);
+  assert.equal(nextCataloguePhotoIndex(4, 1), 0);
+  const lines = buildCatalogueShareLines({
+    name: "Vinyl Gloves",
+    code: "G1",
+    packing: "100 PCS / CTN",
+    sellingUnit: "CTN",
+    priceText: "12.50 SAR",
+    originalPriceText: "15.00 SAR",
+    discountText: "Cash discount",
+    metaText: "Wholesale · Riyadh · Ex VAT",
+    language: "en",
+  });
+  assert.match(catalogueShareFallbackText(lines), /Packing: 100 PCS \/ CTN/);
+  assert.match(catalogueShareFallbackText(lines), /12\.50 SAR/);
+  assert.match(catalogueShareFallbackText(lines), /Before discount: 15\.00 SAR/);
+  const arabic = buildCatalogueShareLines({ name: "قفاز", code: "G1", language: "ar" });
+  assert.match(arabic.find((line) => line.role === "packing").text, /التعبئة: غير متوفر/);
+  const wrapped = wrapShareText("Packing: BOX ".repeat(12), 80, (value) => value.length * 8);
+  assert.ok(wrapped.length > 1);
+  assert.equal(wrapped.join(" "), "Packing: BOX ".repeat(12).trim());
+});
+
+test("share image paints packing and price onto the photo instead of a separate caption", async () => {
+  const texts = [];
+  let drewPhoto = false;
+  const context = {
+    font: "", direction: "ltr", textAlign: "left", textBaseline: "alphabetic", fillStyle: "", strokeStyle: "", lineWidth: 1,
+    measureText(text) { return { width: String(text).length * 18 }; },
+    fillRect() {},
+    fillText(text) { texts.push(text); },
+    drawImage() { drewPhoto = true; },
+    beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+  };
+  const canvas = {
+    width: 0, height: 0, dir: "ltr",
+    getContext: () => context,
+    toBlob(callback, type) { callback(new Blob(["jpeg"], { type })); },
+  };
+  const files = await buildCatalogueShareFiles({
+    photos: [{ id: "photo-1" }],
+    lines: buildCatalogueShareLines({
+      name: "Vinyl Gloves", code: "G1", packing: "100 PCS / CTN", priceText: "12.50 SAR", language: "en",
+    }),
+    loadPhoto: async () => new Blob(["photo"]),
+    fileCode: "G1",
+    document: { createElement: () => canvas },
+    decodeImage: async () => ({ width: 800, height: 600, close() {} }),
+  });
+  assert.equal(files.length, 1);
+  assert.equal(files[0].name, "G1-1.jpg");
+  assert.equal(files[0].type, "image/jpeg");
+  assert.equal(drewPhoto, true);
+  assert.ok(texts.includes("Packing: 100 PCS / CTN"));
+  assert.ok(texts.includes("12.50 SAR"));
+  assert.ok(canvas.height > 600);
+});
+
+test("catalogue photo download returns the stored JPEG to signed-in catalogue users", async () => {
+  const tables = { items_master: [{ item_code: "A123" }], attachments: [] };
+  const admin = mockAdmin(tables);
+  const png = await sharp({ create: { width: 12, height: 8, channels: 3, background: "green" } }).png().toBuffer();
+  const uploaded = await uploadCataloguePhoto(admin, { id: "user" }, "A123", new File([png], "photo.png"));
+  const photo = await readCataloguePhoto(admin, uploaded.id);
+  assert.equal((await sharp(photo.bytes).metadata()).format, "jpeg");
+  tables.profiles = [{ id: "user", role: "salesman", is_active: true }];
+  const routes = routeHarness(admin);
+  const image = await routes.GET(new Request(`http://localhost/api/product-catalogue?photoId=${uploaded.id}`, {
+    headers: { authorization: "Bearer test-token" },
+  }));
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/jpeg");
+  assert.equal(image.headers.get("cache-control"), "private, no-store");
+  assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).format, "jpeg");
+  assert.equal((await routes.GET(new Request(`http://localhost/api/product-catalogue?photoId=${uploaded.id}`))).status, 401);
+  assert.equal((await routes.GET(new Request("http://localhost/api/product-catalogue?photoId=not-an-id", {
+    headers: { authorization: "Bearer test-token" },
+  }))).status, 400);
 });

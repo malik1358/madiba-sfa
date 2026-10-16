@@ -4,6 +4,7 @@ import { MAX_PRODUCT_PHOTO_BYTES } from "../../lib/productCatalogue.js";
 import {
   deleteCataloguePhoto,
   loadCatalogueDetails,
+  readCataloguePhoto,
   requireCatalogueAccess,
   uploadCataloguePhoto,
 } from "../../lib/productCatalogueServer.js";
@@ -34,7 +35,34 @@ async function handle(request, write, operation) {
   }
 }
 
+async function sendCataloguePhoto(request, photoId) {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return json({ success: false, error: "Server configuration is incomplete." }, 500);
+    const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    await requireCatalogueAccess(admin, request, false);
+    const photo = await readCataloguePhoto(admin, photoId);
+    return new NextResponse(photo.bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": photo.contentType || "image/jpeg",
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (error) {
+    if (!error.status) console.error("Product catalogue photo download failed:", error.message);
+    return json({
+      success: false,
+      error: error.status ? error.message : "Unable to load this product photo.",
+    }, error.status || 500);
+  }
+}
+
 export function GET(request) {
+  const photoId = new URL(request.url).searchParams.get("photoId");
+  if (photoId) return sendCataloguePhoto(request, photoId);
   return handle(request, false, async (admin, access) => ({
     ...await loadCatalogueDetails(admin), canManagePhotos: access.canManagePhotos,
   }));

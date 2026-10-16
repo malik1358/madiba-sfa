@@ -1,20 +1,13 @@
-import {
-  RECEIPT_DATASET_KEY,
-  normalizeReceiptDataset,
-} from "./receiptRegister.js";
+import { OUTSTANDING_DATASET_KEY, buildOutstandingRow } from "./outstanding.js";
 import { mergeSalesSnapshots } from "./salesHistory.js";
-import { matchPaymentsFifo } from "./paymentBehavior.js";
 import { loadSalesBiCube } from "./salesBiCubeServer.js";
 import { salesMixMeasuresForRow } from "./salesMix.js";
-import {
-  forEachCustomerSalesHistory,
-  indexReceiptsByCustomer,
-} from "./outstandingReconcileServer.js";
+import { forEachCustomerSalesHistory } from "./outstandingReconcileServer.js";
 import {
   RECEIVABLE_DAYS_DATASET_KEY,
-  accumulateMonthEndReceivables,
   buildReceivableDaysReport,
-  collectReceivableMonthKeys,
+  sumTallyOutstandingRows,
+  tallyReceivablesByMonth,
 } from "./receivableDays.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
@@ -111,7 +104,9 @@ export function normalizeReceivableDaysDataset(raw) {
   return {
     builtAt: String(raw?.builtAt || ""),
     batchId: String(raw?.batchId || ""),
-    receiptUploadedAt: String(raw?.receiptUploadedAt || ""),
+    outstandingUploadedAt: String(raw?.outstandingUploadedAt || raw?.receiptUploadedAt || ""),
+    receivablesSource: String(raw?.receivablesSource || ""),
+    tallyOutstanding: Number(raw?.tallyOutstanding || 0),
     asOfDate: String(raw?.asOfDate || ""),
     creditSalesSource: String(raw?.creditSalesSource || ""),
     monthlyReceivables,
@@ -123,57 +118,45 @@ export function normalizeReceivableDaysDataset(raw) {
 
 export function receivableDaysDatasetIsFresh(dataset, {
   batchId = "",
-  receiptUploadedAt = "",
+  outstandingUploadedAt = "",
   asOfDate = "",
 } = {}) {
   if (!dataset?.builtAt) return false;
-  if (!dataset.monthlyReceivables || !Object.keys(dataset.monthlyReceivables).length) {
-    if (!dataset.monthlyCreditSales || !Object.keys(dataset.monthlyCreditSales).length) return false;
-  }
+  if (dataset.receivablesSource !== "tally_outstanding") return false;
   if (batchId && dataset.batchId && dataset.batchId !== batchId) return false;
-  if (String(dataset.receiptUploadedAt || "") !== String(receiptUploadedAt || "")) return false;
+  if (String(dataset.outstandingUploadedAt || "") !== String(outstandingUploadedAt || "")) return false;
   if (asOfDate && dataset.asOfDate && dataset.asOfDate !== asOfDate) return false;
   return true;
 }
 
+function tallyOutstandingFromDataset(dataset) {
+  const rows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row) => buildOutstandingRow(row));
+  return {
+    total: sumTallyOutstandingRows(rows),
+    uploadedAt: String(dataset?.uploadedAt || ""),
+    customerCount: rows.length,
+  };
+}
+
 export async function buildReceivableDaysDataset(admin, { asOfDate = "", trigger = "manual" } = {}) {
   const asOf = String(asOfDate || getKsaDateString()).slice(0, 10);
-  const receiptDataset = normalizeReceiptDataset(await readSettingJson(admin, RECEIPT_DATASET_KEY));
-  const receiptsByCode = indexReceiptsByCustomer(receiptDataset);
+  const outstandingDataset = await readSettingJson(admin, OUTSTANDING_DATASET_KEY);
+  const tally = tallyOutstandingFromDataset(outstandingDataset);
   const credit = await loadMonthlyCreditSales(admin);
-  const monthKeys = collectReceivableMonthKeys(credit.monthlyCreditSales, asOf);
-  const monthlyReceivables = new Map(monthKeys.map((month) => [month, 0]));
-  let scannedCount = 0;
-  let failedCount = 0;
-
-  await forEachCustomerSalesHistory(admin, async (code, salesRows) => {
-    scannedCount += 1;
-    try {
-      const transactions = mergeSalesSnapshots(salesRows);
-      const receipts = receiptsByCode.get(code) || [];
-      if (!transactions.length && !receipts.length) return;
-      const fifo = matchPaymentsFifo(transactions, receipts);
-      accumulateMonthEndReceivables(fifo, monthKeys, monthlyReceivables, asOf);
-    } catch (error) {
-      failedCount += 1;
-      console.error(`Receivable days rebuild failed for ${code}:`, error);
-    }
-  });
-
-  // Receipt-only customers (no sales history) can still clear AR via unmatched cash; skip —
-  // open AR requires invoices. No extra pass needed.
 
   return {
     builtAt: new Date().toISOString(),
     trigger: String(trigger || "manual"),
     batchId: credit.batchId || await activeSalesBatchId(admin),
-    receiptUploadedAt: String(receiptDataset?.uploadedAt || ""),
+    outstandingUploadedAt: tally.uploadedAt,
+    receivablesSource: "tally_outstanding",
+    tallyOutstanding: tally.total,
     asOfDate: asOf,
     creditSalesSource: credit.source,
-    monthlyReceivables: Object.fromEntries(monthlyReceivables),
+    monthlyReceivables: tallyReceivablesByMonth(tally.total, asOf),
     monthlyCreditSales: credit.monthlyCreditSales,
-    scannedCount,
-    failedCount,
+    scannedCount: tally.customerCount,
+    failedCount: 0,
   };
 }
 
@@ -206,16 +189,16 @@ export async function loadReceivableDaysReport(admin, {
   dateTo = "",
 } = {}) {
   const asOf = String(asOfDate || getKsaDateString()).slice(0, 10);
-  const [batchId, receiptDataset, cached] = await Promise.all([
+  const [batchId, outstandingDataset, cached] = await Promise.all([
     activeSalesBatchId(admin),
-    readSettingJson(admin, RECEIPT_DATASET_KEY).then((raw) => normalizeReceiptDataset(raw)),
+    readSettingJson(admin, OUTSTANDING_DATASET_KEY),
     readReceivableDaysDataset(admin),
   ]);
-  const receiptUploadedAt = String(receiptDataset?.uploadedAt || "");
+  const outstandingUploadedAt = String(outstandingDataset?.uploadedAt || "");
   let dataset = cached;
   let rebuilt = false;
 
-  if (!receivableDaysDatasetIsFresh(dataset, { batchId, receiptUploadedAt, asOfDate: asOf })) {
+  if (!receivableDaysDatasetIsFresh(dataset, { batchId, outstandingUploadedAt, asOfDate: asOf })) {
     dataset = await rebuildReceivableDaysDataset(admin, { asOfDate: asOf, trigger: "report-load" });
     rebuilt = true;
   }
@@ -233,7 +216,9 @@ export async function loadReceivableDaysReport(admin, {
     meta: {
       preparedAt: dataset.builtAt,
       batchId: dataset.batchId,
-      receiptUploadedAt: dataset.receiptUploadedAt,
+      outstandingUploadedAt: dataset.outstandingUploadedAt,
+      receivablesSource: dataset.receivablesSource,
+      tallyOutstanding: dataset.tallyOutstanding,
       creditSalesSource: dataset.creditSalesSource,
       scannedCount: dataset.scannedCount,
       failedCount: dataset.failedCount,

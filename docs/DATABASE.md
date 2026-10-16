@@ -176,13 +176,13 @@ Schemes and quantity limits are settings, not tables:
 | Key | Used for |
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
-| `app_performance_daily_v1` | Daily app speed samples (`checks[]` with timings, counts, and `baseline` / `collecting` / `steady` / `slower` / `error`). One row per KSA date, last 90 days. No migration. |
+| `app_performance_daily_v1` | Workday app speed samples (`checks[]` with timings, counts, and `baseline` / `collecting` / `steady` / `slower` / `error`). One row per KSA hour, last 90 days. No migration. |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
 | `receipt_register_dataset_v1` | Receipt register upload (every collection row with a date and a positive Dr/Cr amount is kept — Receipt, JV-Collection, NSTC JV reclass entries, etc. — so uploads never silently drop a collection). Dual-party day books may also retain **Purchase** rows (AP bills for settlement; not AR collections). **Payment** vouchers are imported only when the upload sets `includePaymentVouchers` (for dual customer/supplier parties; Payment Register Dr columns are accepted and stored as **negative** receipt amounts; settlement applies them to Purchases first, then leftover settles open sales like a receipt). Uploads **upsert by voucher identity** (`receipt_date` + `vch_type` + `vch_no` + customer); they do **not** wipe other receipts on the same dates. Credit notes belong in sales history, not this register — a bad import of CN **899** (`1177C`, 2026-10-01, 10,188.54) was removed from production on 2026-10-13. |
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
-| `receivable_days_monthly_v1` | Precomputed month-end credit AR (ex-VAT) and monthly credit sales for BI Net receivable days; rebuilt when active sales batch, receipt upload time, or KSA as-of date changes |
+| `receivable_days_monthly_v1` | BI Net receivable days cache: uploaded Tally outstanding total on the current month plus monthly credit sales. Rebuilt when the active sales batch, outstanding upload time, or KSA as-of date changes |
 | `performance_kpi_actuals_v1:<YYYY-MM-01>` | Per-salesman KPI actuals and historical pace for the month, rebuilt after sales uploads and saved collection visits; read by `/api/performance` to avoid rescanning source transactions on each screen load |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |

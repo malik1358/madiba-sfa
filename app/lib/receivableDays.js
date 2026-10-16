@@ -168,12 +168,19 @@ function monthInRange(monthKey, dateFrom = "", dateTo = "") {
   return true;
 }
 
+function hasUploadedReceivable(arMap, month) {
+  return Object.prototype.hasOwnProperty.call(arMap, month)
+    && arMap[month] != null
+    && arMap[month] !== "";
+}
+
 function daysForMonthRow(month, creditMap, arMap, asOf) {
-  const receivables = Math.round(toNumber(arMap[month]) * 100) / 100;
+  const hasReceivable = hasUploadedReceivable(arMap, month);
+  const receivables = hasReceivable ? Math.round(toNumber(arMap[month]) * 100) / 100 : null;
   const creditSalesMonth = Math.round(toNumber(creditMap[month]) * 100) / 100;
   const creditSalesYtd = creditSalesYtdThroughMonth(creditMap, month);
   const daysYtd = receivableYtdDays(month, asOf);
-  const daysValue = receivableDays(receivables, creditSalesYtd, daysYtd);
+  const daysValue = hasReceivable ? receivableDays(receivables, creditSalesYtd, daysYtd) : null;
   return {
     receivables,
     credit_sales: creditSalesMonth,
@@ -181,6 +188,22 @@ function daysForMonthRow(month, creditMap, arMap, asOf) {
     days: daysYtd,
     receivable_days: daysValue,
   };
+}
+
+/** Customer totals from the uploaded Tally outstanding file. */
+export function sumTallyOutstandingRows(rows = []) {
+  const total = (Array.isArray(rows) ? rows : []).reduce(
+    (sum, row) => sum + toNumber(row?.total_outstanding),
+    0,
+  );
+  return Math.round(total * 100) / 100;
+}
+
+/** The uploaded outstanding file is one balance. It belongs on the as-of month only. */
+export function tallyReceivablesByMonth(total, asOfDate = "") {
+  const asOf = salesDateKey(asOfDate);
+  if (!asOf) return {};
+  return { [asOf.slice(0, 7)]: Math.round(toNumber(total) * 100) / 100 };
 }
 
 /**
@@ -229,11 +252,11 @@ export function buildReceivableDaysReport({
   });
 
   const latestComplete = [...rows].reverse().find((row) => !row.is_current && row.receivable_days != null) || null;
+  const tallyRow = [...rows].reverse().find((row) => row.receivables != null) || null;
   const totals = rows.reduce((acc, row) => {
-    acc.receivables += toNumber(row.receivables);
     acc.credit_sales += toNumber(row.credit_sales);
     return acc;
-  }, { receivables: 0, credit_sales: 0 });
+  }, { receivables: tallyRow ? toNumber(tallyRow.receivables) : 0, credit_sales: 0 });
   totals.receivables = Math.round(totals.receivables * 100) / 100;
   totals.credit_sales = Math.round(totals.credit_sales * 100) / 100;
   const lastRow = rows.at(-1) || null;
@@ -250,7 +273,8 @@ export function buildReceivableDaysReport({
     asOfDate: asOf,
     dateFrom: salesDateKey(dateFrom),
     dateTo: salesDateKey(dateTo),
-    formula: "(month_end_receivables / credit_sales_ytd) × days_ytd",
+    formula: "(tally_outstanding / credit_sales_ytd) × days_ytd",
+    receivablesSource: "tally_outstanding",
   };
 }
 

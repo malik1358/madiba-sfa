@@ -1,7 +1,10 @@
-import { getKsaDateString } from "./workdayActivity.js";
+import { sendEmail } from "./mailer.js";
+import { getKsaDateString, getKsaDateTimeParts } from "./workdayActivity.js";
 
 export const APP_PERFORMANCE_SETTING_KEY = "app_performance_daily_v1";
 export const APP_PERFORMANCE_HISTORY_DAYS = 90;
+export const APP_PERFORMANCE_EMAIL_TO = "malik@pinasz.com";
+export const APP_PERFORMANCE_SLOTS_PER_DAY = 4;
 export const APP_PERFORMANCE_SPEED_KEYS = [
   "external_build_info_ms",
   "build_info_ms",
@@ -34,14 +37,63 @@ export function parsePerformanceHistory(raw) {
   }
 }
 
-export function withDailyCheck(stored, check, limit = APP_PERFORMANCE_HISTORY_DAYS) {
+export function performanceSlot(date, checkedAt) {
+  const hour = getKsaDateTimeParts(new Date(checkedAt)).hour;
+  return `${date}T${String(hour).padStart(2, "0")}`;
+}
+
+export function withDailyCheck(stored, check, limit = APP_PERFORMANCE_HISTORY_DAYS * APP_PERFORMANCE_SLOTS_PER_DAY) {
   const checks = (Array.isArray(stored?.checks) ? stored.checks : [])
-    .filter((row) => row?.date && row.date !== check.date);
+    .filter((row) => !(check.slot && row?.slot === check.slot));
   checks.push(check);
-  checks.sort((left, right) => String(left.date).localeCompare(String(right.date)));
+  checks.sort((left, right) => String(left.checkedAt || left.slot || left.date).localeCompare(String(right.checkedAt || right.slot || right.date)));
   return {
     version: 1,
-    checks: checks.slice(-Math.max(1, Number(limit) || APP_PERFORMANCE_HISTORY_DAYS)),
+    checks: checks.slice(-Math.max(1, Number(limit) || (APP_PERFORMANCE_HISTORY_DAYS * APP_PERFORMANCE_SLOTS_PER_DAY))),
+  };
+}
+
+const METRIC_LABELS = {
+  external_build_info_ms: "Public app, from outside",
+  build_info_ms: "Public app, from the server",
+  auth_health_ms: "Sign-in service",
+  db_ping_ms: "Database read",
+  customers_count_ms: "Customer count",
+  recent_orders_ms: "Recent orders",
+};
+
+export function shouldEmailPerformanceCheck(check, previousSlot) {
+  if (check?.status !== "slower" && check?.status !== "error") return false;
+  return !previousSlot?.emailedAt;
+}
+
+export function buildPerformanceEmail(check, to = APP_PERFORMANCE_EMAIL_TO) {
+  const when = check.checkedAt || check.slot || check.date;
+  const slowerLines = (check.slower || []).map((key) => {
+    const label = METRIC_LABELS[key] || key;
+    const value = check.metrics?.[key];
+    return `${label}: ${value} ms`;
+  });
+  const errorLines = Object.entries(check.errors || {}).map(([key, message]) => `${key}: ${message}`);
+  const detail = check.status === "error"
+    ? errorLines.join("\n")
+    : slowerLines.join("\n");
+  const subject = check.status === "error"
+    ? "MADIBA app performance check failed"
+    : "MADIBA app is slower";
+  const text = [
+    subject,
+    `Checked at ${when} (KSA date ${check.date}).`,
+    detail,
+    check.status === "slower"
+      ? "This run is both 50% and at least 200 ms above the median of earlier samples."
+      : "",
+  ].filter(Boolean).join("\n");
+  return {
+    to,
+    subject,
+    text,
+    html: `<p>${subject}</p><p>Checked at ${when} (KSA date ${check.date}).</p><pre>${detail}</pre>`,
   };
 }
 
@@ -205,7 +257,9 @@ export async function runAppPerformanceCheck(admin, options = {}) {
   if (readError) throw new Error(readError.message || "Unable to read performance history");
 
   const history = parsePerformanceHistory(data?.setting_value);
-  const priorChecks = history.checks.filter((row) => row?.date !== date);
+  const slot = performanceSlot(date, now.toISOString());
+  const previousSlot = history.checks.find((row) => row?.slot === slot);
+  const priorChecks = history.checks.filter((row) => row?.slot !== slot);
   const check = buildDailyPerformanceRecord({
     date,
     checkedAt: now.toISOString(),
@@ -217,6 +271,17 @@ export async function runAppPerformanceCheck(admin, options = {}) {
     errors,
     priorChecks,
   });
+  check.slot = slot;
+
+  const emailTo = options.emailTo || process.env.APP_PERFORMANCE_EMAIL_TO || APP_PERFORMANCE_EMAIL_TO;
+  let emailed = false;
+  if (shouldEmailPerformanceCheck(check, previousSlot)) {
+    const send = options.sendEmail || sendEmail;
+    await send(buildPerformanceEmail(check, emailTo));
+    check.emailedAt = now.toISOString();
+    emailed = true;
+  }
+
   const next = withDailyCheck(history, check);
   const { error: saveError } = await admin.from("system_settings").upsert({
     setting_key: APP_PERFORMANCE_SETTING_KEY,
@@ -225,5 +290,5 @@ export async function runAppPerformanceCheck(admin, options = {}) {
   }, { onConflict: "setting_key" });
   if (saveError) throw new Error(saveError.message || "Unable to store performance history");
 
-  return { ...check, historyDays: next.checks.length };
+  return { ...check, historyDays: next.checks.length, emailed };
 }

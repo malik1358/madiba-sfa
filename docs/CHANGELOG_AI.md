@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-16** — Salesman Incentive lets reporting-chain team heads (e.g. Soyeb) see their team's figures using the same sales-scope members as My Performance. Solo salesmen still see only themselves; admin/manager/invoice-maker stay company-wide. No migration.
 - **2026-10-16** — Product Catalogue **Export** no longer translates each product on its own. Known packing words stay on the glossary, each other English word is translated once, and up to four share photos are drawn at the same time. No migration.
 - **2026-10-16** — Product Catalogue **Export** builds the same per-item share photo for every product matching the current filters, and asks whether to draw the ex-VAT price. The photos share together, or download as one zip when the share sheet cannot take them. No migration.
 - **2026-10-16** — Catalogue WhatsApp photos translate every English word in the item name, packing, and selling unit (CTN, PACK, PC, GM, and the product words). Item codes and amounts stay numeric. No separate WhatsApp caption. No migration.

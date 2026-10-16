@@ -144,17 +144,17 @@ export async function buildCatalogueShareFiles({
 } = {}) {
   const selected = (photos || []).slice(0, limit);
   const jobs = selected.length ? selected : [null];
-  const files = [];
-  for (let index = 0; index < jobs.length; index += 1) {
-    let photoBlob = null;
-    if (jobs[index] && loadPhoto) {
-      try {
-        photoBlob = await loadPhoto(jobs[index]);
-      } catch {
-        photoBlob = null;
-      }
+  const photoBlobs = await Promise.all(jobs.map(async (photo) => {
+    if (!photo || !loadPhoto) return null;
+    try {
+      return await loadPhoto(photo);
+    } catch {
+      return null;
     }
-    const blob = await renderCatalogueShareJpeg({ photoBlob, lines, document, decodeImage });
+  }));
+  const files = [];
+  for (let index = 0; index < photoBlobs.length; index += 1) {
+    const blob = await renderCatalogueShareJpeg({ photoBlob: photoBlobs[index], lines, document, decodeImage });
     files.push(new File([blob], catalogueShareFileName(fileCode, index), { type: "image/jpeg" }));
   }
   return files;

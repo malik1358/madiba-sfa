@@ -114,6 +114,24 @@ export function catalogueGlossaryArabic(text) {
   return expandCatalogueShareWords(text).replace(/[A-Za-z]+/g, (word) => CATALOGUE_WORD_AR[word.toLowerCase()] || word);
 }
 
+export function catalogueShareUnknownWords(texts) {
+  const words = new Set();
+  for (const text of texts || []) {
+    for (const word of catalogueShareLatinWords(expandCatalogueShareWords(text))) {
+      if (!CATALOGUE_WORD_AR[word.toLowerCase()]) words.add(word.toUpperCase());
+    }
+  }
+  return [...words];
+}
+
+export function catalogueShareTextFromDictionary(text, dictionary = new Map()) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  return expandCatalogueShareWords(source).replace(/\s+/g, " ").trim().replace(/[A-Za-z]+/g, (word) => (
+    dictionary.get(word.toUpperCase()) || CATALOGUE_WORD_AR[word.toLowerCase()] || word
+  )).replace(/\s+/g, " ").trim();
+}
+
 export async function translateCatalogueShareText(text, translate) {
   const source = String(text || "").trim();
   if (!source) return "";
@@ -172,6 +190,7 @@ export function buildCatalogueShareLines({
   nameArabic = "",
   packingArabic = "",
   unitArabic = "",
+  includePrice = true,
 } = {}) {
   const packingValue = String(packing || "").trim() || "Not available";
   const translatedPacking = String(packingArabic || "").trim()
@@ -188,22 +207,24 @@ export function buildCatalogueShareLines({
     ...bilingual("packing", `Packing: ${packingValue}`, `التعبئة: ${translatedPacking}`),
   ];
   if (unit) lines.push(...bilingual("unit", `Selling unit: ${unit}`, `وحدة البيع: ${translatedUnit}`));
-  const price = String(priceAmount || "").trim();
-  if (price) lines.push(...bilingual("price", `${price} SAR`, `${price} ر.س`));
-  else lines.push(...bilingual("price", "Price unavailable", "السعر غير متوفر"));
-  const previous = String(originalAmount || "").trim();
-  if (previous) lines.push(...bilingual("was", `Before discount: ${previous} SAR`, `قبل الخصم: ${previous} ر.س`));
-  const discountEnglish = [
-    cashDiscount && "Cash discount",
-    valueDiscount && "Volume discount",
-    schemeDiscount && "Scheme",
-  ].filter(Boolean).join(" + ");
-  const discountArabic = [
-    cashDiscount && "خصم نقدي",
-    valueDiscount && "خصم الكمية",
-    schemeDiscount && "عرض",
-  ].filter(Boolean).join(" + ");
-  if (discountEnglish) lines.push(...bilingual("discount", discountEnglish, discountArabic));
+  if (includePrice) {
+    const price = String(priceAmount || "").trim();
+    if (price) lines.push(...bilingual("price", `${price} SAR`, `${price} ر.س`));
+    else lines.push(...bilingual("price", "Price unavailable", "السعر غير متوفر"));
+    const previous = String(originalAmount || "").trim();
+    if (previous) lines.push(...bilingual("was", `Before discount: ${previous} SAR`, `قبل الخصم: ${previous} ر.س`));
+    const discountEnglish = [
+      cashDiscount && "Cash discount",
+      valueDiscount && "Volume discount",
+      schemeDiscount && "Scheme",
+    ].filter(Boolean).join(" + ");
+    const discountArabic = [
+      cashDiscount && "خصم نقدي",
+      valueDiscount && "خصم الكمية",
+      schemeDiscount && "عرض",
+    ].filter(Boolean).join(" + ");
+    if (discountEnglish) lines.push(...bilingual("discount", discountEnglish, discountArabic));
+  }
   const city = REGION_LABELS[String(region || "").trim().toLowerCase()] || REGION_LABELS.riyadh;
   const wholesale = pricingType === "retail" ? ["Retail", "التجزئة"] : ["Wholesale", "الجملة"];
   lines.push(...bilingual("meta", `${wholesale[0]} · ${city[0]} · Ex VAT`, `${wholesale[1]} · ${city[1]} · قبل الضريبة`));

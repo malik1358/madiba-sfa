@@ -15,6 +15,7 @@ import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import CustomerCohortReport from "./CustomerCohortReport";
 import SalesMixReport from "./SalesMixReport";
+import ReceivableDaysReport from "./ReceivableDaysReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import {
   applyBiReportPeriod,
@@ -37,6 +38,7 @@ const TEXT = {
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
   overview: { en: "Dashboard", ar: "اللوحة" },
   salesMix: { en: "Sales mix", ar: "مزيج المبيعات" },
+  receivableDays: { en: "Receivable days", ar: "أيام الذمم" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
   madiba: { en: "MADIBA brand", ar: "علامة مديبا" },
   madibaCategories: { en: "Categories", ar: "الفئات" },
@@ -123,6 +125,8 @@ export default function BusinessDashboardPage() {
   const [salesmanApplied, setSalesmanApplied] = useState(() => emptySalesmanMomFilters());
   const [salesmanSearch, setSalesmanSearch] = useState("");
   const [salesmanStatusFilter, setSalesmanStatusFilter] = useState([]);
+  const [receivableLoading, setReceivableLoading] = useState(false);
+  const [receivableReport, setReceivableReport] = useState(null);
   const [amountMeasure, setAmountMeasure] = useState("sales");
   const [reportPeriod, setReportPeriod] = useState(DEFAULT_BI_REPORT_PERIOD);
   const [customPeriodFrom, setCustomPeriodFrom] = useState("");
@@ -134,6 +138,7 @@ export default function BusinessDashboardPage() {
   const itemCacheKeyRef = useRef("");
   const salesmanCacheKeyRef = useRef("");
   const salesMixPeriodKeyRef = useRef("");
+  const receivablePeriodKeyRef = useRef("");
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
       dateFrom: customPeriodFrom,
@@ -173,12 +178,13 @@ export default function BusinessDashboardPage() {
     if (view === "item-growth" && itemLoading) return;
     if (view === "salesman-mom" && salesmanLoading) return;
     if (view === "sales-mix" && growthLoading) return;
+    if (view === "receivable-days" && receivableLoading) return;
     if (view === "operations" && loading) return;
     const node = document.getElementById(reportFocus);
     if (!node) return;
     node.scrollIntoView({ behavior: "smooth", block: "start" });
     setReportFocus("");
-  }, [reportFocus, view, growthLoading, customerLoading, itemLoading, salesmanLoading, loading]);
+  }, [reportFocus, view, growthLoading, customerLoading, itemLoading, salesmanLoading, receivableLoading, loading]);
 
   useEffect(() => {
     if (reportPeriod === "custom" && (!periodRange.dateFrom || !periodRange.dateTo)) return;
@@ -725,6 +731,89 @@ export default function BusinessDashboardPage() {
     };
   }, [view, salesmanApplied]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const stopSafetyTimer = startReportSafetyTimer(() => {
+      if (cancelled) return;
+      setReceivableLoading(false);
+      setError((current) => current || "Receivable days timed out. Please refresh.");
+    });
+
+    async function loadReceivableDays() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        stopSafetyTimer();
+        setReceivableLoading(false);
+        return;
+      }
+
+      const periodKey = `${periodRange.dateFrom || ""}|${periodRange.dateTo || ""}`;
+      if (receivablePeriodKeyRef.current === periodKey) {
+        stopSafetyTimer();
+        setReceivableLoading(false);
+        return;
+      }
+
+      setReceivableLoading(true);
+      setError("");
+
+      try {
+        const session = await resolveAuthSession(supabase, 12000);
+        if (cancelled) return;
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/receivable-days",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              dateFrom: periodRange.dateFrom || "",
+              dateTo: periodRange.dateTo || "",
+            }),
+          },
+          280000,
+        );
+
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load receivable days.");
+        }
+
+        setReceivableReport(payload);
+        receivablePeriodKeyRef.current = periodKey;
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || "Unable to load receivable days.");
+        setReceivableReport(null);
+        receivablePeriodKeyRef.current = "";
+      } finally {
+        stopSafetyTimer();
+        if (!cancelled) setReceivableLoading(false);
+      }
+    }
+
+    if (view !== "receivable-days") {
+      stopSafetyTimer();
+      setReceivableLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
+    loadReceivableDays();
+
+    return () => {
+      cancelled = true;
+      stopSafetyTimer();
+    };
+  }, [view, periodRange]);
+
   const redAlerts = useMemo(
     () => (dashboard?.alerts || []).filter((row) => row.severity === "red"),
     [dashboard],
@@ -788,6 +877,15 @@ export default function BusinessDashboardPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={view === "receivable-days"}
+                className={`moduleBiTab${view === "receivable-days" ? " isActive" : ""}`}
+                onClick={() => setView("receivable-days")}
+              >
+                {t("receivableDays")}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={view === "category-growth"}
                 className={`moduleBiTab${view === "category-growth" ? " isActive" : ""}`}
                 onClick={() => setView("category-growth")}
@@ -836,7 +934,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "overview" || view === "sales-mix" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "sales-mix" || view === "receivable-days" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
@@ -877,7 +975,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
                 {periodRangeLabel ? <em className="moduleBiPeriodRange">{periodRangeLabel}</em> : null}
-                {view !== "sales-mix" ? (
+                {view !== "sales-mix" && view !== "receivable-days" ? (
                   <>
                     <span>{t("measure")}</span>
                     <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
@@ -899,7 +997,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
               </div>
-              {view !== "sales-mix" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
+              {view !== "sales-mix" && view !== "receivable-days" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
             </section>
           ) : null}
 
@@ -957,6 +1055,14 @@ export default function BusinessDashboardPage() {
               loading={growthLoading}
               report={growthReport?.salesMix}
               currentMonth={growthReport?.currentMonth}
+            />
+          ) : null}
+
+          {view === "receivable-days" ? (
+            <ReceivableDaysReport
+              language={language}
+              loading={receivableLoading}
+              report={receivableReport}
             />
           ) : null}
 

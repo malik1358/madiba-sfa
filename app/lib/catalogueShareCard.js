@@ -14,40 +14,61 @@ export function catalogueShareFileName(code, index) {
   return `${safe}-${position + 1}.jpg`;
 }
 
+const REGION_LABELS = {
+  riyadh: ["Riyadh", "الرياض"],
+  dammam: ["Dammam", "الدمام"],
+  jeddah: ["Jeddah", "جدة"],
+};
+
+function bilingual(role, english, arabic) {
+  return [
+    { role, text: String(english || "").trim(), dir: "ltr" },
+    { role, text: String(arabic || "").trim(), dir: "rtl" },
+  ].filter((line) => line.text);
+}
+
 export function buildCatalogueShareLines({
   name = "",
   code = "",
   packing = "",
   sellingUnit = "",
-  priceText = "",
-  originalPriceText = "",
-  discountText = "",
-  metaText = "",
-  language = "en",
+  priceAmount = "",
+  originalAmount = "",
+  cashDiscount = false,
+  valueDiscount = false,
+  schemeDiscount = false,
+  pricingType = "wholesale",
+  region = "riyadh",
 } = {}) {
-  const ar = language === "ar";
+  const packingValue = String(packing || "").trim() || "Not available";
+  const packingArabic = String(packing || "").trim() || "غير متوفر";
   const lines = [
-    { role: "name", text: String(name || "").trim() },
-    { role: "code", text: String(code || "").trim() },
-    {
-      role: "packing",
-      text: `${ar ? "التعبئة" : "Packing"}: ${String(packing || "").trim() || (ar ? "غير متوفر" : "Not available")}`,
-    },
+    { role: "name", text: String(name || "").trim(), dir: "ltr" },
+    { role: "code", text: String(code || "").trim(), dir: "ltr" },
+    ...bilingual("packing", `Packing: ${packingValue}`, `التعبئة: ${packingArabic}`),
   ];
-  if (String(sellingUnit || "").trim()) {
-    lines.push({ role: "unit", text: `${ar ? "وحدة البيع" : "Selling unit"}: ${String(sellingUnit).trim()}` });
-  }
-  if (String(priceText || "").trim()) lines.push({ role: "price", text: String(priceText).trim() });
-  if (String(originalPriceText || "").trim()) {
-    lines.push({ role: "was", text: `${ar ? "قبل الخصم" : "Before discount"}: ${String(originalPriceText).trim()}` });
-  }
-  if (String(discountText || "").trim()) lines.push({ role: "discount", text: String(discountText).trim() });
-  if (String(metaText || "").trim()) lines.push({ role: "meta", text: String(metaText).trim() });
+  const unit = String(sellingUnit || "").trim();
+  if (unit) lines.push(...bilingual("unit", `Selling unit: ${unit}`, `وحدة البيع: ${unit}`));
+  const price = String(priceAmount || "").trim();
+  if (price) lines.push(...bilingual("price", `${price} SAR`, `${price} ر.س`));
+  else lines.push(...bilingual("price", "Price unavailable", "السعر غير متوفر"));
+  const previous = String(originalAmount || "").trim();
+  if (previous) lines.push(...bilingual("was", `Before discount: ${previous} SAR`, `قبل الخصم: ${previous} ر.س`));
+  const discountEnglish = [
+    cashDiscount && "Cash discount",
+    valueDiscount && "Volume discount",
+    schemeDiscount && "Scheme",
+  ].filter(Boolean).join(" + ");
+  const discountArabic = [
+    cashDiscount && "خصم نقدي",
+    valueDiscount && "خصم الكمية",
+    schemeDiscount && "عرض",
+  ].filter(Boolean).join(" + ");
+  if (discountEnglish) lines.push(...bilingual("discount", discountEnglish, discountArabic));
+  const city = REGION_LABELS[String(region || "").trim().toLowerCase()] || REGION_LABELS.riyadh;
+  const wholesale = pricingType === "retail" ? ["Retail", "التجزئة"] : ["Wholesale", "الجملة"];
+  lines.push(...bilingual("meta", `${wholesale[0]} · ${city[0]} · Ex VAT`, `${wholesale[1]} · ${city[1]} · قبل الضريبة`));
   return lines.filter((line) => line.text);
-}
-
-export function catalogueShareFallbackText(lines = []) {
-  return lines.map((line) => String(line?.text || "").trim()).filter(Boolean).join("\n");
 }
 
 export function wrapShareText(text, maxWidth, measure) {

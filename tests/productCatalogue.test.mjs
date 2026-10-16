@@ -9,7 +9,7 @@ import {
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
-  buildCatalogueShareLines, catalogueShareFallbackText, nextCataloguePhotoIndex, wrapShareText,
+  buildCatalogueShareLines, nextCataloguePhotoIndex, wrapShareText,
 } from "../app/lib/catalogueShareCard.js";
 import { buildCatalogueShareFiles } from "../app/lib/catalogueShareCanvas.js";
 import {
@@ -493,6 +493,8 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.match(source, /prefers-reduced-motion/);
   assert.match(source, /Share on WhatsApp/);
   assert.match(source, /buildCatalogueShareFiles/);
+  assert.doesNotMatch(source, /whatsappText/);
+  assert.doesNotMatch(source, /shareTextOnWhatsapp/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
   assert.doesNotMatch(source, /createObjectURL|revokeObjectURL|previewPhotos/);
 });
@@ -506,17 +508,22 @@ test("catalogue carousel advances and share lines put price and packing on the i
     code: "G1",
     packing: "100 PCS / CTN",
     sellingUnit: "CTN",
-    priceText: "12.50 SAR",
-    originalPriceText: "15.00 SAR",
-    discountText: "Cash discount",
-    metaText: "Wholesale · Riyadh · Ex VAT",
-    language: "en",
+    priceAmount: "12.50",
+    originalAmount: "15.00",
+    cashDiscount: true,
+    pricingType: "wholesale",
+    region: "riyadh",
   });
-  assert.match(catalogueShareFallbackText(lines), /Packing: 100 PCS \/ CTN/);
-  assert.match(catalogueShareFallbackText(lines), /12\.50 SAR/);
-  assert.match(catalogueShareFallbackText(lines), /Before discount: 15\.00 SAR/);
-  const arabic = buildCatalogueShareLines({ name: "قفاز", code: "G1", language: "ar" });
-  assert.match(arabic.find((line) => line.role === "packing").text, /التعبئة: غير متوفر/);
+  const text = lines.map((line) => line.text).join("\n");
+  assert.match(text, /Packing: 100 PCS \/ CTN/);
+  assert.match(text, /التعبئة: 100 PCS \/ CTN/);
+  assert.match(text, /12\.50 SAR/);
+  assert.match(text, /12\.50 ر\.س/);
+  assert.match(text, /Before discount: 15\.00 SAR/);
+  assert.match(text, /قبل الخصم: 15\.00 ر\.س/);
+  assert.match(text, /Wholesale · Riyadh · Ex VAT/);
+  assert.match(text, /الجملة · الرياض · قبل الضريبة/);
+  assert.equal(lines.filter((line) => line.dir === "rtl").length > 0, true);
   const wrapped = wrapShareText("Packing: BOX ".repeat(12), 80, (value) => value.length * 8);
   assert.ok(wrapped.length > 1);
   assert.equal(wrapped.join(" "), "Packing: BOX ".repeat(12).trim());
@@ -541,7 +548,7 @@ test("share image paints packing and price onto the photo instead of a separate 
   const files = await buildCatalogueShareFiles({
     photos: [{ id: "photo-1" }],
     lines: buildCatalogueShareLines({
-      name: "Vinyl Gloves", code: "G1", packing: "100 PCS / CTN", priceText: "12.50 SAR", language: "en",
+      name: "Vinyl Gloves", code: "G1", packing: "100 PCS / CTN", priceAmount: "12.50", region: "dammam",
     }),
     loadPhoto: async () => new Blob(["photo"]),
     fileCode: "G1",
@@ -553,7 +560,11 @@ test("share image paints packing and price onto the photo instead of a separate 
   assert.equal(files[0].type, "image/jpeg");
   assert.equal(drewPhoto, true);
   assert.ok(texts.includes("Packing: 100 PCS / CTN"));
+  assert.ok(texts.includes("التعبئة: 100 PCS / CTN"));
   assert.ok(texts.includes("12.50 SAR"));
+  assert.ok(texts.includes("12.50 ر.س"));
+  assert.ok(texts.includes("Wholesale · Dammam · Ex VAT"));
+  assert.ok(texts.includes("الجملة · الدمام · قبل الضريبة"));
   assert.ok(canvas.height > 600);
 });
 

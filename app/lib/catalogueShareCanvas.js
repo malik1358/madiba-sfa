@@ -60,7 +60,6 @@ function canvasBlob(canvas) {
 export async function renderCatalogueShareJpeg({
   photoBlob = null,
   lines = [],
-  rtl = false,
   document: doc = globalThis.document,
   decodeImage = defaultDecode,
 } = {}) {
@@ -82,17 +81,14 @@ export async function renderCatalogueShareJpeg({
   for (const line of lines) {
     measure.font = fontFor(line.role);
     const parts = limitWrapped(wrapShareText(line.text, maxText, (value) => measure.measureText(value).width));
-    parts.forEach((text) => wrapped.push({ role: line.role, text, size: ROLE_SIZE[line.role] || 28 }));
+    parts.forEach((text) => wrapped.push({ role: line.role, text, size: ROLE_SIZE[line.role] || 28, dir: line.dir }));
   }
   const footerHeight = 36 + wrapped.reduce((sum, line) => sum + line.size + 14, 16);
   const canvas = doc.createElement("canvas");
   canvas.width = CARD_WIDTH;
   canvas.height = photoHeight + footerHeight;
-  canvas.dir = rtl ? "rtl" : "ltr";
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to prepare the share image.");
-  context.direction = rtl ? "rtl" : "ltr";
-  context.textAlign = rtl ? "right" : "left";
   context.textBaseline = "alphabetic";
   context.fillStyle = "#f3f7f8";
   context.fillRect(0, 0, CARD_WIDTH, photoHeight);
@@ -104,15 +100,20 @@ export async function renderCatalogueShareJpeg({
     context.fillStyle = "#687f87";
     context.font = `600 36px ${FONT_FAMILY}`;
     context.textAlign = "center";
-    context.fillText(rtl ? "لا توجد صورة" : "No photo", CARD_WIDTH / 2, photoHeight / 2);
-    context.textAlign = rtl ? "right" : "left";
+    context.direction = "ltr";
+    context.fillText("No photo", CARD_WIDTH / 2, photoHeight / 2 - 16);
+    context.direction = "rtl";
+    context.fillText("لا توجد صورة", CARD_WIDTH / 2, photoHeight / 2 + 28);
   }
   context.fillStyle = "#0f4c5c";
   context.fillRect(0, photoHeight, CARD_WIDTH, footerHeight);
   let y = photoHeight + 36;
-  const x = rtl ? CARD_WIDTH - SIDE_PAD : SIDE_PAD;
   for (const line of wrapped) {
+    const lineRtl = line.dir === "rtl";
+    const x = lineRtl ? CARD_WIDTH - SIDE_PAD : SIDE_PAD;
     y += line.size;
+    context.direction = lineRtl ? "rtl" : "ltr";
+    context.textAlign = lineRtl ? "right" : "left";
     context.font = `${line.role === "name" || line.role === "price" ? 700 : 500} ${line.size}px ${FONT_FAMILY}`;
     context.fillStyle = line.role === "price" ? "#fff4c2" : "#ffffff";
     context.fillText(line.text, x, y);
@@ -123,7 +124,7 @@ export async function renderCatalogueShareJpeg({
       context.beginPath();
       const lineY = y - line.size * 0.32;
       context.moveTo(x, lineY);
-      context.lineTo(x + (rtl ? -textWidth : textWidth), lineY);
+      context.lineTo(x + (lineRtl ? -textWidth : textWidth), lineY);
       context.stroke();
     }
     y += 14;
@@ -135,7 +136,6 @@ export async function renderCatalogueShareJpeg({
 export async function buildCatalogueShareFiles({
   photos = [],
   lines = [],
-  rtl = false,
   loadPhoto,
   fileCode = "item",
   limit = 8,
@@ -154,7 +154,7 @@ export async function buildCatalogueShareFiles({
         photoBlob = null;
       }
     }
-    const blob = await renderCatalogueShareJpeg({ photoBlob, lines, rtl, document, decodeImage });
+    const blob = await renderCatalogueShareJpeg({ photoBlob, lines, document, decodeImage });
     files.push(new File([blob], catalogueShareFileName(fileCode, index), { type: "image/jpeg" }));
   }
   return files;

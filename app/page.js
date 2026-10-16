@@ -17,6 +17,8 @@ import { isAtHomeLocation } from "./lib/homeLocation";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
+import { postSinglePlatformSession } from "./lib/authSessionLimit";
+import { isNativeAndroidPlatform } from "./lib/nativeFieldTracking";
 import { useModuleAccess } from "./hooks/useModuleAccess";
 
 export default function Home() {
@@ -277,11 +279,23 @@ export default function Home() {
         }
       }
       setUser(data.user);
+      const sessionLimit = await postSinglePlatformSession({
+        accessToken: data.session?.access_token,
+        platform: (await isNativeAndroidPlatform()) ? "android" : "web",
+      }).catch(() => ({ revoked: 0 }));
+      const signedOutOthers = Number(sessionLimit?.revoked || 0) > 0;
       showPopup({
         title: ar ? "تم تسجيل الدخول" : "Signed in",
-        message: ar
-          ? `مرحباً ${profileData?.salesman_name || data.user.email || ""}`.trim()
-          : `Welcome, ${profileData?.salesman_name || data.user.email || "back"}!`,
+        message: [
+          ar
+            ? `مرحباً ${profileData?.salesman_name || data.user.email || ""}`.trim()
+            : `Welcome, ${profileData?.salesman_name || data.user.email || "back"}!`,
+          signedOutOthers
+            ? (ar
+              ? "تم إنهاء تسجيلات الدخول الأخرى على نفس نوع الجهاز."
+              : "Other sign-ins on this same platform were signed out.")
+            : "",
+        ].filter(Boolean).join(" "),
         variant: "success",
       });
     }

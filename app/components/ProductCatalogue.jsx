@@ -3,11 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppPopup } from "./AppPopupProvider";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
+import { buildCatalogueShareFiles } from "../lib/catalogueShareCanvas";
+import {
+  buildCatalogueShareLines, catalogueShareFallbackText, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex,
+} from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
   catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
+import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
@@ -15,12 +20,49 @@ const PAGE_SIZE = 24;
 function PhotoCarousel({ photos, name, language, onRemove, busy }) {
   const [index, setIndex] = useState(0);
   const [failedUrl, setFailedUrl] = useState("");
+  const [paused, setPaused] = useState(false);
+  const [inView, setInView] = useState(true);
+  const [timerGeneration, setTimerGeneration] = useState(0);
+  const frameRef = useRef(null);
+  const photoKey = photos.map((photo) => photo.id).join("|");
   const current = photos[index % Math.max(photos.length, 1)];
   const ar = language === "ar";
+
+  useEffect(() => {
+    setIndex((value) => (photos.length ? value % photos.length : 0));
+  }, [photoKey, photos.length]);
+
+  useEffect(() => {
+    const node = frameRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return undefined;
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.35 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (photos.length < 2 || paused || !inView) return undefined;
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return undefined;
+    const timer = window.setInterval(() => {
+      setIndex((value) => nextCataloguePhotoIndex(value, photos.length));
+    }, CATALOGUE_CAROUSEL_MS);
+    return () => window.clearInterval(timer);
+  }, [photos.length, paused, inView, timerGeneration]);
+
   return (
-    <div className={styles.gallery} aria-label={`${ar ? "صور" : "Photos"}: ${name}`}>
+    <div
+      ref={frameRef}
+      className={styles.gallery}
+      aria-label={`${ar ? "صور" : "Photos"}: ${name}`}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
+      }}
+    >
       {current && failedUrl !== current.url ? (
-        <img src={current.url} alt={name} loading="lazy" onError={() => setFailedUrl(current.url)} />
+        <img key={current.url} src={current.url} alt={name} loading="lazy" onError={() => setFailedUrl(current.url)} />
       ) : (
         <div className={styles.placeholder}>
           <svg width="52" height="52" viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -33,9 +75,9 @@ function PhotoCarousel({ photos, name, language, onRemove, busy }) {
       )}
       {photos.length > 1 && (
         <div className={styles.carouselControls}>
-          <button type="button" aria-label={ar ? "الصورة السابقة" : "Previous photo"} onClick={() => setIndex((value) => (value - 1 + photos.length) % photos.length)}>&lt;</button>
-          <span aria-live="polite">{index % photos.length + 1} / {photos.length}</span>
-          <button type="button" aria-label={ar ? "الصورة التالية" : "Next photo"} onClick={() => setIndex((value) => (value + 1) % photos.length)}>&gt;</button>
+          <button type="button" aria-label={ar ? "الصورة السابقة" : "Previous photo"} onClick={() => { setTimerGeneration((value) => value + 1); setIndex((value) => (value - 1 + photos.length) % photos.length); }}>&lt;</button>
+          <span>{index % photos.length + 1} / {photos.length}</span>
+          <button type="button" aria-label={ar ? "الصورة التالية" : "Next photo"} onClick={() => { setTimerGeneration((value) => value + 1); setIndex((value) => (value + 1) % photos.length); }}>&gt;</button>
         </div>
       )}
       {current && onRemove && (
@@ -64,6 +106,7 @@ export default function ProductCatalogue({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [sharingCode, setSharingCode] = useState("");
   const [page, setPage] = useState(0);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const writeInFlight = useRef(false);
@@ -156,6 +199,81 @@ export default function ProductCatalogue({
       writeInFlight.current = false;
       setBusy("");
     }
+  }
+
+  async function loadSharePhoto(photo) {
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error(ar ? "الإعداد غير مكتمل." : "Supabase is not configured.");
+    const session = await getSessionWithTimeout(supabase);
+    if (!session?.access_token) throw new Error(ar ? "يرجى تسجيل الدخول مرة أخرى." : "Please login again.");
+    const response = await fetch(`/api/product-catalogue?photoId=${encodeURIComponent(photo.id)}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!response.ok) throw new Error(ar ? "تعذر تحميل صورة المنتج." : "Unable to load the product photo.");
+    return response.blob();
+  }
+
+  async function shareItem(item, detail, priced, price, hasPrice, discounted) {
+    if (sharingCode) return;
+    const lines = buildCatalogueShareLines({
+      name: item.item_name,
+      code: item.item_code,
+      packing: detail.packing,
+      sellingUnit: detail.sellingUnit,
+      priceText: hasPrice ? `${formatMoneyAmount(priced.rate)} SAR` : (ar ? "السعر غير متوفر" : "Price unavailable"),
+      originalPriceText: discounted ? `${formatMoneyAmount(price)} SAR` : "",
+      discountText: discounted ? [
+        priced.applied.cash && (ar ? "خصم نقدي" : "Cash discount"),
+        priced.applied.value && (ar ? "خصم الكمية" : "Volume discount"),
+        priced.applied.scheme && (ar ? "عرض" : "Scheme"),
+      ].filter(Boolean).join(" + ") : "",
+      metaText: [
+        pricingType === "retail" ? (ar ? "التجزئة" : "Retail") : (ar ? "الجملة" : "Wholesale"),
+        pricingRegionLabel(pricingRegion),
+        ar ? "قبل الضريبة" : "Ex VAT",
+      ].filter(Boolean).join(" · "),
+      language,
+    });
+    const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
+    const fallbackText = catalogueShareFallbackText(lines);
+    setSharingCode(item.item_code);
+    setError("");
+    let notice = null;
+    try {
+      const files = await buildCatalogueShareFiles({
+        photos: detail.photos || [],
+        lines,
+        rtl: ar,
+        loadPhoto: loadSharePhoto,
+        fileCode: item.item_code,
+      });
+      const result = await shareTextAndFilesOnWhatsapp("", files, { title: item.item_name, dialogTitle });
+      if (result.success || result.reason === "cancelled") return;
+      notice = {
+        variant: "info",
+        message: ar
+          ? "الصورة جاهزة وفيها الاسم والسعر والتعبئة. اضغط مشاركة على واتساب."
+          : "The photo is ready with the name, price, and packing on the image. Tap Share on WhatsApp.",
+        whatsappFiles: files,
+        whatsappText: fallbackText,
+      };
+    } catch (err) {
+      const textResult = await shareTextOnWhatsapp(fallbackText, {
+        title: item.item_name,
+        dialogTitle,
+        preferNativeShare: false,
+        preferWhatsappUrl: true,
+      });
+      notice = {
+        variant: "warning",
+        message: textResult.success
+          ? (ar ? "تم فتح واتساب بالنص لأن الصورة لم تُجهَّز. السعر والتعبئة في الرسالة." : "WhatsApp opened with the details as text because the photo could not be prepared.")
+          : (err.message || (ar ? "تعذر تجهيز صورة المشاركة." : "Unable to prepare the share image.")),
+      };
+    } finally {
+      setSharingCode("");
+    }
+    if (notice) await showPopup(notice);
   }
 
   const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
@@ -298,6 +416,16 @@ export default function ProductCatalogue({
                   ].filter(Boolean).join(" + ")}
                 </span>}
                 {hasPrice && detail.sellingUnit && <span className="moduleCode">{ar ? "لكل" : "per"} {detail.sellingUnit}</span>}
+                <button
+                  type="button"
+                  className={styles.share}
+                  disabled={Boolean(sharingCode) || Boolean(busy)}
+                  onClick={() => { void shareItem(item, detail, priced, price, hasPrice, discounted); }}
+                >
+                  {sharingCode === item.item_code
+                    ? (ar ? "جاري تجهيز الصورة..." : "Preparing photo...")
+                    : (ar ? "مشاركة واتساب" : "Share on WhatsApp")}
+                </button>
                 <div className={styles.qty}>
                   <button type="button" disabled={disabled || qty <= 0} aria-label={`${ar ? "تقليل" : "Decrease"} ${item.item_name}`} onClick={() => onDecrease(item.item_code)}>-</button>
                   <input type="number" min="0" step="1" disabled={disabled} aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`} value={qty || ""}

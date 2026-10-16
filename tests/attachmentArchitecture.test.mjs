@@ -14,6 +14,7 @@ import {
   parseLegacySupabaseUrl,
   splitObjectKey,
 } from "../app/lib/storage/attachmentKeys.js";
+// ATTACHMENT_BUCKETS also used by catalogue-photo migration regression below.
 import {
   ACTIVE_STORAGE_PROVIDER,
   SIGNED_URL_TTL_SECONDS,
@@ -87,8 +88,17 @@ test("Supabase stays the default provider; unknown providers are rejected", asyn
   assert.ok(resolveStorageProvider("supabase"));
   assert.ok(resolveStorageProvider("r2"));
   assert.throws(() => resolveStorageProvider("s3"), /not available/);
-  await assert.rejects(deleteObject(), /not enabled/);
+  await assert.rejects(deleteObject(createFakeAdmin(), { key: "" }), /required/);
   assert.doesNotMatch(read("../app/lib/storage/providers/supabaseProvider.js"), /aws4fetch|R2_/);
+});
+
+test("deleteObject removes the Storage object for the given provider key", async () => {
+  const admin = createFakeAdmin();
+  const key = "product-catalogue/demo/photo.jpg";
+  await putObject(admin, { key, body: new Blob([new TextEncoder().encode("photo")]), contentType: "image/jpeg" });
+  assert.equal((await headObject(admin, { key })).exists, true);
+  await deleteObject(admin, { key, provider: "supabase" });
+  assert.equal((await headObject(admin, { key })).exists, false);
 });
 
 test("putObject uploads without overwrite and returns size and checksums", async () => {
@@ -617,4 +627,14 @@ test("attachments migration creates the table, nullable owner columns and no bro
   assert.match(migration, /ADD COLUMN IF NOT EXISTS payment_attachment_id uuid REFERENCES public\.attachments \(id\)/);
   assert.match(migration, /ALTER TABLE public\.customer_documents\s+ADD COLUMN IF NOT EXISTS attachment_id uuid/);
   assert.doesNotMatch(migration, /storage\.(buckets|objects)|UPDATE public\.collection_visits|DROP /);
+});
+
+test("catalogue photos reuse attachments with an extended category and drop the dedicated photo table", () => {
+  const migration = read("../supabase/migrations/20261015084023_product_catalogue_photos_attachments.sql");
+  assert.match(migration, /product_catalogue_photo/);
+  assert.match(migration, /DROP TABLE IF EXISTS public\.product_catalogue_photos/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.attachments/);
+  assert.doesNotMatch(migration, /DELETE FROM storage\.objects/);
+  assert.equal(ATTACHMENT_CATEGORIES.productCataloguePhoto, "product_catalogue_photo");
+  assert.equal(ATTACHMENT_BUCKETS.productCatalogue, "product-catalogue");
 });

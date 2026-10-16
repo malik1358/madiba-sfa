@@ -89,11 +89,11 @@ export function cataloguePacking(item = {}, product = {}, stockItem = {}) {
   return { sellingUnit, packing: parts.join(" · ") };
 }
 
-export function validateCataloguePreview(file) {
+export function validateCataloguePhoto(file) {
   if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-    throw new Error("Choose a JPEG, PNG, or WebP photo for the temporary preview.");
+    throw new Error("Choose a JPEG, PNG, or WebP photo.");
   }
   if (!file.size || file.size > MAX_PRODUCT_PHOTO_BYTES) {
-    throw new Error("Preview photos must be no larger than 3 MB.");
+    throw new Error("Photos must be no larger than 3 MB.");
   }
 }

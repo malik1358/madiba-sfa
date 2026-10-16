@@ -12,7 +12,7 @@ export function createFakeAdmin({
   const data = Object.fromEntries(Object.entries(tables).map(([name, rows]) => [name, rows.map((row) => ({ ...row }))]));
   const storage = new Map(Object.entries(objects));
   const bucketState = new Map(Object.entries(buckets).map(([name, settings]) => [name, { ...settings }]));
-  const calls = { uploads: [], signed: [], downloads: [], inserts: [], updates: [], bucketCreates: [], bucketUpdates: [] };
+  const calls = { uploads: [], signed: [], downloads: [], removes: [], inserts: [], updates: [], bucketCreates: [], bucketUpdates: [] };
   let nextId = 1000;
 
   function missingColumnError(table, column, insert = false) {
@@ -161,6 +161,12 @@ export function createFakeAdmin({
           async createSignedUrl(path, expiresIn, options) {
             calls.signed.push({ bucket, path, expiresIn, options });
             return { data: { signedUrl: `https://signed.example/${bucket}/${path}?ttl=${expiresIn}` }, error: null };
+          },
+          async remove(paths) {
+            const list = Array.isArray(paths) ? paths : [paths];
+            calls.removes.push({ bucket, paths: list });
+            list.forEach((path) => storage.delete(`${bucket}/${path}`));
+            return { data: list.map((path) => ({ name: path })), error: null };
           },
         };
       },

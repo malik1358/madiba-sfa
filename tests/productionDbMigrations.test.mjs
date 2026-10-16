@@ -51,6 +51,7 @@ const PRODUCTION_LEDGER_AUDIT = Object.freeze([
   { version: "20261014070840", name: "one_morning_attendance_per_ksa_day" },
   { version: "20261015071140", name: "customer_shares" },
   { version: "20261015081431", name: "product_catalogue_photos" },
+  { version: "20261015084804", name: "product_catalogue_photos_attachments" },
   { version: "20261016080833", name: "single_platform_session" },
 ]);
 
@@ -259,6 +260,7 @@ test("version aliases cover repo timestamps without duplicating ledger rows", ()
     "20261014120000",
     "20261015120000",
     "20261015080745",
+    "20261015084023",
     "20261016120000",
   ];
   const scope = migrationScope(repo, PRODUCTION_LEDGER_AUDIT);
@@ -272,10 +274,11 @@ test("version aliases cover repo timestamps without duplicating ledger rows", ()
     "20261010170000",
     "20261014120000",
     "20261015080745",
+    "20261015084023",
     "20261015120000",
     "20261016120000",
   ]);
-  assert.equal(scope.matchedAliases.length, 11);
+  assert.equal(scope.matchedAliases.length, 12);
   assert.deepEqual(scope.untrackedApplied, []);
   assert.equal(scope.pending.includes("20260909160000"), false);
   assert.equal(scope.pending.includes("20261014120000"), false);
@@ -632,13 +635,15 @@ test("production audit inventory reconciles aliases and ledger-only rows against
     assert.equal(scope.unrelatedPending.includes(version), false, version);
   }
   assert.equal(PRODUCTION_QUARANTINED_MIGRATIONS.some((m) => m.version === "20260816000001"), true);
-  assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 14);
+  assert.equal(normalizeLedgerEntries(PRODUCTION_LEDGER_AUDIT).length, 15);
   assert.equal(scope.unrelatedPending.includes("20261014120000"), false);
   assert.equal(scope.coveredByAlias.includes("20261014120000"), true);
   assert.equal(scope.unrelatedPending.includes("20261015120000"), false);
   assert.equal(scope.coveredByAlias.includes("20261015120000"), true);
   assert.equal(scope.unrelatedPending.includes("20261015080745"), false);
   assert.equal(scope.coveredByAlias.includes("20261015080745"), true);
+  assert.equal(scope.unrelatedPending.includes("20261015084023"), false);
+  assert.equal(scope.coveredByAlias.includes("20261015084023"), true);
 });
 
 test("phase1 attested versions stay out of quarantine and allowlist", () => {

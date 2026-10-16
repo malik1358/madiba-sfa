@@ -21,6 +21,7 @@ export const ATTACHMENT_ENTITY_TYPES = Object.freeze({
   collectionVisit: "collection_visit",
   salesOrder: "sales_order",
   customerDocument: "customer_document",
+  productItem: "product_item",
 });
 
 export function isAttachmentId(value) {

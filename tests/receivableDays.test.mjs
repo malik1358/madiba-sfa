@@ -7,7 +7,12 @@ import {
   monthEndOpenReceivablesExclVat,
   receivableDays,
   receivableDaysChangeTone,
+  ksaMonthKey,
+  lastOutstandingUploadByMonth,
+  parseStoredOutstandingUploadedAt,
+  planOutstandingMonthUploads,
   receivableYtdDays,
+  receivablesFromOutstandingPlan,
   sumTallyOutstandingRows,
   tallyReceivablesByMonth,
 } from "../app/lib/receivableDays.js";
@@ -165,20 +170,53 @@ test("uploaded Tally outstanding is one balance on the as-of month", () => {
 
   const placed = tallyReceivablesByMonth(12500.5, "2026-10-16");
   assert.deepEqual(placed, { "2026-10": 12500.5 });
+});
+
+test("each month keeps the last outstanding import from that month", () => {
+  assert.equal(
+    parseStoredOutstandingUploadedAt("2026-09-28T18-00-00-000Z_outstanding.xlsx"),
+    "2026-09-28T18:00:00.000Z",
+  );
+  assert.equal(ksaMonthKey("2026-09-30T21:30:00.000Z"), "2026-10");
+
+  const stored = [
+    { uploadedAt: "2026-09-02T08:00:00.000Z", filePath: "outstanding/sep-early.xlsx", total: 100 },
+    { uploadedAt: "2026-09-28T18:00:00.000Z", filePath: "outstanding/sep-late.xlsx", total: 900 },
+    { uploadedAt: "2026-10-16T06:00:00.000Z", filePath: "outstanding/oct.xlsx", total: 1 },
+  ];
+  assert.equal(lastOutstandingUploadByMonth(stored).find((row) => row.month === "2026-09").filePath, "outstanding/sep-late.xlsx");
+
+  const plan = planOutstandingMonthUploads(stored, {
+    uploadedAt: "2026-10-16T09:00:00.000Z",
+    total: 4751738,
+  });
+  assert.deepEqual(receivablesFromOutstandingPlan([
+    { month: "2026-09", total: 900 },
+    ...plan.filter((row) => row.month === "2026-10"),
+  ]), {
+    "2026-09": 900,
+    "2026-10": 4751738,
+  });
+  assert.equal(plan.find((row) => row.month === "2026-10").filePath, "");
+  assert.equal(plan.find((row) => row.month === "2026-09").filePath, "outstanding/sep-late.xlsx");
 
   const report = buildReceivableDaysReport({
     asOfDate: "2026-10-16",
     monthlyCreditSales: {
       "2026-04": 28910,
+      "2026-09": 20000,
       "2026-10": 40000,
     },
-    monthlyReceivables: placed,
+    monthlyReceivables: {
+      "2026-09": 900,
+      "2026-10": 4751738,
+    },
   });
 
   assert.equal(report.monthly["2026-04"].receivables, null);
-  assert.equal(report.monthly["2026-04"].receivable_days, null);
-  assert.equal(report.monthly["2026-10"].receivables, 12500.5);
-  assert.equal(report.totals.receivables, 12500.5);
+  assert.equal(report.monthly["2026-09"].receivables, 900);
+  assert.equal(report.monthly["2026-10"].receivables, 4751738);
+  assert.equal(report.totals.receivables, 4751738);
   assert.equal(report.receivablesSource, "tally_outstanding");
 });
 

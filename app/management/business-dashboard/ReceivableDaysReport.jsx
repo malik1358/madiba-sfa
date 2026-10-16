@@ -10,8 +10,8 @@ import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 const TEXT = {
   title: { en: "Net receivable days", ar: "أيام الذمم المدينة الصافية" },
   hint: {
-    en: "Receivables are the uploaded Tally outstanding total, shown on the current month. Receivable days = (that Tally total ÷ credit sales YTD) × days YTD. Earlier months keep credit sales only, because the upload is one balance.",
-    ar: "الذمم هي إجمالي ملف المستحقات المرفوع من تالي، وتظهر في الشهر الحالي. أيام الذمم = (إجمالي تالي ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة حتى التاريخ. الأشهر السابقة تعرض مبيعات الآجل فقط لأن الملف رصيد واحد.",
+    en: "Each month shows the last Tally outstanding file imported in that month. Receivable days = (that month’s outstanding ÷ credit sales YTD) × days YTD. The total row keeps the latest balance, not a sum of months.",
+    ar: "كل شهر يعرض آخر ملف مستحقات تالي تم رفعه في ذلك الشهر. أيام الذمم = (مستحقات ذلك الشهر ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة حتى التاريخ. صف الإجمالي يحتفظ بآخر رصيد وليس مجموع الأشهر.",
   },
   loading: { en: "Loading receivable days...", ar: "جاري تحميل أيام الذمم..." },
   empty: { en: "No credit sales or receivables match this period.", ar: "لا توجد مبيعات آجلة أو ذمم تطابق هذه الفترة." },

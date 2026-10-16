@@ -206,6 +206,89 @@ export function tallyReceivablesByMonth(total, asOfDate = "") {
   return { [asOf.slice(0, 7)]: Math.round(toNumber(total) * 100) / 100 };
 }
 
+/** Storage object names are `{iso-with-colons-and-dot-replaced}_${file}`. */
+export function parseStoredOutstandingUploadedAt(fileName = "") {
+  const match = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/);
+  if (!match) return "";
+  return `${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`;
+}
+
+export function ksaMonthKey(instant) {
+  const date = instant instanceof Date ? instant : new Date(instant);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : "";
+}
+
+/** Keep the latest outstanding upload in each KSA month. */
+export function lastOutstandingUploadByMonth(uploads = []) {
+  const latest = new Map();
+  for (const upload of Array.isArray(uploads) ? uploads : []) {
+    const uploadedAt = String(upload?.uploadedAt || "");
+    const month = ksaMonthKey(uploadedAt);
+    const at = Date.parse(uploadedAt);
+    if (!month || !Number.isFinite(at)) continue;
+    const previous = latest.get(month);
+    if (previous && previous.at > at) continue;
+    latest.set(month, {
+      at,
+      month,
+      uploadedAt,
+      filePath: String(upload?.filePath || ""),
+      total: upload?.total == null || upload?.total === "" ? null : Math.round(toNumber(upload.total) * 100) / 100,
+    });
+  }
+  return [...latest.values()].sort((left, right) => left.month.localeCompare(right.month));
+}
+
+/**
+ * Past months use their last stored outstanding file.
+ * The live upload replaces that month, including when its file is still in storage.
+ */
+export function planOutstandingMonthUploads(storedFiles = [], currentUpload = null) {
+  const currentAt = String(currentUpload?.uploadedAt || "");
+  const currentMonth = ksaMonthKey(currentAt);
+  const historical = lastOutstandingUploadByMonth(storedFiles)
+    .filter((row) => row.month !== currentMonth);
+  const planned = historical.map((row) => ({
+    month: row.month,
+    uploadedAt: row.uploadedAt,
+    filePath: row.filePath,
+    total: null,
+  }));
+  if (currentMonth) {
+    planned.push({
+      month: currentMonth,
+      uploadedAt: currentAt,
+      filePath: "",
+      total: currentUpload?.total == null || currentUpload?.total === ""
+        ? null
+        : Math.round(toNumber(currentUpload.total) * 100) / 100,
+    });
+  }
+  planned.sort((left, right) => left.month.localeCompare(right.month));
+  return planned;
+}
+
+export function outstandingHistoryKey(plan = []) {
+  return (Array.isArray(plan) ? plan : [])
+    .map((row) => `${row.month}|${row.uploadedAt}`)
+    .join(",");
+}
+
+export function receivablesFromOutstandingPlan(plan = []) {
+  return Object.fromEntries(
+    (Array.isArray(plan) ? plan : [])
+      .filter((row) => row?.total != null && row.total !== "")
+      .map((row) => [row.month, Math.round(toNumber(row.total) * 100) / 100]),
+  );
+}
+
 /**
  * Build the monthwise receivable-days report from monthly AR and credit sales maps.
  * Days use YTD credit sales and YTD calendar days through each month-end.

@@ -9,7 +9,7 @@ import {
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
-  buildCatalogueShareLines, nextCataloguePhotoIndex, wrapShareText,
+  buildCatalogueShareLines, catalogueShareLatinWords, nextCataloguePhotoIndex, translateCatalogueShareText, wrapShareText,
 } from "../app/lib/catalogueShareCard.js";
 import { buildCatalogueShareFiles } from "../app/lib/catalogueShareCanvas.js";
 import {
@@ -493,6 +493,7 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.match(source, /prefers-reduced-motion/);
   assert.match(source, /Share on WhatsApp/);
   assert.match(source, /buildCatalogueShareFiles/);
+  assert.match(source, /translateCatalogueShareText/);
   assert.doesNotMatch(source, /whatsappText/);
   assert.doesNotMatch(source, /shareTextOnWhatsapp/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
@@ -515,18 +516,51 @@ test("catalogue carousel advances and share lines put price and packing on the i
     region: "riyadh",
   });
   const text = lines.map((line) => line.text).join("\n");
+  const arabic = lines.filter((line) => line.dir === "rtl").map((line) => line.text).join("\n");
   assert.match(text, /Packing: 100 PCS \/ CTN/);
-  assert.match(text, /التعبئة: 100 PCS \/ CTN/);
+  assert.match(arabic, /التعبئة: 100 قطع \/ كرتون/);
+  assert.match(arabic, /وحدة البيع: كرتون/);
+  assert.equal(catalogueShareLatinWords(arabic).length, 0);
   assert.match(text, /12\.50 SAR/);
   assert.match(text, /12\.50 ر\.س/);
   assert.match(text, /Before discount: 15\.00 SAR/);
   assert.match(text, /قبل الخصم: 15\.00 ر\.س/);
   assert.match(text, /Wholesale · Riyadh · Ex VAT/);
   assert.match(text, /الجملة · الرياض · قبل الضريبة/);
-  assert.equal(lines.filter((line) => line.dir === "rtl").length > 0, true);
   const wrapped = wrapShareText("Packing: BOX ".repeat(12), 80, (value) => value.length * 8);
   assert.ok(wrapped.length > 1);
   assert.equal(wrapped.join(" "), "Packing: BOX ".repeat(12).trim());
+});
+
+test("catalogue share translates every product and packing word into Arabic", async () => {
+  assert.equal(await translateCatalogueShareText("CTN OF 4 PACK OF 6 PC"), "كرتون من 4 عبوة من 6 قطعة");
+  const name = await translateCatalogueShareText(
+    "A003471 MADIBA BABY TALCUM POWDER - WHITE 400 GM",
+    async (phrase) => {
+      if (phrase === "A003471 MADIBA BABY TALCUM POWDER - WHITE 400 gram") {
+        return "A003471 MADIBA بيبي تلك POWDER - أبيض 400 جرام";
+      }
+      return { MADIBA: "مديبا", POWDER: "بودرة" }[phrase.toUpperCase()] || "";
+    },
+  );
+  assert.equal(catalogueShareLatinWords(name).length, 0);
+  assert.match(name, /A003471/);
+  assert.match(name, /مديبا/);
+  assert.match(name, /بودرة/);
+  assert.match(name, /400/);
+  const lines = buildCatalogueShareLines({
+    name: "A003471 MADIBA BABY TALCUM POWDER - WHITE 400 GM",
+    nameArabic: name,
+    code: "A003471",
+    packing: "CTN OF 4 PACK OF 6 PC",
+    sellingUnit: "CTN",
+    priceAmount: "76.00",
+    region: "riyadh",
+  });
+  const arabic = lines.filter((line) => line.dir === "rtl").map((line) => line.text).join("\n");
+  assert.match(arabic, /مديبا/);
+  assert.match(arabic, /كرتون من 4 عبوة من 6 قطعة/);
+  assert.equal(catalogueShareLatinWords(arabic).length, 0);
 });
 
 test("share image paints packing and price onto the photo instead of a separate caption", async () => {
@@ -560,7 +594,7 @@ test("share image paints packing and price onto the photo instead of a separate 
   assert.equal(files[0].type, "image/jpeg");
   assert.equal(drewPhoto, true);
   assert.ok(texts.includes("Packing: 100 PCS / CTN"));
-  assert.ok(texts.includes("التعبئة: 100 PCS / CTN"));
+  assert.ok(texts.includes("التعبئة: 100 قطع / كرتون"));
   assert.ok(texts.includes("12.50 SAR"));
   assert.ok(texts.includes("12.50 ر.س"));
   assert.ok(texts.includes("Wholesale · Dammam · Ex VAT"));

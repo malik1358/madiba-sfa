@@ -115,7 +115,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/import-sales`, `/api/upload-files`, `/api/pricing/cache`, `/api/admin/price-sync`
 - `/api/business-dashboard`, `/api/business-dashboard/category-growth`
-- `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth)
+- `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth); scope uses management roles company-wide or `resolveSalesScopeForUserId` for team heads
 - `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
 - `/management/customer-gps-history` uses `.../gps-history?from=...&to=...` for paginated cross-customer audit reporting; the legacy `customerCode`-only API remains unchanged. `customerGpsReport.js` supplies KSA bounds, coordinate validation, displacement and explicit approval classification.

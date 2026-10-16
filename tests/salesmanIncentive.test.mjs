@@ -7,11 +7,14 @@ import {
   buildInvoiceCategoryProfiles,
   buildSalesmanIncentiveReport,
   classifyIncentiveCategory,
+  collectIncentiveTeamCodes,
   collectionIncentiveTier,
   computeGrowthIncentive,
+  filterIncentiveSalesmanOptions,
   incentiveMonthRange,
   isExcludedIncentiveSalesman,
   parseIncentiveMonth,
+  resolveIncentiveViewerScope,
   resolvePeakMonthlySales,
   shiftIncentiveMonth,
 } from "../app/lib/salesmanIncentive.js";
@@ -507,4 +510,65 @@ test("incentive report combines Thamer aliases for sales and collection rows", (
   assert.equal(report.salesmen[0].peak_month_sales, 50);
   assert.equal(report.salesmen[0].sales_delta, 250);
   assert.equal(report.rows[0].salesman_code, "SM002");
+});
+
+test("team head incentive scope includes subordinates and rejects outsiders", () => {
+  const soyeb = { id: "soyeb", role: "salesman", salesman_code: "SOYEB", salesman_name: "Soyeb" };
+  const salesScope = {
+    visibleMembers: [
+      soyeb,
+      { id: "nabil", role: "salesman", salesman_code: "NABIL", salesman_name: "Nabil" },
+      { id: "belal", role: "salesman", salesman_code: "BELAL", salesman_name: "Belal" },
+      { id: "cl01", role: "collector", salesman_code: "CL01", salesman_name: "Collector" },
+      { id: "ecom", role: "salesman", salesman_code: "TRENDYOL", salesman_name: "TRENDYOL" },
+    ],
+  };
+
+  assert.deepEqual(collectIncentiveTeamCodes(salesScope, soyeb), ["BELAL", "NABIL", "SOYEB"]);
+
+  const teamView = resolveIncentiveViewerScope({ profile: soyeb, salesScope });
+  assert.equal(teamView.hasAllAccess, false);
+  assert.equal(teamView.canSelectSalesman, true);
+  assert.deepEqual(teamView.salesmanCodes, ["BELAL", "NABIL", "SOYEB"]);
+
+  const oneMember = resolveIncentiveViewerScope({
+    profile: soyeb,
+    salesScope,
+    requestedCode: "nabil",
+  });
+  assert.deepEqual(oneMember.salesmanCodes, ["NABIL"]);
+
+  assert.throws(
+    () => resolveIncentiveViewerScope({ profile: soyeb, salesScope, requestedCode: "ALI" }),
+    /outside your team/i,
+  );
+
+  const filtered = filterIncentiveSalesmanOptions([
+    { salesman_code: "SOYEB", salesman_name: "Soyeb" },
+    { salesman_code: "ALI", salesman_name: "Ali" },
+    { salesman_code: "NABIL", salesman_name: "Nabil" },
+  ], teamView.allowedCodes);
+  assert.deepEqual(filtered.map((row) => row.salesman_code), ["SOYEB", "NABIL"]);
+});
+
+test("solo salesman incentive scope stays on own code only", () => {
+  const ali = { id: "ali", role: "salesman", salesman_code: "ALI", salesman_name: "Ali" };
+  const salesScope = { visibleMembers: [ali] };
+  const scope = resolveIncentiveViewerScope({ profile: ali, salesScope });
+  assert.equal(scope.canSelectSalesman, false);
+  assert.deepEqual(scope.salesmanCodes, ["ALI"]);
+});
+
+test("management incentive scope remains company-wide", () => {
+  const manager = { id: "m1", role: "manager", salesman_code: "MGR", salesman_name: "Manager" };
+  const scope = resolveIncentiveViewerScope({ profile: manager, salesScope: null });
+  assert.equal(scope.hasAllAccess, true);
+  assert.equal(scope.canSelectSalesman, true);
+  assert.deepEqual(scope.salesmanCodes, []);
+
+  const filtered = resolveIncentiveViewerScope({
+    profile: manager,
+    requestedCode: "SOYEB",
+  });
+  assert.deepEqual(filtered.salesmanCodes, ["SOYEB"]);
 });

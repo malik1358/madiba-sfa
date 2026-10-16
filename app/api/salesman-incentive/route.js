@@ -1,12 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
 import { canViewManagementReports, normalizeAccessRole } from "../../lib/moduleAccess.js";
-import { normalizeSalesmanCode } from "../../lib/performanceKpis.js";
-import { parseIncentiveMonth } from "../../lib/salesmanIncentive.js";
+import {
+  filterIncentiveSalesmanOptions,
+  parseIncentiveMonth,
+  resolveIncentiveViewerScope,
+} from "../../lib/salesmanIncentive.js";
 import {
   buildSalesmanIncentiveReportFromDb,
   listIncentiveSalesmen,
 } from "../../lib/salesmanIncentiveServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
+import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -43,24 +47,6 @@ async function getProfile(admin, userId) {
   return data;
 }
 
-/** Admins and managers see every salesman. A salesman sees only their own scheme. */
-function resolveIncentiveScope(profile, requestedCode) {
-  const role = normalizeAccessRole(profile?.role);
-  const ownCode = normalizeSalesmanCode(profile?.salesman_code);
-  const requested = normalizeSalesmanCode(requestedCode);
-
-  if (canViewManagementReports(role)) {
-    return { hasAllAccess: true, salesmanCodes: requested ? [requested] : [] };
-  }
-  if (role === "salesman" && ownCode) {
-    if (requested && requested !== ownCode) {
-      throw new Error("You can only view your own incentive.");
-    }
-    return { hasAllAccess: false, salesmanCodes: [ownCode] };
-  }
-  throw new Error("You do not have access to this report.");
-}
-
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -79,9 +65,19 @@ export async function GET(request) {
     const url = new URL(request.url);
     const month = parseIncentiveMonth(url.searchParams.get("month"), getKsaDateString());
 
+    // Management roles keep company-wide access. Team heads (Soyeb and other
+    // reporting-chain bosses) use the same sales-scope members as Performance.
     let scope;
     try {
-      scope = resolveIncentiveScope(profile, url.searchParams.get("salesman"));
+      const role = normalizeAccessRole(profile?.role);
+      const salesScope = canViewManagementReports(role)
+        ? null
+        : await resolveSalesScopeForUserId(admin, user.id);
+      scope = resolveIncentiveViewerScope({
+        profile,
+        salesScope,
+        requestedCode: url.searchParams.get("salesman"),
+      });
     } catch (scopeError) {
       return Response.json({ success: false, error: scopeError.message }, { status: 403 });
     }
@@ -91,14 +87,21 @@ export async function GET(request) {
         month,
         salesmanCodes: scope.salesmanCodes,
       }),
-      scope.hasAllAccess ? listIncentiveSalesmen(admin, { month }) : Promise.resolve([]),
+      scope.canSelectSalesman
+        ? listIncentiveSalesmen(admin, { month }).then((options) => (
+          scope.hasAllAccess
+            ? options
+            : filterIncentiveSalesmanOptions(options, scope.allowedCodes)
+        ))
+        : Promise.resolve([]),
     ]);
 
     return Response.json({
       success: true,
       ...report,
       salesmanOptions: salesmen,
-      canViewAll: scope.hasAllAccess,
+      canViewAll: scope.canSelectSalesman,
+      hasCompanyWideAccess: scope.hasAllAccess,
     });
   } catch (error) {
     console.error("Salesman incentive report error:", error);

@@ -28,9 +28,10 @@ const TEXT = {
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   loading: { en: "Calculating incentive...", ar: "جاري احتساب الحوافز..." },
   accessDenied: {
-    en: "Only admin, manager, or a salesman viewing their own figures can open this screen.",
-    ar: "هذه الشاشة متاحة فقط للأدمن أو المدير أو المندوب لعرض أرقامه.",
+    en: "Only admin, manager, a team head viewing their team, or a salesman viewing their own figures can open this screen.",
+    ar: "هذه الشاشة متاحة فقط للأدمن أو المدير أو رئيس الفريق لعرض فريقه أو المندوب لعرض أرقامه.",
   },
+  allTeam: { en: "All team", ar: "كل الفريق" },
   rules: {
     en: "Scheme: office supplies 0.25% when the invoice is collected within 35 days. Electronics 0.40% within 35 days and 0.20% within 60 days. Other categories 1% within 35 days and 0.5% within 60 days. Nothing after 60 days. Cash deals (RC / DC / JC invoice numbers) are excluded from the category rates and earn only 0.20%, and only when the cash is received within 3 days. Plus 0.5% on the amount this month's net sales exceed the salesman's best month ever. Every receipt dated in the selected month counts, no matter how old the invoice it settles: collections are matched to invoices by cash FIFO per customer over the full ledger, then split by category using the invoice's own item mix. The incentive base is the net (ex-VAT) value collected. TRENDYOL and NOON are ecom channels and are not shown.",
     ar: "النظام: القرطاسية 0.25% عند التحصيل خلال 35 يوماً. الإلكترونيات 0.40% خلال 35 يوماً و0.20% خلال 60 يوماً. الفئات الأخرى 1% خلال 35 يوماً و0.5% خلال 60 يوماً. لا يوجد حافز بعد 60 يوماً. الصفقات النقدية (RC / DC / JC) تستحق 0.20% فقط وإذا تم استلام النقد خلال 3 أيام. بالإضافة إلى 0.5% على ما تتجاوزه مبيعات هذا الشهر عن أفضل شهر للمندوب على الإطلاق. تُحتسب كل الإيصالات المؤرخة في الشهر المحدد مهما كان تاريخ الفاتورة. أساس الحافز هو الصافي بدون ضريبة. TRENDYOL وNOON قنوات إلكترونية ولا تُعرض.",
@@ -358,7 +359,7 @@ export default function SalesmanIncentivePage() {
                     value={salesman}
                     onChange={(event) => setSalesman(event.target.value)}
                   >
-                    <option value="">{t("allSalesmen")}</option>
+                    <option value="">{report?.hasCompanyWideAccess ? t("allSalesmen") : t("allTeam")}</option>
                     {(report?.salesmanOptions || []).map((option) => (
                       <option key={option.salesman_code} value={option.salesman_code}>
                         {option.salesman_code}

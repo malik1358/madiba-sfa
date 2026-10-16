@@ -34,7 +34,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Payment Settlement** and **Outstanding Compare**: FIFO cash application versus the Tally outstanding file.
 - **Business Intelligence**: category growth, salesman month-over-month, sales mix, net receivable days (each month’s last imported Tally outstanding ÷ credit sales YTD), period filters.
 - **Promoter Coverage** (`/management/promoter-coverage`): all authenticated roles can select a product promoter and review that promoter's head-team customer book, 12-month visit coverage, repeat visits, and six completed months of customer sales.
-- **Salesman Incentive**: monthly incentive from collection speed (35/60-day buckets for office supplies, electronics and other categories, 3-day window for cash deals) plus 0.5% on the sales increase over last month.
+- **Salesman Incentive**: monthly incentive from collection speed (35/60-day buckets for office supplies, electronics and other categories, 3-day window for cash deals) plus 0.5% on the sales increase over last month. Team heads see their sales-scope team; admin/manager/invoice-maker see everyone.
 - **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Role Access**, **Imports**.
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
 - **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.

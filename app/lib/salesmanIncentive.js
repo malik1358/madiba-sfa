@@ -3,6 +3,11 @@ import {
   isCreditNoteTransaction,
   matchPaymentsFifo,
 } from "./paymentBehavior.js";
+import {
+  canViewManagementReports,
+  isCollectionOnlyAccess,
+  normalizeAccessRole,
+} from "./moduleAccess.js";
 import { isOfficeSuppliesSale } from "./performanceKpis.js";
 import { ECOM_SALESMAN_TOKENS } from "./salesmanTeamMom.js";
 import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
@@ -49,6 +54,86 @@ export const INCENTIVE_TIER_LABELS = {
   otherSlow: { en: "Other 36-60d", ar: "أخرى 36-60 يوم" },
   late: { en: "Late (no incentive)", ar: "متأخر (بدون حافز)" },
 };
+
+/**
+ * Salesman codes a non-admin viewer may see on Salesman Incentive.
+ * Uses the same sales-scope members as Performance (self, reporting-chain
+ * subordinates, and mutual/shared peers). Collectors are excluded.
+ */
+export function collectIncentiveTeamCodes(salesScope, profile) {
+  const seen = new Set();
+  const codes = [];
+
+  const push = (code, role) => {
+    const normalized = normalizeReportSalesmanCode(code);
+    if (!normalized || seen.has(normalized)) return;
+    if (isCollectionOnlyAccess({ role, salesmanCode: normalized })) return;
+    if (isExcludedIncentiveSalesman({ salesman_code: normalized })) return;
+    seen.add(normalized);
+    codes.push(normalized);
+  };
+
+  (salesScope?.visibleMembers || []).forEach((member) => {
+    push(member?.salesman_code, member?.role);
+  });
+  push(profile?.salesman_code, profile?.role);
+
+  codes.sort((left, right) => left.localeCompare(right));
+  return codes;
+}
+
+/**
+ * Who the caller may load on `/api/salesman-incentive`.
+ * Admin / manager / invoice-maker: company-wide (empty salesmanCodes = all).
+ * Team heads (e.g. Soyeb): every code in their sales scope.
+ * Other salesmen: own code only.
+ */
+export function resolveIncentiveViewerScope({ profile, salesScope, requestedCode } = {}) {
+  const role = normalizeAccessRole(profile?.role);
+  const requested = normalizeReportSalesmanCode(requestedCode);
+
+  if (canViewManagementReports(role)) {
+    return {
+      hasAllAccess: true,
+      canSelectSalesman: true,
+      salesmanCodes: requested ? [requested] : [],
+      allowedCodes: [],
+    };
+  }
+
+  const teamCodes = collectIncentiveTeamCodes(salesScope, profile);
+  if (!teamCodes.length) {
+    throw new Error("You do not have access to this report.");
+  }
+
+  if (requested) {
+    if (!teamCodes.includes(requested)) {
+      throw new Error("That salesman is outside your team.");
+    }
+    return {
+      hasAllAccess: false,
+      canSelectSalesman: teamCodes.length > 1,
+      salesmanCodes: [requested],
+      allowedCodes: teamCodes,
+    };
+  }
+
+  return {
+    hasAllAccess: false,
+    canSelectSalesman: teamCodes.length > 1,
+    // Always pass the team list. An empty salesmanCodes list means "all company"
+    // in the report builder, which must stay reserved for management roles.
+    salesmanCodes: teamCodes,
+    allowedCodes: teamCodes,
+  };
+}
+
+/** Filter the company salesman dropdown down to the viewer's allowed codes. */
+export function filterIncentiveSalesmanOptions(options, allowedCodes) {
+  const allowed = new Set((allowedCodes || []).map(normalizeReportSalesmanCode).filter(Boolean));
+  if (!allowed.size) return Array.isArray(options) ? options : [];
+  return (options || []).filter((option) => allowed.has(normalizeReportSalesmanCode(option?.salesman_code)));
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_KEY = /^\d{4}-\d{2}$/;

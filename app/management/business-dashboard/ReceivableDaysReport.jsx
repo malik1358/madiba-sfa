@@ -10,13 +10,13 @@ import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 const TEXT = {
   title: { en: "Net receivable days", ar: "أيام الذمم المدينة الصافية" },
   hint: {
-    en: "Receivable days = (month-end credit receivables ÷ credit sales YTD) × days YTD. Lower days means faster collections. Green is improvement vs the prior month.",
-    ar: "أيام الذمم = (الذمم في نهاية الشهر ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة حتى التاريخ. انخفاض الأيام يعني تحصيل أسرع. الأخضر تحسّن عن الشهر السابق.",
+    en: "Receivables are the uploaded Tally outstanding total, shown on the current month. Receivable days = (that Tally total ÷ credit sales YTD) × days YTD. Earlier months keep credit sales only, because the upload is one balance.",
+    ar: "الذمم هي إجمالي ملف المستحقات المرفوع من تالي، وتظهر في الشهر الحالي. أيام الذمم = (إجمالي تالي ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة حتى التاريخ. الأشهر السابقة تعرض مبيعات الآجل فقط لأن الملف رصيد واحد.",
   },
   loading: { en: "Loading receivable days...", ar: "جاري تحميل أيام الذمم..." },
   empty: { en: "No credit sales or receivables match this period.", ar: "لا توجد مبيعات آجلة أو ذمم تطابق هذه الفترة." },
   month: { en: "Month", ar: "الشهر" },
-  receivables: { en: "Receivables (ex-VAT)", ar: "الذمم (بدون ضريبة)" },
+  receivables: { en: "Tally outstanding", ar: "مستحقات تالي" },
   creditSales: { en: "Credit sales (month)", ar: "مبيعات الآجل (الشهر)" },
   creditSalesYtd: { en: "Credit sales YTD", ar: "مبيعات الآجل منذ بداية السنة" },
   daysYtd: { en: "Days YTD", ar: "أيام السنة حتى التاريخ" },
@@ -37,6 +37,11 @@ function monthLabel(month, currentMonth, language) {
   const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   const label = date.toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", year: "2-digit" });
   return month === currentMonth ? `${label} ${language === "ar" ? "حتى اليوم" : "MTD"}` : label;
+}
+
+function formatMoneyOrBlank(value) {
+  if (value == null) return "—";
+  return formatMoneyAmount(value);
 }
 
 function formatDays(value) {
@@ -75,7 +80,7 @@ export default function ReceivableDaysReport({
   );
   const valueOf = useCallback((row, key) => {
     if (key === "month") return monthLabel(row.month, currentMonth, language);
-    if (key === "receivables") return formatMoneyAmount(row.receivables);
+    if (key === "receivables") return formatMoneyOrBlank(row.receivables);
     if (key === "credit_sales") return formatMoneyAmount(row.credit_sales);
     if (key === "credit_sales_ytd") return formatMoneyAmount(row.credit_sales_ytd);
     if (key === "days") return String(row.days || 0);
@@ -95,7 +100,7 @@ export default function ReceivableDaysReport({
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
   if (!rows.length) return <div className="moduleHint">{t("empty")}</div>;
 
-  const footerReceivables = visibleRows.reduce((sum, row) => sum + Number(row.receivables || 0), 0);
+  const footerReceivables = report?.totals?.receivables ?? null;
   const footerCreditMonth = visibleRows.reduce((sum, row) => sum + Number(row.credit_sales || 0), 0);
   const footerCreditYtd = visibleRows.length
     ? Number(visibleRows[visibleRows.length - 1]?.credit_sales_ytd || 0)
@@ -162,7 +167,7 @@ export default function ReceivableDaysReport({
                     {monthLabel(row.month, currentMonth, language)}
                   </td>
                   <td className={row.is_current ? "moduleBiMonthCell--current" : ""}>
-                    {formatMoneyAmount(row.receivables)}
+                    {formatMoneyOrBlank(row.receivables)}
                   </td>
                   <td className={row.is_current ? "moduleBiMonthCell--current" : ""}>
                     {formatMoneyAmount(row.credit_sales)}
@@ -185,7 +190,7 @@ export default function ReceivableDaysReport({
             <tfoot>
               <tr className="moduleBiTotalRow">
                 <td>{t("total")}</td>
-                <td>{formatMoneyAmount(footerReceivables)}</td>
+                <td>{formatMoneyOrBlank(footerReceivables)}</td>
                 <td>{formatMoneyAmount(footerCreditMonth)}</td>
                 <td>{formatMoneyAmount(footerCreditYtd)}</td>
                 <td>—</td>

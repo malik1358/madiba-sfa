@@ -104,7 +104,7 @@ test("buildCollectionVisitSummary includes working hours till the visit", () => 
     },
   );
 
-  assert.match(summary, /Working hours: 3h 26m/);
+  assert.match(summary, /\n\nWorking hours: 3h 26m\n\n/);
 });
 
 test("buildCollectionVisitSummary includes last visit date, outcome, remarks, and amount when present", () => {

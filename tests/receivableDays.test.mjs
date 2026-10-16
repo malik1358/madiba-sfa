@@ -8,6 +8,8 @@ import {
   receivableDays,
   receivableDaysChangeTone,
   receivableYtdDays,
+  sumTallyOutstandingRows,
+  tallyReceivablesByMonth,
 } from "../app/lib/receivableDays.js";
 import { matchPaymentsFifo } from "../app/lib/paymentBehavior.js";
 
@@ -152,6 +154,32 @@ test("receivableDaysChangeTone treats lower days as improvement", () => {
   assert.equal(receivableDaysChangeTone(55, 50), "down");
   assert.equal(receivableDaysChangeTone(50, 50), "");
   assert.equal(receivableDaysChangeTone(null, 50), "");
+});
+
+test("uploaded Tally outstanding is one balance on the as-of month", () => {
+  assert.equal(sumTallyOutstandingRows([
+    { total_outstanding: 10000.5 },
+    { total_outstanding: 2500 },
+    { total_outstanding: 0 },
+  ]), 12500.5);
+
+  const placed = tallyReceivablesByMonth(12500.5, "2026-10-16");
+  assert.deepEqual(placed, { "2026-10": 12500.5 });
+
+  const report = buildReceivableDaysReport({
+    asOfDate: "2026-10-16",
+    monthlyCreditSales: {
+      "2026-04": 28910,
+      "2026-10": 40000,
+    },
+    monthlyReceivables: placed,
+  });
+
+  assert.equal(report.monthly["2026-04"].receivables, null);
+  assert.equal(report.monthly["2026-04"].receivable_days, null);
+  assert.equal(report.monthly["2026-10"].receivables, 12500.5);
+  assert.equal(report.totals.receivables, 12500.5);
+  assert.equal(report.receivablesSource, "tally_outstanding");
 });
 
 test("buildReceivableDaysReport respects date filters", () => {

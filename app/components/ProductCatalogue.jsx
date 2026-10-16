@@ -5,14 +5,14 @@ import { useAppPopup } from "./AppPopupProvider";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { buildCatalogueShareFiles } from "../lib/catalogueShareCanvas";
 import {
-  buildCatalogueShareLines, catalogueShareFallbackText, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex,
+  buildCatalogueShareLines, CATALOGUE_CAROUSEL_MS, nextCataloguePhotoIndex,
 } from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
   catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
-import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../lib/whatsappShare";
+import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
@@ -220,22 +220,15 @@ export default function ProductCatalogue({
       code: item.item_code,
       packing: detail.packing,
       sellingUnit: detail.sellingUnit,
-      priceText: hasPrice ? `${formatMoneyAmount(priced.rate)} SAR` : (ar ? "السعر غير متوفر" : "Price unavailable"),
-      originalPriceText: discounted ? `${formatMoneyAmount(price)} SAR` : "",
-      discountText: discounted ? [
-        priced.applied.cash && (ar ? "خصم نقدي" : "Cash discount"),
-        priced.applied.value && (ar ? "خصم الكمية" : "Volume discount"),
-        priced.applied.scheme && (ar ? "عرض" : "Scheme"),
-      ].filter(Boolean).join(" + ") : "",
-      metaText: [
-        pricingType === "retail" ? (ar ? "التجزئة" : "Retail") : (ar ? "الجملة" : "Wholesale"),
-        pricingRegionLabel(pricingRegion),
-        ar ? "قبل الضريبة" : "Ex VAT",
-      ].filter(Boolean).join(" · "),
-      language,
+      priceAmount: hasPrice ? formatMoneyAmount(priced.rate) : "",
+      originalAmount: discounted ? formatMoneyAmount(price) : "",
+      cashDiscount: discounted && priced.applied.cash,
+      valueDiscount: discounted && priced.applied.value,
+      schemeDiscount: discounted && priced.applied.scheme,
+      pricingType,
+      region: pricingRegion,
     });
     const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
-    const fallbackText = catalogueShareFallbackText(lines);
     setSharingCode(item.item_code);
     setError("");
     let notice = null;
@@ -243,7 +236,6 @@ export default function ProductCatalogue({
       const files = await buildCatalogueShareFiles({
         photos: detail.photos || [],
         lines,
-        rtl: ar,
         loadPhoto: loadSharePhoto,
         fileCode: item.item_code,
       });
@@ -252,23 +244,14 @@ export default function ProductCatalogue({
       notice = {
         variant: "info",
         message: ar
-          ? "الصورة جاهزة وفيها الاسم والسعر والتعبئة. اضغط مشاركة على واتساب."
-          : "The photo is ready with the name, price, and packing on the image. Tap Share on WhatsApp.",
+          ? "الصورة جاهزة وفيها التفاصيل بالإنجليزية والعربية. اضغط مشاركة على واتساب. لن يُرسل نص منفصل."
+          : "The photo is ready with the details in English and Arabic. Tap Share on WhatsApp. No separate text is sent.",
         whatsappFiles: files,
-        whatsappText: fallbackText,
       };
     } catch (err) {
-      const textResult = await shareTextOnWhatsapp(fallbackText, {
-        title: item.item_name,
-        dialogTitle,
-        preferNativeShare: false,
-        preferWhatsappUrl: true,
-      });
       notice = {
-        variant: "warning",
-        message: textResult.success
-          ? (ar ? "تم فتح واتساب بالنص لأن الصورة لم تُجهَّز. السعر والتعبئة في الرسالة." : "WhatsApp opened with the details as text because the photo could not be prepared.")
-          : (err.message || (ar ? "تعذر تجهيز صورة المشاركة." : "Unable to prepare the share image.")),
+        variant: "error",
+        message: err.message || (ar ? "تعذر تجهيز صورة المشاركة." : "Unable to prepare the share image."),
       };
     } finally {
       setSharingCode("");

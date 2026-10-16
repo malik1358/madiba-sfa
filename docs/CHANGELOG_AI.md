@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-16** — Catalogue WhatsApp share prints English and Arabic on the photo (name, packing, price, city) and sends the image with no separate caption. No migration.
 - **2026-10-16** — Product Catalogue photos auto-advance every 3.5 seconds (pause on hover, focus, manual controls, or reduced motion). **Share on WhatsApp** draws the item name, code, packing, and ex-VAT price onto each photo and shares that JPEG. Authenticated `GET /api/product-catalogue?photoId=` returns the stored image so the browser can paint the text. No migration.
 - **2026-10-16** — BI receivable days shows each past month’s last imported Tally outstanding file from `upload-files/outstanding/`. The live outstanding dataset remains the current month. The total row stays the latest balance. No migration.
 - **2026-10-16** — WhatsApp **Working hours** line is padded with a blank line before and after so it stands out in visit/collection/order shares. Removed `.filter(Boolean)` that had stripped the leading blank. No migration.

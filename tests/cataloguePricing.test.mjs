@@ -59,10 +59,10 @@ test("retail city maps never fall back to wholesale or another city's price", ()
   assert.equal(orderPriceMapFor(catalog, "riyadh", "wholesale").A1000, 100);
   assert.deepEqual(orderPriceMapFor({ priceMap: { A: 100 }, retailRegionPriceMaps: { riyadh: { A: 120 } } }, "dammam", "retail"), {});
   const retail = resolveCatalogForOrder(catalog, { selectedRegion: "jeddah", currentUserRegions: ["riyadh", "dammam"], pricingType: "retail" });
-  assert.equal(retail.region, "riyadh", "unassigned city cannot be selected");
+  assert.equal(retail.region, "jeddah", "explicit city selection is honoured outside linked cities");
   const [line] = priceOrderLines([{ item_code: "A1000", quantity: 2, rate: 1 }], retail);
-  assert.equal(line.rate, 120, "server ignores supplied price");
-  assert.equal(line.lineTotalInclVat, 276);
+  assert.equal(line.rate, 140, "server ignores supplied price and uses selected city retail");
+  assert.equal(line.lineTotalInclVat, 322);
   assert.throws(() => priceOrderLines([{ item_code: "MISSING", quantity: 1, rate: 100 }], retail), /Retail price unavailable/);
 });
 

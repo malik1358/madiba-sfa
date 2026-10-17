@@ -359,12 +359,13 @@ export function resolveOrderPricingRegion({
   customerSalesmanCode,
   pricingRegionBySalesmanCode = {},
 } = {}) {
-  const allowed = allowedOrderPricingRegions({
+  const preferred = allowedOrderPricingRegions({
     currentUserRegions,
     currentUserRegion,
   });
+  // Honour an explicit city pick (e.g. catalogue salesman changing from their linked city).
   const selected = knownPricingRegion(selectedRegion);
-  if (selected && allowed.includes(selected)) return selected;
+  if (selected) return selected;
 
   const salesmanCode = String(customerSalesmanCode || "").trim().toUpperCase();
   const salesmanRegion = salesmanCode
@@ -372,8 +373,8 @@ export function resolveOrderPricingRegion({
     : "";
 
   const fallback = normalizePricingRegion(currentUserRegion || salesmanRegion);
-  if (allowed.includes(fallback)) return fallback;
-  return allowed[0] || DEFAULT_PRICING_REGION;
+  if (preferred.includes(fallback)) return fallback;
+  return preferred[0] || DEFAULT_PRICING_REGION;
 }
 
 export function emptyRegionPriceMaps() {

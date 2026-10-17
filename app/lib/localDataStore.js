@@ -108,13 +108,14 @@ export function shouldUseLocalCacheOnly(cached, options = {}) {
   return true;
 }
 
-export async function readCacheEntry(key) {
+export async function readCacheEntry(key, options = {}) {
   if (!key) return null;
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : INDEXED_DB_TIMEOUT_MS;
 
   try {
     const indexedEntry = await withTimeout(
       readFromIndexedDb(key),
-      INDEXED_DB_TIMEOUT_MS,
+      timeoutMs,
       "INDEXED_DB_TIMEOUT",
     );
     if (indexedEntry) return indexedEntry;
@@ -138,10 +139,13 @@ export async function writeCacheEntry(key, value, options = {}) {
     version: Number(options.version || 1),
   };
 
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : INDEXED_DB_TIMEOUT_MS;
+
   try {
-    await withTimeout(writeToIndexedDb(entry), INDEXED_DB_TIMEOUT_MS, "INDEXED_DB_TIMEOUT");
+    await withTimeout(writeToIndexedDb(entry), timeoutMs, "INDEXED_DB_TIMEOUT");
     return true;
   } catch {
+    if (options.indexedDbOnly) return false;
     return writeToLocalStorage(key, entry);
   }
 }

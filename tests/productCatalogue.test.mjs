@@ -344,10 +344,29 @@ test("catalogue reads paginate past 1000 items and retain every carousel photo f
   assert.deepEqual(result.details.A1001.packing, "24 PCS / CTN");
   assert.equal(result.details.A1001.photos.length, 2);
   assert.equal(result.details.A1001.photos[0].id, "first");
-  assert.match(result.details.A1001.photos[0].url, /product-catalogue\/first\.jpg/);
+  assert.equal(result.details.A1001.photos[1].id, "second");
+  assert.equal("url" in result.details.A1001.photos[0], false);
   assert.deepEqual(result.details.B123, { sellingUnit: "BOX", packing: "", photos: [] });
   assert.equal(result.photosReady, true);
   assert.ok(admin.calls.some((call) => call.table === "items_master" && call.range[0] === 1000));
+});
+
+test("catalogue lists photo ids without calling storage", async () => {
+  const admin = mockAdmin({
+    items_master: [{ item_code: "A1001" }],
+    attachments: Array.from({ length: 3 }, (_, index) => ({
+      id: `photo-${index}`,
+      category: "product_catalogue_photo",
+      entity_id: "A1001",
+      object_key: index === 2 ? "" : `product-catalogue/photo-${index}.jpg`,
+      storage_provider: "supabase",
+      created_at: "2026-10-09T01:00:00Z",
+    })),
+  });
+  admin.storage.from = () => { throw new Error("storage should not be called while listing photos"); };
+  const result = await loadCatalogueDetails(admin);
+  assert.deepEqual(result.details.A1001.photos.map((photo) => photo.id), ["photo-0", "photo-1"]);
+  assert.equal(result.warnings.length, 0);
 });
 
 test("optional packing schema absence is explicit while other database errors are surfaced", async () => {
@@ -482,14 +501,17 @@ test("HTTP photo upload persists the gallery and DELETE removes the specified im
   assert.equal(oversized.status, 413);
 });
 
-test("catalogue UI uploads via FormData and refreshes signed URLs before expiry", () => {
+test("catalogue UI keeps photos and packing on the device", () => {
   const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
   assert.match(source, /FormData/);
   assert.match(source, /method:\s*["']POST["']/);
   assert.match(source, /method:\s*["']DELETE["']/);
   assert.match(source, /photosReady/);
   assert.match(source, /Upload photo/);
-  assert.match(source, /4 \* 60 \* 1000/);
+  assert.match(source, /readCatalogueOffline/);
+  assert.match(source, /syncCataloguePhotoBlobs/);
+  assert.match(source, /writeCataloguePhotoBlob/);
+  assert.doesNotMatch(source, /4 \* 60 \* 1000/);
   assert.match(source, /CATALOGUE_CAROUSEL_MS/);
   assert.match(source, /prefers-reduced-motion/);
   assert.match(source, /Share on WhatsApp/);
@@ -502,7 +524,7 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.doesNotMatch(source, /whatsappText/);
   assert.doesNotMatch(source, /shareTextOnWhatsapp/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
-  assert.doesNotMatch(source, /createObjectURL|revokeObjectURL|previewPhotos/);
+  assert.doesNotMatch(source, /previewPhotos/);
 });
 
 test("catalogue carousel advances and share lines put price and packing on the image", () => {

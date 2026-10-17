@@ -10,7 +10,7 @@ import {
 } from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
-  catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
+  catalogueCardPrice, catalogueItemGroups, catalogueItemsWithPhotos, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import {
   attachCataloguePhotoUrls, catalogueOfflineNotice, cataloguePhotoIds, cataloguePhotoSyncInFlight,
@@ -427,10 +427,11 @@ export default function ProductCatalogue({
   );
   const filteredCodes = new Set(items.map((item) => normalizeCatalogueCode(item.item_code)));
   const recommendationRows = [...recommendedItems, ...staleItems, ...decliningItems];
-  const exportItems = [
+  const catalogueExportCandidates = [
     ...recommendationRows.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
     ...browseItems,
   ];
+  const exportItems = catalogueItemsWithPhotos(catalogueExportCandidates, details);
   const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
   const lastPage = Math.max(0, Math.ceil(browseItems.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
@@ -465,12 +466,22 @@ export default function ProductCatalogue({
   ];
 
   async function exportCatalogue() {
-    if (!exportItems.length || exporting || sharingCode) return;
+    if (!catalogueExportCandidates.length || exporting || sharingCode) return;
+    if (!exportItems.length) {
+      await showPopup({
+        title: ar ? "تصدير الكتالوج" : "Export catalogue",
+        message: ar
+          ? "لا توجد صور للمنتجات المطابقة. التصدير يرسل فقط المنتجات التي لها صور."
+          : "None of the matching products have a photo. Export sends only products that have images.",
+        choices: [{ id: "ok", label: ar ? "حسناً" : "OK" }],
+      });
+      return;
+    }
     const choice = await showPopup({
       title: ar ? "تصدير الكتالوج" : "Export catalogue",
       message: ar
-        ? `تجهيز صور كل المنتجات المطابقة للفلاتر الحالية (${exportItems.length})؟`
-        : `Prepare the same item photos for all ${exportItems.length} products matching the current filters?`,
+        ? `تجهيز صور المنتجات التي لها صور فقط (${exportItems.length})؟ المنتجات بدون صورة لن تُرسل.`
+        : `Prepare WhatsApp photos for the ${exportItems.length} matching products that have images? Products without a photo are left out.`,
       choices: [
         { id: "cancel", label: ar ? "إلغاء" : "Cancel" },
         { id: "without", label: ar ? "بدون السعر" : "Without price" },
@@ -523,7 +534,16 @@ export default function ProductCatalogue({
             lines,
             loadPhoto: (photo) => loadSharePhoto(photo, token),
             fileCode: item.item_code,
+            requirePhoto: true,
           });
+          if (!itemFiles.length) {
+            skipped.push(item.item_code);
+            prepared += 1;
+            setExportProgress(ar
+              ? `الصور ${prepared} / ${exportItems.length}`
+              : `Photos ${prepared} / ${exportItems.length}`);
+            return [];
+          }
           prepared += 1;
           setExportProgress(ar
             ? `الصور ${prepared} / ${exportItems.length}`
@@ -646,7 +666,7 @@ export default function ProductCatalogue({
           </select>
         </label>
         <button type="button" className="moduleInlineButton" disabled={Boolean(busy)} onClick={() => { void refresh(); }}>{ar ? "تحديث الصور" : "Refresh photos"}</button>
-        <button type="button" className="moduleInlineButton" disabled={loading || exporting || Boolean(sharingCode) || exportItems.length === 0} onClick={() => { void exportCatalogue(); }}>
+        <button type="button" className="moduleInlineButton" disabled={loading || exporting || Boolean(sharingCode) || catalogueExportCandidates.length === 0} onClick={() => { void exportCatalogue(); }}>
           {exporting ? (exportProgress || (ar ? "جاري التجهيز" : "Preparing")) : (ar ? "تصدير" : "Export")}
         </button>
       </div>

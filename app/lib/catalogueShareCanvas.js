@@ -139,10 +139,12 @@ export async function buildCatalogueShareFiles({
   loadPhoto,
   fileCode = "item",
   limit = 8,
+  requirePhoto = false,
   document,
   decodeImage,
 } = {}) {
-  const selected = (photos || []).slice(0, limit);
+  const selected = (photos || []).filter((photo) => String(photo?.id || "").trim()).slice(0, limit);
+  if (requirePhoto && !selected.length) return [];
   const jobs = selected.length ? selected : [null];
   const photoBlobs = await Promise.all(jobs.map(async (photo) => {
     if (!photo || !loadPhoto) return null;
@@ -154,6 +156,7 @@ export async function buildCatalogueShareFiles({
   }));
   const files = [];
   for (let index = 0; index < photoBlobs.length; index += 1) {
+    if (requirePhoto && !photoBlobs[index]) continue;
     const blob = await renderCatalogueShareJpeg({ photoBlob: photoBlobs[index], lines, document, decodeImage });
     files.push(new File([blob], catalogueShareFileName(fileCode, index), { type: "image/jpeg" }));
   }

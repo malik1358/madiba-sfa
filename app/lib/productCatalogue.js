@@ -14,6 +14,14 @@ export function hasCataloguePrice(value) {
   return Number.isFinite(price) && price > 0;
 }
 
+export function catalogueItemsWithPhotos(items, details = {}) {
+  return (items || []).filter((item) => {
+    const code = item?.item_code;
+    const detail = details?.[code] || details?.[normalizeCatalogueCode(code)] || {};
+    return (detail.photos || []).some((photo) => String(photo?.id || "").trim());
+  });
+}
+
 function catalogueRecommendationRows(itemsByCode, list, limit, historyReady) {
   if (!historyReady) return [];
   return (list || []).slice(0, limit)

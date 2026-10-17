@@ -244,6 +244,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `matched-receipt-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday also sends Thursday. `maxDuration` 300s; workflow curl `--max-time` 360 | `/api/cron/matched-receipt-email` |
 | `receipts-not-in-tally-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/receipts-not-in-tally-email` |
 | `customer-gps-change-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday sends Thursday and Friday | `/api/cron/customer-gps-change-email` |
+| `missing-catalogue-photos-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To `malik@pinasz.com` and `swami@pinasz.com`. Optional `MISSING_CATALOGUE_PHOTOS_EMAIL_TO`. | `/api/cron/missing-catalogue-photos-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |

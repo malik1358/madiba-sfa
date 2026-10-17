@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-17** — R2 uploads send `Content-Length`. Cloudflare rejected the receipt copy with HTTP 411 when that header was missing. No migration.
+- **2026-10-17** — Missing Catalogue Photos is emailed every working morning at 08:30 KSA, Saturday–Thursday, to `malik@pinasz.com` and `swami@pinasz.com`. One send is claimed per KSA day. No migration.
 - **2026-10-17** — Approved receipt copy to R2. Existing `receipt-copies/<filename>` objects are copied to `madiba-attachments-prod` as `payment-collections/receipt-copies/<filename>`. The cron checks the bytes before it sets `attachments.verified_at`. It does not change `storage_provider`, visit links, or Supabase objects, and it does not copy payment files. No migration.
 - **2026-10-17** — Morning team emails all leave together at 08:30 KSA, Saturday–Thursday. The 08:35–09:10 stagger is removed. No migration.
 - **2026-10-17** — Team and team-leader email now goes out only from 8:30 AM to 10:00 PM KSA, Saturday–Thursday. Overnight digests move to that morning. Saturday also sends the Thursday mail that used to leave just after Friday midnight. Invoice, KPI, supplier-order, and matched-receipt notices outside the window wait in `system_settings.deferred_team_emails_v1` until the inactivity cron flushes them. No migration.

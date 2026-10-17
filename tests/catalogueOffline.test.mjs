@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   attachCataloguePhotoUrls, catalogueMetaFromPayload, catalogueOfflineNotice, cataloguePhotoCacheKey,
-  cataloguePhotosToFetch, CATALOGUE_OFFLINE_KEY, CATALOGUE_PHOTO_PREFIX, mergeCataloguePacking,
-  syncCataloguePhotoBlobs,
+  beginCataloguePhotoSync, cataloguePhotoSyncInFlight, cataloguePhotosToFetch, CATALOGUE_OFFLINE_KEY,
+  CATALOGUE_PHOTO_PREFIX, mergeCataloguePacking, syncCataloguePhotoBlobs,
 } from "../app/lib/catalogueOffline.js";
 
 function memoryStore(seed = {}) {
@@ -65,4 +65,22 @@ test("catalogue photo sync stores missing files and drops photos that left the c
   const urls = attachCataloguePhotoUrls(meta, { keep: "blob:keep", new: "blob:new" });
   assert.deepEqual(urls.A1.photos.map((photo) => photo.url), ["blob:keep", "blob:new"]);
   assert.equal(cataloguePhotoCacheKey("new").startsWith(CATALOGUE_PHOTO_PREFIX), true);
+});
+
+test("catalogue photo saving runs in the background and keeps one follow-up pass", async () => {
+  let started = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const first = beginCataloguePhotoSync(async () => {
+    started += 1;
+    await gate;
+  });
+  const second = beginCataloguePhotoSync(async () => { started += 1; });
+  assert.equal(cataloguePhotoSyncInFlight(), true);
+  assert.equal(started, 1);
+  release();
+  await first;
+  await second;
+  assert.equal(started, 2);
+  assert.equal(cataloguePhotoSyncInFlight(), false);
 });

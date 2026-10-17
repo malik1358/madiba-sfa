@@ -8,6 +8,7 @@ import {
   refreshOfflineDeviceData,
 } from "../lib/offlineDataRefresh";
 import { getSupabaseClient } from "../lib/supabase";
+import { startCataloguePhotoSync } from "../lib/catalogueOfflineClient";
 import { WORKDAY_GATE_READY_EVENT } from "../lib/morningAttendance";
 
 const BACKGROUND_DATA_START_DELAY_MS = 2500;
@@ -49,6 +50,7 @@ export default function PwaShell() {
       started = true;
       window.clearTimeout(fallbackTimer);
       hydrateMobileSnapshotIfMissing();
+      void startCataloguePhotoSync();
     }
 
     fallbackTimer = window.setTimeout(startBackgroundHydrate, BACKGROUND_DATA_START_DELAY_MS);
@@ -70,11 +72,14 @@ export default function PwaShell() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION") && started) {
         hydrateMobileSnapshotIfMissing();
+        void startCataloguePhotoSync();
       }
     });
 
     const onOnline = () => {
-      if (started) hydrateMobileSnapshotIfMissing();
+      if (!started) return;
+      hydrateMobileSnapshotIfMissing();
+      void startCataloguePhotoSync();
     };
     window.addEventListener("online", onOnline);
 

@@ -1147,6 +1147,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const queuesRef = useRef({ dueCustomers: [], notDueCustomers: [], legalCustomers: [] });
   const pendingSyncCountRef = useRef(0);
   const activeRowKeyRef = useRef("");
+  const errorRef = useRef("");
+  const queueOfflineRef = useRef(false);
   const urlCustomerFilterAppliedRef = useRef(false);
   const prefilledCollectionOpenedRef = useRef(false);
   const workingHoursEntriesRef = useRef([]);
@@ -1165,6 +1167,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
   useEffect(() => {
     activeRowKeyRef.current = activeRowKey;
   }, [activeRowKey]);
+
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
+  useEffect(() => {
+    queueOfflineRef.current = queueOffline;
+  }, [queueOffline]);
 
   const refreshTodayVisitCount = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -1407,12 +1417,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       const message = String(err.message || "");
+      // Re-check after awaits — the phone may have come back online while the
+      // failed request was settling, which previously left the offline-only
+      // message up under an Online status bar.
       const offlineNow = typeof navigator !== "undefined" && navigator.onLine === false;
       if (offlineNow) {
         setError(t("offlineQueueMissing"));
       } else if (message === "SESSION_TIMEOUT") {
         setError("Session check timed out. Please refresh the page or login again.");
-      } else if (message.includes("timed out")) {
+      } else if (message.includes("timed out") || /offline|not available on the device/i.test(message)) {
         setError(t("msgQueueLoadTimeout"));
       } else {
         setError(localizeApiMessage(message || "Unable to load payment collection queue."));
@@ -1477,17 +1490,30 @@ export default function PaymentCollectionsView({ view = "due" }) {
         refreshTodayVisitCount();
       }
     };
+    // Reconnect used to only refresh pending-sync counts. After a brief offline
+    // miss (no device queue yet), the status bar flipped to Online while the
+    // "No saved collection queue" error stayed up. Reload whenever reconnect
+    // finds an error, an offline banner, or an empty queue.
+    const onOnline = () => {
+      void refreshPendingSyncCount();
+      const needsReload = Boolean(errorRef.current)
+        || queueOfflineRef.current
+        || !queueHasRows(queuesRef.current);
+      if (needsReload) {
+        void loadQueue(activeRowKeyRef.current);
+      }
+    };
 
     window.addEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
     window.addEventListener("madiba-offline-queue-changed", onQueueChanged);
-    window.addEventListener("online", onQueueChanged);
+    window.addEventListener("online", onOnline);
     return () => {
       loadSeqRef.current += 1;
       window.clearTimeout(queueRefreshWatchdogRef.current);
       queueRefreshWatchdogRef.current = 0;
       window.removeEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
       window.removeEventListener("madiba-offline-queue-changed", onQueueChanged);
-      window.removeEventListener("online", onQueueChanged);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 

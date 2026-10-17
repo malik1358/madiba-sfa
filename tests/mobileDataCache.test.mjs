@@ -99,6 +99,20 @@ test("payment collections loadQueue shows cached customers immediately while off
   assert.match(source, /if \(offline\) \{\s*setRefreshingQueue\(false\);\s*setError\(""\);\s*return cachedResult;/);
 });
 
+test("payment collections reloads the queue on reconnect when missing or offline", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/management/payment-collections/PaymentCollectionsView.jsx", import.meta.url), "utf8")
+  ));
+  // online must not share the pending-sync-only handler — reconnect with an empty
+  // device queue has to call loadQueue even when nothing is waiting to sync.
+  assert.match(source, /const onOnline = \(\) => \{/);
+  assert.match(source, /addEventListener\("online", onOnline\)/);
+  assert.match(source, /errorRef\.current/);
+  assert.match(source, /queueOfflineRef\.current/);
+  assert.match(source, /!queueHasRows\(queuesRef\.current\)/);
+  assert.doesNotMatch(source, /addEventListener\("online", onQueueChanged\)/);
+});
+
 test("invalidateCollectionQueuesForUser clears every queue cache version by prefix", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")

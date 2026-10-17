@@ -10,7 +10,7 @@ import {
 } from "../lib/catalogueShareCard";
 import { getSupabaseClient } from "../lib/supabase";
 import {
-  catalogueCardPrice, catalogueItemGroups, catalogueItemsWithPhotos, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
+  catalogueCardPrice, catalogueFrontPhoto, catalogueItemGroups, catalogueItemsWithPhotos, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import {
   attachCataloguePhotoUrls, catalogueOfflineNotice, cataloguePhotoIds, cataloguePhotoSyncInFlight,
@@ -529,12 +529,14 @@ export default function ProductCatalogue({
             pricingType,
             region: pricingRegion,
           });
+          const frontPhoto = catalogueFrontPhoto(detail.photos);
           const itemFiles = await buildCatalogueShareFiles({
-            photos: detail.photos || [],
+            photos: frontPhoto ? [frontPhoto] : [],
             lines,
             loadPhoto: (photo) => loadSharePhoto(photo, token),
             fileCode: item.item_code,
             requirePhoto: true,
+            limit: 1,
           });
           if (!itemFiles.length) {
             skipped.push(item.item_code);

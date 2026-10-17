@@ -25,10 +25,16 @@ export function contentTypeForReceipt(objectName) {
 
 export function failureKind(error) {
   const status = Number(error?.statusCode || error?.status || 0);
-  const message = String(error?.message || "");
+  const message = String(error?.message || error?.error || "");
   if (status === 401 || status === 403 || /forbidden|unauthorized|access denied/i.test(message)) return "auth";
   if (status === 409 || /did not match|different content|integrity/i.test(message)) return "integrity";
   return "file";
+}
+
+export function failureDetail(error) {
+  return String(error?.message || error?.error || "copy-failed")
+    .replace(/https?:\/\/\S+/g, "[url]")
+    .slice(0, 180);
 }
 
 export function shouldStopCopy({ auth = 0, integrity = 0, fileFailures = 0, attempted = 0 } = {}) {
@@ -101,7 +107,11 @@ export async function copyReceiptBatch({
       if (remoteSha !== sourceSha) {
         summary.integrity += 1;
         summary.failed += 1;
-        summary.failures.push({ name, reason: uploaded ? "uploaded-bytes-mismatch" : "existing-bytes-mismatch" });
+        summary.failures.push({
+        name,
+        reason: uploaded ? "uploaded-bytes-mismatch" : "existing-bytes-mismatch",
+        detail: "checksum mismatch",
+      });
         summary.stop = true;
         summary.stopReason = "integrity";
         return;
@@ -114,12 +124,19 @@ export async function copyReceiptBatch({
     } catch (error) {
       const kind = failureKind(error);
       summary.failed += 1;
-      summary.failures.push({ name, reason: kind === "file" ? "copy-failed" : kind });
+      summary.failures.push({
+        name,
+        reason: kind === "file" ? "copy-failed" : kind,
+        status: Number(error?.statusCode || error?.status || 0) || null,
+        detail: failureDetail(error),
+      });
       if (kind === "auth") summary.auth += 1;
       if (kind === "integrity") summary.integrity += 1;
-      if (shouldStopCopy({
+      const fileFailures = summary.failed - summary.auth - summary.integrity;
+      const noProgress = summary.copied + summary.already === 0;
+      if (noProgress && fileFailures >= 3 || shouldStopCopy({
         ...summary,
-        fileFailures: summary.failed - summary.auth - summary.integrity,
+        fileFailures,
       })) {
         summary.stop = true;
         summary.stopReason = kind === "auth" ? "auth" : kind === "integrity" ? "integrity" : "widespread";

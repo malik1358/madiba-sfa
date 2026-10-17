@@ -27,9 +27,7 @@ import {
   deleteObject,
   ensureAttachmentBucket,
   getObject,
-  getSignedReadUrl,
   readAttachmentStorageConfig,
-  SIGNED_URL_TTL_SECONDS,
   STORAGE_PROVIDERS,
   writeAttachmentObject,
 } from "./storage/attachmentStorage.js";
@@ -166,17 +164,8 @@ export async function loadCatalogueDetails(admin, loadSheetPacking = loadCatalog
   for (const photo of photos) {
     const ref = attachmentObjectRef(photo);
     const itemCode = normalizeCatalogueCode(photo.entity_id);
-    if (!ref || !itemCode) continue;
-    try {
-      const signed = await getSignedReadUrl(admin, {
-        provider: ref.provider,
-        key: ref.key,
-        expiresIn: SIGNED_URL_TTL_SECONDS,
-      });
-      detailFor(itemCode).photos.push({ id: photo.id, url: signed.url });
-    } catch {
-      fail("Unable to load a product photo. Refresh or ask an administrator to check Storage.", 500);
-    }
+    if (!ref || !itemCode || !photo.id) continue;
+    detailFor(itemCode).photos.push({ id: photo.id });
   }
   return { details, warnings, photosReady };
 }

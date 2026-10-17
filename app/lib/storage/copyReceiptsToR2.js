@@ -5,12 +5,21 @@ export const RECEIPT_R2_BUCKET = "madiba-attachments-prod";
 export const RECEIPT_COPY_PROGRESS_KEY = "receipt_r2_copy_progress_v1";
 export const COPY_CONCURRENCY = 4;
 
-const FILENAME = /^receipt-copies\/[^/]+$/;
+const RECEIPT_FILENAME = /^receipt-copies\/[^/]+$/;
+const PAYMENT_FILENAME = /^payment-copies\/[^/]+$/;
 
 export function receiptDestinationKey(objectName) {
   const name = String(objectName || "").replace(/^\/+/, "");
-  if (!FILENAME.test(name)) {
+  if (!RECEIPT_FILENAME.test(name)) {
     throw new Error("Receipt files stay in receipt-copies with their original filename.");
+  }
+  return `payment-collections/${name}`;
+}
+
+export function paymentDestinationKey(objectName) {
+  const name = String(objectName || "").replace(/^\/+/, "");
+  if (!PAYMENT_FILENAME.test(name)) {
+    throw new Error("Payment files stay in payment-copies with their original filename.");
   }
   return `payment-collections/${name}`;
 }
@@ -21,6 +30,45 @@ export function sha256Hex(bytes) {
 
 export function contentTypeForReceipt(objectName) {
   return String(objectName || "").toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+}
+
+export function contentTypeForPayment(objectName) {
+  const lower = String(objectName || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
+export function fileKind(bytes) {
+  const body = Buffer.from(bytes || []);
+  if (body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) return "jpeg";
+  if (body.length >= 8 && body[0] === 0x89 && body[1] === 0x50 && body[2] === 0x4e && body[3] === 0x47) return "png";
+  if (body.length >= 5 && body.subarray(0, 5).toString("utf8") === "%PDF-") return "pdf";
+  return "";
+}
+
+export function assessCopiedBytes({ bytes, signedBytes, sizeBytes, contentType } = {}) {
+  const body = Buffer.from(bytes || []);
+  const signed = Buffer.from(signedBytes || []);
+  const kind = fileKind(body);
+  const reasons = [];
+  if (!body.length) reasons.push("empty");
+  if (!signed.length || sha256Hex(signed) !== sha256Hex(body)) reasons.push("signed-url-mismatch");
+  if (Number(sizeBytes) !== body.length) reasons.push("size-mismatch");
+  if (contentType === "image/jpeg" && kind !== "jpeg") reasons.push("not-jpeg");
+  if (contentType === "image/png" && kind !== "png") reasons.push("not-png");
+  if (contentType === "application/pdf" && kind !== "pdf") reasons.push("not-pdf");
+  return { ok: reasons.length === 0, sha256: sha256Hex(body), bytes: body.length, kind, reasons };
+}
+
+export function newUploadAssociation(record, visit) {
+  if (!record?.entity_id) return { state: "unlinked", ok: true };
+  const column = record.category === "payment_copy" ? "payment_attachment_id" : "receipt_attachment_id";
+  const matches = String(visit?.id || "") === String(record.entity_id)
+    && String(visit?.customer_code || "").trim().toUpperCase() === String(record.customer_code || "").trim().toUpperCase()
+    && String(visit?.[column] || "") === String(record.id || "");
+  return { state: matches ? "visit" : "mismatch", ok: matches };
 }
 
 export function failureKind(error) {
@@ -72,6 +120,8 @@ export async function copyReceiptBatch({
   concurrency = COPY_CONCURRENCY,
   timeBudgetMs = 45000,
   now = Date.now,
+  destinationKeyFor = receiptDestinationKey,
+  contentTypeFor = contentTypeForReceipt,
 } = {}) {
   const started = now();
   const pending = names.filter((name) => !verifiedNames.has(name));
@@ -94,11 +144,11 @@ export async function copyReceiptBatch({
     summary.attempted += 1;
     let uploaded = false;
     try {
-      const destinationKey = receiptDestinationKey(name);
+      const destinationKey = destinationKeyFor(name);
       const source = Buffer.from(await download(name));
       const sourceSha = sha256Hex(source);
       try {
-        await put(destinationKey, source, contentTypeForReceipt(name), sourceSha);
+        await put(destinationKey, source, contentTypeFor(name), sourceSha);
         uploaded = true;
       } catch (error) {
         if (Number(error?.statusCode) !== 412) throw error;

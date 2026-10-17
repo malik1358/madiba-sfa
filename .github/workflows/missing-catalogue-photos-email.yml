@@ -1,0 +1,98 @@
+name: Missing Catalogue Photos Email
+
+on:
+  schedule:
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday — missing catalogue photos.
+    - cron: "30 5 * * 0-4,6"
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Test-only recipient override."
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already marked sent"
+        required: false
+        default: "true"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger missing catalogue photos email endpoint
+        env:
+          MISSING_CATALOGUE_PHOTOS_EMAIL_URL: ${{ secrets.MISSING_CATALOGUE_PHOTOS_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/missing-catalogue-photos-email'
+          MISSING_CATALOGUE_PHOTOS_EMAIL_URL_TRIMMED="$(printf '%s' "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE="$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "MISSING_CATALOGUE_PHOTOS_EMAIL_URL secret is missing; falling back to default endpoint."
+            MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE="$DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_URL"
+          elif [[ ! "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE" =~ /api/cron/missing-catalogue-photos-email([/?].*)?$ ]]; then
+            echo "MISSING_CATALOGUE_PHOTOS_EMAIL_URL secret does not point to /api/cron/missing-catalogue-photos-email; falling back to default endpoint."
+            MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE="$DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          export EVENT_NAME
+          export FORCE_VALUE="${INPUT_FORCE:-}"
+          export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          python3 - <<'PY' > payload.json
+          import json, os
+          event_name = os.environ.get("EVENT_NAME", "").strip()
+          force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
+          if event_name == "schedule":
+            force = False
+          elif force_raw:
+            force = force_raw not in ("0", "false", "no")
+          else:
+            force = True
+          payload = {"force": force}
+          to = os.environ.get("TO_VALUE", "").strip()
+          if to:
+            payload["to"] = to
+          print(json.dumps(payload))
+          PY
+
+          echo "Request payload:"
+          cat payload.json
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data @payload.json
+          }
+
+          status_code="$(post_report "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE" != "$DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_URL" ]]; then
+            echo "Primary MISSING_CATALOGUE_PHOTOS_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE="$DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_URL"
+            status_code="$(post_report "$MISSING_CATALOGUE_PHOTOS_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Missing catalogue photos email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Missing catalogue photos email succeeded with HTTP $status_code"
+          cat response.json

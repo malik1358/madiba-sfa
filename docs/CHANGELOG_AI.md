@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-17** — Product Catalogue no longer shows “access denied” when the phone has no sign-in. That screen sends the salesman to login and returns them to the catalogue afterwards. Signed-in salesmen also get a Product Catalogue tile on Home. No migration.
 - **2026-10-17** — R2 uploads send `Content-Length`. Cloudflare rejected the receipt copy with HTTP 411 when that header was missing. No migration.
 - **2026-10-17** — Missing Catalogue Photos is emailed every working morning at 08:30 KSA, Saturday–Thursday, to `malik@pinasz.com` and `swami@pinasz.com`. One send is claimed per KSA day. No migration.
 - **2026-10-17** — Approved receipt copy to R2. Existing `receipt-copies/<filename>` objects are copied to `madiba-attachments-prod` as `payment-collections/receipt-copies/<filename>`. The cron checks the bytes before it sets `attachments.verified_at`. It does not change `storage_provider`, visit links, or Supabase objects, and it does not copy payment files. No migration.

@@ -20,6 +20,7 @@ import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
 import { postSinglePlatformSession } from "./lib/authSessionLimit";
 import { isNativeAndroidPlatform } from "./lib/nativeFieldTracking";
 import { useModuleAccess } from "./hooks/useModuleAccess";
+import { clearCatalogueReturn, readCatalogueReturn } from "./lib/productCatalogue";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -45,6 +46,7 @@ export default function Home() {
     "myDay",
     "customerAudit",
     "newOrder",
+    "productCatalogue",
     "pendingOrders",
     "newCustomer",
     "myPerformance",
@@ -58,6 +60,7 @@ export default function Home() {
       myDay: "📍",
       customerAudit: "👥",
       newOrder: "🛒",
+      productCatalogue: "📖",
       pendingOrders: "⏳",
       newCustomer: "➕",
       myPerformance: "🎯",
@@ -70,6 +73,7 @@ export default function Home() {
       myDay: ar ? "يومي" : "My Day",
       customerAudit: ar ? "عملائي" : "My Customers",
       newOrder: ar ? "طلب جديد" : "New Order",
+      productCatalogue: ar ? "كتالوج المنتجات" : "Product Catalogue",
       pendingOrders: ar ? "طلبات معلقة قديمة" : "Old Pending Orders",
       newCustomer: ar ? "عميل جديد" : "New Customer",
       myPerformance: ar ? "أدائي" : "My Performance",
@@ -82,6 +86,7 @@ export default function Home() {
       myDay: ar ? "زيارات ومتابعات اليوم" : "Today's visits & follow-ups",
       customerAudit: ar ? "بحث وسجل العملاء" : "Search & customer history",
       newOrder: ar ? "إنشاء طلب للعميل" : "Create customer order",
+      productCatalogue: ar ? "صور المنتجات والأسعار" : "Product photos and prices",
       pendingOrders: ar ? "عرض الطلبات غير المكتملة" : "View unfinished draft orders",
       newCustomer: ar ? "تسجيل عميل محتمل" : "Register a new prospect",
       myPerformance: ar ? "الأهداف والنتائج" : "KRA & KPI progress",
@@ -320,8 +325,12 @@ export default function Home() {
       const supabase = getSupabaseClient();
       if (!supabase) return;
 
+      const storage = typeof window === "undefined" ? null : window.sessionStorage;
+      const catalogueReturn = readCatalogueReturn(storage);
+
       // Collectors punch morning attendance on the Collections screen.
       if (isCollectionOnlyAccess) {
+        clearCatalogueReturn(storage);
         router.replace("/management/payment-collections");
         return;
       }
@@ -333,6 +342,11 @@ export default function Home() {
           router.replace("/management/my-day");
           return;
         }
+      }
+
+      if (catalogueReturn) {
+        clearCatalogueReturn(storage);
+        router.replace(catalogueReturn);
       }
     }
 

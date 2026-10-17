@@ -5,8 +5,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import {
-  catalogueFrontPhoto, catalogueItemsWithPhotos, cataloguePacking, cataloguePermissions, catalogueSheetPacking,
-  hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
+  catalogueFrontPhoto, catalogueItemsWithPhotos, cataloguePacking, cataloguePageGate, cataloguePermissions, catalogueSheetPacking,
+  clearCatalogueReturn, hasCataloguePrice, readCatalogueReturn, rememberCatalogueReturn, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
   buildCatalogueShareLines, catalogueShareLatinWords, catalogueShareTextFromDictionary, catalogueShareUnknownWords,
@@ -252,6 +252,26 @@ test("catalogue navigation follows field order access and keeps collector exclus
     assert.equal(buildModuleAccess(context).canAccess("productCatalogue"), false);
   }
   assert.equal(localizedModuleLabel("productCatalogue", "ar"), "كتالوج المنتجات");
+});
+
+test("a missing catalogue session asks for sign-in instead of access denied", () => {
+  assert.equal(cataloguePageGate({ loading: true, signedIn: null, canView: false }), "loading");
+  assert.equal(cataloguePageGate({ loading: false, signedIn: null, canView: false }), "loading");
+  assert.equal(cataloguePageGate({ loading: false, signedIn: false, canView: false }), "sign-in");
+  assert.equal(cataloguePageGate({ loading: false, signedIn: true, canView: true }), "open");
+  assert.equal(cataloguePageGate({ loading: false, signedIn: true, canView: false }), "denied");
+  const storage = new Map();
+  const sessionStorage = {
+    setItem: (key, value) => storage.set(key, value),
+    getItem: (key) => storage.get(key) || null,
+    removeItem: (key) => storage.delete(key),
+  };
+  rememberCatalogueReturn(sessionStorage);
+  assert.equal(readCatalogueReturn(sessionStorage), "/management/product-catalogue");
+  clearCatalogueReturn(sessionStorage);
+  assert.equal(readCatalogueReturn(sessionStorage), "");
+  sessionStorage.setItem("madiba-return-path", "/management/upload");
+  assert.equal(readCatalogueReturn(sessionStorage), "");
 });
 
 test("photo writes are restricted to active admin/manager, including metadata gates", () => {

@@ -464,6 +464,8 @@ export function unitMapFromItems(items = []) {
       item_code: code,
       tally_unit: normalizeTallyUnit(item.tally_unit),
       tally_item_name: String(item.tally_item_name || "").trim(),
+      barcode: String(item.tally_barcode || item.barcode || "").trim(),
+      tally_barcode: String(item.tally_barcode || item.barcode || "").trim(),
     };
   });
   return map;

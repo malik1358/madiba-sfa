@@ -140,10 +140,19 @@ export async function GET(request) {
         .filter(Boolean),
     )].slice(0, 500);
 
-    const { data, error } = await admin
+    let { data, error } = await admin
       .from("items_master")
-      .select("item_code,tally_unit,tally_item_name")
+      .select("item_code,tally_unit,tally_item_name,tally_barcode")
       .in("item_code", codes);
+
+    if (error && String(error.message || "").toLowerCase().includes("tally_barcode")) {
+      const retry = await admin
+        .from("items_master")
+        .select("item_code,tally_unit,tally_item_name")
+        .in("item_code", codes);
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       if (isMissingTallyUnitColumn(error)) {

@@ -1437,9 +1437,16 @@ export default function PendingOrdersPage() {
       if (!supabase) return {};
       const { data, error: unitsError } = await supabase
         .from("items_master")
-        .select("item_code,tally_unit,tally_item_name")
+        .select("item_code,tally_unit,tally_item_name,tally_barcode")
         .in("item_code", codes);
-      if (unitsError || !data) return {};
+      if (unitsError || !data) {
+        const retry = await supabase
+          .from("items_master")
+          .select("item_code,tally_unit,tally_item_name")
+          .in("item_code", codes);
+        if (retry.error || !retry.data) return {};
+        return unitMapFromItems(retry.data);
+      }
       return unitMapFromItems(data);
     } catch {
       return {};

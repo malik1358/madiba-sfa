@@ -168,6 +168,7 @@ export async function POST(request) {
         copied: progress.copied,
         already: progress.already,
         failed: progress.failures.length,
+        failures: batch.failures.slice(0, 5).map(({ reason, status, detail }) => ({ reason, status, detail })),
         remaining: names.filter((name) => !progress.verified[name]).length,
       }, 409);
     }

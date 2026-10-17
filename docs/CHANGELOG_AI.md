@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-17** — Historical payment copies copy to R2 at `payment-collections/payment-copies/<original filename>`. The cron checksums each R2 download before it sets `verified_at` on matching Supabase payment rows. It does not change `storage_provider`, visit links, or Supabase objects. The four customer `1222C` R2 uploads are verified separately. Historical reads still follow `storage_provider`; `verified_at` is not the switch. No migration.
+- **2026-10-17** — Receipt copy batches now stop after 20 seconds and the GitHub runner retries a gateway timeout. A 60-second function limit was ending the run even after progress had been saved. No migration.
 - **2026-10-17** — Product Catalogue no longer shows “access denied” when the phone has no sign-in. That screen sends the salesman to login and returns them to the catalogue afterwards. Signed-in salesmen also get a Product Catalogue tile on Home. No migration.
 - **2026-10-17** — R2 uploads send `Content-Length`. Cloudflare rejected the receipt copy with HTTP 411 when that header was missing. No migration.
 - **2026-10-17** — Missing Catalogue Photos is emailed every working morning at 08:30 KSA, Saturday–Thursday, to `malik@pinasz.com` and `swami@pinasz.com`. One send is claimed per KSA day. No migration.

@@ -19,7 +19,7 @@ jobs:
           fi
           post() {
             local mode="$1"
-            curl -sS -L --post301 --post302 --post303 --max-time 70 -o response.json -w "%{http_code}" -X POST \
+            curl -sS -L --post301 --post302 --post303 --max-time 75 -o response.json -w "%{http_code}" -X POST \
               "https://madiba-sfa.vercel.app/api/cron/copy-receipts-to-r2" \
               -H "Authorization: Bearer ${CRON_SECRET}" \
               -H "Content-Type: application/json" \
@@ -27,21 +27,44 @@ jobs:
           }
           run_mode() {
             local mode="$1"
-            local i code
-            for i in $(seq 1 80); do
-              code="$(post "$mode")"
-              echo "mode=${mode} batch=${i} http=${code}"
-              set +e
-              node --input-type=module -e "import fs from 'node:fs'; const body=JSON.parse(fs.readFileSync('response.json','utf8')); console.log(JSON.stringify({success:body.success,done:body.done,stop:body.stop,stopReason:body.stopReason,mode:body.mode,sourceCount:body.sourceCount,copied:body.copied,already:body.already,failed:body.failed,verifiedRows:body.verifiedRows,verifiedCount:body.verifiedCount,reconciledCount:body.reconciledCount,remaining:body.remaining,batchAttempted:body.batchAttempted,error:body.error,failures:body.failures})); if(body.stop) process.exit(2); if(body.success && body.remaining===0) process.exit(0); if(body.success) process.exit(3); process.exit(1);"
-              status=$?
-              set -e
-              if [[ "$status" == "0" ]]; then
-                return 0
-              fi
+            local i code status attempt
+            for i in $(seq 1 160); do
+              for attempt in 1 2 3 4 5 6; do
+                set +e
+                code="$(post "$mode")"
+                status=$?
+                set -e
+                if [[ "$status" != "0" ]]; then
+                  code="000"
+                fi
+                echo "mode=${mode} batch=${i} attempt=${attempt} http=${code}"
+                if [[ "$code" == "502" || "$code" == "503" || "$code" == "504" || "$code" == "000" ]]; then
+                  echo "gateway timeout; saved progress will be resumed"
+                  sleep 8
+                  continue
+                fi
+                set +e
+                node --input-type=module -e "import fs from 'node:fs'; const raw=fs.readFileSync('response.json','utf8'); let body; try { body=JSON.parse(raw); } catch { console.log(raw.slice(0,180)); process.exit(4); } console.log(JSON.stringify({success:body.success,done:body.done,stop:body.stop,stopReason:body.stopReason,mode:body.mode,sourceCount:body.sourceCount,copied:body.copied,already:body.already,failed:body.failed,verifiedRows:body.verifiedRows,verifiedCount:body.verifiedCount,reconciledCount:body.reconciledCount,remaining:body.remaining,batchAttempted:body.batchAttempted,error:body.error,failures:(body.failures||[]).slice(0,5)})); if(body.stop) process.exit(2); if(body.success && body.remaining===0) process.exit(0); if(body.success) process.exit(3); process.exit(1);"
+                status=$?
+                set -e
+                if [[ "$status" == "4" ]]; then
+                  echo "response was not JSON; retrying"
+                  sleep 8
+                  continue
+                fi
+                if [[ "$status" == "0" ]]; then
+                  return 0
+                fi
+                if [[ "$status" == "3" ]]; then
+                  break
+                fi
+                return "$status"
+              done
               if [[ "$status" == "3" ]]; then
                 continue
               fi
-              return "$status"
+              echo "${mode} batch ${i} failed after retries"
+              return 1
             done
             echo "${mode} did not finish"
             return 1

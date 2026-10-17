@@ -2,7 +2,8 @@ name: Salesman Visit Plan Email
 
 on:
   schedule:
-    # 21:00 UTC = 00:00 KSA — build and store visit plans, then email.
+    # 21:00 UTC = 00:00 KSA — build and store visit plans.
+    # If visit-plan email is enabled, delivery waits until 08:30–22:00 KSA, Saturday–Thursday.
     - cron: "0 21 * * *"
   workflow_dispatch:
 

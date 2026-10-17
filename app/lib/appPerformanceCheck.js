@@ -1,4 +1,5 @@
 import { sendEmail } from "./mailer.js";
+import { isWithinTeamEmailWindow } from "./workdayActivity.js";
 import { getKsaDateString, getKsaDateTimeParts } from "./workdayActivity.js";
 
 export const APP_PERFORMANCE_SETTING_KEY = "app_performance_daily_v1";
@@ -275,7 +276,7 @@ export async function runAppPerformanceCheck(admin, options = {}) {
 
   const emailTo = options.emailTo || process.env.APP_PERFORMANCE_EMAIL_TO || APP_PERFORMANCE_EMAIL_TO;
   let emailed = false;
-  if (shouldEmailPerformanceCheck(check, previousSlot)) {
+  if (shouldEmailPerformanceCheck(check, previousSlot) && isWithinTeamEmailWindow(now)) {
     const send = options.sendEmail || sendEmail;
     await send(buildPerformanceEmail(check, emailTo));
     check.emailedAt = now.toISOString();

@@ -6,6 +6,8 @@ import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from ".
 import { isKpiTargetProfile, isTeamTargetSalesmanCode, mergeKpiTargetProfiles, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
 import { changedKpiTargetKeys } from "../../../lib/kpiTargetsEmail.js";
 import { runKpiTargetsEmailCycle } from "../../../lib/kpiTargetsEmailServer.js";
+import { enqueueDeferredTeamEmail } from "../../../lib/deferredTeamEmail.js";
+import { isWithinTeamEmailWindow, teamEmailWindowHoldMessage } from "../../../lib/workdayActivity.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { normalizeReportSalesmanCode } from "../../../lib/salesmanReportIdentity.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
@@ -253,16 +255,30 @@ export async function PUT(request) {
     let email = { sentCount: 0, failedCount: 0, skippedCount: 0, results: [] };
     const changedSalesmanRows = changedRows.filter((row) => !isTeamTargetSalesmanCode(row.salesmanCode));
     if (changedSalesmanRows.length) {
+      const emailArgs = {
+        month: targetMonth.slice(0, 7),
+        salesmanCodes: changedSalesmanRows.map((row) => row.salesmanCode),
+        changedLabelsBySalesman: Object.fromEntries(changedSalesmanRows.map((row) => [
+          row.salesmanCode,
+          row.changedKeys.map((key) => PERFORMANCE_KPI_LABELS[key] || key),
+        ])),
+        trigger: "target_update",
+      };
       try {
-        email = await runKpiTargetsEmailCycle(admin, {
-          month: targetMonth.slice(0, 7),
-          salesmanCodes: changedSalesmanRows.map((row) => row.salesmanCode),
-          changedLabelsBySalesman: Object.fromEntries(changedSalesmanRows.map((row) => [
-            row.salesmanCode,
-            row.changedKeys.map((key) => PERFORMANCE_KPI_LABELS[key] || key),
-          ])),
-          trigger: "target_update",
-        });
+        if (!isWithinTeamEmailWindow()) {
+          await enqueueDeferredTeamEmail(admin, { kind: "kpi_targets", ...emailArgs });
+          email = {
+            sentCount: 0,
+            failedCount: 0,
+            skippedCount: changedSalesmanRows.length,
+            deferred: true,
+            reason: "outside_team_email_window",
+            message: teamEmailWindowHoldMessage(),
+            results: [],
+          };
+        } else {
+          email = await runKpiTargetsEmailCycle(admin, emailArgs);
+        }
         email.changedTargets = changedSalesmanRows.map((row) => ({
           salesmanCode: row.salesmanCode,
           labels: row.changedKeys.map((key) => PERFORMANCE_KPI_LABELS[key] || key),

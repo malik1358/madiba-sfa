@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runDailySupplierOrderEmailCycle } from "../../../lib/dailySupplierOrderEmailServer.js";
+import { teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 import { formatSupabaseError, withJwtClockSkewRetry } from "../../../lib/dailySalesmanResumeServer.js";
 
 export const runtime = "nodejs";
@@ -69,6 +70,8 @@ async function handleRequest(request) {
     }
 
     const { date, force, to, sendToUsers } = await readParams(request);
+    const held = teamEmailWindowSkip(new Date(), { bypass: Boolean(String(to || "").trim() || String(force || "").trim()) });
+    if (held) return NextResponse.json(held);
     const result = await withJwtClockSkewRetry(async () => {
       const admin = createAdminClient();
       return runDailySupplierOrderEmailCycle(admin, {

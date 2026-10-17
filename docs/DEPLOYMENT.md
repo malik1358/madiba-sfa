@@ -234,19 +234,21 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `vercel.json` inactivity | `*/10 * * * *` | Every 10 minutes | `/api/cron/inactivity-push` |
 | `inactivity-push.yml` | Manual only | Backup trigger | same |
 | `auto-close-workdays.yml` | `59 20 * * *` and `5 21 * * *` | 23:59 and 00:05 KSA | `/api/cron/auto-close-workdays` |
-| `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA, build snapshot then maybe email | `/api/cron/salesman-visit-plan-email` |
-| `daily-visit-report-email.yml` | `10 21 * * 0-3,6`; `0 3 * * 6` | 00:10 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-visit-report-email` |
-| `daily-salesman-resume-email.yml` | `15 21 * * 0-3,6`; `0 3 * * 6` | 00:15 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-salesman-resume-email` |
-| `matched-receipt-email.yml` | `35 21 * * *` | 00:35 KSA daily, catch up yesterday's matched app receipts (month-to-date boss digest; function `maxDuration` 300s; workflow curl `--max-time` 360) | `/api/cron/matched-receipt-email` |
-| `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
-| `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
-| `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |
-| `customer-gps-change-email.yml` | `40 21 * * *` | 00:40 KSA every day, including Friday; previous completed KSA calendar day | `/api/cron/customer-gps-change-email` |
+| `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA build snapshot. Email, if enabled, waits for 08:30–22:00 KSA Sat–Thu | `/api/cron/salesman-visit-plan-email` |
+| `daily-visit-report-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-visit-report-email` |
+| `daily-salesman-resume-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-salesman-resume-email` |
+| `daily-supplier-order-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/daily-supplier-order-email` |
+| `outstanding-no-gps-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/outstanding-no-gps-email` |
+| `collection-stale-overdue-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/collection-stale-overdue-email` |
+| `daily-receipt-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday also sends Thursday | `/api/cron/daily-receipt-email` |
+| `matched-receipt-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday also sends Thursday. `maxDuration` 300s; workflow curl `--max-time` 360 | `/api/cron/matched-receipt-email` |
+| `receipts-not-in-tally-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/receipts-not-in-tally-email` |
+| `customer-gps-change-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday sends Thursday and Friday | `/api/cron/customer-gps-change-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |
 | `KPI Targets Email` | Manual dispatch only | Operator-selected month; no scheduled sends | `/api/cron/kpi-targets-email` |
-| `app-performance.yml` | `0 6,9,12,15 * * *` | 09:00, 12:00, 15:00 and 18:00 KSA every day, including Friday. Emails `malik@pinasz.com` when a run is slower or a probe fails. | `/api/cron/app-performance` |
+| `app-performance.yml` | `0 6,9,12,15 * * *` | 09:00, 12:00, 15:00 and 18:00 KSA every day. The check runs on Friday; the alert email does not. Emails `malik@pinasz.com` when a run is slower or a probe fails inside the team email window. | `/api/cron/app-performance` |
 
 KPI target edits notify affected salespeople after the save and CC their complete reporting chain. To manually send a month to all active KPI-eligible salespeople, run **Actions → KPI Targets Email → Run workflow**, selecting `2026-10` for the October 2026 targets. The workflow uses the existing `CRON_SECRET` and production Vercel host; it adds no secrets or schedule.
 
@@ -256,7 +258,7 @@ The Missing Invoice Email backup retries the observed pre-delivery HTTP 500 (`su
 
 ### Customer GPS digest activation and recovery
 
-Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries and does not skip Friday.
+Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries. Scheduled delivery is 08:30 KSA, Saturday–Thursday, with the other morning emails. Saturday sends Thursday and Friday. An operator `to` or `force` test can send outside that window.
 
 No new schema migration is required. Verify the existing `customer_gps_history` schema is present; if absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or `sql/setup_customer_gps_history.sql` separately in Supabase before using history/report/digest. Git deployment does not apply SQL.
 

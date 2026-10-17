@@ -2,7 +2,7 @@ name: App Performance Check
 
 on:
   schedule:
-    # 09:00, 12:00, 15:00 and 18:00 Asia/Riyadh every day.
+    # 09:00, 12:00, 15:00 and 18:00 Asia/Riyadh. The check still runs on Friday; the alert email does not.
     - cron: "0 6,9,12,15 * * *"
   workflow_dispatch:
 

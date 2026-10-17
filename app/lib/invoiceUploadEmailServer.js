@@ -319,6 +319,37 @@ export async function sendInvoiceUploadNotification(admin, {
   };
 }
 
+export async function sendStoredInvoiceUploadNotification(admin, {
+  orderId = "",
+  env = process.env,
+  send = sendEmail,
+  now = new Date(),
+  loadCatalog = loadCachedPricingCatalog,
+  readInvoice = readOrderInvoiceFile,
+} = {}) {
+  const selected = await loadInvoiceMeta(admin, orderId);
+  if (!selected) {
+    return { skipped: true, reason: "no_uploaded_invoice", sent: false };
+  }
+
+  const invoiceBuffer = await readInvoice(admin, selected.meta);
+  const originalName = String(selected.meta.originalFileName || selected.meta.invoiceFileName || "invoice.pdf").trim()
+    || "invoice.pdf";
+
+  return sendInvoiceUploadNotification(admin, {
+    orderId: selected.orderId,
+    invoiceBuffer,
+    invoiceFileName: originalName,
+    uploaderUserId: selected.meta.invoiceUploadedBy || "",
+    uploadedAtIso: selected.meta.invoiceUploadedAt || "",
+    extraCc: "",
+    env,
+    send,
+    now,
+    loadCatalog,
+  });
+}
+
 export async function resendInvoiceUploadNotification(admin, {
   orderId = "",
   extraCc = "malik@pinasz.com",

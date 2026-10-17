@@ -156,6 +156,77 @@ export function isWithinKsaWorkingHours(date = new Date()) {
   return hour >= WORKDAY_START_HOUR && hour < WORKDAY_END_HOUR;
 }
 
+/** Field-team and team-leader email. Saturday–Thursday, 08:30 inclusive to 22:00 exclusive. */
+export const TEAM_EMAIL_START_MINUTES = 8 * 60 + 30;
+export const TEAM_EMAIL_END_MINUTES = 22 * 60;
+
+export function isTeamEmailDay(date = new Date()) {
+  return getKsaWeekdayIndex(date) !== 5;
+}
+
+export function isWithinTeamEmailWindow(date = new Date()) {
+  if (!isTeamEmailDay(date)) return false;
+  const { hour, minute } = getKsaDateTimeParts(date);
+  const minutes = (Number(hour) * 60) + Number(minute);
+  return minutes >= TEAM_EMAIL_START_MINUTES && minutes < TEAM_EMAIL_END_MINUTES;
+}
+
+export function nextTeamEmailWindowStart(date = new Date()) {
+  const today = getKsaDateString(date);
+  const startToday = ksaClockTimestamp(today, 8, 30);
+  if (isTeamEmailDay(date) && date.getTime() < startToday) {
+    return new Date(startToday);
+  }
+
+  let cursor = today;
+  for (let step = 0; step < 7; step += 1) {
+    cursor = addKsaCalendarDays(cursor, 1);
+    const start = ksaClockTimestamp(cursor, 8, 30);
+    if (getKsaWeekdayIndex(new Date(start)) !== 5) return new Date(start);
+  }
+
+  return new Date(startToday);
+}
+
+/**
+ * Previous-calendar-day digests that must leave on this morning.
+ * Saturday also includes Thursday, because the old Friday-midnight send is held until Saturday 08:30.
+ */
+export function scheduledPreviousDayEmailDates(now = new Date()) {
+  const today = getKsaDateString(now);
+  const yesterday = addKsaCalendarDays(today, -1);
+  if (getKsaWeekdayIndex(now) === 6) {
+    return [addKsaCalendarDays(yesterday, -1), yesterday];
+  }
+  return [yesterday];
+}
+
+export function teamEmailWindowSkip(now = new Date(), { bypass = false } = {}) {
+  if (bypass || isWithinTeamEmailWindow(now)) return null;
+  return {
+    success: true,
+    skipped: true,
+    reason: "outside_team_email_window",
+    nextSendAt: nextTeamEmailWindowStart(now).toISOString(),
+  };
+}
+
+export function teamEmailWindowHoldMessage(now = new Date(), { queued = true } = {}) {
+  const label = new Intl.DateTimeFormat("en-GB", {
+    timeZone: KSA_TIMEZONE,
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(nextTeamEmailWindowStart(now));
+  const action = queued
+    ? `This one is held until ${label} KSA.`
+    : `Nothing was sent. Send again after ${label} KSA.`;
+  return `Team emails go out from 8:30 AM to 10:00 PM KSA, Saturday to Thursday. ${action}`;
+}
+
 export function isWithinActiveWorkSession({
   loginAt,
   logoutAt,
@@ -800,7 +871,7 @@ export function describeInactivityEmailState({
     slot,
   };
 
-  if (!isWithinKsaWorkingHours(now)) {
+  if (!isWithinTeamEmailWindow(now)) {
     return { ...base, reason: "outside_hours" };
   }
   if (!loginAt) {

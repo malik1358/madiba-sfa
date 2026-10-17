@@ -11,7 +11,7 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 - Supabase JS (`@supabase/supabase-js`). `@supabase/ssr` is listed in `package.json` but app code does not import it. The browser client in `app/lib/supabase.js` uses `createClient` from `@supabase/supabase-js`.
 - No global `middleware.js`. No ORM. SQL is written by hand.
 - PDF: `jspdf`, `pdf-parse`, `pdfjs-dist`. Excel: `xlsx`. Images: `sharp`. Optional OCR: `tesseract.js`.
-- Email: `nodemailer` (SMTP) or Resend via `app/lib/mailer.js`, including optional PDF attachments. Push: `firebase-admin`.
+- Email: `nodemailer` (SMTP) or Resend via `app/lib/mailer.js`, including optional PDF attachments. Team and team-leader mail is limited to 08:30–22:00 Asia/Riyadh, Saturday–Thursday (`isWithinTeamEmailWindow`). Held invoice, KPI, supplier-order, matched-receipt, and visit-plan messages sit in `system_settings.deferred_team_emails_v1` and leave on the inactivity cron. Push: `firebase-admin`.
 - Android: Capacitor 8 (`android/`, `capacitor.config.js`).
 
 `next.config.mjs` marks `tesseract.js`, `pdfjs-dist`, `@napi-rs/canvas`, and `sharp` as server external packages and raises the server-action body limit to 20mb. It also injects `NEXT_PUBLIC_BUILD_TIME` so the shell can show which deploy is running.

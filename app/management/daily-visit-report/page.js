@@ -132,8 +132,8 @@ const TEXT = {
     ar: "إرسال تقرير الزيارات اليومي لجميع المستخدمين لتاريخ {date}؟",
   },
   emailConfirmMidnight: {
-    en: "Run the scheduled visit-report send now? Thursday goes out Saturday 06:00, and Saturday goes out Sunday 00:10 KSA.",
-    ar: "تشغيل إرسال تقرير الزيارات المجدول الآن؟ يُرسل تقرير الخميس السبت 06:00، وتقرير السبت الأحد 00:10 بتوقيت السعودية.",
+    en: "Run the scheduled visit-report send now? It goes out at 8:30 AM KSA, Saturday to Thursday. Thursday's report goes out Saturday morning.",
+    ar: "تشغيل إرسال تقرير الزيارات المجدول الآن؟ يُرسل الساعة 8:30 صباحاً بتوقيت السعودية من السبت إلى الخميس. تقرير الخميس يُرسل صباح السبت.",
   },
   emailConfirmPotentialSalesTargetsTrial: {
     en: "Send one full Potential Sales Targets email, grouped by salesman, to your admin login email only?",

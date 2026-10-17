@@ -17,6 +17,8 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offl
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer.js";
+import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
+import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -283,9 +285,17 @@ export async function POST(request) {
 
       try {
         if (!supabaseUrl || !serviceKey) return;
-        await runMatchedReceiptEmailCycle(createClient(supabaseUrl, serviceKey, {
+        const mailAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-        }), {
+        });
+        if (!isWithinTeamEmailWindow()) {
+          await enqueueDeferredTeamEmail(mailAdmin, {
+            kind: "matched_receipt_upload",
+            uploadDates: parsed.dates,
+          });
+          return;
+        }
+        await runMatchedReceiptEmailCycle(mailAdmin, {
           uploadDates: parsed.dates,
           env: process.env,
         });

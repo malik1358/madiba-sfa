@@ -55,7 +55,14 @@ function median(values) {
 
 /** Same-day / next-day full CNs reverse immediately; exact item+qty mirrors reverse on any later date. */
 export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
+/** Two amounts count as the same bill (exact Payment↔Purchase, compare). Not a reason to drop money. */
 const AMOUNT_TOLERANCE = 0.02;
+/** Float noise only. A posted halala (0.01) is real money and must still settle. */
+const SETTLEMENT_DUST = 0.0000005;
+
+function hasSettlementAmount(amount) {
+  return Math.abs(toNumber(amount)) > SETTLEMENT_DUST;
+}
 
 function invoiceKey(invoiceDate, voucherNumber) {
   return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
@@ -753,6 +760,7 @@ export function buildSortedReceipts(receipts = []) {
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
+ * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
   // Incentive credits the collection month. A receipt must not settle a bill
@@ -829,7 +837,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
 
   function hasOlderOpenInvoice(list, cashInvoice) {
     return list.some((other) => other !== cashInvoice
-      && other.remaining > 0.009
+      && hasSettlementAmount(other.remaining)
       && other.invoice_date
       && other.invoice_date < cashInvoice.invoice_date);
   }
@@ -843,7 +851,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   }
 
   function applyToInvoice(event, invoice, remaining) {
-    if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
+    if (!hasSettlementAmount(remaining) || !hasSettlementAmount(invoice.remaining)) return remaining;
     if (receiptBeforeInvoice(event, invoice)) return remaining;
     if (event.kind === "credit_note" && event.date < invoice.invoice_date) return remaining;
     const applied = Math.min(remaining, invoice.remaining);
@@ -860,7 +868,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         });
       }
     } else if (event.kind === "credit_note" && applied > 0) {
-      const exclRatio = toNumber(event.amount) > 0.009
+      const exclRatio = hasSettlementAmount(event.amount)
         ? toNumber(event.amount_excl_vat) / toNumber(event.amount)
         : 1;
       creditNoteAllocations.push({
@@ -929,14 +937,14 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   /** Apply Payment to open Purchase bills: exact full match first, then oldest-open FIFO. */
   function applyPaymentToPurchases(event) {
     let remaining = claimExactPurchasePayment(event);
-    if (remaining <= AMOUNT_TOLERANCE) return 0;
+    if (!hasSettlementAmount(remaining)) return 0;
 
     for (const purchase of purchases) {
-      if (remaining <= 0.009) break;
-      if (purchase.remaining <= 0.009) continue;
+      if (!hasSettlementAmount(remaining)) break;
+      if (!hasSettlementAmount(purchase.remaining)) continue;
       if (purchase.exact_matched) continue;
       const applied = Math.min(remaining, purchase.remaining);
-      if (applied <= 0.009) continue;
+      if (!hasSettlementAmount(applied)) continue;
       purchase.remaining = Math.max(0, purchase.remaining - applied);
       remaining = Math.max(0, remaining - applied);
       paymentAppliedToPurchases += applied;
@@ -954,7 +962,14 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   /**
    * Leftover Payment after Purchases: settle open sales like a receipt so dual-party
    * Payments can reduce Machine Open toward Tally (party-ledger netting).
+   * A Payment is not a customer prepayment — it only settles invoices already
+   * dated on or before the payment. Later bills stay open for a real receipt.
    */
+  function paymentCanSettleInvoice(event, invoice) {
+    if (!event?.date || !invoice?.invoice_date) return true;
+    return event.date >= invoice.invoice_date;
+  }
+
   function applyPaymentLeftoverToSales(event, remaining) {
     let left = remaining;
     const settleEvent = {
@@ -964,21 +979,23 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       vch_no: event.vch_no,
     };
     for (const invoice of invoices) {
-      if (left <= 0.009) break;
+      if (!hasSettlementAmount(left)) break;
       if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
-      if (invoice.remaining <= 0.009) continue;
+      if (!hasSettlementAmount(invoice.remaining)) continue;
+      if (!paymentCanSettleInvoice(event, invoice)) continue;
       if (receiptBeforeInvoice(settleEvent, invoice)) continue;
       if (settleEvent.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
       left = applyToInvoice(settleEvent, invoice, left);
       invoice.cash_first_receipt_used = true;
     }
     for (const invoice of invoices) {
-      if (left <= 0.009) break;
+      if (!hasSettlementAmount(left)) break;
+      if (!paymentCanSettleInvoice(event, invoice)) continue;
       left = applyToInvoice(settleEvent, invoice, left);
     }
     const applied = Math.max(0, remaining - left);
     paymentAppliedToSales += applied;
-    unmatchedReceiptAmount += Math.max(0, left);
+    if (hasSettlementAmount(left)) unmatchedReceiptAmount += left;
     return left;
   }
 
@@ -997,7 +1014,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
 
     if (event.kind === "payment") {
       remaining = applyPaymentToPurchases(event);
-      if (remaining > 0.009) {
+      if (hasSettlementAmount(remaining)) {
         applyPaymentLeftoverToSales(event, remaining);
       }
       continue;
@@ -1010,7 +1027,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       if (referencedVoucher) {
         let seenRef = false;
         for (const invoice of invoices) {
-          if (remaining <= 0.009) break;
+          if (!hasSettlementAmount(remaining)) break;
           if (normalizeRef(invoice.voucher_number) === referencedVoucher) {
             seenRef = true;
             continue;
@@ -1020,13 +1037,13 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         }
         // Other open invoices, still skipping the named bill.
         for (const invoice of invoices) {
-          if (remaining <= 0.009) break;
+          if (!hasSettlementAmount(remaining)) break;
           if (normalizeRef(invoice.voucher_number) === referencedVoucher) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
         // Named bill is still open (no later voucher, or those vouchers are full).
         for (const invoice of invoices) {
-          if (remaining <= 0.009) break;
+          if (!hasSettlementAmount(remaining)) break;
           if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
@@ -1037,9 +1054,9 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     // Receipts: first receipt after each cash invoice settles that cash bill first.
     if (event.kind === "receipt") {
       for (const invoice of invoices) {
-        if (remaining <= 0.009) break;
+        if (!hasSettlementAmount(remaining)) break;
         if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
-        if (invoice.remaining <= 0.009) continue;
+        if (!hasSettlementAmount(invoice.remaining)) continue;
         if (receiptBeforeInvoice(event, invoice)) continue;
         // Money taken before the cash sale only belongs to it once every older bill is settled.
         if (event.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
@@ -1050,12 +1067,12 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
 
     // Balance (receipts + unreferenced CNs): normal oldest-open FIFO.
     for (const invoice of invoices) {
-      if (remaining <= 0.009) break;
+      if (!hasSettlementAmount(remaining)) break;
       remaining = applyToInvoice(event, invoice, remaining);
     }
 
-    if (event.kind === "receipt") {
-      unmatchedReceiptAmount += Math.max(0, remaining);
+    if (event.kind === "receipt" && hasSettlementAmount(remaining)) {
+      unmatchedReceiptAmount += remaining;
     }
   }
 
@@ -1873,8 +1890,53 @@ export function buildPaymentSettlementLedger({
     salesByDateMap.set(row.invoice_date, current);
   });
 
+  const applicationsByReceipt = new Map();
+  const pushReceiptApplication = (date, vchNo, application) => {
+    const key = `${dateOnly(date)}::${String(vchNo || "").trim()}`;
+    const list = applicationsByReceipt.get(key) || [];
+    list.push(application);
+    applicationsByReceipt.set(key, list);
+  };
+  matchedPurchasePayments.forEach((row) => {
+    pushReceiptApplication(row.payment_date, row.payment_voucher, {
+      target_kind: "purchase",
+      voucher_number: row.purchase_voucher || "",
+      target_date: row.purchase_date || "",
+      amount: toNumber(row.amount),
+      status: row.status || "Matched",
+    });
+  });
+  purchaseAllocations.forEach((row) => {
+    pushReceiptApplication(row.payment_date, row.vch_no, {
+      target_kind: "purchase",
+      voucher_number: row.purchase_voucher || "",
+      target_date: row.purchase_date || "",
+      amount: toNumber(row.amount),
+      status: "Applied",
+    });
+  });
+  allocations.forEach((row) => {
+    pushReceiptApplication(row.receipt_date, row.vch_no, {
+      target_kind: "sales",
+      voucher_number: row.voucher_number || "",
+      target_date: row.invoice_date || "",
+      amount: toNumber(row.amount),
+      status: "Applied",
+    });
+  });
+
   const collectionsByDateMap = new Map();
   buildSortedReceipts(receipts).forEach((row) => {
+    const signed = toNumber(row.amount);
+    const applications = applicationsByReceipt.get(
+      `${dateOnly(row.receipt_date)}::${String(row.vch_no || "").trim()}`,
+    ) || [];
+    const salesApplied = applications
+      .filter((application) => application.target_kind === "sales")
+      .reduce((total, application) => total + toNumber(application.amount), 0);
+    // Datewise Collected is AR only. A Payment spent on Purchases is not a
+    // negative sales collection; its bills are listed on the expanded row.
+    const arAmount = signed < 0 ? salesApplied : signed;
     const current = collectionsByDateMap.get(row.receipt_date) || {
       date: row.receipt_date,
       receipt_count: 0,
@@ -1882,12 +1944,14 @@ export function buildPaymentSettlementLedger({
       receipts: [],
     };
     current.receipt_count += 1;
-    current.collected_amount += toNumber(row.amount);
+    current.collected_amount += arAmount;
     current.receipts.push({
       vch_no: row.vch_no,
-      amount: toNumber(row.amount),
-      vch_type: row.vch_type || (toNumber(row.amount) < 0 ? "Payment" : "Receipt"),
-      kind: toNumber(row.amount) < 0 ? "payment" : "receipt",
+      amount: signed,
+      ar_amount: arAmount,
+      vch_type: row.vch_type || (signed < 0 ? "Payment" : "Receipt"),
+      kind: signed < 0 ? "payment" : "receipt",
+      applications,
     });
     collectionsByDateMap.set(row.receipt_date, current);
   });

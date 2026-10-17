@@ -5,6 +5,9 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-17** — Settlement no longer discards a receipt or payment of SAR 0.02 or less. Customer `1428` Payments **VP-2** and **VP-5** (2026-10-13, −0.01 each) now settle open invoice **DNFD/119**. The 0.02 figure remains only an exact-amount match window. No migration. See `docs/BUSINESS_RULES.md`.
+- **2026-10-17** — Product Catalogue **New Items** stay on screen for any search or category. Those filters still apply to the product grid and export. Pricing city and type still require a positive price. No migration. See `docs/BUSINESS_RULES.md`.
+- **2026-10-17** — Customer **1030** Payment `Sep//Bpmt0125` (−99,679.39 on 2026-02-19) is fully adjusted to Purchases 145, 146, 51, and 58. Datewise no longer shows that as an unallocated negative collection; the expanded row lists those bills. Payment leftovers settle only sales invoices dated on or before the payment, so an April payment cannot close October invoice NFD/1942. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-17** — A referenced credit note still prefers the next open voucher, then other open invoices. Leftover now settles the named bill when that bill is still open, so credit note 284 (customer 1089C) reduces voucher 1835. Receipt-register Credit Note / Sales Return rows are not cash. Rebuild Outstanding Compare after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-17** — Removed Receipts **1680** (2026-09-10, 174,800) and **1896** (2026-10-05, 116,118.95) for customer `1218` QTC Joint Venture from production `receipt_register_dataset_v1`. Cleared `customer_history_cache:1218:*`. No code/migration. See `docs/DATABASE.md`.
 - **2026-10-17** — Salesman Incentive now applies the collection-date rule. The report passes `receiptOnOrAfterInvoice`, so a receipt cannot settle a later invoice and an October collection of a September invoice stays in October. August and earlier months use the same rule. No migration.
@@ -284,7 +287,7 @@ These are real mismatches. Do not “fix” them as drive-by cleanups.
 | --- | --- | --- |
 | `activate_sales_batch`, `active_sales`, batch statuses | Every sales figure, BI cube, and customer history | `import-sales/route.js`, `salesBiCube.js` |
 | `system_settings` key strings | Renames orphan uploaded data | `docs/DATABASE.md` key table |
-| `paymentBehavior.js` FIFO, reversal window, 0.02 tolerance | Settlement, avg days, WhatsApp, Customer Audit | `tests/paymentBehavior.test.mjs` |
+| `paymentBehavior.js` FIFO, reversal window, 0.02 exact-amount match (does not drop small vouchers) | Settlement, avg days, WhatsApp, Customer Audit | `tests/paymentBehavior.test.mjs` |
 | Invoice status string constants | Pending Orders, email chase, PDF, time-to-make | `orderApproval.js`, `order-invoice/route.js` |
 | `buildModuleAccess` and morning-attendance exemptions | Can lock every field user out, or loop collectors | `moduleAccess.js`, `morningAttendance.js`, `tests/moduleAccess.test.mjs` |
 | Sales scope, mutual groups, book shares, previous salesman | Users lose or gain customer books | `customerAccess.js`, `mutualSalesmanGroups.js`, `salesHierarchy.js` |

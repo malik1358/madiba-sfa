@@ -1,0 +1,50 @@
+name: Copy receipt files to R2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Copy, verify, then reconcile receipt files
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CRON_SECRET}" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+          post() {
+            local mode="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 70 -o response.json -w "%{http_code}" -X POST \
+              "https://madiba-sfa.vercel.app/api/cron/copy-receipts-to-r2" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "Content-Type: application/json" \
+              --data "{\"mode\":\"${mode}\"}"
+          }
+          run_mode() {
+            local mode="$1"
+            local i code
+            for i in $(seq 1 80); do
+              code="$(post "$mode")"
+              echo "mode=${mode} batch=${i} http=${code}"
+              set +e
+              node --input-type=module -e "import fs from 'node:fs'; const body=JSON.parse(fs.readFileSync('response.json','utf8')); console.log(JSON.stringify({success:body.success,done:body.done,stop:body.stop,stopReason:body.stopReason,mode:body.mode,sourceCount:body.sourceCount,copied:body.copied,already:body.already,failed:body.failed,verifiedRows:body.verifiedRows,verifiedCount:body.verifiedCount,reconciledCount:body.reconciledCount,remaining:body.remaining,batchAttempted:body.batchAttempted,error:body.error,failures:body.failures})); if(body.stop) process.exit(2); if(body.success && body.remaining===0) process.exit(0); if(body.success) process.exit(3); process.exit(1);"
+              status=$?
+              set -e
+              if [[ "$status" == "0" ]]; then
+                return 0
+              fi
+              if [[ "$status" == "3" ]]; then
+                continue
+              fi
+              return "$status"
+            done
+            echo "${mode} did not finish"
+            return 1
+          }
+          run_mode copy
+          run_mode reconcile

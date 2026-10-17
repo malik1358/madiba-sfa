@@ -5,7 +5,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import {
-  cataloguePacking, cataloguePermissions, catalogueSheetPacking,
+  catalogueItemsWithPhotos, cataloguePacking, cataloguePermissions, catalogueSheetPacking,
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
@@ -522,6 +522,8 @@ test("catalogue UI keeps photos and packing on the device", () => {
   assert.match(source, /buildCatalogueShareFiles/);
   assert.match(source, /translateCatalogueShareText/);
   assert.match(source, /Without price/);
+  assert.match(source, /catalogueItemsWithPhotos/);
+  assert.match(source, /requirePhoto:\s*true/);
   assert.match(source, /whatsappFiles/);
   assert.doesNotMatch(source, /downloadStoredZip|zipStoredFiles/);
   assert.doesNotMatch(source, /downloadExcelWorkbook/);
@@ -645,6 +647,35 @@ test("share image paints packing and price onto the photo instead of a separate 
   assert.ok(texts.includes("Wholesale · Dammam · Ex VAT"));
   assert.ok(texts.includes("الجملة · الدمام · قبل الضريبة"));
   assert.ok(canvas.height > 600);
+  const kept = await buildCatalogueShareFiles({
+    photos: [{ id: "photo-1" }, { id: "" }, { id: "photo-2" }],
+    lines: [],
+    loadPhoto: async (photo) => (photo.id === "photo-1" ? new Blob(["photo"]) : null),
+    requirePhoto: true,
+    fileCode: "G1",
+    document: { createElement: () => canvas },
+    decodeImage: async () => ({ width: 800, height: 600, close() {} }),
+  });
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].name, "G1-1.jpg");
+  assert.deepEqual(await buildCatalogueShareFiles({ photos: [], lines: [], requirePhoto: true }), []);
+});
+
+test("catalogue WhatsApp export keeps only products that have a photo", () => {
+  const details = {
+    A1: { photos: [{ id: "p1" }] },
+    A2: { photos: [] },
+    A3: { photos: [{ id: "  " }] },
+    A4: { photos: [{ id: "p4" }] },
+  };
+  const items = [
+    { item_code: "A1" },
+    { item_code: "A2" },
+    { item_code: "a3" },
+    { item_code: "A4" },
+  ];
+  assert.deepEqual(catalogueItemsWithPhotos(items, details).map((item) => item.item_code), ["A1", "A4"]);
+  assert.deepEqual(catalogueItemsWithPhotos([], details), []);
 });
 
 test("catalogue photo download returns the stored JPEG to signed-in catalogue users", async () => {

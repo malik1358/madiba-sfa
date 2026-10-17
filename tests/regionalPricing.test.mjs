@@ -201,13 +201,24 @@ test("multi-region salesmen can pick an assigned order region", () => {
     }),
     "dammam"
   );
+});
+
+test("explicit pricing city selection is honoured outside the linked cities", () => {
   assert.equal(
     resolveOrderPricingRegion({
       selectedRegion: "jeddah",
       currentUserRegion: "riyadh",
       currentUserRegions: ["riyadh", "dammam"],
     }),
-    "riyadh"
+    "jeddah"
+  );
+  assert.equal(
+    resolveOrderPricingRegion({
+      currentUserRegion: "dammam",
+      currentUserRegions: ["dammam"],
+    }),
+    "dammam",
+    "default stays the salesman linked city when nothing is selected"
   );
 });
 

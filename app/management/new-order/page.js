@@ -30,6 +30,7 @@ import {
   lookupDiscountRate,
   summarizePricedLines,
   normalizePaymentType,
+  PRICING_REGIONS,
   pricingRegionLabel,
   orderPriceMapFor,
   resolveOrderPricingRegion,
@@ -766,11 +767,13 @@ export default function NewOrderPage() {
   );
 
   const allowedPricingRegions = useMemo(
-    () => allowedOrderPricingRegions({
-      currentUserRegions: accessScope?.pricingRegions,
-      currentUserRegion: accessScope?.pricingRegion,
-    }),
-    [accessScope]
+    () => (catalogueMode
+      ? [...PRICING_REGIONS]
+      : allowedOrderPricingRegions({
+        currentUserRegions: accessScope?.pricingRegions,
+        currentUserRegion: accessScope?.pricingRegion,
+      })),
+    [accessScope, catalogueMode]
   );
 
   const pricingRegion = useMemo(

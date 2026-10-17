@@ -107,7 +107,7 @@ export default function ProductCatalogue({
   pricingType, onPricingType, allowedPricingRegions, onPricingRegion, retailAvailable,
   nearestCustomers,
   paymentType, onPaymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
-  newItems, historyLoading, historyReady,
+  newItems, notBoughtRecently = [], buyingLess = [], historyMonthCount = 0, historyLoading, historyReady,
 }) {
   const ar = language === "ar";
   const { showPopup } = useAppPopup();
@@ -422,10 +422,23 @@ export default function ProductCatalogue({
     if (notice) await showPopup(notice);
   }
 
-  const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
+  const pricedRecommendation = (list) => (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code]));
+  const {
+    recommended: recommendedItems,
+    notBoughtRecently: staleItems,
+    buyingLess: decliningItems,
+    browse: browseItems,
+  } = catalogueItemGroups(
+    items,
+    pricedRecommendation(newItems),
+    historyReady,
+    pricedRecommendation(notBoughtRecently),
+    pricedRecommendation(buyingLess),
+  );
   const filteredCodes = new Set(items.map((item) => normalizeCatalogueCode(item.item_code)));
+  const recommendationRows = [...recommendedItems, ...staleItems, ...decliningItems];
   const exportItems = [
-    ...recommendedItems.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
+    ...recommendationRows.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
     ...browseItems,
   ];
   const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
@@ -433,7 +446,31 @@ export default function ProductCatalogue({
   const currentPage = Math.min(page, lastPage);
   const visible = browseItems.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const groups = [
-    ...(historyReady ? [{ key: "new", items: recommendedItems }] : []),
+    ...(historyReady ? [
+      {
+        key: "new",
+        title: ar ? "أصناف جديدة" : "New Items",
+        hint: ar ? "أصناف لم يشترها هذا العميل من قبل" : "Items this customer has never bought",
+        empty: ar ? "لا توجد توصيات لأصناف جديدة لهذا العميل." : "No new item recommendations for this customer.",
+        items: recommendedItems,
+      },
+      {
+        key: "stale",
+        title: ar ? "لم يُشترَ منذ فترة" : "Not Bought Since Long",
+        hint: ar ? "أصناف اشتراها سابقاً وأقدمها شراءً" : "Previously purchased items with the oldest last purchase",
+        empty: ar ? "لا توجد أصناف لم تُشترَ منذ فترة." : "No items are waiting since an old purchase.",
+        items: staleItems,
+      },
+      {
+        key: "less",
+        title: ar ? "يشتري أقل" : "Buying Less",
+        hint: ar ? "أصناف الكمية الحالية فيها أقل من المتوسط" : "Items currently buying below their historical average quantity",
+        empty: historyMonthCount < 2
+          ? (ar ? "يلزم سجل مشتريات لشهرين على الأقل." : "At least 2 months of purchase history are required.")
+          : (ar ? "لا توجد أصناف يشتريها العميل أقل من المعتاد." : "No items are below this customer's usual quantity."),
+        items: decliningItems,
+      },
+    ] : []),
     { key: "all", items: visible },
   ];
 
@@ -640,11 +677,11 @@ export default function ProductCatalogue({
       {!selectedCustomer && <p className={styles.notice}><a href="#catalogue-customer">{ar ? "اختر العميل أدناه لإعداد الطلب." : "Choose a customer below to prepare an order."}</a> {ar ? "يمكنك تصفح جميع المنتجات الآن." : "You can browse all products now."}</p>}
       {selectedCustomer && historyLoading && <p role="status">{ar ? "جاري تحميل توصيات العميل..." : "Loading customer recommendations..."}</p>}
       {groups.map((group) => <section key={group.key}>
-        {group.key === "new" ? <>
-          <h3>{ar ? "أصناف جديدة" : "New Items"}</h3>
-          <p className="moduleHint">{ar ? "أصناف لم يشترها هذا العميل من قبل" : "Items this customer has never bought"}</p>
-          {group.items.length === 0 && <p>{ar ? "لا توجد توصيات لأصناف جديدة لهذا العميل." : "No new item recommendations for this customer."}</p>}
-        </> : <h3>{ar ? "جميع المنتجات" : "All products"}</h3>}
+        {group.key === "all" ? <h3>{ar ? "جميع المنتجات" : "All products"}</h3> : <>
+          <h3>{group.title}</h3>
+          <p className="moduleHint">{group.hint}</p>
+          {group.items.length === 0 && <p>{group.empty}</p>}
+        </>}
         <div className={styles.grid}>
         {group.items.map((item) => {
           const detail = details[item.item_code] || {};

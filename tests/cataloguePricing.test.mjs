@@ -162,4 +162,15 @@ test("three never-bought items lead the catalogue, retain ranking and never dupl
   const narrowed = catalogueItemGroups([items[0]], suggestions.newItems, true);
   assert.deepEqual(narrowed.recommended.map((item) => item.item_code), suggestions.newItems.map((item) => item.item_code));
   assert.deepEqual(narrowed.browse.map((item) => item.item_code), ["A1000"]);
+  const other = catalogueItemGroups(
+    [items[0]],
+    [{ item_code: "B1000" }],
+    true,
+    [{ item_code: "A1000" }, { item_code: "C1000" }, { item_code: "E1000" }],
+    [{ item_code: "A1000" }, { item_code: "D1000" }],
+  );
+  assert.deepEqual(other.recommended.map((item) => item.item_code), ["B1000"]);
+  assert.deepEqual(other.notBoughtRecently.map((item) => item.item_code), ["A1000", "C1000"]);
+  assert.deepEqual(other.buyingLess.map((item) => item.item_code), ["D1000"]);
+  assert.deepEqual(other.browse.map((item) => item.item_code), []);
 });

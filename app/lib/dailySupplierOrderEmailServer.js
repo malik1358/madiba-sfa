@@ -73,8 +73,7 @@ export function resolveDailySupplierOrderEmailSchedule(date, now = new Date()) {
   const previousDate = getPreviousKsaDateString(now);
   const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
 
-  // Friday is the KSA holiday. Thursday's report goes out at Friday midnight
-  // (Saturday 00:20 KSA), not at the start of Friday.
+  // Friday is the KSA holiday. Thursday's report goes out Saturday at 08:30 KSA.
   if (previousWeekday === 5) {
     return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
   }

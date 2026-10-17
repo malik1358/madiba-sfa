@@ -2,9 +2,8 @@ name: Receipts Not in Tally Email
 
 on:
   schedule:
-    # 05:35 UTC = 08:35 KSA — month-to-date open list (mistakes excluded).
-    # Skips Friday holiday the same way as other daily digests (Sun–Thu + Sat).
-    - cron: "35 5 * * 0-3,5,6"
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday — month-to-date open list.
+    - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       date:

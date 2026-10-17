@@ -2,8 +2,9 @@ name: Matched Receipt Email
 
 on:
   schedule:
-    # 21:35 UTC = 00:35 KSA; check yesterday's app receipts against Tally.
-    - cron: "35 21 * * *"
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday, with the other morning emails.
+    # Saturday also sends Thursday's matches, held from the old Friday-midnight run.
+    - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       preview:

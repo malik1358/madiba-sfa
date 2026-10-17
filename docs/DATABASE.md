@@ -205,6 +205,7 @@ Schemes and quantity limits are settings, not tables:
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
 | `daily_receipt_email_last_sent:<YYYY-MM-DD>` | Daily app-entered receipt email dedupe, one marker per Riyadh report date |
 | `matched_receipt_email_claim:<collection_visit_id>:<audience>` | Insert-only one-time claim per matched app receipt and recipient audience (`salesman:<profile_id>` or `boss:<profile_id>`); value transitions from `sending` to `sent` |
+| `deferred_team_emails_v1` | Queue of team and team-leader emails held until 08:30–22:00 KSA, Saturday–Thursday. JSON `{ items: [...] }` for invoice upload, KPI target changes, supplier-order uploads, matched-receipt uploads, and visit-plan email. No migration. The inactivity cron flushes it. |
 
 Do not create a new table for a small flag if the surrounding feature already uses one of these keys. Do not rename a key; clients and cron jobs compare the string exactly.
 

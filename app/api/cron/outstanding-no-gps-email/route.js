@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { formatSupabaseError, withJwtClockSkewRetry } from "../../../lib/dailySalesmanResumeServer.js";
 import { runOutstandingNoGpsEmailCycle } from "../../../lib/outstandingNoGpsEmailServer.js";
+import { teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -69,6 +70,8 @@ async function handleRequest(request) {
     }
 
     const { date, force, to, sendToUsers } = await readParams(request);
+    const held = teamEmailWindowSkip(new Date(), { bypass: Boolean(String(to || "").trim() || String(force || "").trim()) });
+    if (held) return NextResponse.json(held);
     const result = await withJwtClockSkewRetry(async () => {
       const admin = createAdminClient();
       return runOutstandingNoGpsEmailCycle(admin, {

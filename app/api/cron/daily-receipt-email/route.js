@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runDailyReceiptEmailCycle } from "../../../lib/dailyReceiptEmailServer.js";
+import { scheduledPreviousDayEmailDates, teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -22,12 +23,29 @@ export async function POST(request) {
   try {
     let body = {};
     try { body = await request.json(); } catch {}
+    const testTo = String(body?.to || "").trim();
+    const held = teamEmailWindowSkip(new Date(), { bypass: Boolean(testTo) });
+    if (held) return NextResponse.json(held);
     const env = {
       ...process.env,
-      ...(String(body?.to || "").trim() ? { DAILY_RECEIPT_EMAIL_TEST_TO: String(body.to).trim() } : {}),
+      ...(testTo ? { DAILY_RECEIPT_EMAIL_TEST_TO: testTo } : {}),
     };
-    const result = await runDailyReceiptEmailCycle(createAdminClient(), { date: body?.date, env });
-    return NextResponse.json({ success: !result.failedCount, ...result }, { status: result.failedCount ? 500 : 200 });
+    const explicitDate = String(body?.date || "").trim();
+    const dates = explicitDate || testTo ? [explicitDate] : scheduledPreviousDayEmailDates();
+    const admin = createAdminClient();
+    const runs = [];
+    for (const date of dates) {
+      runs.push(await runDailyReceiptEmailCycle(admin, { date, env }));
+    }
+    const failedCount = runs.reduce((sum, run) => sum + Number(run.failedCount || 0), 0);
+    const result = runs[runs.length - 1] || {};
+    return NextResponse.json({
+      success: !failedCount,
+      ...result,
+      dates: runs.map((run) => run.date),
+      runs,
+      failedCount,
+    }, { status: failedCount ? 500 : 200 });
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error?.message || error) }, { status: 500 });
   }

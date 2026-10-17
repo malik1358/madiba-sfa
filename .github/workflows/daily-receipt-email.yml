@@ -2,8 +2,9 @@ name: Daily Receipt Email
 
 on:
   schedule:
-    # 21:30 UTC = 00:30 KSA; report the previous Riyadh calendar day.
-    - cron: "30 21 * * *"
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday, with the other morning emails.
+    # Saturday also sends Thursday, which used to leave just after Friday midnight.
+    - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       date:

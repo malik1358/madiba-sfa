@@ -6,6 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-17** — Approved receipt copy to R2. Existing `receipt-copies/<filename>` objects are copied to `madiba-attachments-prod` as `payment-collections/receipt-copies/<filename>`. The cron checks the bytes before it sets `attachments.verified_at`. It does not change `storage_provider`, visit links, or Supabase objects, and it does not copy payment files. No migration.
+- **2026-10-17** — Morning team emails all leave together at 08:30 KSA, Saturday–Thursday. The 08:35–09:10 stagger is removed. No migration.
+- **2026-10-17** — Team and team-leader email now goes out only from 8:30 AM to 10:00 PM KSA, Saturday–Thursday. Overnight digests move to that morning. Saturday also sends the Thursday mail that used to leave just after Friday midnight. Invoice, KPI, supplier-order, and matched-receipt notices outside the window wait in `system_settings.deferred_team_emails_v1` until the inactivity cron flushes them. No migration.
 - **2026-10-17** — Product Catalogue **Export** sends one photo per item. That photo is the front image, the oldest upload shown first on the card. Extra carousel photos are not exported again. No migration.
 - **2026-10-17** — Product Catalogue **Export** to WhatsApp sends only products that already have a catalogue photo. Products without a photo, and photos that cannot be loaded, are left out. No migration.
 - **2026-10-17** — Product Catalogue no longer waits while photo files download. After sign-in the app saves and updates those files in the background, and the catalogue shows each photo as it is saved. Packing still appears from the device copy. No migration.

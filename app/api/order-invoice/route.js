@@ -36,6 +36,8 @@ import {
   statusForRejectionReason,
 } from "../../lib/orderApproval.js";
 import { sendInvoiceUploadNotification } from "../../lib/invoiceUploadEmailServer.js";
+import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
+import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -467,6 +469,14 @@ export async function POST(request) {
           const mailAdmin = createClient(supabaseUrl, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           });
+          if (!isWithinTeamEmailWindow()) {
+            await enqueueDeferredTeamEmail(mailAdmin, {
+              kind: "invoice_upload",
+              orderId,
+              uploaderUserId: uploaderUserIdForEmail,
+            });
+            return;
+          }
           await sendInvoiceUploadNotification(mailAdmin, {
             orderId,
             invoiceBuffer: invoiceBytesForEmail,

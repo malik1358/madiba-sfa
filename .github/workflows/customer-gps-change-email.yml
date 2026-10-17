@@ -2,7 +2,9 @@ name: Customer GPS Change Email
 
 on:
   schedule:
-    - cron: "40 21 * * *"
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday, with the other morning emails.
+    # Saturday sends Thursday (held from Friday) and Friday.
+    - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       date:

@@ -12,6 +12,8 @@ import {
   loadSalesmanVisitPlanProfiles,
   sendSalesmanVisitPlanEmailsFromPayload,
 } from "../../../lib/salesmanVisitPlanServer.js";
+import { enqueueDeferredTeamEmail } from "../../../lib/deferredTeamEmail.js";
+import { isWithinTeamEmailWindow } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -55,6 +57,26 @@ async function handleRequest(request) {
         emailed: false,
         skipped: true,
         reason: "email_disabled",
+        reportDate: snapshot.reportDate,
+        builtAt: snapshot.builtAt,
+        salesmanCount: snapshot.salesmanCount,
+        visitCount: snapshot.visitCount,
+        sentCount: 0,
+        failedCount: 0,
+      });
+    }
+
+    if (!isWithinTeamEmailWindow()) {
+      await enqueueDeferredTeamEmail(admin, {
+        kind: "visit_plan",
+        reportDate: snapshot.reportDate,
+      });
+      return NextResponse.json({
+        success: true,
+        stored: true,
+        emailed: false,
+        deferred: true,
+        reason: "outside_team_email_window",
         reportDate: snapshot.reportDate,
         builtAt: snapshot.builtAt,
         salesmanCount: snapshot.salesmanCount,

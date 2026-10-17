@@ -196,6 +196,26 @@ export function legacyCollectionCopyRef(visit, kind) {
   return parsed ? { provider: "supabase", key: parsed.key } : null;
 }
 
+const HISTORICAL_FLAT_KEY = /^payment-collections\/(?:receipt-copies|payment-copies)\/[^/]+$/;
+
+// Describes a later read switch. It does not change the provider the app uses today.
+// verified_at alone is not the switch. Legacy visit URLs stay on Supabase.
+export function historicalR2ReadCandidate(record) {
+  const key = String(record?.object_key || "");
+  const category = String(record?.category || "");
+  const historical = category === ATTACHMENT_CATEGORIES.receiptCopy || category === ATTACHMENT_CATEGORIES.paymentCopy;
+  const ready = historical
+    && record?.storage_provider === "supabase"
+    && Boolean(record?.verified_at)
+    && HISTORICAL_FLAT_KEY.test(key);
+  return {
+    activeProvider: record?.storage_provider || "supabase",
+    activeKey: key,
+    ready,
+    r2Key: ready ? key : null,
+  };
+}
+
 export function legacyCustomerDocumentRef(document) {
   const key = legacyObjectKey(ATTACHMENT_BUCKETS.customerDocuments, document?.file_path);
   return key ? { provider: "supabase", key } : null;

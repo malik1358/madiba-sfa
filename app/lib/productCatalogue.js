@@ -14,15 +14,34 @@ export function hasCataloguePrice(value) {
   return Number.isFinite(price) && price > 0;
 }
 
-export function catalogueItemGroups(items, newItems, historyReady) {
+function catalogueRecommendationRows(itemsByCode, list, limit, historyReady) {
+  if (!historyReady) return [];
+  return (list || []).slice(0, limit)
+    .map((item) => itemsByCode.get(normalizeCatalogueCode(item.item_code)) || item)
+    .filter((item) => normalizeCatalogueCode(item?.item_code));
+}
+
+export function catalogueItemGroups(items, newItems, historyReady, notBoughtRecently = [], buyingLess = []) {
   const byCode = new Map(items.map((item) => [normalizeCatalogueCode(item.item_code), item]));
-  const recommended = historyReady ? newItems.slice(0, 3)
-    .map((item) => byCode.get(normalizeCatalogueCode(item.item_code)) || item)
-    .filter((item) => normalizeCatalogueCode(item?.item_code)) : [];
-  const codes = new Set(recommended.map((item) => normalizeCatalogueCode(item.item_code)));
+  const seen = new Set();
+  function unique(list) {
+    const rows = [];
+    for (const item of list) {
+      const code = normalizeCatalogueCode(item.item_code);
+      if (seen.has(code)) continue;
+      seen.add(code);
+      rows.push(item);
+    }
+    return rows;
+  }
+  const recommended = unique(catalogueRecommendationRows(byCode, newItems, 3, historyReady));
+  const stale = unique(catalogueRecommendationRows(byCode, notBoughtRecently, 2, historyReady));
+  const declining = unique(catalogueRecommendationRows(byCode, buyingLess, 2, historyReady));
   return {
     recommended,
-    browse: items.filter((item) => !codes.has(normalizeCatalogueCode(item.item_code))),
+    notBoughtRecently: stale,
+    buyingLess: declining,
+    browse: items.filter((item) => !seen.has(normalizeCatalogueCode(item.item_code))),
   };
 }
 

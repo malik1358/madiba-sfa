@@ -1742,6 +1742,9 @@ export default function NewOrderPage() {
             valueDiscountMap={valueDiscountMap}
             schemeApplications={schemeApplications}
             newItems={quickOrderSuggestions.newItems}
+            notBoughtRecently={quickOrderSuggestions.notBoughtRecently}
+            buyingLess={quickOrderSuggestions.buyingLess}
+            historyMonthCount={quickOrderSuggestions.historyMonthCount || 0}
             historyLoading={loadingCustomerHistory}
             historyReady={Boolean(selectedCustomer && historyCustomerCode === selectedCustomer.customer_code)}
             nearestCustomers={<NearestCustomerSuggestions

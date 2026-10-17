@@ -326,7 +326,11 @@ export default function ProductCatalogue({
   }
 
   const { recommended: recommendedItems, browse: browseItems } = catalogueItemGroups(items, newItems, historyReady);
-  const exportItems = [...(historyReady ? recommendedItems : []), ...browseItems];
+  const filteredCodes = new Set(items.map((item) => normalizeCatalogueCode(item.item_code)));
+  const exportItems = [
+    ...recommendedItems.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
+    ...browseItems,
+  ];
   const unpricedCartCodes = Object.keys(quantities).filter((code) => Number(quantities[code]) > 0 && !hasCataloguePrice(priceList[code]));
   const lastPage = Math.max(0, Math.ceil(browseItems.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
@@ -540,7 +544,7 @@ export default function ProductCatalogue({
         {group.key === "new" ? <>
           <h3>{ar ? "أصناف جديدة" : "New Items"}</h3>
           <p className="moduleHint">{ar ? "أصناف لم يشترها هذا العميل من قبل" : "Items this customer has never bought"}</p>
-          {group.items.length === 0 && <p>{ar ? "لا توجد توصيات مطابقة لهذه الفلاتر." : "No new item recommendations match these filters."}</p>}
+          {group.items.length === 0 && <p>{ar ? "لا توجد توصيات لأصناف جديدة لهذا العميل." : "No new item recommendations for this customer."}</p>}
         </> : <h3>{ar ? "جميع المنتجات" : "All products"}</h3>}
         <div className={styles.grid}>
         {group.items.map((item) => {

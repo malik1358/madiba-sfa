@@ -17,7 +17,8 @@ export function hasCataloguePrice(value) {
 export function catalogueItemGroups(items, newItems, historyReady) {
   const byCode = new Map(items.map((item) => [normalizeCatalogueCode(item.item_code), item]));
   const recommended = historyReady ? newItems.slice(0, 3)
-    .map((item) => byCode.get(normalizeCatalogueCode(item.item_code))).filter(Boolean) : [];
+    .map((item) => byCode.get(normalizeCatalogueCode(item.item_code)) || item)
+    .filter((item) => normalizeCatalogueCode(item?.item_code)) : [];
   const codes = new Set(recommended.map((item) => normalizeCatalogueCode(item.item_code)));
   return {
     recommended,

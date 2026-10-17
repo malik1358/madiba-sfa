@@ -159,5 +159,7 @@ test("three never-bought items lead the catalogue, retain ranking and never dupl
   assert.deepEqual(groups.recommended.map((item) => item.item_code), [...suggestions.newItems].reverse().map((item) => item.item_code));
   assert.equal(groups.browse.length, 2);
   assert.deepEqual(catalogueItemGroups(items, suggestions.newItems, false).recommended, []);
-  assert.equal(catalogueItemGroups([items[0]], suggestions.newItems, true).recommended.length, 0);
+  const narrowed = catalogueItemGroups([items[0]], suggestions.newItems, true);
+  assert.deepEqual(narrowed.recommended.map((item) => item.item_code), suggestions.newItems.map((item) => item.item_code));
+  assert.deepEqual(narrowed.browse.map((item) => item.item_code), ["A1000"]);
 });

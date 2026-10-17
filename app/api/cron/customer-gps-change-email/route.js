@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runGpsChangeEmailCycle } from "../../../lib/customerGpsChangeEmailServer.js";
+import { scheduledPreviousDayEmailDates, teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -34,16 +35,25 @@ async function handleRequest(request) {
     if (!url || !key) throw new Error("Server configuration is incomplete.");
     const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
     const { date, force, to } = await readParams(request);
-    const result = await runGpsChangeEmailCycle(admin, {
-      date,
-      force,
-      env: {
-        ...process.env,
-        ...(String(force || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_FORCE: "true" } : {}),
-        ...(String(to || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_TEST_TO: String(to).trim() } : {}),
-      },
-    });
-    return NextResponse.json({ success: true, ...result });
+    const bypass = Boolean(String(to || "").trim() || String(force || "").trim());
+    const held = teamEmailWindowSkip(new Date(), { bypass });
+    if (held) return NextResponse.json(held);
+    const explicitDate = String(date || "").trim();
+    const dates = explicitDate || bypass ? [explicitDate] : scheduledPreviousDayEmailDates();
+    const runs = [];
+    for (const reportDate of dates) {
+      runs.push(await runGpsChangeEmailCycle(admin, {
+        date: reportDate,
+        force,
+        env: {
+          ...process.env,
+          ...(String(force || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_FORCE: "true" } : {}),
+          ...(String(to || "").trim() ? { CUSTOMER_GPS_CHANGE_EMAIL_TEST_TO: String(to).trim() } : {}),
+        },
+      }));
+    }
+    const result = runs[runs.length - 1] || {};
+    return NextResponse.json({ success: true, ...result, dates: runs.map((run) => run.date), runs });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "GPS digest failed." }, { status: 500 });
   }

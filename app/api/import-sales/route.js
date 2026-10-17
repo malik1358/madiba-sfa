@@ -4,7 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
-import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
+import { resolveDailySupplierOrderEmailSchedule, runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
+import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
+import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
@@ -1191,19 +1193,27 @@ export async function POST(request) {
         const emailAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
-        const emailResult = await runDailySupplierOrderEmailCycle(emailAdmin, {
-          trigger: "sales-upload",
-          now: new Date(),
-          env: process.env,
-        });
-        if (emailResult?.skipped) {
-          console.info("Daily supplier order email skipped after sales upload:", emailResult.reason || "skipped");
+        if (!isWithinTeamEmailWindow()) {
+          const schedule = resolveDailySupplierOrderEmailSchedule("", new Date());
+          if (!schedule.skipped && schedule.date) {
+            await enqueueDeferredTeamEmail(emailAdmin, { kind: "supplier_order", date: schedule.date });
+          }
+          console.info("Daily supplier order email held after sales upload until the 8:30 AM–10:00 PM KSA window.");
         } else {
-          console.info("Daily supplier order email sent after sales upload:", {
-            date: emailResult?.date,
-            sentCount: emailResult?.sentCount,
-            orderCount: emailResult?.orderCount,
+          const emailResult = await runDailySupplierOrderEmailCycle(emailAdmin, {
+            trigger: "sales-upload",
+            now: new Date(),
+            env: process.env,
           });
+          if (emailResult?.skipped) {
+            console.info("Daily supplier order email skipped after sales upload:", emailResult.reason || "skipped");
+          } else {
+            console.info("Daily supplier order email sent after sales upload:", {
+              date: emailResult?.date,
+              sentCount: emailResult?.sentCount,
+              orderCount: emailResult?.orderCount,
+            });
+          }
         }
       } catch (emailError) {
         console.error("Daily supplier order email after sales upload failed:", emailError);

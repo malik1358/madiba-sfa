@@ -444,6 +444,16 @@ test("shouldEmailInactivity is false until 100 minutes without activity", () => 
       userLogs: [],
       now: new Date("2026-08-18T04:40:00.000Z"),
     }),
+    false,
+  );
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T05:30:00.000Z"),
+    }),
     true,
   );
 

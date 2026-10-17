@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runDailyVisitReportEmailCycle } from "../../../lib/dailyVisitReportEmailServer.js";
+import { teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -36,6 +37,9 @@ async function handleRequest(request) {
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    const held = teamEmailWindowSkip();
+    if (held) return NextResponse.json(held);
 
     const date = await readDateParam(request);
     const result = await runDailyVisitReportEmailCycle(admin, { date });

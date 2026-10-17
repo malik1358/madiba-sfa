@@ -446,7 +446,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 100
 
   const result = await runInactivityEmailCycle(admin, {
     ...cycleOptions,
-    now: new Date("2026-09-06T04:50:00.000Z"),
+    now: new Date("2026-09-06T05:30:00.000Z"),
   });
 
   assert.equal(result.sent, 1);
@@ -458,7 +458,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 100
 
   const second = await runInactivityEmailCycle(admin, {
     ...cycleOptions,
-    now: new Date("2026-09-06T05:00:00.000Z"),
+    now: new Date("2026-09-06T05:40:00.000Z"),
   });
 
   assert.equal(second.sent, 0);

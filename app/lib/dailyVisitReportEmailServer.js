@@ -59,7 +59,7 @@ export function resolveDailyVisitReportEmailSchedule(date, now = new Date()) {
   const previousDate = getPreviousKsaDateString(now);
   const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
 
-  // Friday is the KSA holiday. Thursday's report goes out Saturday at 06:00 KSA.
+  // Friday is the KSA holiday. Thursday's report goes out Saturday at 08:30 KSA.
   if (previousWeekday === 5) {
     return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
   }

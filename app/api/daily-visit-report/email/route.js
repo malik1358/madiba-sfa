@@ -6,6 +6,7 @@ import {
   parseReportDateParam,
   runDailyVisitReportEmailCycle,
 } from "../../../lib/dailyVisitReportEmailServer.js";
+import { teamEmailWindowHoldMessage, teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -126,6 +127,16 @@ export async function POST(request) {
       }
     }
 
+    if (!digestOnly && !potentialSalesTargetsOnly) {
+      const held = teamEmailWindowSkip();
+      if (held) {
+        return NextResponse.json({
+          ...held,
+          message: teamEmailWindowHoldMessage(new Date(), { queued: false }),
+        });
+      }
+    }
+
     const result = await runDailyVisitReportEmailCycle(admin, {
       date,
       userIds,
@@ -143,7 +154,7 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         message: result.reason === "friday_holiday"
-          ? "Friday is a holiday. Thursday's report is sent Saturday at 06:00 KSA."
+          ? "Friday is a holiday. Thursday's report is sent Saturday at 08:30 KSA."
           : "No midnight visit report is due for this day.",
         ...result,
       });

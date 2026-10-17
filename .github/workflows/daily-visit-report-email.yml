@@ -2,10 +2,9 @@ name: Daily Visit Report Email
 
 on:
   schedule:
-    # 21:10 UTC = 00:10 KSA: Mon–Thu and Sunday reports.
-    # Skip the Friday KSA send; Thursday's report runs Saturday at 06:00 KSA.
-    - cron: "10 21 * * 0-3,6"
-    - cron: "0 3 * * 6"
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday.
+    # Thursday's report still goes Saturday morning because Friday is the holiday.
+    - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
 
 jobs:

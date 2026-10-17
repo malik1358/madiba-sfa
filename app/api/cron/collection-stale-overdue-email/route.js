@@ -6,6 +6,7 @@ import {
   resolveCollectionStaleOverdueRouteTrigger,
   runCollectionStaleOverdueEmailCycle,
 } from "../../../lib/collectionStaleOverdueEmailServer.js";
+import { teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -67,6 +68,8 @@ async function handleRequest(request) {
     }
 
     const { date, force, to, trigger } = await readParams(request);
+    const held = teamEmailWindowSkip(new Date(), { bypass: Boolean(String(to || "").trim() || String(force || "").trim()) });
+    if (held) return NextResponse.json(held);
     const result = await withJwtClockSkewRetry(async () => {
       const admin = createAdminClient();
       return runCollectionStaleOverdueEmailCycle(admin, {

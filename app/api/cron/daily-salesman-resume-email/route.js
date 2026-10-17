@@ -6,6 +6,7 @@ import {
   runDailySalesmanResumeEmailCycle,
   withJwtClockSkewRetry,
 } from "../../../lib/dailySalesmanResumeServer.js";
+import { teamEmailWindowSkip } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -46,6 +47,9 @@ async function handleRequest(request) {
     if (!supabaseUrl || !serviceKey) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
+
+    const held = teamEmailWindowSkip();
+    if (held) return NextResponse.json(held);
 
     const date = await readDateParam(request);
     // Recreate the client on each attempt so a cold-start clock skew against

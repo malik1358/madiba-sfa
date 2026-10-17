@@ -141,7 +141,7 @@ export function buildInactivityAlertEmail({
     `Login: ${loginTime}`,
     `Idle since: ${lastActivity}`,
     `Idle time starts at login or lunch in, then resets only on a visit, submitted order, or collection. Background order updates are ignored.`,
-    `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA or the next visit, order, or collection, and is skipped during lunch break.`,
+    `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes from 8:30 AM to 10:00 PM KSA, Saturday to Thursday, until the next visit, order, or collection, and is skipped during lunch break.`,
     reportUrl ? `Daily Visit Report: ${reportUrl}` : "",
   ].filter(Boolean).join("\n");
 
@@ -153,7 +153,7 @@ export function buildInactivityAlertEmail({
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Login</td><td>${escapeHtml(loginTime)}</td></tr>
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Idle since</td><td>${escapeHtml(lastActivity)}</td></tr>
   </table>
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes from 8:30 AM to 10:00 PM KSA, Saturday to Thursday, to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
   ${reportUrl ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(reportUrl)}" style="color: #0b5cab; font-weight: 600;">Open Daily Visit Report</a></p>` : ""}
 </div>`;
 
@@ -178,7 +178,7 @@ export function buildLateLoginReminderEmail({
     `${who} has not logged morning attendance by 11:00 KSA.`,
     `Date (KSA): ${date}`,
     `Checked at: ${checkedAt}`,
-    "This reminder is sent every 30 minutes until the user logs in, to the user and bosses in the reporting hierarchy.",
+    "This reminder is sent every 30 minutes from 11:00 AM until 10:00 PM KSA, Saturday to Thursday, until the user logs in, to the user and bosses in the reporting hierarchy.",
     reportUrl ? `Daily Visit Report: ${reportUrl}` : "",
   ].filter(Boolean).join("\n");
 
@@ -189,7 +189,7 @@ export function buildLateLoginReminderEmail({
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Date (KSA)</td><td>${escapeHtml(date || "-")}</td></tr>
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Checked at</td><td>${escapeHtml(checkedAt)}</td></tr>
   </table>
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">A reminder is sent every 30 minutes until login, to the user and bosses in the reporting hierarchy.</p>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">A reminder is sent every 30 minutes from 11:00 AM until 10:00 PM KSA, Saturday to Thursday, until login, to the user and bosses in the reporting hierarchy.</p>
   ${reportUrl ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(reportUrl)}" style="color: #0b5cab; font-weight: 600;">Open Daily Visit Report</a></p>` : ""}
 </div>`;
 

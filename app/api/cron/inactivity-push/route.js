@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runInactivityEmailCycle } from "../../../lib/inactivityEmailServer.js";
 import { runInactivityPushCycle } from "../../../lib/inactivityPushServer.js";
+import { flushDeferredTeamEmails } from "../../../lib/deferredTeamEmail.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -25,6 +26,12 @@ async function handleRequest(request) {
     });
 
     const email = await runInactivityEmailCycle(admin);
+    let deferred = { skipped: true, reason: "not_run", sent: 0, kept: 0 };
+    try {
+      deferred = await flushDeferredTeamEmails(admin);
+    } catch (error) {
+      deferred = { skipped: false, sent: 0, kept: 0, error: String(error?.message || error) };
+    }
     console.info("inactivity-email-cycle", JSON.stringify({
       reportDate: email?.reportDate || null,
       skipped: Boolean(email?.skipped),
@@ -64,6 +71,7 @@ async function handleRequest(request) {
       ...push,
       email,
       push,
+      deferred,
     });
   } catch (error) {
     const message = error.message || "Inactivity push cycle failed.";

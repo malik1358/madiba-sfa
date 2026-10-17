@@ -211,25 +211,50 @@ function DatewiseDayRow({ row, open, onToggle }) {
           <td />
         </tr>
       ))}
-      {open && receipts.map((receipt, index) => (
-        <tr
-          key={`${row.date}-rcpt-${receipt.vch_no || index}`}
-          className="paymentSettleChildRow"
-        >
-          <td style={{ paddingLeft: 28 }}>
-            {receipt.kind === "payment" || Number(receipt.amount) < 0
-              ? "Payment"
-              : "Receipt"}
-            {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
-          </td>
-          <td />
-          <td />
-          <td />
-          <td>1</td>
-          <td>{formatMoney(receipt.amount)}</td>
-          <td />
-        </tr>
-      ))}
+      {open && receipts.map((receipt, index) => {
+        const applications = Array.isArray(receipt.applications) ? receipt.applications : [];
+        const isPayment = receipt.kind === "payment" || Number(receipt.amount) < 0;
+        if (isPayment && applications.length) {
+          return applications.map((application, applicationIndex) => (
+            <tr
+              key={`${row.date}-rcpt-${receipt.vch_no || index}-app-${applicationIndex}`}
+              className="paymentSettleChildRow"
+            >
+              <td style={{ paddingLeft: 28 }}>
+                Payment
+                {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
+                {" → "}
+                {application.target_kind === "purchase" ? "Purchase" : "Invoice"}
+                {application.voucher_number ? ` ${application.voucher_number}` : ""}
+              </td>
+              <td />
+              <td />
+              <td />
+              <td>{applicationIndex === 0 ? 1 : ""}</td>
+              <td>{formatMoney(application.amount)}</td>
+              <td />
+            </tr>
+          ));
+        }
+        return (
+          <tr
+            key={`${row.date}-rcpt-${receipt.vch_no || index}`}
+            className="paymentSettleChildRow"
+          >
+            <td style={{ paddingLeft: 28 }}>
+              {isPayment ? "Payment" : "Receipt"}
+              {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
+              {isPayment ? " · not adjusted against an invoice" : ""}
+            </td>
+            <td />
+            <td />
+            <td />
+            <td>1</td>
+            <td>{formatMoney(receipt.amount)}</td>
+            <td />
+          </tr>
+        );
+      })}
       {open && !detailCount && (
         <tr className="paymentSettleChildRow">
           <td colSpan={7} style={{ paddingLeft: 28 }}>No transactions on this date.</td>
@@ -1095,7 +1120,7 @@ export default function PaymentSettlementPage() {
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
-                  Use + / − on a date to see the invoices and receipts that make up that day’s totals.
+                  Use + / − on a date to see that day’s invoices, receipts, and the purchase or sales bills a Payment was adjusted against. Collected is sales cash only — a Payment spent on Purchases is not a negative collection.
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

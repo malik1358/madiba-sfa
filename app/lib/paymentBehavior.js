@@ -683,6 +683,18 @@ export function isPurchaseVoucherType(vchType) {
   return false;
 }
 
+/**
+ * Credit notes belong in sales history. A Credit Note / Sales Return row in the
+ * receipt register is not a collection — often one line of a sales credit note.
+ */
+export function isCreditNoteReceiptType(vchType) {
+  const text = String(vchType || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  if (text.includes("CREDIT NOTE") || text.includes("CREDITNOTE") || text === "CN") return true;
+  if (text.includes("SALES RETURN") || text === "SR" || /\bSR\b/.test(text)) return true;
+  return false;
+}
+
 /** Purchase register rows (AP bills) sorted oldest-first. */
 export function buildPurchaseRegisterRows(receipts = []) {
   return (Array.isArray(receipts) ? receipts : [])
@@ -705,7 +717,8 @@ export function buildPurchaseRegisterRows(receipts = []) {
 export function buildSortedReceipts(receipts = []) {
   return (Array.isArray(receipts) ? receipts : [])
     // Purchases are AP bills, not cash collections / payments.
-    .filter((row) => !isPurchaseVoucherType(row?.vch_type))
+    // Credit notes are settled from sales history, not as cash.
+    .filter((row) => !isPurchaseVoucherType(row?.vch_type) && !isCreditNoteReceiptType(row?.vch_type))
     .map((row) => ({
       receipt_date: dateOnly(row?.receipt_date),
       amount: toNumber(row?.amount),
@@ -734,13 +747,18 @@ export function buildSortedReceipts(receipts = []) {
  * before the cash invoice only takes that slot when no older bill is still open.
  * Invoices reversed immediately by credit notes are excluded from matching.
  * Unpaired credit notes settle open AR like receipts (VAT-incl) and count in Paid.
- * A CN with an explicit Ref. No. skips that named invoice and settles the next
- * open voucher(s) after it — the referenced bill keeps its full sales and cash only.
+ * A CN with an explicit Ref. No. settles the next open voucher(s) after that
+ * bill first. The named bill keeps its full sales. Leftover then fills other
+ * open invoices, and any remainder settles the named bill when it is still open.
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
  */
-export function matchPaymentsFifo(transactions = [], receipts = []) {
+export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
+  // Incentive credits the collection month. A receipt must not settle a bill
+  // dated after the money arrived, or a later sales upload rewrites an earlier
+  // month by parking that receipt on an invoice that did not exist yet.
+  const receiptOnOrAfterInvoice = Boolean(options.receiptOnOrAfterInvoice);
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
   const creditNotes = buildCreditNotes(transactions);
   const { reversals, reversedKeys } = findImmediateCreditNoteReversals(allInvoices, creditNotes);
@@ -816,8 +834,17 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       && other.invoice_date < cashInvoice.invoice_date);
   }
 
+  function receiptBeforeInvoice(event, invoice) {
+    return receiptOnOrAfterInvoice
+      && event?.kind === "receipt"
+      && event.date
+      && invoice?.invoice_date
+      && event.date < invoice.invoice_date;
+  }
+
   function applyToInvoice(event, invoice, remaining) {
     if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
+    if (receiptBeforeInvoice(event, invoice)) return remaining;
     if (event.kind === "credit_note" && event.date < invoice.invoice_date) return remaining;
     const applied = Math.min(remaining, invoice.remaining);
     if (event.kind === "receipt" && applied > 0) {
@@ -940,6 +967,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       if (left <= 0.009) break;
       if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
       if (invoice.remaining <= 0.009) continue;
+      if (receiptBeforeInvoice(settleEvent, invoice)) continue;
       if (settleEvent.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
       left = applyToInvoice(settleEvent, invoice, left);
       invoice.cash_first_receipt_used = true;
@@ -975,7 +1003,8 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       continue;
     }
 
-    // Referenced credit notes settle later vouchers like a receipt — never the named bill.
+    // Referenced credit notes settle later vouchers first. The named bill is
+    // last, and only for what those later bills could not take.
     if (event.kind === "credit_note") {
       const referencedVoucher = normalizeRef(event.reference);
       if (referencedVoucher) {
@@ -989,10 +1018,16 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
           if (!seenRef) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
-        // Leftover (no next open, or oversize CN): FIFO oldest-open but still skip the Ref.
+        // Other open invoices, still skipping the named bill.
         for (const invoice of invoices) {
           if (remaining <= 0.009) break;
           if (normalizeRef(invoice.voucher_number) === referencedVoucher) continue;
+          remaining = applyToInvoice(event, invoice, remaining);
+        }
+        // Named bill is still open (no later voucher, or those vouchers are full).
+        for (const invoice of invoices) {
+          if (remaining <= 0.009) break;
+          if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
         continue;
@@ -1005,6 +1040,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
         if (remaining <= 0.009) break;
         if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
         if (invoice.remaining <= 0.009) continue;
+        if (receiptBeforeInvoice(event, invoice)) continue;
         // Money taken before the cash sale only belongs to it once every older bill is settled.
         if (event.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
         remaining = applyToInvoice(event, invoice, remaining);

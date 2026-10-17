@@ -848,7 +848,7 @@ test("referenced credit note skips named bill and settles later vouchers first",
         voucher_number: "56",
         voucher_type: "Credit Note",
         reference: "2395",
-        // Larger than 2749 so leftover stays unmatched (never settles the Ref. bill).
+        // Larger than 2749. Later voucher takes what it can; leftover settles the named bill.
         sales_amount: -1500,
         category: "Paper",
       },
@@ -863,8 +863,9 @@ test("referenced credit note skips named bill and settles later vouchers first",
   assert.ok(first);
   assert.ok(next);
   assert.equal(Number(first.amount_incl_vat.toFixed(2)), 1150);
-  assert.equal(Number(first.credit_note_settled.toFixed(2)), 0);
-  assert.equal(Number(first.remaining.toFixed(2)), 1150);
+  // 1725 CN − 1150 on the next voucher = 575 back on the still-open named bill.
+  assert.equal(Number(first.credit_note_settled.toFixed(2)), 575);
+  assert.equal(Number(first.remaining.toFixed(2)), 575);
   assert.equal(Number(next.credit_note_settled.toFixed(2)), 1150);
   assert.equal(Number(next.paid_amount.toFixed(2)), 1150);
   assert.equal(Number(next.remaining.toFixed(2)), 0);
@@ -903,11 +904,11 @@ test("referenced credit notes settle the next voucher, not the named Ref. No.", 
 
   const invoice211 = ledger.invoices.find((row) => row.voucher_number === "NFD/211");
   const invoice212 = ledger.invoices.find((row) => row.voucher_number === "NFD/212");
-  // Receipt 1500 → 211 first; CN 429 (ref 211) → 212; CN 430 (ref 212) → 211.
+  // Receipt 1500 → 211 first; CN 429 (ref 211) → 212; CN 430 fills 211 then the rest returns to 212.
   assert.deepEqual(invoice211.fifo_credit_notes.map((row) => row.voucher_number), ["430"]);
-  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["429"]);
+  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["429", "430"]);
   assert.equal(Number(invoice211.remaining.toFixed(2)), 0);
-  assert.equal(Number(invoice212.remaining.toFixed(2)), 4058.35);
+  assert.equal(Number(invoice212.remaining.toFixed(2)), 4025.91);
 });
 
 test("Outstanding Compare uses FIFO open when CN display attachment differs", () => {
@@ -976,9 +977,10 @@ test("partial credit note and sales return appear in creditNotes table, not reve
   assert.equal(ledger.invoices.some((row) => row.voucher_number === "INV1"), true);
 
   const invoice = ledger.invoices.find((row) => row.voucher_number === "INV1");
-  // CN-PART refs INV1 → skips named bill (no next voucher); only unreferenced SR-1 FIFO-settles INV1.
-  assert.equal(invoice.credit_notes.length, 1);
-  assert.equal(invoice.credit_notes[0].voucher_number, "SR-1");
+  // No later voucher, so referenced CN-PART settles the open bill. Unreferenced SR-1 follows FIFO.
+  assert.equal(invoice.credit_notes.length, 2);
+  assert.equal(invoice.credit_notes[0].voucher_number, "CN-PART");
+  assert.equal(invoice.credit_notes[1].voucher_number, "SR-1");
   assert.equal(invoice.credit_notes[0].days, null);
   assert.equal(invoice.settlements.length, 1);
   // Payment days only from the cash receipt — CN amounts ignored.
@@ -986,6 +988,45 @@ test("partial credit note and sales return appear in creditNotes table, not reve
   assert.equal(ledger.creditNotes[0].applied_to_voucher, "INV1");
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 345);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 400);
+  assert.equal(Number(invoice.remaining.toFixed(2)), 405);
+});
+
+test("referenced credit note settles the named invoice when it is the open bill", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-11-20", voucher_number: "1835", sales_amount: 13338, category: "Paper" },
+      {
+        transaction_date: "2026-06-11",
+        voucher_number: "284",
+        voucher_type: "Credit Note",
+        reference: "1835",
+        sales_amount: -8768.81,
+        category: "Paper",
+      },
+    ],
+    receipts: [
+      { receipt_date: "2026-01-15", amount: 500, vch_no: "75", vch_type: "Receipt" },
+      { receipt_date: "2026-01-22", amount: 500, vch_no: "122", vch_type: "Receipt" },
+      { receipt_date: "2026-02-19", amount: 500, vch_no: "342", vch_type: "Receipt" },
+      { receipt_date: "2026-06-11", amount: -1574.38, vch_no: "284", vch_type: "Credit Note" },
+      { receipt_date: "2026-07-23", amount: 1300, vch_no: "JV/Coll/2026/0433", vch_type: "JV-Collection" },
+      { receipt_date: "2026-10-10", amount: 500, vch_no: "", vch_type: "Journal" },
+    ],
+    outstandingInvoices: [
+      { invoice_date: "2025-11-20", ref_no: "1835", pending_amount: 1954.57 },
+    ],
+    todayIso: "2026-10-17",
+  });
+
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "1835");
+  assert.ok(invoice);
+  assert.equal(Number(invoice.amount_incl_vat.toFixed(2)), 15338.7);
+  assert.equal(Number(invoice.fifo_paid.toFixed(2)), 3300);
+  assert.equal(Number(invoice.credit_note_settled.toFixed(2)), 10084.13);
+  assert.deepEqual(invoice.credit_notes.map((row) => row.voucher_number), ["284"]);
+  assert.equal(invoice.settlements.some((row) => row.vch_no === "284"), false);
+  assert.equal(Number(invoice.remaining.toFixed(2)), 1954.57);
+  assert.ok(Math.abs(ledger.outstandingCompareTotals.open_delta) < 0.02);
 });
 
 test("next-day matching credit note still counts as immediate reversal", () => {

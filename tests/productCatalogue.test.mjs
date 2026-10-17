@@ -509,8 +509,12 @@ test("catalogue UI keeps photos and packing on the device", () => {
   assert.match(source, /photosReady/);
   assert.match(source, /Upload photo/);
   assert.match(source, /readCatalogueOffline/);
-  assert.match(source, /syncCataloguePhotoBlobs/);
+  assert.match(source, /startCataloguePhotoSync/);
+  assert.doesNotMatch(source, /await syncCataloguePhotoBlobs/);
+  assert.doesNotMatch(source, /await hydratePhotoUrls/);
   assert.match(source, /writeCataloguePhotoBlob/);
+  const shell = fs.readFileSync(new URL("../app/components/PwaShell.jsx", import.meta.url), "utf8");
+  assert.match(shell, /startCataloguePhotoSync/);
   assert.doesNotMatch(source, /4 \* 60 \* 1000/);
   assert.match(source, /CATALOGUE_CAROUSEL_MS/);
   assert.match(source, /prefers-reduced-motion/);

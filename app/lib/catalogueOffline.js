@@ -145,6 +145,35 @@ async function mapWithLimit(list, limit, worker) {
   if (list.length) await Promise.all(Array.from({ length: workers }, () => run()));
 }
 
+let cataloguePhotoSync = null;
+let cataloguePhotoSyncAgain = false;
+
+export function cataloguePhotoSyncInFlight() {
+  return Boolean(cataloguePhotoSync);
+}
+
+/** Run photo saving in the background. A second request waits for one follow-up pass. */
+export function beginCataloguePhotoSync(task) {
+  if (typeof task !== "function") return Promise.resolve();
+  if (cataloguePhotoSync) {
+    cataloguePhotoSyncAgain = true;
+    return cataloguePhotoSync;
+  }
+  cataloguePhotoSync = (async () => {
+    do {
+      cataloguePhotoSyncAgain = false;
+      try {
+        await task();
+      } catch {
+        // Keep the copy already saved on the device.
+      }
+    } while (cataloguePhotoSyncAgain);
+  })().finally(() => {
+    cataloguePhotoSync = null;
+  });
+  return cataloguePhotoSync;
+}
+
 export async function syncCataloguePhotoBlobs({
   meta,
   downloadPhoto,

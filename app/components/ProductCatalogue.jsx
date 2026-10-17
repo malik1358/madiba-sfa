@@ -13,10 +13,10 @@ import {
   catalogueCardPrice, catalogueItemGroups, hasCataloguePrice, normalizeCatalogueCode, validateCataloguePhoto,
 } from "../lib/productCatalogue";
 import {
-  attachCataloguePhotoUrls, catalogueMetaFromPayload, catalogueOfflineNotice, cataloguePhotoIds,
-  mergeCataloguePacking, readCatalogueOffline, readCataloguePhotoBlob, syncCataloguePhotoBlobs,
-  writeCatalogueOffline, writeCataloguePhotoBlob,
+  attachCataloguePhotoUrls, catalogueOfflineNotice, cataloguePhotoIds, cataloguePhotoSyncInFlight,
+  readCatalogueOffline, readCataloguePhotoBlob, writeCataloguePhotoBlob,
 } from "../lib/catalogueOffline";
+import { CATALOGUE_PHOTO_SYNC_EVENT, startCataloguePhotoSync } from "../lib/catalogueOfflineClient";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
@@ -116,7 +116,7 @@ export default function ProductCatalogue({
   const [canManagePhotos, setCanManagePhotos] = useState(false);
   const [photosReady, setPhotosReady] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
+  const [savingPhotos, setSavingPhotos] = useState(false);
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -129,7 +129,7 @@ export default function ProductCatalogue({
   const mounted = useRef(false);
   const photoUrls = useRef(new Map());
   const metaRef = useRef(null);
-  const refreshGeneration = useRef(0);
+  const hydrateGeneration = useRef(0);
 
   const request = useCallback(async (url = "/api/product-catalogue", options = {}) => {
     const supabase = getSupabaseClient();
@@ -143,111 +143,101 @@ export default function ProductCatalogue({
     return payload;
   }, []);
 
+  const rememberPhotoUrl = useCallback((id, blob) => {
+    if (!id || !blob) return "";
+    const existing = photoUrls.current.get(id);
+    if (existing) return existing;
+    const url = URL.createObjectURL(blob);
+    photoUrls.current.set(id, url);
+    return url;
+  }, []);
+
+  const publishMeta = useCallback((meta) => {
+    metaRef.current = meta;
+    setDetails(attachCataloguePhotoUrls(meta, Object.fromEntries(photoUrls.current)));
+    setWarnings(meta?.warnings || []);
+    setPhotosReady(meta?.photosReady === true);
+    setOfflineSaved(Boolean(meta?.details));
+  }, []);
+
+  const hydratePhotoUrls = useCallback(async (meta) => {
+    const generation = hydrateGeneration.current + 1;
+    hydrateGeneration.current = generation;
+    const ids = cataloguePhotoIds(meta);
+    await Promise.all(ids.map(async (id) => {
+      if (photoUrls.current.has(id)) return;
+      const blob = await readCataloguePhotoBlob(id);
+      if (blob) rememberPhotoUrl(id, blob);
+    }));
+    if (!mounted.current || hydrateGeneration.current !== generation) return;
+    for (const [id, url] of photoUrls.current) {
+      if (ids.includes(id)) continue;
+      URL.revokeObjectURL(url);
+      photoUrls.current.delete(id);
+    }
+    publishMeta(meta);
+  }, [publishMeta, rememberPhotoUrl]);
+
   const refresh = useCallback(async () => {
-    const generation = refreshGeneration.current + 1;
-    refreshGeneration.current = generation;
-    const current = () => mounted.current && refreshGeneration.current === generation;
-
-    function rememberPhotoUrl(id, blob) {
-      if (!id || !blob) return "";
-      const existing = photoUrls.current.get(id);
-      if (existing) return existing;
-      const url = URL.createObjectURL(blob);
-      photoUrls.current.set(id, url);
-      return url;
-    }
-
-    function publishMeta(meta) {
-      metaRef.current = meta;
-      setDetails(attachCataloguePhotoUrls(meta, Object.fromEntries(photoUrls.current)));
-      setWarnings(meta?.warnings || []);
-      setPhotosReady(meta?.photosReady === true);
-      setOfflineSaved(Boolean(meta?.details));
-    }
-
-    async function hydratePhotoUrls(meta) {
-      const ids = cataloguePhotoIds(meta);
-      await Promise.all(ids.map(async (id) => {
-        if (photoUrls.current.has(id)) return;
-        const blob = await readCataloguePhotoBlob(id);
-        if (blob) rememberPhotoUrl(id, blob);
-      }));
-      for (const [id, url] of photoUrls.current) {
-        if (ids.includes(id)) continue;
-        URL.revokeObjectURL(url);
-        photoUrls.current.delete(id);
-      }
-      if (current()) publishMeta(meta);
-    }
-
     const cached = await readCatalogueOffline();
-    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-    if (cached && current()) {
+    if (!mounted.current) return;
+    if (cached) {
       setLoading(false);
       publishMeta(cached);
-      await hydratePhotoUrls(cached);
+      void hydratePhotoUrls(cached);
     }
-    if (!current()) return;
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
     if (offline) {
       setLoading(false);
-      setSyncing(false);
+      setSavingPhotos(false);
       if (!cached) setError(catalogueOfflineNotice(true, false));
       return;
     }
-
-    setSyncing(true);
     if (!cached) setLoading(true);
     setError("");
-    try {
-      const payload = await request();
-      if (!current()) return;
-      const next = mergeCataloguePacking(cached, catalogueMetaFromPayload(payload));
-      await writeCatalogueOffline(next);
-      setCanManagePhotos(payload.canManagePhotos === true);
-      publishMeta(next);
-      await hydratePhotoUrls(next);
-      const supabase = getSupabaseClient();
-      const session = supabase ? await getSessionWithTimeout(supabase) : null;
-      const token = session?.access_token || "";
-      if (!current()) return;
-      await syncCataloguePhotoBlobs({
-        meta: next,
-        downloadPhoto: async (id) => {
-          if (!token) return null;
-          const response = await fetch(`/api/product-catalogue?photoId=${encodeURIComponent(id)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!response.ok) return null;
-          return response.blob();
-        },
-        onStored: (id, blob) => {
-          if (!current() || !blob) return;
-          rememberPhotoUrl(id, blob);
-          publishMeta(metaRef.current || next);
-        },
-      });
-    } catch (err) {
-      if (current() && !cached && !metaRef.current) setError(err.message || "Unable to load photos and packing.");
-    } finally {
-      if (current()) {
-        setLoading(false);
-        setSyncing(false);
-      }
-    }
-  }, [request]);
+    setSavingPhotos(cataloguePhotoSyncInFlight());
+    void startCataloguePhotoSync();
+  }, [hydratePhotoUrls, publishMeta]);
 
   useEffect(() => {
     mounted.current = true;
+    function onPhotoSync(event) {
+      if (!mounted.current) return;
+      const detail = event.detail || {};
+      if (detail.type === "start") setSavingPhotos(true);
+      if (detail.type === "meta" && detail.meta) {
+        setCanManagePhotos(detail.canManagePhotos === true);
+        setLoading(false);
+        setError("");
+        publishMeta(detail.meta);
+        void hydratePhotoUrls(detail.meta);
+      }
+      if (detail.type === "photo" && detail.blob) {
+        rememberPhotoUrl(detail.id, detail.blob);
+        publishMeta(detail.meta || metaRef.current);
+      }
+      if (detail.type === "error" && !metaRef.current) {
+        setLoading(false);
+        setError(detail.message || "Unable to load photos and packing.");
+      }
+      if (detail.type === "done") {
+        setSavingPhotos(false);
+        setLoading(false);
+      }
+    }
+    window.addEventListener(CATALOGUE_PHOTO_SYNC_EVENT, onPhotoSync);
     const onOnline = () => { void refresh(); };
     window.addEventListener("online", onOnline);
+    setSavingPhotos(cataloguePhotoSyncInFlight());
     void refresh();
     return () => {
       mounted.current = false;
+      window.removeEventListener(CATALOGUE_PHOTO_SYNC_EVENT, onPhotoSync);
       window.removeEventListener("online", onOnline);
       for (const url of photoUrls.current.values()) URL.revokeObjectURL(url);
       photoUrls.current.clear();
     };
-  }, [refresh]);
+  }, [hydratePhotoUrls, publishMeta, refresh, rememberPhotoUrl]);
 
   useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
 
@@ -655,7 +645,7 @@ export default function ProductCatalogue({
             {categories.map((value) => <option key={value} value={value}>{value === "ALL" ? (ar ? "كل الفئات" : "All categories") : value}</option>)}
           </select>
         </label>
-        <button type="button" className="moduleInlineButton" disabled={syncing || Boolean(busy)} onClick={() => { void refresh(); }}>{syncing ? (ar ? "جاري التحديث" : "Updating") : (ar ? "تحديث الصور" : "Refresh photos")}</button>
+        <button type="button" className="moduleInlineButton" disabled={Boolean(busy)} onClick={() => { void refresh(); }}>{ar ? "تحديث الصور" : "Refresh photos"}</button>
         <button type="button" className="moduleInlineButton" disabled={loading || exporting || Boolean(sharingCode) || exportItems.length === 0} onClick={() => { void exportCatalogue(); }}>
           {exporting ? (exportProgress || (ar ? "جاري التجهيز" : "Preparing")) : (ar ? "تصدير" : "Export")}
         </button>
@@ -669,9 +659,8 @@ export default function ProductCatalogue({
       </p>}
       {canManagePhotos && <p className="moduleHint">{ar ? "ارفع صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. يمكن إضافة أكثر من صورة للصنف." : "Upload JPEG, PNG, or WebP photos, up to 3 MB each. Add more than one photo per item for the carousel."}</p>}
       {canManagePhotos && !photosReady && <p className={styles.notice}>{ar ? "تخزين الصور غير جاهز بعد. طبّق ترحيل الصور في Supabase." : "Photo storage is not ready yet. Apply the product catalogue photos migration in Supabase."}</p>}
-      {loading && !offlineSaved && <p role="status">{ar ? "جاري تحميل الصور والتعبئة..." : "Loading photos and packing..."}</p>}
-      {syncing && offlineSaved && <p role="status" className="moduleHint">{ar ? "الصور والتعبئة محفوظة على الجهاز. جاري التحديث..." : "Photos and packing are saved on this device. Updating..."}</p>}
-      {!syncing && offlineSaved && typeof navigator !== "undefined" && navigator.onLine === false && <p className="moduleHint">{ar ? "الصور والتعبئة محفوظة على هذا الجهاز." : "Photos and packing are saved on this device."}</p>}
+      {loading && !offlineSaved && <p role="status">{ar ? "جاري تحميل التعبئة..." : "Loading packing..."}</p>}
+      {offlineSaved && typeof navigator !== "undefined" && navigator.onLine === false && <p className="moduleHint">{ar ? "الصور والتعبئة محفوظة على هذا الجهاز." : "Photos and packing are saved on this device."}</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {warnings.map((warning) => <p key={warning} className={styles.notice}>{warning}</p>)}
       {!selectedCustomer && <p className={styles.notice}><a href="#catalogue-customer">{ar ? "اختر العميل أدناه لإعداد الطلب." : "Choose a customer below to prepare an order."}</a> {ar ? "يمكنك تصفح جميع المنتجات الآن." : "You can browse all products now."}</p>}
@@ -695,7 +684,7 @@ export default function ProductCatalogue({
           const disabled = !selectedCustomer || !hasPrice;
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
-              <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={syncing}
+              <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
                 onRemove={canManagePhotos ? (id) => remove(item.item_code, id) : undefined} />
               <div className={styles.cardBody}>
                 <span className={styles.category}>{item.category}</span>

@@ -175,6 +175,67 @@ test("only receipts inside the report month are counted", () => {
   assert.equal(rows.length, 0);
 });
 
+test("an October collection of a September invoice is credited in October", () => {
+  const septemberInvoice = [
+    salesLine({ transaction_date: "2026-09-10", voucher_number: "NFD/1", category: "Tissue", sales_amount: 1000 }),
+  ];
+  const receipts = [{ receipt_date: "2026-10-05", amount: 1150, vch_no: "1935" }];
+  const customers = [{ customerCode: "C001", customerName: "Alpha", transactions: septemberInvoice, receipts }];
+
+  const september = buildSalesmanIncentiveReport({ month: "2026-09", customers });
+  const october = buildSalesmanIncentiveReport({ month: "2026-10", customers });
+
+  assert.equal(september.rows.length, 0);
+  assert.equal(september.totals.collection_incentive, 0);
+  assert.equal(october.rows.length, 1);
+  assert.equal(october.rows[0].invoice_date, "2026-09-10");
+  assert.equal(october.rows[0].receipt_date, "2026-10-05");
+  assert.equal(october.rows[0].days, 25);
+  assert.equal(october.totals.collected_amount, 1150);
+  assert.equal(october.totals.collection_incentive, 10);
+});
+
+test("a later invoice cannot pull an earlier collection into that sales month", () => {
+  const septemberInvoice = salesLine({
+    transaction_date: "2026-09-10",
+    voucher_number: "NFD/1",
+    category: "Tissue",
+    sales_amount: 1000,
+  });
+  const octoberInvoice = salesLine({
+    transaction_date: "2026-10-12",
+    voucher_number: "RNFD/560",
+    category: "Tissue",
+    sales_amount: 1000,
+  });
+  const receipts = [{ receipt_date: "2026-09-24", amount: 1150, vch_no: "1813" }];
+
+  const beforeLaterSale = buildSalesmanIncentiveReport({
+    month: "2026-09",
+    customers: [{ customerCode: "C001", transactions: [septemberInvoice], receipts }],
+  });
+  const afterLaterSale = buildSalesmanIncentiveReport({
+    month: "2026-09",
+    customers: [{ customerCode: "C001", transactions: [septemberInvoice, octoberInvoice], receipts }],
+  });
+
+  assert.equal(beforeLaterSale.rows.length, 1);
+  assert.equal(beforeLaterSale.rows[0].voucher_number, "NFD/1");
+  assert.equal(beforeLaterSale.rows[0].receipt_date, "2026-09-24");
+  assert.equal(afterLaterSale.totals.collection_incentive, beforeLaterSale.totals.collection_incentive);
+  assert.equal(afterLaterSale.totals.collected_amount, beforeLaterSale.totals.collected_amount);
+  assert.equal(afterLaterSale.rows.some((row) => row.voucher_number === "RNFD/560"), false);
+
+  const octoberOnly = buildCustomerIncentiveRows({
+    customerCode: "C001",
+    transactions: [octoberInvoice],
+    receipts,
+    fromDate: "2026-09-01",
+    toDate: "2026-09-30",
+  });
+  assert.equal(octoberOnly.length, 0);
+});
+
 test("electronics pays 0.40% within 35 days and 0.20% within 60 days", () => {
   const [fast] = buildCustomerIncentiveRows({
     customerCode: "C001",

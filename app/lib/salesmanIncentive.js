@@ -292,6 +292,9 @@ export function buildInvoiceCategoryProfiles(transactions = []) {
  * Receipts are FIFO-settled against that customer's invoices, then each settled
  * chunk is split by category using the invoice's own item mix. Cash-deal
  * invoices are not split — the whole chunk takes the cash rate.
+ * Incentive is credited on the receipt date, never the invoice date. A receipt
+ * cannot settle an invoice dated after the collection, so posting a later sale
+ * cannot move an earlier month's incentive.
  * Incentive base is the net (ex-VAT) share of the VAT-inclusive cash collected.
  */
 export function buildCustomerIncentiveRows({
@@ -305,7 +308,9 @@ export function buildCustomerIncentiveRows({
   const from = dateOnly(fromDate);
   const to = dateOnly(toDate);
   const profiles = buildInvoiceCategoryProfiles(transactions);
-  const { allocations } = matchPaymentsFifo(transactions, receipts);
+  const { allocations } = matchPaymentsFifo(transactions, receipts, {
+    receiptOnOrAfterInvoice: true,
+  });
 
   return (allocations || [])
     .filter((allocation) => {

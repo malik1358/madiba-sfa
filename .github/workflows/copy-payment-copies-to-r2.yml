@@ -3,6 +3,8 @@ name: Copy payment files to R2
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   copy:
     runs-on: ubuntu-latest

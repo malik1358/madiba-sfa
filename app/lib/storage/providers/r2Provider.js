@@ -58,14 +58,23 @@ export async function ensureBucket() {
   r2Context();
 }
 
+function payloadLength(body) {
+  if (typeof body === "string") return Buffer.byteLength(body);
+  if (body instanceof ArrayBuffer) return body.byteLength;
+  if (ArrayBuffer.isView(body)) return body.byteLength;
+  return null;
+}
+
 export async function putObject(_admin, { key, body, contentType, metadata = {}, env }) {
   const { client, config } = r2Context(env);
   const sha256 = String(metadata?.sha256 || "").toLowerCase();
+  const length = payloadLength(body);
   const response = await client.fetch(objectUrl(config, key), {
     method: "PUT",
     body,
     headers: {
       "content-type": contentType || "application/octet-stream",
+      ...(length === null ? {} : { "content-length": String(length) }),
       "if-none-match": "*",
       // R2 rejects the upload if the bytes do not match this hash.
       ...(/^[a-f0-9]{64}$/.test(sha256) ? { "x-amz-content-sha256": sha256 } : {}),

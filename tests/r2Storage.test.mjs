@@ -216,6 +216,7 @@ test("R2 PUT is SigV4-signed, non-overwriting, hash-checked, with MIME and safe 
   assert.equal(request.headers["if-none-match"], "*");
   assert.equal(request.headers["x-amz-content-sha256"], sha256);
   assert.equal(request.headers["content-type"], "image/jpeg");
+  assert.equal(request.headers["content-length"], String(bytes.length));
   assert.equal(request.headers["x-amz-meta-sha256"], sha256);
   assert.equal(request.headers["x-amz-meta-category"], "receipt_copy");
   assert.equal(request.headers["x-amz-meta-entity-type"], "collection_visit");

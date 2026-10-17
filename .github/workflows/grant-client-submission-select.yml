@@ -1,0 +1,108 @@
+# TEMPORARY manual grant for collection_visits.client_submission_id column SELECT.
+# After one successful production run, delete this workflow and
+# scripts/grantClientSubmissionIdSelect.mjs in a follow-up pull request.
+# Do not dispatch it again. The script stops once that column privilege exists.
+name: Client submission column grant
+run-name: Client submission column grant (${{ github.sha }})
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-db-client-submission-select-grant
+  cancel-in-progress: false
+
+jobs:
+  grant:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production-db
+    env:
+      PRODUCTION_DB_PROJECT_REF: ${{ vars.PRODUCTION_DB_PROJECT_REF || 'ynmtlzyqvmurpmfretji' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout dispatched main commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify dispatch is current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if [[ "$GITHUB_REF" != "refs/heads/main" || "$(git rev-parse HEAD)" != "$GITHUB_SHA" || "$(git rev-parse refs/remotes/origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "workflow must be dispatched from the current main SHA" >&2
+            exit 1
+          fi
+
+      - name: Verify protected production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          environment_json="$(gh api "repos/$GITHUB_REPOSITORY/environments/production-db")"
+          jq -e '
+            .can_admins_bypass == false and
+            any(.protection_rules[]?; .type == "required_reviewers" and ((.reviewers // []) | length > 0)) and
+            .deployment_branch_policy.custom_branch_policies == true and
+            .deployment_branch_policy.protected_branches == false
+          ' <<< "$environment_json" >/dev/null || {
+            echo "production-db must require reviewers, disallow admin bypass, and use custom deployment branch policies" >&2
+            exit 1
+          }
+          branch_policies="$(gh api "repos/$GITHUB_REPOSITORY/environments/production-db/deployment-branch-policies")"
+          jq -e '.branch_policies | length == 1 and .[0].name == "main" and .[0].type == "branch"' <<< "$branch_policies" >/dev/null || {
+            echo "production-db deployment policy must allow only the main branch" >&2
+            exit 1
+          }
+
+      - name: Set up Node 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: Reject unexpected script input
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/grantClientSubmissionIdSelect.mjs --self-check
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes postgresql-client-16
+          version="$(psql --version)"
+          if [[ ! "$version" =~ ^psql\ \(PostgreSQL\)\ 16\. ]]; then
+            echo "unexpected PostgreSQL client version" >&2
+            exit 1
+          fi
+
+      - name: Configure verified production database TLS
+        shell: bash
+        env:
+          PRODUCTION_DB_ROOT_CA_CERT: ${{ secrets.PRODUCTION_DB_ROOT_CA_CERT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$PRODUCTION_DB_ROOT_CA_CERT" ]]; then
+            echo "production database root CA certificate is missing" >&2
+            exit 1
+          fi
+          cert_path="$RUNNER_TEMP/production-db-root-ca.crt"
+          umask 077
+          printf '%s\n' "$PRODUCTION_DB_ROOT_CA_CERT" > "$cert_path"
+          openssl x509 -in "$cert_path" -noout >/dev/null
+          echo "PGSSLROOTCERT=$cert_path" >> "$GITHUB_ENV"
+
+      - name: Grant client submission column select
+        shell: bash
+        env:
+          PRODUCTION_DB_MIGRATION_URL: ${{ secrets.PRODUCTION_DB_MIGRATION_URL }}
+        run: node scripts/grantClientSubmissionIdSelect.mjs

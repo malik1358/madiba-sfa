@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchJsonWithTimeout, withTimeout } from "../lib/authSession";
+import { fetchJsonWithTimeout, resolveAuthSession, withTimeout } from "../lib/authSession";
 import { buildModuleAccess } from "../lib/moduleAccess";
 import { readCacheEntry, writeCacheEntry } from "../lib/localDataStore";
 import { getSupabaseClient } from "../lib/supabase";
@@ -15,17 +15,25 @@ function accessCacheKey(userId) {
 export function useModuleAccess() {
   const [access, setAccess] = useState(() => buildModuleAccess({}));
   const [loading, setLoading] = useState(true);
+  const [signedIn, setSignedIn] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+    let accessLoadPending = false;
+    let initialSessionSettled = false;
     const supabase = getSupabaseClient();
     const stopLoading = () => {
       if (!cancelled) setLoading(false);
     };
-    const failsafeTimer = window.setTimeout(stopLoading, 10000);
+    const failsafeTimer = window.setTimeout(() => {
+      if (cancelled || accessLoadPending) return;
+      setSignedIn((current) => (current == null ? false : current));
+      stopLoading();
+    }, 10000);
 
     if (!supabase) {
       setAccess(buildModuleAccess({}));
+      setSignedIn(false);
       stopLoading();
       window.clearTimeout(failsafeTimer);
       return undefined;
@@ -47,13 +55,16 @@ export function useModuleAccess() {
     }
 
     async function loadAccess(session) {
+      accessLoadPending = true;
       try {
         if (!session?.user) {
           if (!cancelled) {
+            setSignedIn(false);
             setAccess(buildModuleAccess({}));
           }
           return;
         }
+        if (!cancelled) setSignedIn(true);
 
         const cacheKey = accessCacheKey(session.user.id);
         try {
@@ -103,20 +114,28 @@ export function useModuleAccess() {
       } catch {
         // Keep cached access when the live profile request fails offline.
       } finally {
+        accessLoadPending = false;
         stopLoading();
       }
     }
 
-    withTimeout(supabase.auth.getSession(), 8000, "SESSION_TIMEOUT").then((result) => {
-      if (!cancelled) loadAccess(result?.data?.session);
+    resolveAuthSession(supabase, 8000).then((session) => {
+      initialSessionSettled = true;
+      if (!cancelled) loadAccess(session);
     }).catch(() => {
-      stopLoading();
+      initialSessionSettled = true;
+      if (!cancelled && !accessLoadPending) {
+        setSignedIn(false);
+        stopLoading();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!cancelled) loadAccess(session);
+      if (cancelled) return;
+      if (!initialSessionSettled && !session?.user) return;
+      loadAccess(session);
     });
 
     return () => {
@@ -126,5 +145,5 @@ export function useModuleAccess() {
     };
   }, []);
 
-  return { access, loading };
+  return { access, loading, signedIn };
 }

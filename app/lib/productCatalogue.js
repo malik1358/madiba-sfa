@@ -26,6 +26,30 @@ export function catalogueFrontPhoto(photos) {
   return (photos || []).find((photo) => String(photo?.id || "").trim()) || null;
 }
 
+export const CATALOGUE_RETURN_PATH = "/management/product-catalogue";
+const CATALOGUE_RETURN_KEY = "madiba-return-path";
+
+export function cataloguePageGate({ loading = false, signedIn = null, canView = false } = {}) {
+  if (loading || signedIn == null) return "loading";
+  if (!signedIn) return "sign-in";
+  if (!canView) return "denied";
+  return "open";
+}
+
+export function rememberCatalogueReturn(storage) {
+  storage?.setItem(CATALOGUE_RETURN_KEY, CATALOGUE_RETURN_PATH);
+}
+
+export function readCatalogueReturn(storage) {
+  return storage?.getItem(CATALOGUE_RETURN_KEY) === CATALOGUE_RETURN_PATH
+    ? CATALOGUE_RETURN_PATH
+    : "";
+}
+
+export function clearCatalogueReturn(storage) {
+  storage?.removeItem(CATALOGUE_RETURN_KEY);
+}
+
 function catalogueRecommendationRows(itemsByCode, list, limit, historyReady) {
   if (!historyReady) return [];
   return (list || []).slice(0, limit)

@@ -496,7 +496,8 @@ test("catalogue UI uploads via FormData and refreshes signed URLs before expiry"
   assert.match(source, /buildCatalogueShareFiles/);
   assert.match(source, /translateCatalogueShareText/);
   assert.match(source, /Without price/);
-  assert.match(source, /downloadStoredZip/);
+  assert.match(source, /whatsappFiles/);
+  assert.doesNotMatch(source, /downloadStoredZip|zipStoredFiles/);
   assert.doesNotMatch(source, /downloadExcelWorkbook/);
   assert.doesNotMatch(source, /whatsappText/);
   assert.doesNotMatch(source, /shareTextOnWhatsapp/);

@@ -14,7 +14,6 @@ import {
 } from "../lib/productCatalogue";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
-import { downloadStoredZip } from "../lib/zipStoredFiles";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
@@ -413,18 +412,18 @@ export default function ProductCatalogue({
       });
       files.push(...batches.flat());
       if (!files.length) throw new Error(ar ? "تعذر تجهيز صور المنتجات." : "Unable to prepare the product photos.");
-      const dialogTitle = ar ? "مشاركة صور الكتالوج" : "Share catalogue photos";
+      const dialogTitle = ar ? "مشاركة على واتساب" : "Share on WhatsApp";
       const result = await shareTextAndFilesOnWhatsapp("", files, {
         title: ar ? "كتالوج المنتجات" : "Product catalogue",
         dialogTitle,
       });
       if (!(result.success || result.reason === "cancelled")) {
-        await downloadStoredZip(files, `product-catalogue-${pricingRegion}${includePrice ? "" : "-no-price"}`);
         notice = {
           variant: "info",
           message: ar
-            ? "تعذر إرسال كل الصور دفعة واحدة على واتساب. تم تنزيل الصور معاً."
-            : "WhatsApp could not take every photo at once. The photos were downloaded together.",
+            ? "الصور جاهزة وفيها التفاصيل بالإنجليزية والعربية. اضغط مشاركة على واتساب. لن يُرسل نص منفصل."
+            : "The photos are ready with the details in English and Arabic. Tap Share on WhatsApp. No separate text is sent.",
+          whatsappFiles: files,
         };
       }
     } catch (err) {

@@ -197,6 +197,15 @@ test("outstanding without GPS is available to management report viewers", () => 
   assert.equal(localizedModuleLabel("outstandingNoGps", "en"), "Outstanding Without GPS");
 });
 
+test("missing catalogue photos is a management report", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("missingCataloguePhotos"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("missingCataloguePhotos"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("missingCataloguePhotos"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("missingCataloguePhotos"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("missingCataloguePhotos"), false);
+  assert.equal(moduleLabelForPath("/management/missing-catalogue-photos", "en"), "Missing Catalogue Photos");
+});
+
 test("invoice makers can view every management report without setup access", () => {
   for (const role of ["invoice-maker", "invoice_maker"]) {
     const access = buildModuleAccess({ role });
@@ -208,6 +217,7 @@ test("invoice makers can view every management report without setup access", () 
       "userActivity",
       "workingHours",
       "outstandingNoGps",
+      "missingCataloguePhotos",
       "gpsMap",
       "collectionReport",
       "receiptsNotInTally",

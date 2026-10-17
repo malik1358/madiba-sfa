@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-17** — Product Catalogue no longer waits while photo files download. After sign-in the app saves and updates those files in the background, and the catalogue shows each photo as it is saved. Packing still appears from the device copy. No migration.
+- **2026-10-17** — Reports now includes **Missing Catalogue Photos** (`/management/missing-catalogue-photos`). It lists active catalogue items with no `product_catalogue_photo` and excludes building materials and do-not-use names. Admin, report-user, manager, and invoice-maker can open it. No migration.
 - **2026-10-17** — Product Catalogue shows the same three quick-order rows as Customer Audit: **New Items**, **Not Bought Since Long**, and **Buying Less**. Search and category still do not hide them. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-17** — Product Catalogue photos and packing open from the device. The list no longer signs every Storage photo before packing can appear. Saved packing and JPEG files stay on the phone, including while offline; a later online open updates them in the background. Share uses the saved photo. No migration. See `docs/ARCHITECTURE.md`, `docs/BUSINESS_RULES.md`.
 - **2026-10-17** — Product Catalogue **New Items** stay on screen for any search or category. Those filters still apply to the product grid and export. Pricing city and type still require a positive price. No migration. See `docs/BUSINESS_RULES.md`.

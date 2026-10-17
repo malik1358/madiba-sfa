@@ -37,6 +37,7 @@ export const MODULES = {
   promoterCoverage: { href: "/management/promoter-coverage", label: "Promoter Coverage" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
+  missingCataloguePhotos: { href: "/management/missing-catalogue-photos", label: "Missing Catalogue Photos" },
   customerGpsHistory: { href: "/management/customer-gps-history", label: "Customer GPS History" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
@@ -94,6 +95,7 @@ export const NAV_GROUPS = [
       "userActivity",
       "workingHours",
       "outstandingNoGps",
+      "missingCataloguePhotos",
       "customerGpsHistory",
       "gpsMap",
     ],
@@ -231,6 +233,7 @@ export function buildModuleAccess(context = {}) {
       promoterCoverage: true,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: hasManagementReportAccess,
+      missingCataloguePhotos: hasManagementReportAccess,
       customerGpsHistory: isAdmin || isManager,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
       salesmanVisitPlan: isAdmin || (
@@ -433,6 +436,7 @@ export const MODULE_LABELS = {
   promoterCoverage: { en: "Promoter Coverage", ar: "تغطية مروج المنتجات" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
+  missingCataloguePhotos: { en: "Missing Catalogue Photos", ar: "صور الكتالوج الناقصة" },
   customerGpsHistory: { en: "Customer GPS History", ar: "سجل مواقع العملاء" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },

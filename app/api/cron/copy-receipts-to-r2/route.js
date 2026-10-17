@@ -129,7 +129,7 @@ export async function POST(request) {
       names,
       verifiedNames: new Set(Object.keys(doneSet)),
       concurrency: COPY_CONCURRENCY,
-      timeBudgetMs: 45000,
+      timeBudgetMs: 20000,
       download: async (name) => {
         const { data, error } = await admin.storage.from("payment-collections").download(name);
         if (error || !data) throw error || new Error("Source file is missing.");

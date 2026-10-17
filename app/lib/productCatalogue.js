@@ -22,6 +22,10 @@ export function catalogueItemsWithPhotos(items, details = {}) {
   });
 }
 
+export function catalogueFrontPhoto(photos) {
+  return (photos || []).find((photo) => String(photo?.id || "").trim()) || null;
+}
+
 function catalogueRecommendationRows(itemsByCode, list, limit, historyReady) {
   if (!historyReady) return [];
   return (list || []).slice(0, limit)

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import {
-  catalogueItemsWithPhotos, cataloguePacking, cataloguePermissions, catalogueSheetPacking,
+  catalogueFrontPhoto, catalogueItemsWithPhotos, cataloguePacking, cataloguePermissions, catalogueSheetPacking,
   hasCataloguePrice, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
@@ -523,7 +523,9 @@ test("catalogue UI keeps photos and packing on the device", () => {
   assert.match(source, /translateCatalogueShareText/);
   assert.match(source, /Without price/);
   assert.match(source, /catalogueItemsWithPhotos/);
+  assert.match(source, /catalogueFrontPhoto/);
   assert.match(source, /requirePhoto:\s*true/);
+  assert.match(source, /limit:\s*1/);
   assert.match(source, /whatsappFiles/);
   assert.doesNotMatch(source, /downloadStoredZip|zipStoredFiles/);
   assert.doesNotMatch(source, /downloadExcelWorkbook/);
@@ -676,6 +678,9 @@ test("catalogue WhatsApp export keeps only products that have a photo", () => {
   ];
   assert.deepEqual(catalogueItemsWithPhotos(items, details).map((item) => item.item_code), ["A1", "A4"]);
   assert.deepEqual(catalogueItemsWithPhotos([], details), []);
+  assert.equal(catalogueFrontPhoto([{ id: "front" }, { id: "side" }, { id: "back" }]).id, "front");
+  assert.equal(catalogueFrontPhoto([{ id: " " }, { id: "side" }]).id, "side");
+  assert.equal(catalogueFrontPhoto([]), null);
 });
 
 test("catalogue photo download returns the stored JPEG to signed-in catalogue users", async () => {

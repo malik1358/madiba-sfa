@@ -19,7 +19,7 @@ Roles are stored on `public.profiles.role` and normalized in `app/lib/moduleAcce
 
 `is_management()` in SQL is `admin`, `report-user`, and `manager` after the report-user migration. Invoice makers are not management in row-level security even though the app gives them several admin screens.
 
-Screen access is `buildModuleAccess`, optionally overridden by the admin **Role Access** matrix (`/management/role-access`, `system_settings.role_module_access_v1`). Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`).
+Screen access is `buildModuleAccess`, optionally overridden by the admin **Role Access** matrix (`/management/role-access`, `system_settings.role_module_access_v1`). Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`). On iPhone Safari, that overlay warns that phone GPS can be on while the website Location permission is still blocked.
 
 ## Main screens
 

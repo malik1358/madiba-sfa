@@ -69,9 +69,12 @@ export const GPS_REQUIRED_ERROR = "GPS is required. Allow location access in the
 export const GPS_UNSUPPORTED_ERROR = "UNSUPPORTED";
 export const GPS_PERMISSION_DENIED_ERROR = "PERMISSION_DENIED";
 export const GPS_POSITION_UNAVAILABLE_ERROR = "POSITION_UNAVAILABLE";
+export const GPS_TIMEOUT_ERROR = "TIMEOUT";
 export const GPS_LOCATION_FAILED_ERROR = "LOCATION_FAILED";
 export const GPS_PROBE_DEFAULT_ATTEMPTS = 3;
 export const GPS_PROBE_RETRY_DELAY_MS = 1500;
+export const GPS_PROBE_RETRY_MAXIMUM_AGE_MS = 15000;
+export const GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS = 60000;
 
 function delayMs(ms) {
   return new Promise((resolve) => {
@@ -111,7 +114,105 @@ export function mapGeolocationFailure(error) {
   const code = Number(error?.code);
   if (code === 1) return new Error(GPS_PERMISSION_DENIED_ERROR);
   if (code === 2) return new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  if (code === 3) return new Error(GPS_TIMEOUT_ERROR);
+  const message = String(error?.message || "").toUpperCase();
+  if (message.includes("PERMISSION") || message.includes("DENIED")) {
+    return new Error(GPS_PERMISSION_DENIED_ERROR);
+  }
+  if (message.includes("UNAVAILABLE")) {
+    return new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  }
+  if (message.includes("TIMEOUT")) {
+    return new Error(GPS_TIMEOUT_ERROR);
+  }
   return new Error(GPS_LOCATION_FAILED_ERROR);
+}
+
+export function resolveGpsFailureCode(error) {
+  const message = String(error?.message || "").trim();
+  if (
+    message === GPS_PERMISSION_DENIED_ERROR
+    || message === GPS_POSITION_UNAVAILABLE_ERROR
+    || message === GPS_TIMEOUT_ERROR
+    || message === GPS_UNSUPPORTED_ERROR
+    || message === GPS_LOCATION_FAILED_ERROR
+  ) {
+    return message;
+  }
+  if (message === GPS_REQUIRED_ERROR) {
+    return GPS_LOCATION_FAILED_ERROR;
+  }
+  return mapGeolocationFailure(error).message;
+}
+
+/**
+ * Progressive browser/native probe options. First attempt prefers a fresh
+ * high-accuracy fix. Later attempts relax maximumAge and accuracy so Safari /
+ * iOS cold starts do not fail while phone GPS is already on for another app.
+ */
+export function resolveGpsProbeAttemptOptions(attempt, totalAttempts = GPS_PROBE_DEFAULT_ATTEMPTS, options = {}) {
+  const attemptNumber = Math.max(1, Number(attempt) || 1);
+  const attempts = Math.max(1, Number(totalAttempts) || GPS_PROBE_DEFAULT_ATTEMPTS);
+  const baseTimeoutMs = Number(options.timeoutMs || 10000);
+  const explicitHighAccuracy = options.enableHighAccuracy;
+  const explicitMaximumAge = options.maximumAge;
+
+  if (explicitHighAccuracy !== undefined || Number.isFinite(Number(explicitMaximumAge))) {
+    return {
+      enableHighAccuracy: explicitHighAccuracy === undefined ? true : Boolean(explicitHighAccuracy),
+      maximumAge: Number.isFinite(Number(explicitMaximumAge)) ? Number(explicitMaximumAge) : 0,
+      timeoutMs: baseTimeoutMs,
+    };
+  }
+
+  if (attemptNumber <= 1) {
+    return {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeoutMs: baseTimeoutMs,
+    };
+  }
+
+  if (attemptNumber === 2 || attempts === 2) {
+    return {
+      enableHighAccuracy: true,
+      maximumAge: GPS_PROBE_RETRY_MAXIMUM_AGE_MS,
+      timeoutMs: Math.max(baseTimeoutMs, 15000),
+    };
+  }
+
+  return {
+    enableHighAccuracy: false,
+    maximumAge: GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS,
+    timeoutMs: Math.max(baseTimeoutMs, 20000),
+  };
+}
+
+export function formatGpsFailureMessage(error, language = "en") {
+  const code = resolveGpsFailureCode(error);
+  const ar = String(language || "").toLowerCase().startsWith("ar");
+
+  if (code === GPS_PERMISSION_DENIED_ERROR) {
+    return ar
+      ? "إذن الموقع محظور لهذا الموقع. على iPhone: الإعدادات ← Safari ← الموقع ← سماح، أو اضغط aA في شريط العنوان ← إعدادات الموقع ← سماح، ثم أعد المحاولة."
+      : "Location is blocked for this website. Phone GPS can be on while Safari still blocks MADIBA. On iPhone: Settings → Safari → Location → Allow, or tap aA in the address bar → Website Settings → Location → Allow, then try again.";
+  }
+
+  if (code === GPS_UNSUPPORTED_ERROR) {
+    return ar
+      ? "خدمة تحديد الموقع غير مدعومة على هذا الجهاز أو المتصفح."
+      : "Geolocation is not supported on this device or browser.";
+  }
+
+  if (code === GPS_POSITION_UNAVAILABLE_ERROR || code === GPS_TIMEOUT_ERROR) {
+    return ar
+      ? "تعذر قراءة GPS الآن. انتقل إلى مكان مفتوح وانتظر إشارة GPS، ثم أعد المحاولة. إذا كان الموقع مسموحاً في Safari وما زال الفشل، أعد تحميل الصفحة."
+      : "Unable to read GPS right now. Move outdoors, wait for a GPS fix, then try again. If Safari already allows Location and it still fails, reload the page and retry.";
+  }
+
+  return ar
+    ? "GPS مطلوب. اسمح بالوصول إلى الموقع في المتصفح وحاول مرة أخرى."
+    : GPS_REQUIRED_ERROR;
 }
 
 async function isNativeCapacitorPlatform() {
@@ -127,11 +228,12 @@ async function isNativeCapacitorPlatform() {
 async function probeNativeGpsLocation(options = {}) {
   const timeoutMs = Number(options.timeoutMs || 10000);
   const maximumAge = Number.isFinite(Number(options.maximumAge)) ? Number(options.maximumAge) : 0;
+  const enableHighAccuracy = options.enableHighAccuracy === undefined ? true : Boolean(options.enableHighAccuracy);
   const { Geolocation } = await import("@capacitor/geolocation");
 
   try {
     const position = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: true,
+      enableHighAccuracy,
       timeout: timeoutMs,
       maximumAge,
     });
@@ -148,6 +250,7 @@ function probeBrowserGpsLocation(options = {}) {
 
   const timeoutMs = Number(options.timeoutMs || 10000);
   const maximumAge = Number.isFinite(Number(options.maximumAge)) ? Number(options.maximumAge) : 0;
+  const enableHighAccuracy = options.enableHighAccuracy === undefined ? true : Boolean(options.enableHighAccuracy);
 
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
@@ -161,7 +264,7 @@ function probeBrowserGpsLocation(options = {}) {
       (error) => {
         reject(mapGeolocationFailure(error));
       },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge },
+      { enableHighAccuracy, timeout: timeoutMs, maximumAge },
     );
   });
 }
@@ -189,11 +292,21 @@ export async function probeGpsLocationWithRetries(options = {}) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const attemptOptions = {
+      ...options,
+      ...resolveGpsProbeAttemptOptions(attempt, attempts, options),
+    };
     try {
-      return await probeGpsLocation(options);
+      return await probeGpsLocation(attemptOptions);
     } catch (error) {
       lastError = error;
-      if (error?.message === GPS_UNSUPPORTED_ERROR || attempt >= attempts) {
+      const code = resolveGpsFailureCode(error);
+      // Permission / unsupported failures will not recover on retry.
+      if (
+        code === GPS_UNSUPPORTED_ERROR
+        || code === GPS_PERMISSION_DENIED_ERROR
+        || attempt >= attempts
+      ) {
         throw error;
       }
       if (retryDelayMs > 0) {
@@ -205,13 +318,20 @@ export async function probeGpsLocationWithRetries(options = {}) {
   throw lastError || new Error(GPS_LOCATION_FAILED_ERROR);
 }
 
-export function captureGpsLocation() {
-  return probeGpsLocationWithRetries().catch((error) => {
-    if (error?.message === GPS_PERMISSION_DENIED_ERROR
-      || error?.message === GPS_POSITION_UNAVAILABLE_ERROR
-      || error?.message === GPS_LOCATION_FAILED_ERROR
-      || error?.message === GPS_UNSUPPORTED_ERROR) {
-      throw new Error(GPS_REQUIRED_ERROR);
+export function captureGpsLocation(options = {}) {
+  return probeGpsLocationWithRetries(options).catch((error) => {
+    const code = resolveGpsFailureCode(error);
+    if (
+      code === GPS_PERMISSION_DENIED_ERROR
+      || code === GPS_POSITION_UNAVAILABLE_ERROR
+      || code === GPS_TIMEOUT_ERROR
+      || code === GPS_LOCATION_FAILED_ERROR
+      || code === GPS_UNSUPPORTED_ERROR
+    ) {
+      const wrapped = new Error(GPS_REQUIRED_ERROR);
+      wrapped.cause = error;
+      wrapped.gpsCode = code;
+      throw wrapped;
     }
     throw error;
   });
@@ -221,7 +341,7 @@ export function requireGpsLocation(options = {}) {
   if (!shouldRequireTransactionGps(options.role)) {
     return Promise.resolve(null);
   }
-  return captureGpsLocation();
+  return captureGpsLocation(options);
 }
 
 export function normalizeGpsCapturePlatform(value, source = "") {

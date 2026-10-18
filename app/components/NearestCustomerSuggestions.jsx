@@ -76,6 +76,7 @@ export default function NearestCustomerSuggestions({
                           <Link
                             key={key}
                             href={action.href}
+                            prefetch={false}
                             className="moduleNearestCustomersActionLink"
                           >
                             {action.label}

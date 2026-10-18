@@ -7,6 +7,7 @@ import {
   isInlineMorningAttendancePath,
   isMorningAttendanceRequiredForRole,
   isMorningAttendanceUniqueViolation,
+  resolveMorningAttendanceRedirectPath,
   WORKDAY_GATE_READY_EVENT,
   WORKDAY_TIMES_UPDATED_EVENT,
   todayAttendanceBounds,
@@ -33,6 +34,29 @@ test("Collections paths skip the redirect but use the inline attendance gate", (
   assert.equal(isInlineMorningAttendancePath("/management/my-day"), false);
   assert.equal(canAccessWithoutMorningAttendance("/management/new-order"), false);
   assert.equal(canAccessWithoutMorningAttendance("/management/visit-without-order"), false);
+});
+
+test("attendance redirect keeps visit-without-order customer deep links on My Day", () => {
+  assert.equal(
+    resolveMorningAttendanceRedirectPath(
+      "/management/visit-without-order",
+      "?customer_code=1059&customer_name=Al+Shaheen",
+      "/management/my-day",
+    ),
+    "/management/my-day?customer_code=1059&customer_name=Al+Shaheen",
+  );
+  assert.equal(
+    resolveMorningAttendanceRedirectPath("/management/new-order", "?customer_code=1059", "/management/my-day"),
+    "/management/my-day",
+  );
+  assert.equal(
+    resolveMorningAttendanceRedirectPath(
+      "/management/visit-without-order",
+      "?customer_code=1059",
+      "/management/payment-collections",
+    ),
+    "/management/payment-collections",
+  );
 });
 
 test("morning attendance is required for every role except admin", () => {

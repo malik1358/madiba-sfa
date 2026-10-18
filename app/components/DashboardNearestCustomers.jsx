@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildNearestCustomerActionLinks } from "../lib/dashboardNearestCustomers.js";
+import { useRouter } from "next/navigation";
+import {
+  buildNearestCustomerActions,
+  buildNearestCustomerNavigateHandlers,
+} from "../lib/dashboardNearestCustomers.js";
 import { fetchVisibleCustomersCached } from "../lib/mobileDataCache.js";
 import { fetchSalesScope } from "../lib/salesScope.js";
 import { getSupabaseClient } from "../lib/supabase.js";
@@ -15,6 +19,7 @@ const ACTION_LABELS = {
 };
 
 export default function DashboardNearestCustomers({ moduleAccess, language = "en" }) {
+  const router = useRouter();
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(true);
   const ar = language === "ar";
@@ -23,6 +28,7 @@ export default function DashboardNearestCustomers({ moduleAccess, language = "en
     order: ACTION_LABELS.order[ar ? "ar" : "en"],
     collection: ACTION_LABELS.collection[ar ? "ar" : "en"],
   };
+  const navigateHandlers = buildNearestCustomerNavigateHandlers(router, moduleAccess);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +85,9 @@ export default function DashboardNearestCustomers({ moduleAccess, language = "en
         loading={finding}
         locationUnavailable={locationUnavailable}
         onRefresh={refresh}
-        actions={(customer) => buildNearestCustomerActionLinks(customer, moduleAccess, labels)}
+        actions={(customer) =>
+          buildNearestCustomerActions(customer, moduleAccess, labels, navigateHandlers)
+        }
       />
     </div>
   );

@@ -11,6 +11,7 @@ import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
   readGateReadyState,
+  resolveMorningAttendanceRedirectPath,
   writeGateReadyState,
 } from "../lib/morningAttendance";
 import {
@@ -126,7 +127,8 @@ export default function MorningAttendanceRedirect() {
               variant: "warning",
             });
           }
-          router.replace(home);
+          const search = typeof window !== "undefined" ? window.location.search : "";
+          router.replace(resolveMorningAttendanceRedirectPath(pathname, search, home));
         }
       } catch {
         if (!cancelled) setAttendanceComplete(true);
@@ -151,7 +153,8 @@ export default function MorningAttendanceRedirect() {
   useEffect(() => {
     if (checking || !required || attendanceComplete) return;
     if (canAccessWithoutMorningAttendance(pathname)) return;
-    router.replace(attendanceHome);
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    router.replace(resolveMorningAttendanceRedirectPath(pathname, search, attendanceHome));
   }, [attendanceComplete, attendanceHome, checking, pathname, required, router]);
 
   async function handleMorningAttendance() {

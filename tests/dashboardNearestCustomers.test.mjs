@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildNearestCustomerActionLinks,
   buildNearestCustomerActions,
+  buildNearestCustomerNavigateHandlers,
 } from "../app/lib/dashboardNearestCustomers.js";
 
 const customer = {
@@ -69,4 +70,24 @@ test("replaces visit link with onClick when a visit handler is provided", () => 
 
   actions[0].onClick();
   assert.deepEqual(selected, ["C100"]);
+});
+
+test("navigate handlers push visit-without-order with the customer query", () => {
+  const pushed = [];
+  const handlers = buildNearestCustomerNavigateHandlers(
+    { push: (href) => pushed.push(href) },
+    fullAccess,
+  );
+  const actions = buildNearestCustomerActions(customer, fullAccess, {}, handlers);
+
+  assert.equal(actions.every((action) => typeof action.onClick === "function"), true);
+  actions[0].onClick();
+  actions[1].onClick();
+  actions[2].onClick();
+
+  assert.deepEqual(pushed, [
+    "/management/visit-without-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12",
+    "/management/new-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12",
+    "/management/payment-collections?customer=C100",
+  ]);
 });

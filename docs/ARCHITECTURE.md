@@ -140,7 +140,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
 - `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`. Digests include per-customer **Times today** / **Total times** counts. Authorized `force` / test-`to` query params resend without claiming the daily marker.
 - `salesman-visit-plan-email`, `mobile-snapshot`
-- `app-performance` measures the public build endpoint, Auth health, a settings read, a customer count, and a two-day order count at 09:00, 12:00, 15:00 and 18:00 KSA. Each KSA hour is stored separately in `system_settings.app_performance_daily_v1` and 90 days are kept. A run is `slower` only when a timing is both 50% above and at least 200 ms above the median of earlier samples, after three samples exist. Slower and failed runs email `malik@pinasz.com` once per hour.
+- `app-performance` measures the public build endpoint, Auth health, a keyed settings read (`active_sales_batch_id`), a customer count, and a two-day order count at 09:00, 12:00, 15:00 and 18:00 KSA. The cron prefers Vercel region `syd1` (near production Supabase). It warms one DB round-trip, then records the fastest of two attempts for each DB probe so a single cold pooler hit does not mark the hour slower. Each KSA hour is stored separately in `system_settings.app_performance_daily_v1` and 90 days are kept. A run is `slower` only when a timing is both 50% above and at least 200 ms above the median of earlier samples, after three samples exist. Slower and failed runs email `malik@pinasz.com` once per hour.
 
 ## Authentication
 

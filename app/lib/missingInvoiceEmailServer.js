@@ -3,13 +3,17 @@ import {
   MISSING_INVOICE_EMAIL_LAST_SENT_KEY,
   MISSING_INVOICE_GRACE_MS,
   buildMissingInvoiceAlertEmail,
+  getMissingInvoiceEmailIndiaDate,
   getMissingInvoiceEmailMidnightKsaDate,
+  isMissingInvoiceEmailDailySummarySlot,
   isMissingInvoiceEmailOfficeHoliday,
+  isMissingInvoiceEmailWithinOfficeHours,
   invoiceMetaKey,
   missingInvoiceCreatedFromIso,
   parseInvoiceMeta,
   parseMissingInvoiceEmailState,
   resolveMissingInvoiceEmailCc,
+  resolveMissingInvoiceEmailDailySummary,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
   wasMissingInvoiceEmailSentRecently,
@@ -87,14 +91,31 @@ export async function loadLastMissingInvoiceEmailSentAt(admin) {
   return parseMissingInvoiceEmailState(data?.setting_value);
 }
 
-export async function saveLastMissingInvoiceEmailSentAt(admin, now = new Date(), previousState = {}) {
+export async function saveLastMissingInvoiceEmailSentAt(
+  admin,
+  now = new Date(),
+  previousState = {},
+  {
+    markFrequentSent = true,
+    markMidnight = true,
+    markDailySummary = false,
+  } = {},
+) {
   const state = parseMissingInvoiceEmailState(previousState);
-  const midnightDate = getMissingInvoiceEmailMidnightKsaDate(now);
+  const midnightDate = markMidnight ? getMissingInvoiceEmailMidnightKsaDate(now) : null;
+  const indiaDate = getMissingInvoiceEmailIndiaDate(now);
   const { error } = await admin.from("system_settings").upsert({
     setting_key: MISSING_INVOICE_EMAIL_LAST_SENT_KEY,
     setting_value: JSON.stringify({
-      lastSentAt: now.toISOString(),
+      lastSentAt: markFrequentSent ? now.toISOString() : (
+        typeof state.lastSentAt === "number"
+          ? new Date(state.lastSentAt).toISOString()
+          : state.lastSentAt
+            ? new Date(state.lastSentAt).toISOString()
+            : null
+      ),
       lastMidnightKsaDate: midnightDate || state.lastMidnightKsaDate,
+      lastDailySummaryIndiaDate: markDailySummary ? indiaDate : state.lastDailySummaryIndiaDate,
     }),
   }, { onConflict: "setting_key" });
   if (error) throw error;
@@ -120,6 +141,10 @@ export async function loadMissingInvoiceOrders(admin, now = new Date()) {
     orders: selectMissingInvoiceOrders(orders, metaByOrder, now),
     metaByOrder,
   };
+}
+
+function uniqueEmails(...lists) {
+  return [...new Set(lists.flat().map((email) => String(email || "").trim().toLowerCase()).filter(Boolean))];
 }
 
 export async function runMissingInvoiceEmailCycle(admin, {
@@ -159,7 +184,8 @@ export async function runMissingInvoiceEmailCycle(admin, {
 
   const to = resolveMissingInvoiceEmailRecipients(env);
   const cc = resolveMissingInvoiceEmailCc(env, to);
-  if (!to.length) {
+  const dailySummaryTo = resolveMissingInvoiceEmailDailySummary(env, [...to, ...cc]);
+  if (!to.length && !dailySummaryTo.length) {
     return {
       skipped: true,
       reason: "no_recipients",
@@ -175,7 +201,24 @@ export async function runMissingInvoiceEmailCycle(admin, {
   const message = buildMissingInvoiceAlertEmail({ now, orders, metaByOrder });
   const hasFrequentReminderOrders = message.pendingApprovalCount > 0 || message.pendingInvoiceCreationCount > 0;
   const midnightKsaDate = getMissingInvoiceEmailMidnightKsaDate(now);
-  if (!hasFrequentReminderOrders && !midnightKsaDate) {
+  const withinOfficeHours = isMissingInvoiceEmailWithinOfficeHours(now);
+  const dailySummarySlot = isMissingInvoiceEmailDailySummarySlot(now);
+  const indiaDate = getMissingInvoiceEmailIndiaDate(now);
+  const wantFrequent = hasFrequentReminderOrders && withinOfficeHours;
+  const wantMidnight = !hasFrequentReminderOrders && Boolean(midnightKsaDate);
+  const mayNeedDaily = Boolean(dailySummaryTo.length && dailySummarySlot);
+
+  if (!wantFrequent && !wantMidnight && !mayNeedDaily) {
+    if (hasFrequentReminderOrders && !withinOfficeHours) {
+      return {
+        skipped: true,
+        reason: "outside_office_hours",
+        sentCount: 0,
+        orderCount: message.orderCount,
+        to,
+        cc,
+      };
+    }
     return {
       skipped: true,
       reason: "no_pending_approval_or_invoice_creation",
@@ -187,7 +230,9 @@ export async function runMissingInvoiceEmailCycle(admin, {
   }
 
   const sendState = parseMissingInvoiceEmailState(await loadLastSentAt(admin));
-  if (!hasFrequentReminderOrders && sendState.lastMidnightKsaDate === midnightKsaDate) {
+  const dailySummaryPending = mayNeedDaily && sendState.lastDailySummaryIndiaDate !== indiaDate;
+
+  if (wantMidnight && sendState.lastMidnightKsaDate === midnightKsaDate && !dailySummaryPending) {
     return {
       skipped: true,
       reason: "midnight_digest_already_sent",
@@ -198,7 +243,7 @@ export async function runMissingInvoiceEmailCycle(admin, {
     };
   }
 
-  if (hasFrequentReminderOrders && wasMissingInvoiceEmailSentRecently(sendState.lastSentAt, now)) {
+  if (wantFrequent && wasMissingInvoiceEmailSentRecently(sendState.lastSentAt, now) && !dailySummaryPending) {
     return {
       skipped: true,
       reason: "sent_recently",
@@ -209,27 +254,124 @@ export async function runMissingInvoiceEmailCycle(admin, {
     };
   }
 
-  try {
-    const sent = await send({ ...message, to, cc }, env);
-    await saveLastSentAt(admin, now, sendState);
+  if (!wantFrequent && !(wantMidnight && sendState.lastMidnightKsaDate !== midnightKsaDate) && !dailySummaryPending) {
+    if (hasFrequentReminderOrders && !withinOfficeHours) {
+      return {
+        skipped: true,
+        reason: "outside_office_hours",
+        sentCount: 0,
+        orderCount: message.orderCount,
+        to,
+        cc,
+      };
+    }
     return {
-      skipped: false,
-      sentCount: 1,
-      failedCount: 0,
+      skipped: true,
+      reason: wantMidnight ? "midnight_digest_already_sent" : "no_pending_approval_or_invoice_creation",
+      sentCount: 0,
       orderCount: message.orderCount,
       to,
       cc,
-      provider: sent?.provider || null,
     };
-  } catch (error) {
+  }
+
+  const sends = [];
+  const includeDailyOnOperational = wantFrequent
+    && dailySummaryPending
+    && withinOfficeHours
+    && dailySummarySlot;
+
+  if ((wantFrequent || (wantMidnight && sendState.lastMidnightKsaDate !== midnightKsaDate)) && to.length) {
+    if (!(wantFrequent && wasMissingInvoiceEmailSentRecently(sendState.lastSentAt, now))) {
+      const operationalCc = includeDailyOnOperational
+        ? uniqueEmails(cc, dailySummaryTo)
+        : cc;
+      sends.push({
+        kind: includeDailyOnOperational ? "frequent_with_daily_summary" : (wantFrequent ? "frequent" : "midnight"),
+        payload: { ...message, to, cc: operationalCc },
+        markFrequentSent: wantFrequent,
+        markMidnight: wantMidnight,
+        markDailySummary: includeDailyOnOperational,
+      });
+    }
+  }
+
+  if (dailySummaryPending && !includeDailyOnOperational) {
+    sends.push({
+      kind: "daily_summary",
+      payload: { ...message, to: dailySummaryTo, cc: [] },
+      markFrequentSent: false,
+      markMidnight: false,
+      markDailySummary: true,
+    });
+  }
+
+  if (!sends.length) {
+    return {
+      skipped: true,
+      reason: wantFrequent ? "sent_recently" : "no_pending_approval_or_invoice_creation",
+      sentCount: 0,
+      orderCount: message.orderCount,
+      to,
+      cc,
+    };
+  }
+
+  let sentCount = 0;
+  let failedCount = 0;
+  let lastError = null;
+  let provider = null;
+  let nextState = sendState;
+  const kinds = [];
+
+  for (const entry of sends) {
+    try {
+      const sent = await send(entry.payload, env);
+      sentCount += 1;
+      provider = sent?.provider || provider;
+      kinds.push(entry.kind);
+      await saveLastSentAt(admin, now, nextState, {
+        markFrequentSent: entry.markFrequentSent,
+        markMidnight: entry.markMidnight,
+        markDailySummary: entry.markDailySummary,
+      });
+      nextState = {
+        ...nextState,
+        lastSentAt: entry.markFrequentSent ? now.getTime() : nextState.lastSentAt,
+        lastMidnightKsaDate: entry.markMidnight
+          ? (getMissingInvoiceEmailMidnightKsaDate(now) || nextState.lastMidnightKsaDate)
+          : nextState.lastMidnightKsaDate,
+        lastDailySummaryIndiaDate: entry.markDailySummary ? indiaDate : nextState.lastDailySummaryIndiaDate,
+      };
+    } catch (error) {
+      failedCount += 1;
+      lastError = error.message || "Unable to send email";
+    }
+  }
+
+  if (!sentCount) {
     return {
       skipped: false,
       sentCount: 0,
-      failedCount: 1,
+      failedCount,
       orderCount: message.orderCount,
       to,
       cc,
-      error: error.message || "Unable to send email",
+      dailySummaryTo,
+      error: lastError,
     };
   }
+
+  return {
+    skipped: false,
+    sentCount,
+    failedCount,
+    orderCount: message.orderCount,
+    to,
+    cc,
+    dailySummaryTo,
+    kinds,
+    provider,
+    ...(lastError ? { error: lastError } : {}),
+  };
 }

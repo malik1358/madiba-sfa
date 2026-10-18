@@ -16,7 +16,11 @@ import {
   selectDailySupplierOrders,
   shouldIncludeInSupplierOrderReport,
 } from "../app/lib/dailySupplierOrderEmail.js";
-import { DEFAULT_MISSING_INVOICE_EMAIL_CC, DEFAULT_MISSING_INVOICE_EMAIL_TO } from "../app/lib/missingInvoiceEmail.js";
+import {
+  DEFAULT_MISSING_INVOICE_EMAIL_CC,
+  DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY,
+  DEFAULT_MISSING_INVOICE_EMAIL_TO,
+} from "../app/lib/missingInvoiceEmail.js";
 import { runDailySupplierOrderEmailCycle } from "../app/lib/dailySupplierOrderEmailServer.js";
 
 test("parseMoneyAmount accepts comma and dot thousands", () => {
@@ -159,7 +163,10 @@ test("buildDailySupplierOrderEmail includes values with VAT and a total row", ()
 
 test("resolveDailySupplierOrderDigestRecipients uses the invoice-ops list", () => {
   assert.deepEqual(resolveDailySupplierOrderDigestRecipients({}), DEFAULT_MISSING_INVOICE_EMAIL_TO);
-  assert.deepEqual(resolveDailySupplierOrderDigestCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
+  assert.deepEqual(
+    resolveDailySupplierOrderDigestCc({}),
+    [...DEFAULT_MISSING_INVOICE_EMAIL_CC, ...DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY],
+  );
 });
 
 test("runDailySupplierOrderEmailCycle emails each salesman plus one boss digest and company digest", async () => {

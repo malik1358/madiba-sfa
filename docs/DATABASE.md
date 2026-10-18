@@ -200,7 +200,7 @@ Schemes and quantity limits are settings, not tables:
 | `order_invoice_meta:<id>` | Invoice status and PDF metadata |
 | `order_history_latest:<id>` / `order_history:<id>:` | Order edit history |
 | `order_pricing_meta:<id>` | Pricing snapshot on the order |
-| `missing_invoice_email_last_sent_at` | Email dedupe |
+| `missing_invoice_email_last_sent_at` | Email dedupe JSON: `lastSentAt`, `lastMidnightKsaDate`, `lastDailySummaryIndiaDate` (India calendar date for Soyeb/Fazlur end-of-day summary) |
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
 | `daily_receipt_email_last_sent:<YYYY-MM-DD>` | Daily app-entered receipt email dedupe, one marker per Riyadh report date |

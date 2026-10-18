@@ -2,6 +2,7 @@ import { amountInclVat } from "./invoiceAmountFromPdf.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import {
   DEFAULT_MISSING_INVOICE_EMAIL_CC,
+  DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY,
   DEFAULT_MISSING_INVOICE_EMAIL_TO,
   hasUploadedInvoice,
   invoiceStatusLabel,
@@ -38,8 +39,10 @@ export function resolveDailySupplierOrderDigestRecipients(env = process.env) {
 
 export function resolveDailySupplierOrderDigestCc(env = process.env, to = []) {
   const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
-  return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_CC, env.DAILY_SUPPLIER_ORDER_EMAIL_CC || env.MISSING_INVOICE_EMAIL_CC)
-    .filter((email) => !recipients.has(email));
+  return mergeEmailList(
+    [...DEFAULT_MISSING_INVOICE_EMAIL_CC, ...DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY],
+    env.DAILY_SUPPLIER_ORDER_EMAIL_CC || env.MISSING_INVOICE_EMAIL_CC,
+  ).filter((email) => !recipients.has(email));
 }
 
 export function supplierOrderGroupKey(order = {}) {

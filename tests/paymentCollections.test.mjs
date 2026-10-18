@@ -24,6 +24,8 @@ import {
   assertCollectionVisitRemark,
   collectionVisitRequiresRemark,
   hasCollectionVisitRemark,
+  resolveCollectionVisitCopyFiles,
+  COLLECTION_VISIT_RECEIPT_REQUIRED_ERROR,
   COLLECTION_VISIT_REMARK_REQUIRED_ERROR,
   invoiceHasCashRef,
   isCashOnlyQueueCustomer,
@@ -1061,6 +1063,48 @@ test("collection visit remark is required when full overdue is not received", ()
     }),
     { message: COLLECTION_VISIT_REMARK_REQUIRED_ERROR },
   );
+});
+
+test("funds received promotes a payment-only photo to the compulsory receipt copy", () => {
+  const paymentOnly = { name: "Screenshot.jpg" };
+  const promoted = resolveCollectionVisitCopyFiles({
+    visitOutcome: "FUNDS_RECEIVED",
+    paymentCopy: paymentOnly,
+  });
+  assert.equal(promoted.receiptCopy, paymentOnly);
+  assert.equal(promoted.paymentCopy, null);
+  assert.equal(promoted.promotedPaymentToReceipt, true);
+
+  const both = resolveCollectionVisitCopyFiles({
+    visitOutcome: "FUNDS_RECEIVED",
+    receiptCopy: { name: "receipt.jpg" },
+    paymentCopy: paymentOnly,
+  });
+  assert.equal(both.receiptCopy?.name, "receipt.jpg");
+  assert.equal(both.paymentCopy, paymentOnly);
+  assert.equal(both.promotedPaymentToReceipt, false);
+
+  assert.throws(
+    () => resolveCollectionVisitCopyFiles({ visitOutcome: "FUNDS_RECEIVED" }),
+    { message: COLLECTION_VISIT_RECEIPT_REQUIRED_ERROR },
+  );
+
+  // A prior visit's stored receipt must not skip the new-save attachment.
+  assert.throws(
+    () => resolveCollectionVisitCopyFiles({
+      visitOutcome: "FUNDS_RECEIVED",
+      latestCollection: { has_receipt_copy: true, receipt_attachment_id: "att-1" },
+    }),
+    { message: COLLECTION_VISIT_RECEIPT_REQUIRED_ERROR },
+  );
+
+  const nonFunds = resolveCollectionVisitCopyFiles({
+    visitOutcome: "ASKED_COME_LATER",
+    paymentCopy: paymentOnly,
+  });
+  assert.equal(nonFunds.receiptCopy, null);
+  assert.equal(nonFunds.paymentCopy, paymentOnly);
+  assert.equal(nonFunds.promotedPaymentToReceipt, false);
 });
 
 test("sumCollectionReceivedInLastDays totals amounts within the inclusive window", () => {

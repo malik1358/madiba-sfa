@@ -269,6 +269,9 @@ export function buildCollectionSalesmanOptions(rows) {
 export const COLLECTION_VISIT_REMARK_REQUIRED_ERROR =
   "Remark is required when full overdue is not received.";
 
+export const COLLECTION_VISIT_RECEIPT_REQUIRED_ERROR =
+  "Receipt copy is compulsory when funds are received.";
+
 /** Same gate as next-visit: remark is required whenever the visit does not clear full overdue. */
 export function collectionVisitRequiresRemark(paymentStatus, visitOutcome) {
   return String(paymentStatus || "").trim().toUpperCase() !== "PAID"
@@ -288,6 +291,39 @@ export function assertCollectionVisitRemark({
   if (!collectionVisitRequiresRemark(paymentStatus, visitOutcome)) return;
   if (hasCollectionVisitRemark(remarkArabic, remarkEnglish)) return;
   throw new Error(COLLECTION_VISIT_REMARK_REQUIRED_ERROR);
+}
+
+/**
+ * Funds Received requires a receipt copy on this save. Collectors often attach the
+ * only photo under Payment Copy; promote that file to receipt so the save is not
+ * blocked by the Payment-vs-Receipt field mix-up. A prior visit's stored receipt
+ * does not satisfy a new Funds Received save.
+ */
+export function resolveCollectionVisitCopyFiles({
+  visitOutcome,
+  receiptCopy = null,
+  paymentCopy = null,
+} = {}) {
+  const needsReceipt = String(visitOutcome || "").trim().toUpperCase() === "FUNDS_RECEIVED";
+  let nextReceipt = receiptCopy || null;
+  let nextPayment = paymentCopy || null;
+  let promotedPaymentToReceipt = false;
+
+  if (needsReceipt && !nextReceipt && nextPayment) {
+    nextReceipt = nextPayment;
+    nextPayment = null;
+    promotedPaymentToReceipt = true;
+  }
+
+  if (needsReceipt && !nextReceipt) {
+    throw new Error(COLLECTION_VISIT_RECEIPT_REQUIRED_ERROR);
+  }
+
+  return {
+    receiptCopy: nextReceipt,
+    paymentCopy: nextPayment,
+    promotedPaymentToReceipt,
+  };
 }
 
 function scheduledRevisitTier(record, today) {

@@ -57,6 +57,7 @@ import {
   isScheduledRevisitQueueCustomer,
   canViewerSeeScheduledRevisit,
   formatLatestCollectionVisitRemark,
+  resolveCollectionVisitCopyFiles,
   scheduledRevisitDate,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
@@ -208,8 +209,12 @@ const TEXT = {
     ar: "تم حفظ الزيارة. شارك الصور/الملفات المرفوعة مع هذا الملخص على واتساب.",
   },
   copied: { en: "Copied", ar: "تم النسخ" },
-  paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
-  receiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
+  paymentCopy: { en: "Payment Copy (optional)", ar: "صورة الدفع (اختياري)" },
+  receiptCopy: { en: "Receipt Copy (required for funds received)", ar: "صورة الإيصال (إلزامية عند استلام مبلغ)" },
+  receiptCopyHint: {
+    en: "Attach the receipt here. If you only have one photo, use this field.",
+    ar: "أرفق الإيصال هنا. إذا كان لديك صورة واحدة فقط، استخدم هذا الحقل.",
+  },
   capturePhoto: { en: "Take Photo", ar: "التقاط صورة" },
   chooseFile: { en: "Choose File / PDF", ar: "اختيار ملف / PDF" },
   clearAttachment: { en: "Clear", ar: "مسح" },
@@ -1959,7 +1964,25 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (selectedOutcome === "FUNDS_RECEIVED" && !form.receiptMode) {
         throw new Error(t("msgModeRequired"));
       }
-      if (selectedOutcome === "FUNDS_RECEIVED" && !form.receiptCopy && !row?.latest_collection?.receipt_copy_url) {
+
+      let receiptCopyFile = form.receiptCopy;
+      let paymentCopyFile = form.paymentCopy;
+      try {
+        const resolvedCopies = resolveCollectionVisitCopyFiles({
+          visitOutcome: selectedOutcome,
+          receiptCopy: receiptCopyFile,
+          paymentCopy: paymentCopyFile,
+        });
+        receiptCopyFile = resolvedCopies.receiptCopy;
+        paymentCopyFile = resolvedCopies.paymentCopy;
+        if (resolvedCopies.promotedPaymentToReceipt) {
+          setForm((current) => ({
+            ...current,
+            receiptCopy: receiptCopyFile,
+            paymentCopy: null,
+          }));
+        }
+      } catch {
         throw new Error(t("msgReceiptRequired"));
       }
 
@@ -2138,8 +2161,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       const shareFiles = [];
-      if (form.paymentCopy) {
-        const preparedPayment = await prepareUploadFile(form.paymentCopy);
+      if (paymentCopyFile) {
+        const preparedPayment = await prepareUploadFile(paymentCopyFile);
         const paymentFallback = String(preparedPayment?.type || "").includes("pdf")
           ? "payment-copy.pdf"
           : "payment-copy.jpg";
@@ -2148,8 +2171,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
         if (paymentFile) shareFiles.push(paymentFile);
       }
 
-      if (form.receiptCopy) {
-        const preparedReceipt = await prepareReceiptUploadFile(form.receiptCopy);
+      if (receiptCopyFile) {
+        const preparedReceipt = await prepareReceiptUploadFile(receiptCopyFile);
         const receiptFallback = String(preparedReceipt?.type || "").includes("pdf")
           ? "receipt-copy.pdf"
           : "receipt-copy.jpg";
@@ -3459,43 +3482,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     />
                                   </label>
                                   <label>
-                                    {t("paymentCopy")}
-                                    <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "6px" }}>
-                                      <label className="moduleInlineButton moduleActionButton">
-                                        {t("capturePhoto")}
-                                        <input
-                                          hidden
-                                          type="file"
-                                          accept="image/*"
-                                          capture="environment"
-                                          onChange={(event) => setForm((current) => ({ ...current, paymentCopy: event.target.files?.[0] || null }))}
-                                        />
-                                      </label>
-                                      <label className="moduleInlineButton moduleActionButton">
-                                        {t("chooseFile")}
-                                        <input
-                                          hidden
-                                          type="file"
-                                          accept="image/*,application/pdf"
-                                          onChange={(event) => setForm((current) => ({ ...current, paymentCopy: event.target.files?.[0] || null }))}
-                                        />
-                                      </label>
-                                    </div>
-                                    {form.paymentCopy ? (
-                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <span>{t("attachmentSelected")}: {form.paymentCopy.name || "payment-copy"}</span>
-                                        <button
-                                          type="button"
-                                          className="moduleInlineButton moduleActionButton"
-                                          onClick={() => setForm((current) => ({ ...current, paymentCopy: null }))}
-                                        >
-                                          {t("clearAttachment")}
-                                        </button>
-                                      </div>
-                                    ) : null}
-                                  </label>
-                                  <label>
                                     {t("receiptCopy")}
+                                    {form.visitOutcome === "FUNDS_RECEIVED" ? (
+                                      <span className="moduleHint" style={{ display: "block", marginTop: "4px" }}>{t("receiptCopyHint")}</span>
+                                    ) : null}
                                     <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "6px" }}>
                                       <label className="moduleInlineButton moduleActionButton">
                                         {t("capturePhoto")}
@@ -3525,6 +3515,42 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                           type="button"
                                           className="moduleInlineButton moduleActionButton"
                                           onClick={() => setForm((current) => ({ ...current, receiptCopy: null }))}
+                                        >
+                                          {t("clearAttachment")}
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </label>
+                                  <label>
+                                    {t("paymentCopy")}
+                                    <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "6px" }}>
+                                      <label className="moduleInlineButton moduleActionButton">
+                                        {t("capturePhoto")}
+                                        <input
+                                          hidden
+                                          type="file"
+                                          accept="image/*"
+                                          capture="environment"
+                                          onChange={(event) => setForm((current) => ({ ...current, paymentCopy: event.target.files?.[0] || null }))}
+                                        />
+                                      </label>
+                                      <label className="moduleInlineButton moduleActionButton">
+                                        {t("chooseFile")}
+                                        <input
+                                          hidden
+                                          type="file"
+                                          accept="image/*,application/pdf"
+                                          onChange={(event) => setForm((current) => ({ ...current, paymentCopy: event.target.files?.[0] || null }))}
+                                        />
+                                      </label>
+                                    </div>
+                                    {form.paymentCopy ? (
+                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <span>{t("attachmentSelected")}: {form.paymentCopy.name || "payment-copy"}</span>
+                                        <button
+                                          type="button"
+                                          className="moduleInlineButton moduleActionButton"
+                                          onClick={() => setForm((current) => ({ ...current, paymentCopy: null }))}
                                         >
                                           {t("clearAttachment")}
                                         </button>

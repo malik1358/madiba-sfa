@@ -37,6 +37,8 @@ export const MIGRATION_VERSION_ALIASES = Object.freeze([
   { ledgerVersion: "20261015084804", repoVersion: "20261015084023", name: "product_catalogue_photos_attachments" },
   // Applied via Supabase at apply-time stamp; repo file keeps 20261016120000.
   { ledgerVersion: "20261016080833", repoVersion: "20261016120000", name: "single_platform_session" },
+  // Applied via Supabase MCP as madiba_mig_owner; ledger stamp 20261018192343, repo file keeps 20261018180000.
+  { ledgerVersion: "20261018192343", repoVersion: "20261018180000", name: "sales_orders_created_updated_indexes" },
 ]);
 
 /**

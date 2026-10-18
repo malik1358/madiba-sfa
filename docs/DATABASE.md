@@ -104,7 +104,7 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 ## Orders
 
-`sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`. Indexes include `created_at DESC` and `updated_at DESC` (`20261018180000_sales_orders_created_updated_indexes.sql`) for recent-order lists and the app-performance two-day count. Apply that migration in Supabase before relying on it.
+`sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`. Indexes include `created_at DESC` and `updated_at DESC` (repo file `20261018180000_sales_orders_created_updated_indexes.sql`; production ledger `20261018192343`) for recent-order lists and the app-performance two-day count. Already applied in production — do not replay.
 
 Orphan `mobile_field_snapshot_v1:*` rows in `system_settings` are removed after a completed mobile-snapshot rebuild (`pruneOrphanMobileFieldSnapshots`). Stale snapshots inflate toast storage and slow settings traffic; keep only keys listed in `mobile_field_snapshot_meta_v1`.
 

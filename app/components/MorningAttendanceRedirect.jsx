@@ -13,12 +13,17 @@ import {
   readGateReadyState,
   writeGateReadyState,
 } from "../lib/morningAttendance";
-import { buildGpsActivityNote, requireGpsLocation, resolveGpsCapturePlatform } from "../lib/geo";
+import {
+  buildGpsActivityNote,
+  formatGpsFailureMessage,
+  probeGpsLocationWithRetries,
+  resolveGpsCapturePlatform,
+} from "../lib/geo";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
 import { getSupabaseClient } from "../lib/supabase";
 import { useAppPopup } from "./AppPopupProvider";
 import { useAppLanguage } from "../lib/appLanguage";
-import { isCollectionOnlyAccess } from "../lib/moduleAccess";
+import { isCollectionOnlyAccess, shouldRequireTransactionGps } from "../lib/moduleAccess";
 
 const MY_DAY_PATH = "/management/my-day";
 const COLLECTIONS_PATH = "/management/payment-collections";
@@ -32,6 +37,10 @@ const REDIRECT_TEXT = {
   inlineMessage: {
     en: "Tap Morning Attendance to start your day before recording collections.",
     ar: "اضغط حضور الصباح لبدء يومك قبل تسجيل التحصيلات.",
+  },
+  gpsHint: {
+    en: "Phone GPS can be on while Safari still blocks this website. Allow Location for madiba-sfa.vercel.app, then tap again.",
+    ar: "قد يكون GPS الهاتف مفعلاً بينما Safari ما زال يحظر هذا الموقع. اسمح بالموقع لـ madiba-sfa.vercel.app ثم اضغط مرة أخرى.",
   },
   button: { en: "Morning Attendance", ar: "حضور الصباح" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
@@ -154,7 +163,14 @@ export default function MorningAttendanceRedirect() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error("Please login again.");
 
-      const location = await requireGpsLocation({ role });
+      let location = null;
+      if (shouldRequireTransactionGps(role)) {
+        try {
+          location = await probeGpsLocationWithRetries({ attempts: 3, timeoutMs: 12000, retryDelayMs: 1200 });
+        } catch (gpsError) {
+          throw new Error(formatGpsFailureMessage(gpsError, language));
+        }
+      }
       const platform = await resolveGpsCapturePlatform();
       const note = buildGpsActivityNote("MORNING_ATTENDANCE", location, { note: null, platform });
       const result = await insertMorningAttendanceOnce(supabase, session.user.id, note);
@@ -185,6 +201,7 @@ export default function MorningAttendanceRedirect() {
       <div className="appPopupDialog">
         <h2>{text("title")}</h2>
         <p>{text("inlineMessage")}</p>
+        <p className="moduleHint" style={{ marginTop: 0 }}>{text("gpsHint")}</p>
         {saveError ? <p style={{ color: "#dc2626" }}>{saveError}</p> : null}
         <div className="appPopupActions">
           <button type="button" className="modulePrimaryButton" onClick={handleMorningAttendance} disabled={saving}>

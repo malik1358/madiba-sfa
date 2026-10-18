@@ -28,8 +28,12 @@ import {
   isCollectionReportSalesman,
   GPS_PERMISSION_DENIED_ERROR,
   GPS_POSITION_UNAVAILABLE_ERROR,
+  GPS_TIMEOUT_ERROR,
   GPS_LOCATION_FAILED_ERROR,
   GPS_REQUIRED_ERROR,
+  GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS,
+  GPS_PROBE_RETRY_MAXIMUM_AGE_MS,
+  formatGpsFailureMessage,
   haversineDistanceKm,
   mapGeolocationFailure,
   nearestActivityGps,
@@ -37,6 +41,8 @@ import {
   parseGpsFromActivityNote,
   parseReverseGeocodeAddress,
   normalizeGpsCapturePlatform,
+  resolveGpsFailureCode,
+  resolveGpsProbeAttemptOptions,
   summarizeRouteDistanceKm,
 } from "../app/lib/geo.js";
 
@@ -185,8 +191,54 @@ test("normalizeGpsCoords rounds coordinates and tolerates missing accuracy", () 
 test("mapGeolocationFailure maps browser and Capacitor error codes", () => {
   assert.equal(mapGeolocationFailure({ code: 1 }).message, GPS_PERMISSION_DENIED_ERROR);
   assert.equal(mapGeolocationFailure({ code: 2 }).message, GPS_POSITION_UNAVAILABLE_ERROR);
-  assert.equal(mapGeolocationFailure({ code: 3 }).message, GPS_LOCATION_FAILED_ERROR);
+  assert.equal(mapGeolocationFailure({ code: 3 }).message, GPS_TIMEOUT_ERROR);
+  assert.equal(mapGeolocationFailure({ message: "Timeout expired" }).message, GPS_TIMEOUT_ERROR);
   assert.equal(mapGeolocationFailure({}).message, GPS_LOCATION_FAILED_ERROR);
+});
+
+test("resolveGpsProbeAttemptOptions relaxes accuracy and age on later attempts", () => {
+  assert.deepEqual(resolveGpsProbeAttemptOptions(1, 3), {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeoutMs: 10000,
+  });
+  assert.deepEqual(resolveGpsProbeAttemptOptions(2, 3), {
+    enableHighAccuracy: true,
+    maximumAge: GPS_PROBE_RETRY_MAXIMUM_AGE_MS,
+    timeoutMs: 15000,
+  });
+  assert.deepEqual(resolveGpsProbeAttemptOptions(3, 3), {
+    enableHighAccuracy: false,
+    maximumAge: GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS,
+    timeoutMs: 20000,
+  });
+  assert.deepEqual(resolveGpsProbeAttemptOptions(1, 3, { enableHighAccuracy: true, maximumAge: 0, timeoutMs: 6000 }), {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeoutMs: 6000,
+  });
+});
+
+test("formatGpsFailureMessage distinguishes Safari permission from GPS fix failures", () => {
+  const denied = formatGpsFailureMessage({ message: GPS_PERMISSION_DENIED_ERROR }, "en");
+  assert.match(denied, /Safari/i);
+  assert.match(denied, /Location is blocked/i);
+
+  const timeout = formatGpsFailureMessage({ message: GPS_TIMEOUT_ERROR }, "en");
+  assert.match(timeout, /Unable to read GPS/i);
+
+  assert.equal(resolveGpsFailureCode({ message: GPS_REQUIRED_ERROR }), GPS_LOCATION_FAILED_ERROR);
+  assert.equal(resolveGpsFailureCode({ message: GPS_TIMEOUT_ERROR }), GPS_TIMEOUT_ERROR);
+});
+
+test("collector morning attendance overlay uses progressive GPS probe and Safari guidance", async () => {
+  const source = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../app/components/MorningAttendanceRedirect.jsx", import.meta.url), "utf8"),
+  );
+  assert.match(source, /probeGpsLocationWithRetries/);
+  assert.match(source, /formatGpsFailureMessage/);
+  assert.match(source, /gpsHint/);
+  assert.match(source, /Phone GPS can be on while Safari still blocks/);
 });
 
 test("my-day visit capture uses shared GPS probe instead of stale browser maximumAge", async () => {

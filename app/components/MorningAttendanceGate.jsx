@@ -19,7 +19,7 @@ import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 import LunchInSuggestionPrompt from "./LunchInSuggestionPrompt";
 import LunchPunchNoonPrompt from "./LunchPunchNoonPrompt";
 import LoginAtFirstCustomerPrompt from "./LoginAtFirstCustomerPrompt";
-import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocationWithRetries, resolveGpsCapturePlatform } from "../lib/geo";
+import { buildGpsActivityNote, formatGpsFailureMessage, probeGpsLocationWithRetries, resolveGpsCapturePlatform } from "../lib/geo";
 import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole, MORNING_ATTENDANCE_COMPLETE_EVENT, readGateReadyState, writeGateReadyState } from "../lib/morningAttendance";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 
@@ -57,8 +57,8 @@ const TEXT = {
   checkingLocation: { en: "Checking location access...", ar: "جاري التحقق من الوصول إلى الموقع..." },
   checkLocationAgain: { en: "Check location again", ar: "تحقق من الموقع مرة أخرى" },
   locationPermissionDenied: {
-    en: "Location permission is blocked. Enable location for MADIBA SFA to continue.",
-    ar: "إذن الموقع محظور. فعّل الموقع لتطبيق MADIBA SFA للمتابعة.",
+    en: "Location is blocked for this website. Phone GPS can be on while Safari still blocks MADIBA. Allow Location for this site, then tap Check again.",
+    ar: "إذن الموقع محظور لهذا الموقع. قد يكون GPS الهاتف مفعلاً بينما Safari يحظر MADIBA. اسمح بالموقع لهذا الموقع ثم اضغط تحقق مرة أخرى.",
   },
   locationUnsupported: { en: "Geolocation is not supported on this device.", ar: "خدمة تحديد الموقع غير مدعومة على هذا الجهاز." },
   locationUnavailable: {
@@ -278,16 +278,7 @@ export default function MorningAttendanceGate({
         return false;
       }
       if (userId) clearGpsVerifiedForSession(userId);
-      const reason = String(err?.message || "");
-      if (reason === GPS_PERMISSION_DENIED_ERROR) {
-        setLocationError(t("locationPermissionDenied"));
-      } else if (reason === GPS_UNSUPPORTED_ERROR) {
-        setLocationError(t("locationUnsupported"));
-      } else if (reason === GPS_POSITION_UNAVAILABLE_ERROR) {
-        setLocationError(t("locationUnavailable"));
-      } else {
-        setLocationError(t("locationFailed"));
-      }
+      setLocationError(formatGpsFailureMessage(err, language) || t("locationFailed"));
       setLocationReady(false);
       return false;
     } finally {

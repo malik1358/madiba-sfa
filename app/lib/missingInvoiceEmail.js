@@ -32,6 +32,9 @@ export const MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUO
 export const MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN = ORDER_STATUS_PENDING_WITH_SALESMAN;
 export const MISSING_INVOICE_EMAIL_TIMEZONE = "Asia/Riyadh";
 export const MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE = "Asia/Kolkata";
+/** India office window for the 15-minute chase (inclusive), Saturday–Thursday. */
+export const MISSING_INVOICE_EMAIL_OFFICE_START_MINUTES = 8 * 60;
+export const MISSING_INVOICE_EMAIL_OFFICE_END_MINUTES = 20 * 60;
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -42,6 +45,9 @@ export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
 ];
 export const DEFAULT_MISSING_INVOICE_EMAIL_CC = [
   "jenil.modi@noorshukran.com",
+];
+/** Managers who get one end-of-day summary only (not the 15-minute chase). */
+export const DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY = [
   "soyeb@noorshukran.com",
   "fazlur.rahiman@noorshukran.com",
 ];
@@ -53,9 +59,9 @@ const EXCLUDED_INVOICE_STATUSES = new Set([
   "invoice made",
 ]);
 
-export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
+function getZonedDateTimeParts(date, timeZone) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: MISSING_INVOICE_EMAIL_TIMEZONE,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -68,7 +74,20 @@ export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
     date: `${parts.year}-${parts.month}-${parts.day}`,
     hour: parts.hour,
     minute: parts.minute,
+    minutesOfDay: Number(parts.hour) * 60 + Number(parts.minute),
   };
+}
+
+export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
+  return getZonedDateTimeParts(date, MISSING_INVOICE_EMAIL_TIMEZONE);
+}
+
+export function getMissingInvoiceEmailOfficeDateTimeParts(date = new Date()) {
+  return getZonedDateTimeParts(date, MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE);
+}
+
+export function getMissingInvoiceEmailIndiaDate(date = new Date()) {
+  return getMissingInvoiceEmailOfficeDateTimeParts(date).date;
 }
 
 export function isMissingInvoiceEmailOfficeHoliday(date = new Date()) {
@@ -76,6 +95,19 @@ export function isMissingInvoiceEmailOfficeHoliday(date = new Date()) {
     timeZone: MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE,
     weekday: "short",
   }).format(date) === "Fri";
+}
+
+export function isMissingInvoiceEmailWithinOfficeHours(date = new Date()) {
+  if (isMissingInvoiceEmailOfficeHoliday(date)) return false;
+  const { minutesOfDay } = getMissingInvoiceEmailOfficeDateTimeParts(date);
+  return minutesOfDay >= MISSING_INVOICE_EMAIL_OFFICE_START_MINUTES
+    && minutesOfDay <= MISSING_INVOICE_EMAIL_OFFICE_END_MINUTES;
+}
+
+export function isMissingInvoiceEmailDailySummarySlot(date = new Date()) {
+  if (isMissingInvoiceEmailOfficeHoliday(date)) return false;
+  const { minutesOfDay } = getMissingInvoiceEmailOfficeDateTimeParts(date);
+  return minutesOfDay >= MISSING_INVOICE_EMAIL_OFFICE_END_MINUTES;
 }
 
 export function getMissingInvoiceEmailMidnightKsaDate(date = new Date()) {
@@ -102,6 +134,7 @@ export function parseMissingInvoiceEmailState(value) {
   }
   const state = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   const midnightDate = String(state.lastMidnightKsaDate || "").trim();
+  const dailySummaryDate = String(state.lastDailySummaryIndiaDate || "").trim();
   return {
     lastSentAt: typeof state.lastSentAt === "number"
       ? state.lastSentAt
@@ -109,6 +142,7 @@ export function parseMissingInvoiceEmailState(value) {
         ? value
         : parseLastSentAt(state) ?? parseLastSentAt(value),
     lastMidnightKsaDate: /^\d{4}-\d{2}-\d{2}$/.test(midnightDate) ? midnightDate : null,
+    lastDailySummaryIndiaDate: /^\d{4}-\d{2}-\d{2}$/.test(dailySummaryDate) ? dailySummaryDate : null,
   };
 }
 
@@ -320,10 +354,17 @@ export function resolveMissingInvoiceEmailRecipients(env = process.env) {
   return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_TO, env.MISSING_INVOICE_EMAIL_TO);
 }
 
+export function resolveMissingInvoiceEmailDailySummary(env = process.env, exclude = []) {
+  const excluded = new Set((exclude || []).map((email) => String(email || "").trim().toLowerCase()));
+  return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY, env.MISSING_INVOICE_EMAIL_DAILY_SUMMARY)
+    .filter((email) => !excluded.has(email));
+}
+
 export function resolveMissingInvoiceEmailCc(env = process.env, to = []) {
   const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
+  const dailyOnly = new Set(resolveMissingInvoiceEmailDailySummary(env).map((email) => email.toLowerCase()));
   return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_CC, env.MISSING_INVOICE_EMAIL_CC)
-    .filter((email) => !recipients.has(email));
+    .filter((email) => !recipients.has(email) && !dailyOnly.has(email));
 }
 
 function customerLabel(order) {
@@ -470,7 +511,7 @@ ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceR
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
-<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes while Pending for approval or Pending for invoice creation has orders. When both queues are empty, one summary is sent at midnight KSA.</p>
+<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes from 08:00 to 20:00 India time (Saturday–Thursday) while Pending for approval or Pending for invoice creation has orders. Soyeb and Fazlur receive one end-of-day summary only. When both queues are empty, one operational summary is sent at midnight KSA.</p>
 </div>`;
 
 return {

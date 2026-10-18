@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_MISSING_INVOICE_EMAIL_CC,
+  DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY,
   DEFAULT_MISSING_INVOICE_EMAIL_TO,
   MISSING_INVOICE_GRACE_MS,
   MISSING_INVOICE_STATUS_NOT_UPLOADED,
@@ -16,10 +17,13 @@ import {
   isTestCustomerName,
   isTestCustomerOrder,
   getMissingInvoiceEmailMidnightKsaDate,
+  isMissingInvoiceEmailDailySummarySlot,
   isMissingInvoiceEmailOfficeHoliday,
+  isMissingInvoiceEmailWithinOfficeHours,
   missingInvoiceCreatedFromIso,
   wasMissingInvoiceEmailSentRecently,
   resolveMissingInvoiceEmailCc,
+  resolveMissingInvoiceEmailDailySummary,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
 } from "../app/lib/missingInvoiceEmail.js";
@@ -51,16 +55,43 @@ test("resolveMissingInvoiceEmailRecipients always includes the default inboxes",
   );
 });
 
-test("resolveMissingInvoiceEmailCc includes Jenil and extra CC addresses", () => {
+test("resolveMissingInvoiceEmailCc includes Jenil only on the 15-minute chase", () => {
   assert.deepEqual(resolveMissingInvoiceEmailCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
+  assert.equal(resolveMissingInvoiceEmailCc({}).includes("soyeb@noorshukran.com"), false);
+  assert.equal(resolveMissingInvoiceEmailCc({}).includes("fazlur.rahiman@noorshukran.com"), false);
   assert.deepEqual(
     resolveMissingInvoiceEmailCc({ MISSING_INVOICE_EMAIL_CC: "extra-cc@madiba.com, jenil.modi@noorshukran.com" }),
     [...DEFAULT_MISSING_INVOICE_EMAIL_CC, "extra-cc@madiba.com"],
   );
   assert.deepEqual(
+    resolveMissingInvoiceEmailCc(
+      { MISSING_INVOICE_EMAIL_CC: "soyeb@noorshukran.com, fazlur.rahiman@noorshukran.com" },
+      [],
+    ),
+    DEFAULT_MISSING_INVOICE_EMAIL_CC,
+  );
+  assert.deepEqual(
     resolveMissingInvoiceEmailCc({}, [...DEFAULT_MISSING_INVOICE_EMAIL_TO, ...DEFAULT_MISSING_INVOICE_EMAIL_CC]),
     [],
   );
+});
+
+test("resolveMissingInvoiceEmailDailySummary defaults to Soyeb and Fazlur", () => {
+  assert.deepEqual(resolveMissingInvoiceEmailDailySummary({}), DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY);
+  assert.deepEqual(
+    resolveMissingInvoiceEmailDailySummary({ MISSING_INVOICE_EMAIL_DAILY_SUMMARY: "extra-daily@madiba.com" }),
+    [...DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY, "extra-daily@madiba.com"],
+  );
+});
+
+test("missing invoice 15-minute chase stays inside India office hours through 8 PM", () => {
+  assert.equal(isMissingInvoiceEmailWithinOfficeHours(new Date("2026-10-03T02:29:00.000Z")), false); // 07:59 IST
+  assert.equal(isMissingInvoiceEmailWithinOfficeHours(new Date("2026-10-03T02:30:00.000Z")), true); // 08:00 IST
+  assert.equal(isMissingInvoiceEmailWithinOfficeHours(new Date("2026-10-03T14:30:00.000Z")), true); // 20:00 IST
+  assert.equal(isMissingInvoiceEmailWithinOfficeHours(new Date("2026-10-03T14:31:00.000Z")), false); // 20:01 IST
+  assert.equal(isMissingInvoiceEmailDailySummarySlot(new Date("2026-10-03T14:29:00.000Z")), false);
+  assert.equal(isMissingInvoiceEmailDailySummarySlot(new Date("2026-10-03T14:30:00.000Z")), true);
+  assert.equal(isMissingInvoiceEmailWithinOfficeHours(new Date("2026-10-02T10:00:00.000Z")), false); // Friday
 });
 
 test("missing invoice midnight digest is scheduled by KSA calendar date", () => {
@@ -109,6 +140,7 @@ test("saveLastMissingInvoiceEmailSentAt persists the KSA midnight date", async (
   assert.deepEqual(JSON.parse(savedRow.setting_value), {
     lastSentAt: "2026-09-29T21:00:00.000Z",
     lastMidnightKsaDate: "2026-09-30",
+    lastDailySummaryIndiaDate: null,
   });
 });
 
@@ -255,7 +287,8 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, waiting c
   assert.match(message.html, /Quotation submitted waiting for the payment/);
   assert.match(message.html, /Pending with salesman/);
   assert.doesNotMatch(message.html, /Stock unavailable/);
-  assert.match(message.html, /every 15 minutes while Pending for approval or Pending for invoice creation has orders/);
+  assert.match(message.html, /every 15 minutes from 08:00 to 20:00 India time/);
+  assert.match(message.html, /Soyeb and Fazlur receive one end-of-day summary only/);
   assert.match(message.text, /from September 2026 onward/);
   assert.match(
     message.text,
@@ -284,7 +317,7 @@ test("runMissingInvoiceEmailCycle skips daytime sends when the two reminder queu
   assert.equal(result.reason, "no_pending_approval_or_invoice_creation");
 });
 
-test("runMissingInvoiceEmailCycle sends one digest to the default list", async () => {
+test("runMissingInvoiceEmailCycle sends one digest to the default list without Soyeb or Fazlur", async () => {
   const sent = [];
   const saved = [];
   const result = await runMissingInvoiceEmailCycle({}, {
@@ -311,8 +344,94 @@ test("runMissingInvoiceEmailCycle sends one digest to the default list", async (
   assert.deepEqual(sent[0].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
   assert.deepEqual(sent[0].cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
   assert.deepEqual(result.cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
+  assert.deepEqual(result.dailySummaryTo, DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY);
+  assert.equal(sent[0].cc.includes("soyeb@noorshukran.com"), false);
+  assert.equal(sent[0].cc.includes("fazlur.rahiman@noorshukran.com"), false);
   assert.match(sent[0].subject, /SO-7|1 order pending invoice \/ approval/);
   assert.equal(saved.length, 1);
+});
+
+test("runMissingInvoiceEmailCycle skips the 15-minute chase after 8 PM India time", async () => {
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-10-03T14:45:00.000Z"), // 20:15 IST Saturday
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async () => {
+      throw new Error("should not send frequent chase after office hours");
+    },
+    loadOrders: async () => ({
+      orders: [submittedOrder(7)],
+      metaByOrder: new Map(),
+    }),
+    loadLastSentAt: async () => ({
+      lastSentAt: new Date("2026-10-03T14:30:00.000Z").toISOString(),
+      lastDailySummaryIndiaDate: "2026-10-03",
+    }),
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "outside_office_hours");
+});
+
+test("runMissingInvoiceEmailCycle sends Soyeb and Fazlur one end-of-day summary", async () => {
+  const sent = [];
+  const saved = [];
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-10-03T14:30:00.000Z"), // 20:00 IST Saturday
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadOrders: async () => ({
+      orders: [submittedOrder(7)],
+      metaByOrder: new Map(),
+    }),
+    loadLastSentAt: async () => ({
+      lastSentAt: new Date("2026-10-03T14:00:00.000Z").toISOString(),
+      lastDailySummaryIndiaDate: null,
+    }),
+    saveLastSentAt: async (_admin, sentAt, state, flags) => {
+      saved.push({ sentAt, state, flags });
+    },
+    syncVault: async () => ({ ok: true }),
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.sentCount, 1);
+  assert.deepEqual(result.kinds, ["frequent_with_daily_summary"]);
+  assert.deepEqual(sent[0].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
+  assert.ok(sent[0].cc.includes("jenil.modi@noorshukran.com"));
+  assert.ok(sent[0].cc.includes("soyeb@noorshukran.com"));
+  assert.ok(sent[0].cc.includes("fazlur.rahiman@noorshukran.com"));
+  assert.equal(saved[0].flags.markDailySummary, true);
+});
+
+test("runMissingInvoiceEmailCycle sends a catch-up daily summary after 8 PM without repeating the chase", async () => {
+  const sent = [];
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-10-03T15:00:00.000Z"), // 20:30 IST Saturday
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadOrders: async () => ({
+      orders: [submittedOrder(7)],
+      metaByOrder: new Map(),
+    }),
+    loadLastSentAt: async () => ({
+      lastSentAt: new Date("2026-10-03T14:30:00.000Z").toISOString(),
+      lastDailySummaryIndiaDate: null,
+    }),
+    saveLastSentAt: async () => {},
+    syncVault: async () => ({ ok: true }),
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.sentCount, 1);
+  assert.deepEqual(result.kinds, ["daily_summary"]);
+  assert.deepEqual(sent[0].to, DEFAULT_MISSING_INVOICE_EMAIL_DAILY_SUMMARY);
+  assert.deepEqual(sent[0].cc, []);
 });
 
 test("runMissingInvoiceEmailCycle skips other queue statuses outside midnight", async () => {

@@ -193,7 +193,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_POTENTIAL_SALES_TARGETS_TO` | Optional comma-separated recipients for the separate daily full target digest, grouped by salesman |
 | `DAILY_SALESMAN_RESUME_TO` | Resume digest recipients |
 | `MATCHED_RECEIPT_EMAIL_ENABLED` | Set `true` in Vercel production to send daily salesman mail and consolidated hierarchy-boss digests after the preview is approved; remains false by default in local/dev |
-| `MISSING_INVOICE_EMAIL_TO`, `MISSING_INVOICE_EMAIL_CC` | Extra invoice-chase addresses |
+| `MISSING_INVOICE_EMAIL_TO`, `MISSING_INVOICE_EMAIL_CC`, `MISSING_INVOICE_EMAIL_DAILY_SUMMARY` | Extra invoice-chase To/CC (15-minute list) and optional extra end-of-day summary addresses (defaults Soyeb + Fazlur) |
 | `INVOICE_UPLOAD_EMAIL_TO`, `INVOICE_UPLOAD_EMAIL_CC` | Optional extra To/CC when an invoice PDF is uploaded (always includes uploader, salesman, direct boss, and `iliyas.belliyaru@noorshukran.com`) |
 | `DAILY_SUPPLIER_ORDER_EMAIL_TO`, `DAILY_SUPPLIER_ORDER_EMAIL_CC` | Extra company order digest (invoice-ops); hierarchy bosses get separate team digests |
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` skips salesman and hierarchy-boss digests; sends only the company digest |

@@ -75,6 +75,7 @@ import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
   notifyWorkdayTimesUpdated,
+  readGateReadyState,
   todayAttendanceBounds,
 } from "../../lib/morningAttendance";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -438,6 +439,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [attendanceBusy, setAttendanceBusy] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [attendanceLogsReady, setAttendanceLogsReady] = useState(false);
+  const [gateAttendanceComplete, setGateAttendanceComplete] = useState(false);
+  const [deepLinkCustomerCode, setDeepLinkCustomerCode] = useState("");
   const [accessScope, setAccessScope] = useState(null);
   const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
   const [visitSaving, setVisitSaving] = useState(false);
@@ -469,25 +472,29 @@ export default function MyDayPage({ mode = "default" } = {}) {
     row.entry_type === entryType
     && (!currentUserId || !row.user_id || row.user_id === currentUserId)
   ));
-  const morningAttendanceComplete = hasOwnAttendanceLog("MORNING_ATTENDANCE");
+  const morningAttendanceComplete = hasOwnAttendanceLog("MORNING_ATTENDANCE") || gateAttendanceComplete;
   const lunchOutComplete = hasOwnAttendanceLog("LUNCH_BREAK_OUT");
   const lunchInComplete = hasOwnAttendanceLog("LUNCH_BREAK_IN");
+  // Gate cache unlocks Visit Without Order deep-links before todayLogs finishes loading.
   const workdayUnlocked = !attendanceRequired || morningAttendanceComplete;
 
   const morningPopupShownRef = useRef(false);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    setDeepLinkCustomerCode(String(new URLSearchParams(window.location.search).get("customer_code") || "").trim());
+  }, [visitOnlyMode]);
+
+  useEffect(() => {
     if (!visitOnlyMode || loading) return undefined;
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("customer_code")) {
-      return undefined;
-    }
+    if (deepLinkCustomerCode) return undefined;
 
     const timer = window.setTimeout(() => {
       document.getElementById("visit-schedule")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 150);
 
     return () => window.clearTimeout(timer);
-  }, [visitOnlyMode, loading]);
+  }, [visitOnlyMode, loading, deepLinkCustomerCode]);
 
   useEffect(() => {
     if (!attendanceLogsReady || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current || visitOnlyMode) return;
@@ -594,6 +601,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         }
 
         setCurrentUserId(session.user.id);
+        setGateAttendanceComplete(Boolean(readGateReadyState(session.user.id)?.attendanceComplete));
 
         const cachedSnapshot = await readMyDaySnapshot(session.user.id, today);
         if (cachedSnapshot) {
@@ -2070,7 +2078,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const prefilledVisitOpenedRef = useRef(false);
 
   useEffect(() => {
-    if (!visitOnlyMode || loading || !workdayUnlocked || prefilledVisitOpenedRef.current) return;
+    // Deep links from Home nearest-customers (Visit without order) and attendance
+    // redirects onto My Day both carry customer_code.
+    if (loading || !workdayUnlocked || prefilledVisitOpenedRef.current) return;
     if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
@@ -2078,16 +2088,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
     if (!code) return;
 
     const row = findVisitRowByCode(visitStatusRows, code);
-    if (!row) {
-      if (refreshing) return;
-      prefilledVisitOpenedRef.current = true;
-      openNearestCustomer(visitRowFromSearchParams(code));
-      return;
-    }
-
     prefilledVisitOpenedRef.current = true;
-    openNearestCustomer(row);
-  }, [visitOnlyMode, loading, refreshing, workdayUnlocked, visitStatusRows]);
+    openNearestCustomer(row || visitRowFromSearchParams(code));
+  }, [visitOnlyMode, loading, workdayUnlocked, visitStatusRows]);
 
   const filteredInactiveCustomers = useMemo(() => {
     const query = String(visitStatusSearch || "").trim().toLowerCase();
@@ -2187,7 +2190,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }, [activeVisitCustomerCode, visitStatusRows, prospectScheduleRows]);
 
   useEffect(() => {
-    if (!visitOnlyMode || !activeVisitCustomerCode) return undefined;
+    if ((!visitOnlyMode && !deepLinkCustomerCode) || !activeVisitCustomerCode) return undefined;
     if (typeof window === "undefined") return undefined;
 
     let cancelled = false;
@@ -2200,7 +2203,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       cancelled = true;
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [visitOnlyMode, activeVisitCustomerCode]);
+  }, [visitOnlyMode, deepLinkCustomerCode, activeVisitCustomerCode]);
 
   const isAdministrator = isAdminRole(profile?.role);
 
@@ -2418,7 +2421,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
         {workdayUnlocked ? (
         <>
-        {visitOnlyMode && activeVisitRow ? (
+        {(visitOnlyMode || deepLinkCustomerCode) && activeVisitRow ? (
           <section className="moduleSection">
             {renderVisitReportForm(activeVisitRow, { showClose: true })}
           </section>
@@ -2752,7 +2755,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                       </div>
                     </td>
                   </tr>
-                  {!visitOnlyMode && activeVisitCustomerCode === row.customer_code && (
+                  {!visitOnlyMode && !deepLinkCustomerCode && activeVisitCustomerCode === row.customer_code && (
                     <tr>
                       <td colSpan={14}>
                         {renderVisitReportForm(row)}

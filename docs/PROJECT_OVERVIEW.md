@@ -41,7 +41,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Customer GPS History** (`/management/customer-gps-history`, module `customerGpsHistory`): admin/manager only. Date-filtered, paginated history shows old/new coordinates and maps, displacement in meters, save actor/time in KSA, and explicitly recorded approval. Excel export covers the displayed page only. A daily digest of salesman-accepted changes goes to `malik@pinasz.com` by default at 08:30 KSA, Saturday–Thursday, including zero-change days. Saturday also covers Thursday and Friday; each row shows how many times that customer changed today and in total.
 - **Potential Sales Targets** (`/management/potential-sales-targets`): independent, exportable report of active customers with qualifying outstanding. Filter by visible salesman; rows show last visit by that salesman, latest order/invoice, monthly net sales for the three latest completed KSA months and current month-to-date. Browser and daily email lists omit customers visited by that salesman within the last eight KSA calendar days.
 
-The home page (`app/page.js`) is email/password login, then a dashboard with nearest customers when GPS is available.
+The home page (`app/page.js`) is email/password login, then a dashboard with nearest customers when GPS is available. Nearest-customer **Visit without order** / **New order** / **Collection** actions use `router.push` (not soft `Link` prefetch). Home Main Menu includes **Visit Without Order** for field sales.
 
 ## Languages
 

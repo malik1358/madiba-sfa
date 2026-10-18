@@ -32,6 +32,27 @@ export function canAccessWithoutMorningAttendance(pathname) {
     || isInlineMorningAttendancePath(path);
 }
 
+/**
+ * When attendance is missing, bounce field modules to My Day / Collections.
+ * Preserve visit deep-link query so the customer form can open after punch-in.
+ */
+export function resolveMorningAttendanceRedirectPath(pathname, search = "", attendanceHome = "/management/my-day") {
+  const home = String(attendanceHome || "/management/my-day").trim() || "/management/my-day";
+  const path = String(pathname || "").trim().split("?")[0];
+  const query = String(search || "").trim();
+  const normalizedQuery = query && !query.startsWith("?") ? `?${query}` : query;
+
+  if (
+    home === "/management/my-day"
+    && path === "/management/visit-without-order"
+    && normalizedQuery.includes("customer_code=")
+  ) {
+    return `${home}${normalizedQuery}`;
+  }
+
+  return home;
+}
+
 export function todayAttendanceBounds(referenceDate = new Date()) {
   return ksaDayBounds(getKsaDateString(referenceDate));
 }

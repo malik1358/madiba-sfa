@@ -3,7 +3,7 @@ function canAccessModule(access, moduleKey) {
   return Boolean(access?.modules?.[moduleKey]);
 }
 
-function customerQuery(customer) {
+export function customerQuery(customer) {
   const params = new URLSearchParams();
   const code = String(customer?.customer_code || "").trim();
   const name = String(customer?.customer_name || "").trim();
@@ -60,4 +60,30 @@ export function buildNearestCustomerActions(customer, access, labels = {}, handl
       onClick: () => handlers[action.key](customer),
     };
   });
+}
+
+/** Prefer click handlers over Link soft-nav for field phones (Capacitor / Safari). */
+export function buildNearestCustomerNavigateHandlers(router, access = {}) {
+  if (!router || typeof router.push !== "function") return {};
+  const preferPaymentCollections = canAccessModule(access, "paymentCollections");
+  return {
+    visit: (customer) => {
+      const query = customerQuery(customer);
+      if (!query) return;
+      router.push(`/management/visit-without-order?${query}`);
+    },
+    order: (customer) => {
+      const query = customerQuery(customer);
+      if (!query) return;
+      router.push(`/management/new-order?${query}`);
+    },
+    collection: (customer) => {
+      const code = String(customer?.customer_code || "").trim();
+      if (!code) return;
+      const href = preferPaymentCollections || !canAccessModule(access, "myCollections")
+        ? `/management/payment-collections?customer=${encodeURIComponent(code)}`
+        : `/management/my-collections?customer=${encodeURIComponent(code)}`;
+      router.push(href);
+    },
+  };
 }

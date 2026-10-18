@@ -140,6 +140,8 @@ export default function ManagementPage() {
           customersRes,
           salesmenRes,
           ordersRes,
+          draftsRes,
+          submittedRes,
           importsRes,
           activeBatchRes,
           latestImportRes,
@@ -147,17 +149,17 @@ export default function ManagementPage() {
         ] = await Promise.all([
           supabase.from("customers").select("customer_code", { count: "exact", head: true }),
           supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin", "report-user", "report_user", "invoice-maker", "invoice_maker"]),
-          supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
+          supabase.from("sales_orders").select("id", { count: "exact", head: true }),
+          supabase.from("sales_orders").select("id", { count: "exact", head: true }).eq("status", "DRAFT"),
+          supabase.from("sales_orders").select("id", { count: "exact", head: true }).eq("status", "SUBMITTED"),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
-          (async () => {
-            return supabase
-              .from("import_batches")
-              .select("id")
-              .order("id", { ascending: false })
-              .limit(1)
-              .maybeSingle();
-          })(),
+          supabase
+            .from("import_batches")
+            .select("id")
+            .order("id", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
           supabase
             .from("sales_orders")
             .select("id,customer_code,customer_name,salesman_code,status,updated_at")
@@ -168,22 +170,20 @@ export default function ManagementPage() {
         if (customersRes.error) throw customersRes.error;
         if (salesmenRes.error) throw salesmenRes.error;
         if (ordersRes.error) throw ordersRes.error;
+        if (draftsRes.error) throw draftsRes.error;
+        if (submittedRes.error) throw submittedRes.error;
         if (importsRes.error) throw importsRes.error;
         if (activeBatchRes.error) throw activeBatchRes.error;
         // Some deployments do not have import batch timestamp columns.
         // Keep management page usable even when that metadata is unavailable.
         if (recentOrdersRes.error) throw recentOrdersRes.error;
 
-        const orders = ordersRes.data || [];
-        const drafts = orders.filter((row) => row.status === "DRAFT").length;
-        const submitted = orders.filter((row) => row.status === "SUBMITTED").length;
-
         setSummary({
           customers: customersRes.count || 0,
           salesmen: salesmenRes.count || 0,
           orders: ordersRes.count || 0,
-          drafts,
-          submitted,
+          drafts: draftsRes.count || 0,
+          submitted: submittedRes.count || 0,
           imports: importsRes.count || 0,
         });
 

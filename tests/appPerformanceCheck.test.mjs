@@ -8,6 +8,7 @@ import {
   judgeDailySpeed,
   median,
   parsePerformanceHistory,
+  pickBestProbeAttempt,
   runAppPerformanceCheck,
   shouldEmailPerformanceCheck,
   withDailyCheck,
@@ -33,6 +34,23 @@ test("median uses the middle sample", () => {
   assert.equal(median([10, 30, 20]), 20);
   assert.equal(median([10, 40]), 25);
   assert.equal(median([]), null);
+});
+
+test("pickBestProbeAttempt keeps the fastest successful timing", () => {
+  const best = pickBestProbeAttempt([
+    { ok: true, ms: 760 },
+    { ok: true, ms: 290, value: 4 },
+  ]);
+  assert.equal(best.ms, 290);
+  assert.equal(best.value, 4);
+});
+
+test("pickBestProbeAttempt returns the last failure when every attempt fails", () => {
+  const failed = pickBestProbeAttempt([
+    { ok: false, ms: 10, error: "first" },
+    { ok: false, ms: 20, error: "second" },
+  ]);
+  assert.equal(failed.error, "second");
 });
 
 test("the first stored day is a baseline", () => {

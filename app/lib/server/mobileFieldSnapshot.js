@@ -1,6 +1,12 @@
 import { buildCollectionQueues } from "../paymentCollections.js";
 import { buildScopeHash, buildSnapshotKey } from "../scopeHash.js";
 import { filterPendingOrdersForScope, PENDING_ORDER_STATUSES, PENDING_ORDERS_SELECT } from "../pendingOrdersQuery.js";
+import {
+  listActiveMobileSnapshotSettingKeys,
+  pruneOrphanMobileFieldSnapshots as pruneOrphanSnapshotsWithMeta,
+  SNAPSHOT_SETTING_PREFIX,
+  snapshotSettingKey,
+} from "../mobileFieldSnapshotPrune.js";
 import { buildVisibleCustomersForScope, resolveScopeForUserId } from "../../api/customers/visible/route.js";
 import {
   fetchOutstandingAndCollectionRecords,
@@ -8,12 +14,8 @@ import {
 } from "../../api/payment-collections/route.js";
 import { resolveSalesScopeForUserId } from "../../api/user/sales-scope/route.js";
 
-export const SNAPSHOT_SETTING_PREFIX = "mobile_field_snapshot_v1:";
+export { SNAPSHOT_SETTING_PREFIX, listActiveMobileSnapshotSettingKeys };
 export const SNAPSHOT_META_KEY = "mobile_field_snapshot_meta_v1";
-
-function snapshotSettingKey(snapshotKey) {
-  return `${SNAPSHOT_SETTING_PREFIX}${snapshotKey}`;
-}
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
@@ -145,6 +147,11 @@ export async function saveMobileFieldSnapshot(admin, snapshot) {
     }, { onConflict: "setting_key" });
 
   if (error) throw error;
+}
+
+export async function pruneOrphanMobileFieldSnapshots(admin, meta = null) {
+  const resolvedMeta = meta || await readSnapshotMeta(admin);
+  return pruneOrphanSnapshotsWithMeta(admin, resolvedMeta);
 }
 
 export async function readMobileFieldSnapshot(admin, snapshotKey) {
@@ -359,6 +366,13 @@ export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
   };
 
   await writeSnapshotMeta(admin, meta);
+  if (complete) {
+    try {
+      await pruneOrphanMobileFieldSnapshots(admin, meta);
+    } catch {
+      // Prune is best-effort; a failed cleanup must not fail the rebuild result.
+    }
+  }
   return meta;
 }
 

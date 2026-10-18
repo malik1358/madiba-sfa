@@ -5,6 +5,8 @@ import { isCronAuthorized } from "../../../lib/cronAuth.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+// Run near production Supabase (ap-southeast-2) so DB probes measure database health, not cross-region pooler noise.
+export const preferredRegion = "syd1";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -127,14 +127,17 @@ async function probeRollback(admin, row) {
 }
 
 async function authorizedRead(admin, attachmentId) {
+  const authClient = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const { data: profile, error } = await admin.from("profiles").select("id").eq("role", "admin").eq("is_active", true).limit(1).maybeSingle();
   if (error || !profile?.id) throw new Error("No active admin is available for the read probe.");
   const userResult = await admin.auth.admin.getUserById(profile.id);
   const email = userResult.data?.user?.email;
   if (!email) throw new Error("The admin probe account has no email.");
-  const link = await admin.auth.admin.generateLink({ type: "magiclink", email });
+  const link = await authClient.auth.admin.generateLink({ type: "magiclink", email });
   if (link.error || !link.data?.properties?.hashed_token) throw new Error("Could not open a short-lived read probe.");
-  const otp = await admin.auth.verifyOtp({ type: "magiclink", token_hash: link.data.properties.hashed_token });
+  const otp = await authClient.auth.verifyOtp({ type: "magiclink", token_hash: link.data.properties.hashed_token });
   const token = otp.data?.session?.access_token;
   if (otp.error || !token) throw new Error("The read probe login was rejected.");
   try {
@@ -148,7 +151,7 @@ async function authorizedRead(admin, attachmentId) {
     const response = await fetch(result.body.url);
     return { ok: response.ok, status: result.status, host: signedHostKind(result.body.url), bytes: Number(response.headers.get("content-length") || 0) };
   } finally {
-    await admin.auth.admin.signOut(token).catch(() => {});
+    await authClient.auth.admin.signOut(token).catch(() => {});
   }
 }
 

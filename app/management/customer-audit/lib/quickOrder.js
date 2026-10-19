@@ -1,0 +1,251 @@
+import { monthKey, salesUnitQty } from './format.js';
+import { isDoNotUseItem, normalizeCode } from './helpers.js';
+
+function hasPositivePurchase(row) {
+  if (Number(row?.sales_amount || 0) > 0) return true;
+  if (Number(row?.line_value || 0) > 0) return true;
+  if (Number(row?.amount || 0) > 0) return true;
+  return salesUnitQty(row) > 0;
+}
+
+export function buildQuickOrderSuggestions({ analytics, transactions, peerTransactions, itemMaster }) {
+  if (!analytics) {
+    return { newItems: [], notBoughtRecently: [], buyingLess: [] };
+  }
+
+  const currentCatalogByCode = new Map(
+    (itemMaster || [])
+      .filter((item) => item?.item_code)
+      .map((item) => [normalizeCode(item.item_code), item])
+  );
+  const historyByCode = new Map();
+
+  transactions.forEach((row) => {
+    const code = normalizeCode(row.item_code);
+    const catalogItem = currentCatalogByCode.get(code);
+    const catalogName = String(catalogItem?.item_name || '').trim();
+    const transactionName = String(row.item_name || '').trim();
+    const itemName = catalogName && !isDoNotUseItem(catalogName) ? catalogName : transactionName;
+
+    if (!code || isDoNotUseItem(itemName)) {
+      return;
+    }
+
+    if (!historyByCode.has(code)) {
+      historyByCode.set(code, {
+        item_code: String(row.item_code || '').trim(),
+        item_name: itemName || row.item_code || 'Unknown Item',
+        category: catalogItem?.category || row.category || 'Unclassified',
+        lastBought: null,
+        months: {},
+        totalPositiveQty: 0,
+        activePurchaseMonths: new Set(),
+      });
+    }
+
+    const item = historyByCode.get(code);
+    const qty = salesUnitQty(row);
+    const month = monthKey(row.transaction_date);
+
+    if (month) {
+      if (item.months[month] === undefined) {
+        item.months[month] = 0;
+      }
+      item.months[month] += qty;
+    }
+
+    if (qty > 0 && month) {
+      item.totalPositiveQty += qty;
+      item.activePurchaseMonths.add(month);
+    }
+
+    if (qty > 0 && row.transaction_date && (!item.lastBought || row.transaction_date > item.lastBought)) {
+      item.lastBought = row.transaction_date;
+    }
+  });
+
+  const cleanMaster = (itemMaster || [])
+    .map((row) => ({
+      item_code: String(row.item_code || '').trim(),
+      item_name: String(row.item_name || '').trim(),
+      category: String(row.category || 'Unclassified').trim(),
+      rate: null,
+      is_active: row.is_active,
+    }))
+    .filter((item) => item.item_code)
+    .filter((item) => !isDoNotUseItem(item.item_name));
+
+  const selectedBoughtCodes = new Set(
+    transactions
+      .filter((row) => hasPositivePurchase(row))
+      .map((row) => normalizeCode(row.item_code))
+      .filter(Boolean)
+  );
+  const categorySales = new Map();
+
+  transactions.forEach((row) => {
+    if (!hasPositivePurchase(row)) return;
+    const category = String(row.category || 'Unclassified').trim() || 'Unclassified';
+    const categoryKey = category.toUpperCase();
+    const salesValue = Number(row.sales_amount || row.line_value || row.amount || 0);
+    categorySales.set(categoryKey, Number(categorySales.get(categoryKey) || 0) + Math.max(salesValue, 0));
+  });
+
+  const peerCustomerItems = {};
+  peerTransactions.forEach((row) => {
+    if (!hasPositivePurchase(row)) return;
+
+    const customerCode = String(row.customer_code || '').trim();
+    const itemCode = normalizeCode(row.item_code);
+
+    if (!customerCode || !itemCode) return;
+
+    if (!peerCustomerItems[customerCode]) {
+      peerCustomerItems[customerCode] = new Set();
+    }
+
+    peerCustomerItems[customerCode].add(itemCode);
+  });
+
+  const similarCustomers = Object.entries(peerCustomerItems)
+    .map(([customerCode, itemCodes]) => {
+      let sharedItems = 0;
+      itemCodes.forEach((itemCode) => {
+        if (selectedBoughtCodes.has(itemCode)) {
+          sharedItems += 1;
+        }
+      });
+
+      return { customerCode, sharedItems, itemCodes };
+    })
+    .filter((customer) => customer.sharedItems > 0)
+    .sort((a, b) => b.sharedItems - a.sharedItems);
+
+  const topSimilarCustomers = similarCustomers.slice(0, 50);
+  const topSimilarCodes = new Set(topSimilarCustomers.map((customer) => customer.customerCode));
+  const shouldUseAllPeers = topSimilarCodes.size === 0;
+
+  const peerItemMeta = new Map();
+  peerTransactions.forEach((row) => {
+    const code = normalizeCode(row.item_code);
+    if (!code || isDoNotUseItem(row.item_name)) return;
+    if (peerItemMeta.has(code)) return;
+
+    peerItemMeta.set(code, {
+      item_code: String(row.item_code || '').trim(),
+      item_name: row.item_name || row.item_code || 'Unknown Item',
+      category: row.category || 'Unclassified',
+      rate: null,
+      is_active: true,
+    });
+  });
+
+  const candidateStats = {};
+  peerTransactions.forEach((row) => {
+    const customerCode = String(row.customer_code || '').trim();
+    if (!shouldUseAllPeers && !topSimilarCodes.has(customerCode)) return;
+    if (!hasPositivePurchase(row)) return;
+
+    const itemCode = normalizeCode(row.item_code);
+    if (!itemCode || selectedBoughtCodes.has(itemCode)) return;
+
+    if (!candidateStats[itemCode]) {
+      candidateStats[itemCode] = { customerCodes: new Set(), totalSales: 0, latestDate: null };
+    }
+
+    candidateStats[itemCode].customerCodes.add(customerCode);
+    candidateStats[itemCode].totalSales += Number(row.sales_amount || row.line_value || row.amount || 0);
+
+    const txDate = row.transaction_date;
+    if (txDate && (!candidateStats[itemCode].latestDate || txDate > candidateStats[itemCode].latestDate)) {
+      candidateStats[itemCode].latestDate = txDate;
+    }
+  });
+
+  const masterByCode = new Map(cleanMaster.map((item) => [normalizeCode(item.item_code), item]));
+  const candidateCodes = Object.keys(candidateStats);
+
+  const peerNewItems = candidateCodes
+    .map((code) => {
+      const item = masterByCode.get(code) || peerItemMeta.get(code);
+      if (!item) return null;
+      const stats = candidateStats[code];
+
+      if (!stats) return null;
+      if (isDoNotUseItem(item.item_name)) return null;
+      if (item.is_active === false) return null;
+
+      return {
+        ...item,
+        similarCustomerCount: stats.customerCodes.size,
+        peerSales: stats.totalSales,
+        peerLatestDate: stats.latestDate,
+        recommendationReason: `Bought by ${stats.customerCodes.size} similar customers`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.similarCustomerCount !== a.similarCustomerCount) return b.similarCustomerCount - a.similarCustomerCount;
+      if (b.peerSales !== a.peerSales) return b.peerSales - a.peerSales;
+      return String(a.item_name || '').localeCompare(String(b.item_name || ''));
+    })
+    .slice(0, 3);
+
+  const peerItemCodes = new Set(peerNewItems.map((item) => normalizeCode(item.item_code)));
+  const fallbackNewItems = cleanMaster
+    .filter((item) => item.is_active !== false)
+    .filter((item) => !selectedBoughtCodes.has(normalizeCode(item.item_code)))
+    .filter((item) => !peerItemCodes.has(normalizeCode(item.item_code)))
+    .map((item) => {
+      const category = String(item.category || 'Unclassified').trim() || 'Unclassified';
+      const categoryScore = Number(categorySales.get(category.toUpperCase()) || 0);
+      return {
+        ...item,
+        categoryScore,
+        recommendationReason: categoryScore > 0
+          ? `Related to ${category} purchases`
+          : 'New catalog item',
+      };
+    })
+    .sort((a, b) => {
+      if (b.categoryScore !== a.categoryScore) return b.categoryScore - a.categoryScore;
+      return String(a.item_name || '').localeCompare(String(b.item_name || ''));
+    });
+
+  const newItems = [...peerNewItems, ...fallbackNewItems].slice(0, 3);
+
+  const notBoughtRecently = Array.from(historyByCode.values())
+    .filter((item) => item.lastBought)
+    .sort((a, b) => String(a.lastBought).localeCompare(String(b.lastBought)))
+    .slice(0, 2)
+    .map((item) => ({ ...item, rate: null, recommendationReason: 'Not Bought Since Long' }));
+
+  const visibleMonths = analytics.months || [];
+  const latestMonth = visibleMonths.length ? visibleMonths[visibleMonths.length - 1] : null;
+
+  const buyingLess = Array.from(historyByCode.values())
+    .map((item) => {
+      const activeMonths = item.activePurchaseMonths.size;
+      const totalQty = Number(item.totalPositiveQty || 0);
+      const avgQty = activeMonths > 0 ? totalQty / activeMonths : 0;
+      const latestQty = latestMonth ? Number(item.months[latestMonth] || 0) : 0;
+      const declineQty = avgQty - latestQty;
+      const declinePercent = avgQty > 0 ? declineQty / avgQty : 0;
+
+      return { ...item, totalQty, activeMonths, avgQty, latestQty, declineQty, declinePercent };
+    })
+    .filter((item) => item.avgQty > 0 && item.latestQty < item.avgQty)
+    .sort((a, b) => {
+      if (b.declinePercent !== a.declinePercent) return b.declinePercent - a.declinePercent;
+      return b.declineQty - a.declineQty;
+    })
+    .slice(0, 2)
+    .map((item) => ({ ...item, rate: null, recommendationReason: 'Buying Less' }));
+
+  return {
+    newItems,
+    notBoughtRecently,
+    buyingLess,
+    historyMonthCount: visibleMonths.length,
+  };
+}

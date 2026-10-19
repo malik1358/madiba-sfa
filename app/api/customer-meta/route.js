@@ -1,0 +1,329 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
+import {
+  customerSalesmanAssignmentMatchesScope,
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../lib/salesHierarchy.js";
+import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function extractEmailLocalPart(email) {
+  const raw = String(email || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.includes("@") ? raw.split("@")[0] : raw;
+}
+
+function normalizeLooseToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
+function isSalesTeamRole(role) {
+  const normalized = normalizeRole(role);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
+}
+
+function profileCodeCandidates(profile) {
+  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
+}
+
+function authCodeCandidates(authUser) {
+  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+  const localPart = extractEmailLocalPart(authUser?.email);
+
+  return [
+    normalizeCode(metadata.salesman_code),
+    normalizeCode(metadata.salesman_name),
+    normalizeCode(metadata.head_salesman_code),
+    normalizeCode(metadata.head_salesman_name),
+    normalizeCode(localPart),
+    normalizeCode(localPart.replace(/[._-]+/g, " ")),
+    normalizeCode(localPart.replace(/[._-]+/g, "")),
+  ].filter(Boolean);
+}
+
+function fuzzyMatchedProfileCodes(allProfiles, authUser) {
+  const localPart = extractEmailLocalPart(authUser?.email);
+  const localToken = normalizeLooseToken(localPart);
+  if (!localToken) return [];
+
+  return allProfiles
+    .filter((profile) => {
+      const nameToken = normalizeLooseToken(profile?.salesman_name);
+      const codeToken = normalizeLooseToken(profile?.salesman_code);
+      return (
+        (nameToken && (nameToken.includes(localToken) || localToken.includes(nameToken)))
+        || (codeToken && (codeToken.includes(localToken) || localToken.includes(codeToken)))
+      );
+    })
+    .flatMap((profile) => profileCodeCandidates(profile));
+}
+
+function settingKeyFor(customerCode) {
+  return `customer_meta:${normalizeCode(customerCode)}`;
+}
+
+async function resolveScope(admin, token) {
+  const {
+    data: { user },
+    error: userError,
+  } = await admin.auth.getUser(token);
+
+  if (userError || !user) {
+    throw new Error("Invalid login session");
+  }
+
+  const { data: currentProfile, error: profileError } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError || !currentProfile) {
+    throw new Error("Profile not found.");
+  }
+
+  const role = normalizeRole(currentProfile.role);
+  const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
+
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,role,salesman_code,salesman_name"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  const authUsers = usersRes.data?.users || [];
+  const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
+  const allProfiles = profilesRes.data || [];
+  const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
+
+  let visibleProfiles = scopedProfiles;
+  if (!["admin", "manager"].includes(role)) {
+    if (isProductPromoterRole(role) && inheritedHeadCode) {
+      const headProfile = {
+        salesman_code: inheritedHeadCode,
+        salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+      };
+      const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
+      visibleProfiles = scopedProfiles.filter((profile) => (
+        normalizeCode(profile.salesman_code) === inheritedHeadCode || peerIds.has(profile.id)
+      ));
+    } else {
+      const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+      visibleProfiles = scopedProfiles.filter((profile) => (
+        profile.id === currentProfile.id || subordinateIds.has(profile.id)
+      ));
+    }
+  }
+
+  if (!["admin", "manager"].includes(role) && !visibleProfiles.some((profile) => profile.id === currentProfile.id)) {
+    visibleProfiles = [currentProfile, ...visibleProfiles];
+  }
+
+  visibleProfiles = mergeMutualGroupProfiles(visibleProfiles, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
+  const scopeMatchers = buildSalesmanScopeMatchers(visibleProfiles);
+
+  return {
+    hasAllAccess: ["admin", "manager"].includes(role),
+    identitySearchPattern,
+    visibleSalesmanCodes: [...new Set([
+      ...visibleProfiles.flatMap((profile) => profileCodeCandidates(profile)),
+      ...authCodeCandidates(currentAuthUser),
+      ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
+      ...mutualGroupCodes,
+    ])],
+    scopeMatchers,
+  };
+}
+
+async function ensureCustomerVisible(admin, customerCode, scope) {
+  const { data: customer, error } = await admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,previous_salesman_code")
+    .eq("customer_code", customerCode)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!customer) {
+    throw new Error("Customer not found.");
+  }
+
+  if (!scope.hasAllAccess && !assignedSalesmanCodes(customer).some((code) => customerSalesmanAssignmentMatchesScope(code, scope))) {
+    const normalizedInput = normalizeCode(customerCode);
+    const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
+    const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
+    const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+
+    let hasHistoryAccess = false;
+    for (const codeCandidate of codeCandidates) {
+      const { data: historyRow, error: historyError } = await admin
+        .from("active_sales")
+        .select("id")
+        .eq("customer_code", codeCandidate)
+        .in("salesman_code", scope.visibleSalesmanCodes || [])
+        .limit(1)
+        .maybeSingle();
+
+      if (historyError) throw historyError;
+      if (historyRow?.id) {
+        hasHistoryAccess = true;
+        break;
+      }
+
+      if (!hasHistoryAccess && scope.identitySearchPattern) {
+        const { data: nameHistoryRow, error: nameHistoryError } = await admin
+          .from("active_sales")
+          .select("id")
+          .eq("customer_code", codeCandidate)
+          .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (nameHistoryError) throw nameHistoryError;
+        if (nameHistoryRow?.id) {
+          hasHistoryAccess = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasHistoryAccess) {
+      throw new Error("You do not have access to this customer.");
+    }
+  }
+
+  return customer;
+}
+
+export async function GET(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const url = new URL(request.url);
+    const customerCode = normalizeCode(url.searchParams.get("customerCode"));
+    if (!customerCode) {
+      return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scope = await resolveScope(admin, authHeader.replace("Bearer ", ""));
+    await ensureCustomerVisible(admin, customerCode, scope);
+
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", settingKeyFor(customerCode))
+      .maybeSingle();
+
+    if (error) throw error;
+
+    let value = { nationalAddress: "", documents: [] };
+    if (data?.setting_value) {
+      try {
+        value = JSON.parse(String(data.setting_value));
+      } catch {
+        value = { nationalAddress: "", documents: [] };
+      }
+    }
+
+    return NextResponse.json({ success: true, customerCode, value });
+  } catch (error) {
+    const message = error.message || "Unable to load customer meta.";
+    const status = /access|session|customer not found/i.test(message) ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}
+
+export async function POST(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const customerCode = normalizeCode(body?.customerCode);
+    if (!customerCode) {
+      return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
+    }
+
+    const value = {
+      nationalAddress: String(body?.nationalAddress || "").trim(),
+      documents: Array.isArray(body?.documents)
+        ? body.documents.map((document) => ({
+            type: String(document?.type || "OTHER").trim() || "OTHER",
+            name: String(document?.name || "").trim(),
+            size: Number(document?.size || 0),
+            mimeType: String(document?.mimeType || "").trim(),
+          }))
+        : [],
+    };
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scope = await resolveScope(admin, authHeader.replace("Bearer ", ""));
+    await ensureCustomerVisible(admin, customerCode, scope);
+
+    const { error } = await admin
+      .from("system_settings")
+      .upsert(
+        {
+          setting_key: settingKeyFor(customerCode),
+          setting_value: JSON.stringify(value),
+        },
+        { onConflict: "setting_key" }
+      );
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, customerCode, value });
+  } catch (error) {
+    const message = error.message || "Unable to save customer meta.";
+    const status = /access|session|customer not found/i.test(message) ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}

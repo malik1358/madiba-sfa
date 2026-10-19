@@ -1,0 +1,274 @@
+import { formatDurationMinutes, buildGoogleMapsPointUrl } from "./geo.js";
+import { parseEmailList, normalizeDeliverableEmail } from "./mailer.js";
+import {
+  buildDayRoutePoints,
+  buildDayRouteSvg,
+  buildWorkdayRouteStops,
+} from "./dayRouteMap.js";
+import {
+  buildVisitDaySplit,
+  entryDisplayAmount,
+  formatEntryCoordinates,
+  formatSplitMoney,
+  loginLogoutLocationNotes,
+} from "./dailyVisitReportStats.js";
+import {
+  visitReportRowBackground,
+  VISIT_REPORT_ROW_LEGEND,
+} from "./visitReportRowColors.js";
+import {
+  formatAchievementPercent,
+  formatPerformanceKpiLine,
+  formatPerformanceKpiValue,
+  performanceUpdatedStatusLabel,
+} from "./performanceKpis.js";
+import { KSA_TIMEZONE } from "./workdayActivity.js";
+
+export function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function formatReportTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("en-GB", {
+    timeZone: KSA_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatKm(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number.toFixed(digits)} km`;
+}
+
+export function resolveUserReportEmail({ reportEmail, email } = {}) {
+  return normalizeDeliverableEmail(reportEmail) || normalizeDeliverableEmail(email);
+}
+
+export function resolveVisitReportRecipients({
+  userEmail,
+  reportEmail,
+  email,
+  managerEmails,
+  chainEmails,
+  sendToUser = true,
+} = {}) {
+  const managers = parseEmailList(
+    Array.isArray(managerEmails) ? managerEmails.join(",") : managerEmails,
+  );
+  const chain = parseEmailList(
+    Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails,
+  );
+  const user = sendToUser
+    ? resolveUserReportEmail({ reportEmail, email: userEmail || email })
+    : "";
+  const to = [];
+
+  if (user) to.push(user);
+  [...chain, ...managers].forEach((address) => {
+    if (!to.includes(address)) to.push(address);
+  });
+
+  return { to, userEmail: user || "", managerEmails: managers, chainEmails: chain };
+}
+
+function distanceFromCustomerLabel(entry) {
+  if (!entry?.hasEntryGps) return "No entry GPS";
+  if (!entry?.hasCustomerLocation) return "No customer location";
+  return formatKm(entry.distanceFromCustomerKm);
+}
+
+function transactionLabel(entry) {
+  const parts = [entry?.transactionLabel || entry?.transactionType || "-"];
+  const amount = entryDisplayAmount(entry);
+  if (amount > 0) {
+    parts.push(`${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR`);
+  }
+  if (entry?.logoutAutoClosed) parts.push("Auto-closed");
+  if (entry?.isFarFromCustomer) parts.push("Far");
+  return parts.join(" · ");
+}
+
+function customerLabel(entry) {
+  if (entry?.customerName && entry?.customerCode) {
+    return `${entry.customerName} (${entry.customerCode})`;
+  }
+  return entry?.customerName || entry?.customerCode || "-";
+}
+
+export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}) {
+  const userName = String(user?.userName || "User").trim() || "User";
+  const subject = `Daily Visit Report — ${userName} — ${date}`;
+  const entries = Array.isArray(user?.entries) ? user.entries : [];
+  const performance = user?.performance || null;
+  const kpis = Array.isArray(performance?.kpis) ? performance.kpis : [];
+
+  const kpiText = kpis.length
+    ? [
+      "Monthly KPI status:",
+      ...kpis.map((kpi) => `- ${formatPerformanceKpiLine(kpi)}`),
+      performanceUpdatedStatusLabel(performance),
+      "",
+    ]
+    : [];
+
+  const kpiHtml = kpis.length
+    ? `<h2 style="font-size: 16px;">Monthly KPI status</h2>
+      <p style="color:#52616b; font-size: 13px;">${escapeHtml(performanceUpdatedStatusLabel(performance))}</p>
+      <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%; margin: 0 0 16px;">
+        <thead style="background: #f4f7fb;">
+          <tr>
+            <th>KPI</th><th>Actual</th><th>Target</th><th>Achievement</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${kpis.map((kpi) => `<tr>
+            <td>${escapeHtml(kpi.label)}</td>
+            <td>${escapeHtml(formatPerformanceKpiValue(kpi.key, kpi.actual))}</td>
+            <td>${escapeHtml(kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—")}</td>
+            <td>${escapeHtml(formatAchievementPercent(kpi.achievement))}</td>
+            <td>${escapeHtml(kpi.status?.label || "No target")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`
+    : "";
+
+  const idleGaps = Array.isArray(user?.idleGaps) ? user.idleGaps : (user?.daySummary?.idleGaps || []);
+  const routePoints = Array.isArray(user?.routePoints) && user.routePoints.length
+    ? user.routePoints
+    : buildDayRoutePoints(entries, idleGaps);
+  const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
+  const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
+  const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
+  const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
+    ? user.locationNotes
+    : loginLogoutLocationNotes(entries, thresholdKm);
+
+  const summaryText = [
+    `Daily visit report for ${userName}`,
+    `Date: ${date} (KSA)`,
+    `Entries: ${user?.visitCount || 0}`,
+    `Far from customer: ${user?.farFromCustomerCount || 0}`,
+    `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
+    `Visit without order: ${activitySplit.visitWithoutOrderCount}`,
+    `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} SAR`,
+    `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} SAR`,
+    `Collections: ${activitySplit.collectionCount} / ${formatSplitMoney(activitySplit.collectionValue)} SAR`,
+    ...locationNotes,
+    "",
+    ...kpiText,
+    ...entries.map((entry) => {
+      const waiting = entry.waitingMinutesFromPrevious == null
+        ? "-"
+        : formatDurationMinutes(entry.waitingMinutesFromPrevious);
+      return [
+        `${entry.visitSequence || "-"} ${formatReportTime(entry.savedAt)}`,
+        transactionLabel(entry),
+        customerLabel(entry),
+        `From customer: ${distanceFromCustomerLabel(entry)}`,
+        `From previous: ${entry.distanceFromPreviousKm == null ? "-" : formatKm(entry.distanceFromPreviousKm)}`,
+        `Area: ${entry.area || "-"}`,
+        `Waiting: ${waiting}`,
+      ].join(" | ");
+    }),
+  ].join("\n");
+
+  const splitHtml = `<table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; margin: 0 0 16px;">
+    <thead style="background: #f4f7fb;">
+      <tr><th>Activity</th><th>Count</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Visit without order</td><td>${activitySplit.visitWithoutOrderCount}</td><td>-</td></tr>
+      <tr><td>New-customer orders</td><td>${activitySplit.newCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.newCustomerOrderValue))} SAR</td></tr>
+      <tr><td>Repeat-customer orders</td><td>${activitySplit.repeatCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.repeatCustomerOrderValue))} SAR</td></tr>
+      <tr><td>Collections</td><td>${activitySplit.collectionCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.collectionValue))} SAR</td></tr>
+    </tbody>
+  </table>`;
+
+  const coachingHtml = locationNotes.length
+    ? `<p style="background:#fff7ed;border:1px solid #fdba74;padding:8px 10px;font-size:13px;color:#9a3412;">
+        ${locationNotes.map((note) => escapeHtml(note)).join("<br/>")}
+      </p>`
+    : "";
+
+  const routeHtml = routeSvg
+    ? `<h2 style="font-size: 16px;">Day route</h2>
+      <div style="margin: 0 0 16px;">${routeSvg}</div>
+      ${workdayStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px;">${workdayStops.map((stop) => `<li>${escapeHtml(stop.label)}${stop.mapsUrl ? ` · <a href="${escapeHtml(stop.mapsUrl)}">Open this place</a>` : ""}</li>`).join("")}</ul>` : ""}`
+    : "";
+
+  const rowsHtml = entries.length
+    ? entries.map((entry) => {
+      const waiting = entry.waitingMinutesFromPrevious == null
+        ? "-"
+        : formatDurationMinutes(entry.waitingMinutesFromPrevious);
+      const mapUrl = entry.hasEntryGps
+        ? buildGoogleMapsPointUrl(entry.entryLatitude, entry.entryLongitude)
+        : "";
+      const background = visitReportRowBackground(entry, idleGaps);
+      return `<tr${background ? ` style="background:${background};"` : ""}>
+        <td>${escapeHtml(entry.visitSequence || "-")}</td>
+        <td>${escapeHtml(entry.onSiteVisitNumber || "-")}</td>
+        <td>${escapeHtml(formatReportTime(entry.savedAt))}</td>
+        <td>${escapeHtml(customerLabel(entry))}</td>
+        <td>${escapeHtml(transactionLabel(entry))}</td>
+        <td>${escapeHtml(distanceFromCustomerLabel(entry))}</td>
+        <td>${escapeHtml(entry.distanceFromPreviousKm == null ? "-" : formatKm(entry.distanceFromPreviousKm))}</td>
+        <td>${escapeHtml(formatEntryCoordinates(entry))}</td>
+        <td>${escapeHtml(entry.area || "-")}</td>
+        <td>${escapeHtml(entry.street || "-")}</td>
+        <td>${escapeHtml(entry.speedKmh == null ? "-" : `${Number(entry.speedKmh).toFixed(1)} km/h`)}</td>
+        <td>${escapeHtml(waiting)}</td>
+        <td>${escapeHtml(entry.capturePlatformLabel || "-")}</td>
+        <td>${mapUrl ? `<a href="${escapeHtml(mapUrl)}">Open</a>` : "-"}</td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="15">No visits or orders found for this date.</td></tr>`;
+
+  const legendHtml = `<p style="font-size: 12px; color: #52616b; margin: 0 0 10px;">
+    ${VISIT_REPORT_ROW_LEGEND.map((item) => (
+      `<span style="display:inline-block;margin:0 10px 6px 0;padding:2px 8px;background:${item.background};border:1px solid #d5dee3;border-radius:999px;">${escapeHtml(item.label)}</span>`
+    )).join("")}
+  </p>`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4;">
+  <h1 style="font-size: 20px; margin-bottom: 8px;">Daily Visit Report</h1>
+  <p style="margin: 0 0 16px;">${escapeHtml(userName)} · ${escapeHtml(date)} (KSA)</p>
+  <p>
+    Entries: <strong>${Number(user?.visitCount || 0)}</strong>
+    · Far from customer: <strong>${Number(user?.farFromCustomerCount || 0)}</strong>
+    · Route total: <strong>${escapeHtml(formatKm(user?.totalRouteDistanceKm))}</strong>
+  </p>
+  ${splitHtml}
+  ${coachingHtml}
+  ${kpiHtml}
+  ${routeHtml}
+  ${legendHtml}
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">
+    <thead style="background: #f4f7fb;">
+      <tr>
+        <th>#</th><th>Visit #</th><th>Time</th><th>Customer</th><th>Transaction</th>
+        <th>Distance from customer</th><th>Distance from previous</th>
+        <th>Coordinates</th>
+        <th>Area</th><th>Street</th><th>Speed</th><th>Est. waiting</th>
+        <th>Platform</th><th>Map</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html, text: summaryText };
+}

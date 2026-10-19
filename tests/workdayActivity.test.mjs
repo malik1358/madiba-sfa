@@ -1,0 +1,491 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  BACKGROUND_GPS_IDLE_MS,
+  buildAutoCloseEndOfDayPayload,
+  calculateWorkingHoursMinutes,
+  collectWorkdaysNeedingAutoClose,
+  deriveActivityStatus,
+  extractLunchTimes,
+  filterLogsByKsaEventDate,
+  formatKsaDateTime,
+  formatWorkingHours,
+  getKsaDateString,
+  isOnLunchBreak,
+  isWithinActiveWorkSession,
+  ksaDayBounds,
+  shouldSendLunchBreakReminder,
+  getOpenLunchBreakOutTimestamp,
+  isInactivityPromptSnoozed,
+  getPreviousKsaDateString,
+  isKsaOrderDay,
+  ksaMidnightEndIso,
+  readInactivityPromptSnoozeUntil,
+  shouldCaptureIdleGpsPing,
+  lateLoginReminderSlot,
+  shouldEmailInactivity,
+  shouldSendLateLoginReminder,
+  shouldWarnInactivity,
+  snoozeInactivityPrompt,
+  writeInactivityPromptSnoozeUntil,
+} from "../app/lib/workdayActivity.js";
+
+test("ksaDayBounds covers the full KSA calendar day", () => {
+  const bounds = ksaDayBounds("2026-08-18");
+  assert.equal(bounds.startIso, "2026-08-17T21:00:00.000Z");
+  assert.equal(bounds.endIso, "2026-08-18T20:59:59.999Z");
+});
+
+test("ksaMidnightEndIso stores 11:59 PM KSA", () => {
+  assert.equal(ksaMidnightEndIso("2026-08-18"), "2026-08-18T20:59:59.999Z");
+  assert.equal(formatKsaDateTime("2026-08-18T20:59:59.999Z"), "18/08/2026, 23:59");
+});
+
+test("getPreviousKsaDateString returns the KSA calendar day that just ended", () => {
+  assert.equal(getPreviousKsaDateString(new Date("2026-09-03T21:10:00.000Z")), "2026-09-03");
+  assert.equal(getPreviousKsaDateString(new Date("2026-09-03T20:50:00.000Z")), "2026-09-02");
+});
+
+test("KSA holiday is Friday only", () => {
+  assert.equal(isKsaOrderDay("2026-09-03"), true);
+  assert.equal(isKsaOrderDay("2026-09-04"), false);
+  assert.equal(isKsaOrderDay("2026-09-05"), true);
+  assert.equal(isKsaOrderDay("2026-09-06"), true);
+});
+
+test("filterLogsByKsaEventDate keeps only events on the report day", () => {
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-18T03:00:00.000Z" }),
+      created_at: "2026-08-18T03:00:00.000Z",
+    },
+    {
+      entry_type: "END_OF_DAY",
+      note: JSON.stringify({
+        autoClosed: true,
+        captured_at: "2026-08-17T20:59:59.999Z",
+      }),
+      created_at: "2026-08-18T03:05:00.000Z",
+    },
+  ];
+
+  const filtered = filterLogsByKsaEventDate(logs, "2026-08-18");
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].entry_type, "MORNING_ATTENDANCE");
+});
+
+test("extractLunchTimes returns first lunch out and in after morning attendance", () => {
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-18T03:00:00.000Z" }),
+      created_at: "2026-08-18T03:00:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:00:00.000Z" }),
+      created_at: "2026-08-18T09:00:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:45:00.000Z" }),
+      created_at: "2026-08-18T09:45:00.000Z",
+    },
+  ];
+
+  const lunch = extractLunchTimes(logs);
+  assert.ok(lunch.lunchOutAt);
+  assert.ok(lunch.lunchInAt);
+});
+
+test("isOnLunchBreak is true after lunch out and false after lunch in", () => {
+  const logs = [
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:00:00.000Z" }),
+      created_at: "2026-08-18T09:00:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:45:00.000Z" }),
+      created_at: "2026-08-18T09:45:00.000Z",
+    },
+  ];
+
+  assert.equal(isOnLunchBreak(logs.slice(0, 1), Date.parse("2026-08-18T09:30:00.000Z")), true);
+  assert.equal(isOnLunchBreak(logs, Date.parse("2026-08-18T10:00:00.000Z")), false);
+});
+
+test("isWithinActiveWorkSession follows login-lunch-logout windows", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: loginAt }),
+      created_at: loginAt,
+    },
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:00:00.000Z" }),
+      created_at: "2026-08-18T09:00:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:45:00.000Z" }),
+      created_at: "2026-08-18T09:45:00.000Z",
+    },
+  ];
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T08:00:00.000Z"),
+    }),
+    true,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T09:30:00.000Z"),
+    }),
+    false,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T11:00:00.000Z"),
+    }),
+    true,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: "2026-08-18T13:00:00.000Z",
+      userLogs: logs,
+      now: new Date("2026-08-18T12:00:00.000Z"),
+    }),
+    false,
+  );
+});
+
+test("shouldSendLunchBreakReminder is true after 3 hours on lunch", () => {
+  const lunchOutAt = "2026-08-18T09:00:00.000Z";
+  const logs = [
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: lunchOutAt }),
+      created_at: lunchOutAt,
+    },
+  ];
+
+  assert.equal(
+    shouldSendLunchBreakReminder(logs, new Date("2026-08-18T11:30:00.000Z")),
+    false,
+  );
+
+  assert.equal(
+    shouldSendLunchBreakReminder(logs, new Date("2026-08-18T12:00:00.000Z")),
+    true,
+  );
+
+  assert.equal(
+    getOpenLunchBreakOutTimestamp([
+      ...logs,
+      {
+        entry_type: "LUNCH_BREAK_IN",
+        note: JSON.stringify({ captured_at: "2026-08-18T12:30:00.000Z" }),
+        created_at: "2026-08-18T12:30:00.000Z",
+      },
+    ], Date.parse("2026-08-18T13:00:00.000Z")),
+    0,
+  );
+});
+
+test("deriveActivityStatus marks idle users without recent transactions", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+  const now = new Date("2026-08-18T12:00:00.000Z");
+  const reportDate = getKsaDateString(now);
+
+  const status = deriveActivityStatus({
+    loginAt,
+    logoutAt: null,
+    userLogs: [
+      {
+        entry_type: "VISIT_REPORT",
+        note: JSON.stringify({ captured_at: "2026-08-18T03:10:00.000Z" }),
+        created_at: "2026-08-18T03:10:00.000Z",
+      },
+    ],
+    collections: [],
+    orders: [],
+    reportDate,
+    now,
+  });
+
+  assert.equal(status, "idle");
+});
+
+test("deriveActivityStatus marks active users with recent transactions", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+  const now = new Date("2026-08-18T12:00:00.000Z");
+  const reportDate = getKsaDateString(now);
+
+  const status = deriveActivityStatus({
+    loginAt,
+    logoutAt: null,
+    userLogs: [
+      {
+        entry_type: "VISIT_REPORT",
+        note: JSON.stringify({ captured_at: "2026-08-18T11:45:00.000Z" }),
+        created_at: "2026-08-18T11:45:00.000Z",
+      },
+    ],
+    collections: [],
+    orders: [],
+    reportDate,
+    now,
+  });
+
+  assert.equal(status, "active");
+});
+
+test("shouldSendLateLoginReminder starts at 11:00 KSA and skips login, Friday, and after hours", () => {
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T07:59:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T08:00:00.000Z"),
+  }), true);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: "2026-09-06T05:00:00.000Z",
+    now: new Date("2026-09-06T08:00:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-04T08:00:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T19:00:00.000Z"),
+  }), false);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:00:00.000Z")), 0);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:29:00.000Z")), 0);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:30:00.000Z")), 1);
+});
+
+test("shouldEmailInactivity is false until 50 minutes without activity", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T03:49:00.000Z"),
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T03:50:00.000Z"),
+    }),
+    true,
+  );
+});
+
+test("shouldWarnInactivity ignores lunch break and ended workdays", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+  const now = new Date("2026-08-18T12:00:00.000Z");
+  const staleVisit = {
+    entry_type: "VISIT_REPORT",
+    note: JSON.stringify({ captured_at: "2026-08-18T03:10:00.000Z" }),
+    created_at: "2026-08-18T03:10:00.000Z",
+  };
+
+  assert.equal(
+    shouldWarnInactivity({
+      loginAt,
+      logoutAt: "2026-08-18T13:00:00.000Z",
+      userLogs: [staleVisit],
+      now,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldWarnInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [
+        staleVisit,
+        {
+          entry_type: "LUNCH_BREAK_OUT",
+          note: JSON.stringify({ captured_at: "2026-08-18T11:30:00.000Z" }),
+          created_at: "2026-08-18T11:30:00.000Z",
+        },
+      ],
+      now,
+    }),
+    false,
+  );
+});
+
+test("calculateWorkingHoursMinutes sums login to lunch out and lunch in to logout", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: "2026-08-18T09:00:00.000Z",
+    lunchInAt: "2026-08-18T09:45:00.000Z",
+    logoutAt: "2026-08-18T13:00:00.000Z",
+  });
+
+  assert.equal(minutes, 555);
+  assert.equal(formatWorkingHours(minutes), "9h 15m");
+});
+
+test("calculateWorkingHoursMinutes uses openEndedAt when logout is missing", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: "2026-08-18T09:00:00.000Z",
+    lunchInAt: "2026-08-18T09:45:00.000Z",
+    logoutAt: null,
+    openEndedAt: "2026-08-18T12:00:00.000Z",
+  });
+
+  assert.equal(minutes, 495);
+});
+
+test("calculateWorkingHoursMinutes falls back to login to logout without lunch", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: null,
+    lunchInAt: null,
+    logoutAt: "2026-08-18T13:00:00.000Z",
+  });
+
+  assert.equal(minutes, 600);
+  assert.equal(formatWorkingHours(minutes), "10h");
+});
+
+test("formatWorkingHours returns dash when no minutes", () => {
+  assert.equal(formatWorkingHours(null), "-");
+  assert.equal(formatWorkingHours(0), "-");
+});
+
+test("shouldCaptureIdleGpsPing waits for 15 minutes of inactivity", () => {
+  const loginTs = Date.parse("2026-08-19T09:00:00.000Z");
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: loginTs + 10 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: loginTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: loginTs + 16 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: loginTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    true,
+  );
+});
+
+test("shouldCaptureIdleGpsPing skips when a recent ping already happened", () => {
+  const loginTs = Date.parse("2026-08-19T09:00:00.000Z");
+  const pingTs = loginTs + 16 * 60 * 1000;
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: pingTs + 5 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: pingTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    false,
+  );
+});
+
+test("inactivity prompt snooze persists across reads", () => {
+  const storage = new Map();
+  const mockStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  };
+  const now = 1_700_000_000_000;
+
+  assert.equal(isInactivityPromptSnoozed(now, mockStorage), false);
+
+  snoozeInactivityPrompt(5 * 60 * 1000, now, mockStorage);
+
+  assert.equal(readInactivityPromptSnoozeUntil(mockStorage), now + 5 * 60 * 1000);
+  assert.equal(isInactivityPromptSnoozed(now + 60 * 1000, mockStorage), true);
+  assert.equal(isInactivityPromptSnoozed(now + 6 * 60 * 1000, mockStorage), false);
+
+  writeInactivityPromptSnoozeUntil(now + 15 * 60 * 1000, mockStorage);
+  assert.equal(isInactivityPromptSnoozed(now + 10 * 60 * 1000, mockStorage), true);
+});
+
+test("collectWorkdaysNeedingAutoClose closes past days and waits until 23:59 for today", () => {
+  const userId = "user-1";
+  const logs = [
+    {
+      user_id: userId,
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-24T06:00:00.000Z" }),
+      created_at: "2026-08-24T06:00:00.000Z",
+    },
+    {
+      user_id: userId,
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-25T06:00:00.000Z" }),
+      created_at: "2026-08-25T06:00:00.000Z",
+    },
+  ];
+
+  const nextDayMorning = new Date("2026-08-26T06:00:00.000Z");
+  const pendingPast = collectWorkdaysNeedingAutoClose(logs, nextDayMorning);
+  assert.deepEqual(pendingPast, [
+    { userId, day: "2026-08-24" },
+    { userId, day: "2026-08-25" },
+  ]);
+
+  const sameDayBeforeCutoff = new Date("2026-08-25T18:00:00.000Z");
+  const pendingSameDayEarly = collectWorkdaysNeedingAutoClose(logs, sameDayBeforeCutoff, userId);
+  assert.deepEqual(pendingSameDayEarly, [{ userId, day: "2026-08-24" }]);
+
+  const sameDayAtCutoff = new Date("2026-08-25T20:59:00.000Z");
+  const pendingSameDayLate = collectWorkdaysNeedingAutoClose(
+    logs.filter((row) => row.note.includes("2026-08-25")),
+    sameDayAtCutoff,
+    userId,
+  );
+  assert.deepEqual(pendingSameDayLate, [{ userId, day: "2026-08-25" }]);
+});
+
+test("buildAutoCloseEndOfDayPayload stores auto-closed logout at 11:59 PM KSA", () => {
+  const payload = buildAutoCloseEndOfDayPayload("user-1", "2026-08-25");
+  assert.equal(payload.created_at, "2026-08-25T20:59:59.999Z");
+  assert.equal(JSON.parse(payload.note).autoClosed, true);
+});

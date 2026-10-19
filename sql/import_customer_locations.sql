@@ -1,0 +1,16 @@
+-- One-time customer GPS import helper
+--
+-- Preferred approach: run the backend script against your Excel file
+--   npm.cmd run import:customer-locations -- "C:\path\customer master gps location.xlsx"
+--
+-- Dry run first:
+--   npm.cmd run import:customer-locations -- "C:\path\customer master gps location.xlsx" --dry-run
+--
+-- Excel columns expected:
+--   Party Name | Lattitude | Longitutde
+--
+-- The script matches Party Name codes like "1224 RAWAAT MAZAYA..." to customers.customer_code
+-- and updates customers.latitude / customers.longitude only.
+--
+-- Admin UI alternative:
+--   Management -> Customer Master -> Import GPS Excel

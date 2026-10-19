@@ -1,0 +1,59 @@
+name: Inactivity Push
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger inactivity push endpoint
+        env:
+          INACTIVITY_PUSH_URL: ${{ secrets.INACTIVITY_PUSH_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_INACTIVITY_PUSH_URL='https://madiba-sfa.vercel.app/api/cron/inactivity-push'
+          INACTIVITY_PUSH_URL_TRIMMED="$(printf '%s' "$INACTIVITY_PUSH_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          INACTIVITY_PUSH_URL_EFFECTIVE="$INACTIVITY_PUSH_URL_TRIMMED"
+
+          if [[ -z "$INACTIVITY_PUSH_URL_EFFECTIVE" ]]; then
+            echo "INACTIVITY_PUSH_URL secret is missing; falling back to default endpoint."
+            INACTIVITY_PUSH_URL_EFFECTIVE="$DEFAULT_INACTIVITY_PUSH_URL"
+          elif [[ ! "$INACTIVITY_PUSH_URL_EFFECTIVE" =~ /api/cron/inactivity-push([/?].*)?$ ]]; then
+            echo "INACTIVITY_PUSH_URL secret does not point to /api/cron/inactivity-push; falling back to default endpoint."
+            INACTIVITY_PUSH_URL_EFFECTIVE="$DEFAULT_INACTIVITY_PUSH_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_push() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_push "$INACTIVITY_PUSH_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$INACTIVITY_PUSH_URL_EFFECTIVE" != "$DEFAULT_INACTIVITY_PUSH_URL" ]]; then
+            echo "Primary INACTIVITY_PUSH_URL failed with HTTP $status_code; retrying default endpoint."
+            INACTIVITY_PUSH_URL_EFFECTIVE="$DEFAULT_INACTIVITY_PUSH_URL"
+            status_code="$(post_push "$INACTIVITY_PUSH_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Inactivity push failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Inactivity push succeeded with HTTP $status_code"
+          cat response.json

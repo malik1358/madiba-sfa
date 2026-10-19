@@ -1,0 +1,60 @@
+name: Price Sync
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger price sync endpoint
+        env:
+          PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_PRICE_SYNC_URL='https://madiba-sfa.vercel.app/api/admin/price-sync'
+          PRICE_SYNC_URL_TRIMMED="$(printf '%s' "$PRICE_SYNC_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          PRICE_SYNC_URL_EFFECTIVE="$PRICE_SYNC_URL_TRIMMED"
+
+          if [[ -z "$PRICE_SYNC_URL_EFFECTIVE" ]]; then
+            echo "PRICE_SYNC_URL secret is missing; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+          elif [[ ! "$PRICE_SYNC_URL_EFFECTIVE" =~ /api/admin/price-sync([/?].*)?$ ]]; then
+            echo "PRICE_SYNC_URL secret does not point to /api/admin/price-sync; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          # Guard against accidental leading/trailing whitespace in pasted secrets.
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_sync() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_sync "$PRICE_SYNC_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$PRICE_SYNC_URL_EFFECTIVE" != "$DEFAULT_PRICE_SYNC_URL" ]]; then
+            echo "Primary PRICE_SYNC_URL failed with HTTP $status_code; retrying default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+            status_code="$(post_sync "$PRICE_SYNC_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Price sync failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Price sync succeeded with HTTP $status_code"
+          cat response.json

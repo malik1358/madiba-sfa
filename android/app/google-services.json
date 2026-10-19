@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "339731447608",
+    "project_id": "madiba-sfa",
+    "storage_bucket": "madiba-sfa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:339731447608:android:42d5fcdb790aba46b44bcd",
+        "android_client_info": {
+          "package_name": "com.madiba.sfa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-G8p2B--yUsx7IPAAAPLdBqZ0ZaGCOco"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

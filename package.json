@@ -1,0 +1,50 @@
+{
+  "name": "madiba-sfa",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "dev:clean": "node scripts/dev-server.mjs --clean",
+    "dev:stop": "node scripts/stop-dev-server.mjs",
+    "build": "next build",
+    "start": "next start",
+    "import:customer-locations": "node scripts/import-customer-locations.mjs",
+    "cap:sync": "npx cap sync android",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npx cap run android",
+    "cap:build:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-android-apk.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/camera": "^8.2.3",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "^8.1.3",
+    "@capacitor/geolocation": "^8.2.2",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/push-notifications": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capawesome-team/capacitor-android-battery-optimization": "^8.0.1",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
+    "@napi-rs/canvas": "^1.0.8",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.49.1",
+    "firebase-admin": "^13.10.0",
+    "jspdf": "^4.2.1",
+    "next": "^15.2.4",
+    "nodemailer": "^7.0.13",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^6.2.108",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sharp": "^0.35.4",
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,941 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
+import {
+  combineOutstandingHeaderRows,
+  customerAccountCodesMatch,
+  customerCodeCandidates,
+  customerMatchesOutstandingCodeSet,
+  detectOutstandingPendingAmountColumn,
+  detectOutstandingSalesmanColumn,
+  extractLeadingCustomerCodeAndName,
+  applyOutstandingRowSalesman,
+  buildOutstandingRowSalesmanByCode,
+  isPlaceholderSalesmanValue,
+  pickOutstandingSalesmanName,
+  pickLongestCustomerName,
+  findOutstandingForCustomer,
+  findOutstandingHeaderRow,
+  isSameOutstandingCustomer,
+  findOutstandingCustomerCodesForSalesmen,
+  findOutstandingInvoiceDayColumn,
+  hydrateOutstandingInvoices,
+  isOutstandingInvoiceDayHeader,
+  normalizeOutstandingHeader,
+  mergeParsedOutstandingSheets,
+  prioritizeOutstandingSheets,
+  repairOutstandingInvoice,
+  resolveOutstandingCustomerOwnership,
+  resolveInvoiceAgingDays,
+  resolveInvoiceDays,
+  resolveOutstandingInvoiceCustomerCode,
+  resolveOutstandingBucketLabels,
+  syncOutstandingCustomerFromInvoices,
+  resolveOverdueDaysFromDueDate,
+  sanitizeStoredOverdueDays,
+  buildOutstandingPdfBucketRows,
+  summarizeOutstandingBuckets,
+  summarizeOutstandingBucketsForVisitStatus,
+  visibleOutstandingBucketLabels,
+  mapOutstandingBucketsToCollectionFields,
+  parseOutstandingSheetDate,
+  parseOutstandingRows,
+  detectOutstandingColumnIndexes,
+  findOutstandingDueDateColumn,
+  excelSerialToIsoDate,
+  formatSheetDateValue,
+  laterDateOnly,
+  latestOutstandingInvoiceDate,
+  outstandingInvoiceDate,
+  clampLatestInvoiceDateToOutstandingBuckets,
+  resolveVisitLastInvoiceDate,
+  sanitizeStoredInvoiceDays,
+  selectPreferredOutstandingParses,
+  buildCollectionOutstandingBucketsFromInvoices,
+  resolveCollectionOutstandingBuckets,
+} from "../app/lib/outstanding.js";
+
+test("detectOutstandingSalesmanColumn prefers Salesman over Sales Person", () => {
+  const header = ["Date", "Ref. No.", "Party's Name", "Sales Person", "City Name", "State Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"];
+
+  assert.equal(detectOutstandingSalesmanColumn(header), 10);
+});
+
+test("parseOutstandingSheetDate accepts Excel day-month-year text", () => {
+  assert.equal(parseOutstandingSheetDate("23-Apr-26"), "2026-04-23");
+  assert.equal(parseOutstandingSheetDate("23-May-26"), "2026-05-23");
+  assert.equal(parseOutstandingSheetDate("29-Jul-26"), "2026-07-29");
+  assert.equal(parseOutstandingSheetDate("2026-05-23"), "2026-05-23");
+});
+
+test("laterDateOnly keeps the newest real invoice or sale date", () => {
+  assert.equal(laterDateOnly("2026-06-13", "2026-08-24", "2026-08-10"), "2026-08-24");
+  assert.equal(laterDateOnly("2026-06-13T00:00:00", "", null), "2026-06-13");
+  assert.equal(laterDateOnly("", null, undefined), "");
+});
+
+test("outstandingInvoiceDate prefers invoice_date then invoice days", () => {
+  assert.equal(outstandingInvoiceDate({ invoice_date: "2026-08-10", invoice_day: 80 }), "2026-08-10");
+  assert.equal(outstandingInvoiceDate({ invoice_day: 21 }, "2026-09-01"), "2026-08-11");
+});
+
+test("latestOutstandingInvoiceDate uses the newest matching invoice not the customer master date", () => {
+  assert.equal(
+    latestOutstandingInvoiceDate(
+      [
+        { customer_code: "1409", customer_name: "Rawa'i Al-Kutub Trading Company", invoice_date: "2026-08-10" },
+        { customer_code: "9999", customer_name: "Other", invoice_date: "2026-08-30" },
+      ],
+      "1409",
+      "Rawa'i Al-Kutub Trading Company",
+    ),
+    "2026-08-10",
+  );
+});
+
+test("0-30 outstanding clamps a 250-day master date to at most 30 days", () => {
+  assert.equal(
+    clampLatestInvoiceDateToOutstandingBuckets("2025-12-26", { days0To30: 33433 }, "2026-09-01"),
+    "2026-08-02",
+  );
+  assert.equal(
+    resolveVisitLastInvoiceDate({
+      latest_transaction_date: "2025-12-26",
+      outstanding_0_30: 33433,
+    }, "2026-09-01"),
+    "2026-08-02",
+  );
+});
+
+test("keeps a real August sale date when 0-30 outstanding also exists", () => {
+  assert.equal(
+    clampLatestInvoiceDateToOutstandingBuckets("2026-08-24", { days0To30: 3753 }, "2026-09-01"),
+    "2026-08-24",
+  );
+});
+
+test("isPlaceholderSalesmanValue detects voucher placeholders", () => {
+  assert.equal(isPlaceholderSalesmanValue("NOT ADDED IN VOUCHER"), true);
+  assert.equal(isPlaceholderSalesmanValue(""), true);
+  assert.equal(isPlaceholderSalesmanValue("N/A"), true);
+  assert.equal(isPlaceholderSalesmanValue("UNASSIGNED"), true);
+  assert.equal(isPlaceholderSalesmanValue("Osama"), false);
+});
+
+test("pickOutstandingSalesmanName prefers real salesman over empty and placeholders", () => {
+  const invoices = [
+    { salesman: "" },
+    { salesman: "NOT ADDED IN VOUCHER" },
+    { salesman: "Osama" },
+    { salesman: "Osama" },
+    { salesman: "" },
+  ];
+
+  assert.equal(pickOutstandingSalesmanName(invoices), "Osama");
+});
+
+test("applyOutstandingRowSalesman backfills invoice salesman from aggregate rows", () => {
+  const rows = [{
+    customer_code: "1134C",
+    customer_name: "Golden Top Company",
+    salesman: "Osama",
+    buckets: { ">120": 11850.52 },
+    total_outstanding: 11850.52,
+  }];
+  const invoices = [{
+    customer_code: "1134C",
+    customer_name: "Golden Top Company",
+    pending_amount: 11850.52,
+    salesman: "",
+  }];
+
+  assert.deepEqual(buildOutstandingRowSalesmanByCode(rows), new Map([["1134C", "Osama"]]));
+  assert.equal(applyOutstandingRowSalesman(invoices, rows)[0].salesman, "Osama");
+});
+
+test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {
+  const dataset = {
+    invoices: [
+      {
+        customer_code: "1173C LOULOAT AL NILE TRADING CO.",
+        customer_name: "1173C LOULOAT AL NILE TRADING CO.",
+        salesman: "Ahmed Nabil",
+      },
+      { customer_code: "2001A", salesman: "Another Salesman" },
+    ],
+  };
+
+  assert.deepEqual(
+    findOutstandingCustomerCodesForSalesmen(dataset, ["AHMED NABIL"]),
+    ["1173C"]
+  );
+});
+
+test("findOutstandingCustomerCodesForSalesmen does not widen unrelated scope", () => {
+  const dataset = {
+    invoices: [
+      { customer_code: "1173C", salesman: "Ahmed Nabil" },
+      { customer_code: "2001A", salesman: "Another Salesman" },
+    ],
+  };
+
+  assert.deepEqual(
+    findOutstandingCustomerCodesForSalesmen(dataset, ["AHMED NABIL"]),
+    ["1173C"]
+  );
+});
+
+test("outstanding ownership records other salesman assignments as authoritative", () => {
+  const ownership = resolveOutstandingCustomerOwnership({
+    invoices: [
+      { customer_code: "1173C", salesman: "Ahmed Nabil" },
+      { customer_code: "1114C", salesman: "Junaid" },
+    ],
+  }, ["AHMED NABIL"]);
+
+  assert.deepEqual([...ownership.assignedCustomerCodes], ["1173C", "1114C"]);
+  assert.deepEqual([...ownership.ownedCustomerCodes], ["1173C"]);
+});
+
+test("outstanding ownership uses scope matchers for parenthetical salesman labels", () => {
+  const dataset = {
+    invoices: [
+      { customer_code: "1542", salesman: "Parvez (PARVEZ)" },
+      { customer_code: "1290", salesman: "Junaid" },
+    ],
+  };
+  const parvezScope = buildSalesmanScopeMatchers([
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+    { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },
+    { salesman_code: "SOYEB", salesman_name: "Soyeb (SOYEB)" },
+  ]);
+
+  const ownership = resolveOutstandingCustomerOwnership(
+    dataset,
+    ["PARVEZ", "JUNAID", "SOYEB"],
+    parvezScope,
+  );
+
+  assert.deepEqual([...ownership.ownedCustomerCodes].sort(), ["1290", "1542"]);
+});
+
+test("outstanding ownership honors aggregate pending-bills row salesman over invoice labels", () => {
+  const junaidScope = buildSalesmanScopeMatchers([
+    { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+    { salesman_code: "SOYEB", salesman_name: "Soyeb (SOYEB)" },
+  ]);
+
+  const ownership = resolveOutstandingCustomerOwnership({
+    invoices: [{
+      customer_code: "1177",
+      customer_name: "MAK MARKETING COMPANY",
+      salesman: "Abdul Rehman",
+    }],
+    rows: [{
+      customer_code: "1177 MAK MARKETING COMPANY",
+      customer_name: "1177 MAK MARKETING COMPANY",
+      salesman: "Junaid",
+      buckets: { ">120": 5000 },
+      total_outstanding: 5000,
+    }],
+  }, ["JUNAID", "PARVEZ", "SOYEB"], junaidScope);
+
+  assert.equal(customerMatchesOutstandingCodeSet("1177C", ownership.ownedCustomerCodes), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1177", ownership.ownedCustomerCodes), true);
+});
+
+test("customerMatchesOutstandingCodeSet matches numeric suffix account variants", () => {
+  const owned = new Set(["1177"]);
+  assert.equal(customerMatchesOutstandingCodeSet("1177C", owned), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1177 MAK MARKETING COMPANY", owned), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1173C", owned), false);
+});
+
+test("customerCodeCandidates extracts code from a combined customer master value", () => {
+  assert.deepEqual(
+    customerCodeCandidates("1173C LOULOAT AL NILE TRADING CO."),
+    ["1173C LOULOAT AL NILE TRADING CO.", "1173C"]
+  );
+});
+
+test("extractLeadingCustomerCodeAndName only splits real customer codes", () => {
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("1542 RENEWABLE TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "1542", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
+  );
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("1468_Bahr Al-Takhfid Trading Company"),
+    { customer_code: "1468", customer_name: "Bahr Al-Takhfid Trading Company" },
+  );
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("RENEWABLE TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
+  );
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "", customer_name: "TECHNOLOGY FOR TRADING EST" },
+  );
+});
+
+test("parseOutstandingRows keeps 1468 underscore party invoices for collection queue", () => {
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Days", "Salesman"],
+    ["13-Jun-26", "NFD/986", "1468_Bahr Al-Takhfid Trading Company", "", 19315, "13-Jul-26", 51, 81, "Ahmed Nabil"],
+  ], 0);
+
+  assert.equal(parsed.invoices.length, 1);
+  assert.equal(resolveOutstandingInvoiceCustomerCode(parsed.invoices[0]), "1468");
+  assert.equal(hydrateOutstandingInvoices(parsed).length, 1);
+});
+
+test("repairOutstandingInvoice keeps the longest available party label", () => {
+  const repaired = repairOutstandingInvoice({
+    customer_code: "1542",
+    customer_name: "FOR TRADING EST",
+  });
+
+  assert.equal(repaired.customer_code, "1542");
+  assert.equal(repaired.customer_name, "1542 FOR TRADING EST");
+});
+
+test("pickLongestCustomerName prefers the fullest available label", () => {
+  assert.equal(
+    pickLongestCustomerName("FOR TRADING EST", "RENEWABLE TECHNOLOGY FOR TRADING EST", "1542"),
+    "RENEWABLE TECHNOLOGY FOR TRADING EST",
+  );
+});
+
+test("customerAccountCodesMatch treats numeric suffix variants as the same account", () => {
+  assert.equal(customerAccountCodesMatch("1199", "1199C"), true);
+  assert.equal(customerAccountCodesMatch("1199C", "1199 NASSER HAMAD AL-MALEK TRADING EST"), true);
+  assert.equal(customerAccountCodesMatch("1173C", "1174C"), false);
+});
+
+test("findOutstandingForCustomer matches order 1564 to outstanding 1564C", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "1564C",
+      customer_name: "1564C Windows of Thought and Creativity Foundation",
+      open_invoices: 2,
+      buckets: { "0-30": 800, "31-60": 1200 },
+      total_outstanding: 2000,
+    }],
+    invoices: [{
+      customer_code: "1564C",
+      customer_name: "1564C Windows of Thought and Creativity Foundation",
+      pending_amount: 2000,
+      invoice_day: 20,
+    }],
+  };
+
+  const customer = findOutstandingForCustomer(
+    dataset,
+    "1564",
+    "Windows of Thought and Creativity Foundation",
+  );
+  assert.equal(customer?.total_outstanding, 2000);
+  assert.equal(customer?.buckets["31-60"], 1200);
+  assert.equal(
+    isSameOutstandingCustomer(
+      "1564C",
+      "1564C Windows of Thought and Creativity Foundation",
+      "1564",
+      "Windows of Thought and Creativity Foundation",
+    ),
+    true,
+  );
+});
+
+test("findOutstandingHeaderRow accepts Open Balance and Aging invoice detail headers", () => {
+  const rows = [
+    ["Outstanding Report"],
+    ["Date", "Ref No", "Customer Account", "Open Balance", "Due Date", "Aging", "Salesman"],
+    ["10/08/2026", "INV-1", "1173C Customer", 250, "20/08/2026", 15, "Ahmed Nabil"],
+  ];
+
+  assert.equal(findOutstandingHeaderRow(rows), 1);
+});
+
+test("findOutstandingHeaderRow accepts Pending Amount and Overdue Days without Invoice Day", () => {
+  const rows = [
+    ["Date", "Ref No", "Customer Name", "Pending Amount", "Due Date", "Overdue Days", "Salesman"],
+    ["10/08/2026", "INV-1", "1173C Customer", 250, "20/08/2026", 15, "Ahmed Nabil"],
+  ];
+
+  assert.equal(findOutstandingHeaderRow(rows), 0);
+});
+
+test("Invoice Day is distinguished from Overdue Days", () => {
+  assert.equal(isOutstandingInvoiceDayHeader("Overdue Days"), false);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Day"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Days"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Da"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Date"), false);
+});
+
+test("Invoice Day falls back to the distinct column after Overdue Days", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due Date", "Overdue Days", "Invoice Da", "Salesman"];
+
+  assert.equal(findOutstandingInvoiceDayColumn(headers, 5, 7), 6);
+});
+
+test("Invoice Day is found even when Sales Person sits before Overdue", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Da"];
+  const columns = detectOutstandingColumnIndexes(headers);
+
+  assert.equal(columns.dueDate, 5);
+  assert.equal(columns.overdueDays, 6);
+  assert.equal(columns.invoiceDay, 7);
+});
+
+test("exact Due / Due on wins over a Due 90 Days ageing column", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Pending", "Due 90 Days", "Due on", "Overdue", "Invoice Days"];
+
+  assert.equal(findOutstandingDueDateColumn(headers), 5);
+  assert.equal(detectOutstandingColumnIndexes(headers).dueDate, 5);
+});
+
+test("Abdullah Hamad July invoice keeps Excel due date and invoice days", () => {
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Da", "Salesman"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", "", 11843, "29-Aug-26", 0, 30, "Junaid"],
+    ["22-Aug-26", "RNFD/283", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", "", 1638, "21-Sep-26", 0, 7, "Parvez"],
+  ], 0);
+
+  assert.equal(parsed.invoices.length, 2);
+  assert.equal(parsed.invoices[0].ref_no, "NFD/1247");
+  assert.equal(parsed.invoices[0].invoice_date, "2026-07-30");
+  assert.equal(parsed.invoices[0].due_date, "2026-08-29");
+  assert.equal(parsed.invoices[0].invoice_day, 30);
+  assert.equal(parsed.invoices[1].ref_no, "RNFD/283");
+  assert.equal(parsed.invoices[1].due_date, "2026-09-21");
+  assert.equal(parsed.invoices[1].invoice_day, 7);
+  assert.equal(parsed.rows[0].buckets["0-30"], 13481);
+});
+
+test("Excel date serials are not treated as invoice days or 1900 due dates", () => {
+  assert.equal(excelSerialToIsoDate(46233), "2026-07-30");
+  assert.equal(formatSheetDateValue(90), "");
+  assert.equal(sanitizeStoredInvoiceDays(46233), 0);
+  assert.equal(sanitizeStoredInvoiceDays(30), 30);
+
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"],
+    [46233, "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, 46263, 0, 30, "Junaid"],
+  ], 0);
+
+  assert.equal(parsed.invoices[0].invoice_date, "2026-07-30");
+  assert.equal(parsed.invoices[0].due_date, "2026-08-29");
+  assert.equal(parsed.invoices[0].invoice_day, 30);
+});
+
+test("Pending Bills parse is preferred over Bills Receivable 90-day rows", () => {
+  const pending = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, "29-Aug-26", 0, 30],
+  ], 0);
+  const receivable = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, "28-Oct-26", 0, 64],
+  ], 0);
+
+  const chosen = selectPreferredOutstandingParses([
+    { sheetName: "Bills Receivable", parsed: receivable },
+    { sheetName: "Pending Bills", parsed: pending },
+  ]);
+
+  assert.equal(chosen.length, 1);
+  assert.equal(chosen[0].invoices[0].due_date, "2026-08-29");
+  assert.equal(chosen[0].invoices[0].invoice_day, 30);
+});
+
+test("findOutstandingHeaderRow accepts short Party, Balance, and Days headers", () => {
+  const rows = [
+    ["Party", "Voucher", "Balance", "Days", "Sales Person"],
+    ["1173C Customer", "INV-1", 250, 15, "Ahmed Nabil"],
+  ];
+
+  assert.equal(findOutstandingHeaderRow(rows), 0);
+});
+
+test("combined outstanding headers preserve parent and child labels", () => {
+  const rows = [
+    ["Customer", "", "Outstanding", "Aging"],
+    ["Code", "Name", "Balance", "Days"],
+  ];
+
+  assert.deepEqual(combineOutstandingHeaderRows(rows, 1), [
+    "Customer Code",
+    "Name",
+    "Outstanding Balance",
+    "Aging Days",
+  ]);
+  assert.equal(findOutstandingHeaderRow(rows), 1);
+});
+
+test("pending bills banner rows do not merge into bills receivable detail headers", () => {
+  const rows = [
+    ["Pending Bills", "", "", "", "", "", 46252, "Overdue Above 90 Days"],
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "City Name", "State Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"],
+    [46053, 2825, "1126C  Five Trend Trading Company", "Osama", "", "Riyadh", 4362.23, 46083, 169, 199, "Osama"],
+  ];
+
+  const header = combineOutstandingHeaderRows(rows, 1);
+  assert.deepEqual(header.slice(0, 8), [
+    "Date",
+    "Ref. No.",
+    "Party's Name",
+    "Sales Person",
+    "City Name",
+    "State Name",
+    "Pending",
+    "Due on",
+  ]);
+  assert.equal(detectOutstandingPendingAmountColumn(header), 6);
+});
+
+test("single-cell report titles are not merged into detail headers", () => {
+  const rows = [
+    ["Pending Bills"],
+    ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due Date", "Overdue Days", "Invoice Day", "Salesman"],
+  ];
+
+  assert.deepEqual(combineOutstandingHeaderRows(rows, 1), rows[1]);
+});
+
+test("Pending Bills is preferred over an older Bills Receivable sheet", () => {
+  assert.deepEqual(
+    prioritizeOutstandingSheets(["Bills Receivable", "Summary", "Pending Bills"]),
+    ["Pending Bills", "Bills Receivable", "Summary"]
+  );
+});
+
+test("mergeParsedOutstandingSheets keeps invoice detail rows from secondary sheets", () => {
+  const merged = mergeParsedOutstandingSheets([
+    {
+      bucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
+      rows: [{
+        customer_code: "1001",
+        customer_name: "1001 Example Trading",
+        open_invoices: 1,
+        buckets: { ">120": 1000 },
+        total_outstanding: 1000,
+        salesman: "Ahmed Hadia",
+      }],
+      invoices: [{
+        customer_code: "1001",
+        customer_name: "1001 Example Trading",
+        ref_no: "INV-001",
+        pending_amount: 1000,
+        due_date: "2026-07-01",
+        overdue_days: 30,
+        invoice_day: 60,
+        salesman: "Ahmed Hadia",
+      }],
+    },
+    {
+      bucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
+      rows: [{
+        customer_code: "1235",
+        customer_name: "1235 Rokn Al-Muhareb Trading Company",
+        open_invoices: 2,
+        buckets: { "61-90": 4073 },
+        total_outstanding: 4073,
+        salesman: "Ahmed Nabil",
+      }],
+      invoices: [
+        {
+          customer_code: "1235",
+          customer_name: "1235 Rokn Al-Muhareb Trading Company",
+          ref_no: "RNFD/024",
+          pending_amount: 2531,
+          due_date: "2026-07-20",
+          overdue_days: 37,
+          invoice_day: 67,
+          salesman: "Ahmed Nabil",
+        },
+        {
+          customer_code: "1235",
+          customer_name: "1235 Rokn Al-Muhareb Trading Company",
+          ref_no: "RNFD/105",
+          pending_amount: 1542,
+          due_date: "2026-08-12",
+          overdue_days: 14,
+          invoice_day: 44,
+          salesman: "ABDALLA ANTHANATH",
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(merged.rows.length, 2);
+  assert.equal(findOutstandingForCustomer(merged, "1235", "Rokn Al-Muhareb Trading Company")?.total_outstanding, 4073);
+  assert.equal(merged.invoices.filter((invoice) => invoice.customer_code === "1235").length, 2);
+});
+
+test("resolve outstanding bucket labels falls back to customer bucket keys", () => {
+  assert.deepEqual(
+    resolveOutstandingBucketLabels([], { "31-60": 0, "0-30": 1200, ">120": 50 }),
+    ["0-30", "31-60", ">120"]
+  );
+  assert.deepEqual(
+    resolveOutstandingBucketLabels(
+      [],
+      [{ buckets: { "0-30": 10 } }, { buckets: { "61-90": 20, "0-30": 5 } }]
+    ),
+    ["0-30", "61-90"]
+  );
+});
+
+test("order PDF outstanding rows stay visible when stored labels are missing", () => {
+  const rows = buildOutstandingPdfBucketRows(
+    {
+      buckets: { "0-30": 1200, "31-60": 0, "61-90": 400 },
+      open_invoices: 3,
+      total_outstanding: 1600,
+    },
+    []
+  );
+
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+  assert.equal(rows.at(-1).amount, 1600);
+});
+
+test("sync outstanding customer from invoices when the aggregate row is missing", () => {
+  const customer = syncOutstandingCustomerFromInvoices(null, [
+    {
+      customer_code: "1564",
+      customer_name: "Windows of Thought and Creativity Foundation",
+      pending_amount: 2500,
+      invoice_day: 40,
+    },
+  ], "2026-09-06T00:00:00.000Z");
+
+  assert.equal(customer.customer_code, "1564");
+  assert.equal(customer.open_invoices, 1);
+  assert.equal(customer.buckets["31-60"], 2500);
+  assert.equal(customer.total_outstanding, 2500);
+  assert.equal(
+    buildOutstandingPdfBucketRows(customer, []).find((row) => row.kind === "total")?.amount,
+    2500
+  );
+});
+
+test("visible outstanding buckets keep empty gaps through the oldest balance", () => {
+  assert.deepEqual(
+    visibleOutstandingBucketLabels(
+      ["0-30", "31-60", "61-90", "91-120", ">120"],
+      { "0-30": 61312.25, "31-60": 0, "61-90": 14795.35, "91-120": 0, ">120": 0 }
+    ),
+    ["0-30", "31-60", "61-90"]
+  );
+});
+
+test("visible outstanding buckets keep all labels when every amount is zero", () => {
+  assert.deepEqual(
+    visibleOutstandingBucketLabels(
+      ["0-30", "31-60", "61-90", "91-120", ">120"],
+      { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 0, ">120": 0 }
+    ),
+    ["0-30", "31-60", "61-90", "91-120", ">120"]
+  );
+});
+
+test("order PDF outstanding rows show zeros when customer has no outstanding", () => {
+  const rows = buildOutstandingPdfBucketRows(null, ["0-30", "31-60", "61-90", "91-120", ">120"]);
+
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "91-120 days",
+    ">120 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+  assert.deepEqual(rows.map((row) => row.amount), [0, 0, 0, 0, 0, 0, 0]);
+});
+
+test("order PDF outstanding rows use default buckets when labels and customer are missing", () => {
+  const rows = buildOutstandingPdfBucketRows(null, []);
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "91-120 days",
+    ">120 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+});
+
+test("outstanding buckets collapse into the three Visit Status age bands", () => {
+  assert.deepEqual(
+    summarizeOutstandingBuckets({
+      "0-30": 100,
+      "31-60": 200,
+      "61-90": 300,
+      "91-120": 400,
+      ">120": 500,
+    }),
+    { days0To30: 100, days30To60: 200, daysAbove60: 1200 }
+  );
+});
+
+test("visit status outstanding buckets split at 90 days", () => {
+  assert.deepEqual(
+    summarizeOutstandingBucketsForVisitStatus({
+      "0-30": 100,
+      "31-60": 200,
+      "61-90": 300,
+      "91-120": 400,
+      ">120": 500,
+    }),
+    { days0To30: 100, days30To60: 200, days61To90: 300, daysAbove90: 900 }
+  );
+});
+
+test("findOutstandingHeaderRow scans beyond the old 25-row report preamble", () => {
+  const rows = Array.from({ length: 30 }, () => [""]);
+  rows.push(["Customer Name", "0-30", "31-60", "Open Invoices"]);
+
+  assert.equal(findOutstandingHeaderRow(rows), 30);
+});
+
+test("resolveInvoiceAgingDays prefers invoice day over excel serial overdue values", () => {
+  const invoice = {
+    invoice_day: 41,
+    overdue_days: 46241,
+    due_date: "2026-08-07",
+    pending_amount: 46211,
+  };
+
+  assert.equal(resolveInvoiceAgingDays(invoice, "2026-08-18T12:00:00"), 41);
+  assert.equal(resolveOverdueDaysFromDueDate(invoice, "2026-08-18T12:00:00"), 11);
+});
+
+test("resolveInvoiceDays uses invoice day and never overdue days", () => {
+  assert.equal(resolveInvoiceDays({
+    invoice_day: 90,
+    overdue_days: 5,
+    due_date: "2026-08-17",
+  }, "2026-08-22T12:00:00"), 90);
+
+  assert.equal(resolveInvoiceDays({
+    invoice_date: "2026-07-23",
+    overdue_days: 40,
+    due_date: "2026-07-13",
+  }, "2026-08-22T12:00:00"), 30);
+
+  assert.equal(resolveInvoiceDays({
+    overdue_days: 82,
+    due_date: "2026-06-01",
+  }, "2026-08-22T12:00:00"), 0);
+});
+
+test("sanitizeStoredOverdueDays drops excel serial values from uploads", () => {
+  assert.equal(sanitizeStoredOverdueDays(46241, 41), 0);
+  assert.equal(sanitizeStoredOverdueDays(15, 41), 15);
+});
+
+test("normalizeOutstandingHeader strips curly apostrophes from Party Name headers", () => {
+  assert.equal(normalizeOutstandingHeader("Party\u2019s Name"), "partys name");
+});
+
+test("repairOutstandingInvoice extracts 1119C from party name text", () => {
+  const repaired = repairOutstandingInvoice({
+    customer_code: "",
+    customer_name: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+    pending_amount: 2805538,
+    ref_no: "SI/9901",
+  });
+
+  assert.equal(resolveOutstandingInvoiceCustomerCode(repaired), "1119C");
+  assert.equal(repaired.customer_code, "1119C");
+});
+
+test("hydrateOutstandingInvoices synthesizes missing invoice rows from aggregate rows", () => {
+  const invoices = hydrateOutstandingInvoices({
+    invoices: [],
+    rows: [{
+      customer_code: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      customer_name: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      buckets: { ">120": 2805538 },
+      total_outstanding: 2805538,
+    }],
+  });
+
+  assert.equal(invoices.length, 1);
+  assert.equal(resolveOutstandingInvoiceCustomerCode(invoices[0]), "1119C");
+  assert.equal(invoices[0].pending_amount, 2805538);
+});
+
+test("prospect customers do not inherit outstanding from similar customer names", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "1098",
+      customer_name: "Al Tawfeer Trading Company",
+      open_invoices: 1,
+      buckets: { ">120": 2224 },
+      total_outstanding: 2224,
+    }],
+    invoices: [{
+      customer_code: "1098",
+      customer_name: "Al Tawfeer Trading Company",
+      ref_no: "1098",
+      pending_amount: 2224,
+      overdue_days: 328,
+      salesman: "Abdul Rehman",
+    }],
+  };
+
+  const customer = findOutstandingForCustomer(
+    dataset,
+    "PROSPECT-126",
+    "Raed Al Tawfeer Trading Company, Al Shifa Branch",
+  );
+
+  assert.equal(customer, null);
+  assert.equal(
+    isSameOutstandingCustomer(
+      "1098",
+      "Al Tawfeer Trading Company",
+      "PROSPECT-126",
+      "Raed Al Tawfeer Trading Company, Al Shifa Branch",
+    ),
+    false,
+  );
+});
+
+test("mapOutstandingBucketsToCollectionFields mirrors customer audit bucket layout", () => {
+  assert.deepEqual(
+    mapOutstandingBucketsToCollectionFields({
+      "0-30": 0,
+      "31-60": 1160,
+      "61-90": 2244,
+      "91-120": 2906,
+    }),
+    {
+      outstanding_0_30: 0,
+      outstanding_30_60: 1160,
+      outstanding_61_90: 2244,
+      outstanding_91_120: 2906,
+      outstanding_above_120: 0,
+    },
+  );
+});
+
+test("buildCollectionOutstandingBucketsFromInvoices prefers invoice day over overdue days", () => {
+  const withInvoiceDay = buildCollectionOutstandingBucketsFromInvoices([
+    { pending_amount: 1159.89, invoice_day: 35, overdue_days: 5 },
+    { pending_amount: 2243.94, invoice_day: 65, overdue_days: 35 },
+    { pending_amount: 2906, invoice_day: 117, overdue_days: 89 },
+  ]);
+
+  assert.deepEqual(withInvoiceDay, {
+    outstanding_cash: 0,
+    outstanding_0_30: 0,
+    outstanding_30_60: 1159.89,
+    outstanding_61_90: 2243.94,
+    outstanding_91_120: 2906,
+    outstanding_above_120: 0,
+  });
+
+  const overdueOnly = buildCollectionOutstandingBucketsFromInvoices([
+    { pending_amount: 1159.89, overdue_days: 5 },
+    { pending_amount: 2243.94, overdue_days: 35 },
+    { pending_amount: 2906, overdue_days: 89 },
+  ]);
+
+  assert.deepEqual(overdueOnly, {
+    outstanding_cash: 0,
+    outstanding_0_30: 1159.89,
+    outstanding_30_60: 2243.94,
+    outstanding_61_90: 2906,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  });
+});
+
+test("resolveCollectionOutstandingBuckets prefers invoice-day buckets over lumped row totals", () => {
+  const fromInvoices = resolveCollectionOutstandingBuckets({
+    rowBuckets: {
+      "0-30": 0,
+      "31-60": 12878.85,
+      "61-90": 0,
+      "91-120": 0,
+      ">120": 0,
+    },
+    invoices: [
+      { pending_amount: 2850, invoice_day: 64, overdue_days: 34 },
+      { pending_amount: 2949, invoice_day: 37, overdue_days: 7 },
+      { pending_amount: 7079, invoice_day: 32, overdue_days: 2 },
+    ],
+  });
+
+  assert.equal(fromInvoices.outstanding_0_30, 0);
+  assert.equal(fromInvoices.outstanding_30_60, 10028);
+  assert.equal(fromInvoices.outstanding_61_90, 2850);
+  assert.equal(fromInvoices.outstanding_91_120, 0);
+});
+
+test("News Gate 5-Sep outstanding keeps both remaining invoices in 31-60", () => {
+  const invoices = [
+    { pending_amount: 5799.45, invoice_day: 39, overdue_days: 9, ref_no: "NFD/1233" },
+    { pending_amount: 7079.4, invoice_day: 34, overdue_days: 4, ref_no: "RNFD/161" },
+  ];
+  const buckets = resolveCollectionOutstandingBuckets({
+    rowBuckets: { "31-60": 12878.85 },
+    invoices,
+  });
+  const customer = syncOutstandingCustomerFromInvoices({
+    customer_code: "1204C",
+    buckets: { "31-60": 10029, "61-90": 2850 },
+    open_invoices: 3,
+    total_outstanding: 12879,
+  }, invoices);
+
+  assert.equal(Number(buckets.outstanding_30_60.toFixed(2)), 12878.85);
+  assert.equal(buckets.outstanding_61_90, 0);
+  assert.equal(Number(customer.buckets["31-60"].toFixed(2)), 12878.85);
+  assert.equal(customer.buckets["61-90"], 0);
+  assert.equal(customer.open_invoices, 2);
+  assert.equal(Number(customer.total_outstanding.toFixed(2)), 12878.85);
+});
+
+test("Bills Receivable parse is preferred over Customer wise totals", () => {
+  const billsReceivable = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["28-Jul-26", "NFD/1233", "1204C  News Gate Trading Company", 5799.45, "27-Aug-26", 9, 39],
+    ["02-Aug-26", "RNFD/161", "1204C  News Gate Trading Company", 7079.4, "01-Sep-26", 4, 34],
+  ], 0);
+  const customerWise = {
+    rows: [{
+      customer_code: "1204C",
+      customer_name: "News Gate Trading Company",
+      buckets: { "31-60": 12878.85 },
+      open_invoices: 1,
+      total_outstanding: 12878.85,
+    }],
+    bucketLabels: ["31-60"],
+    invoices: [],
+  };
+
+  const chosen = selectPreferredOutstandingParses([
+    { sheetName: "Customer wise", parsed: customerWise },
+    { sheetName: "Bills Receivable", parsed: billsReceivable },
+  ]);
+
+  assert.equal(chosen.length, 1);
+  assert.equal(chosen[0].invoices.length, 2);
+  assert.equal(Number(chosen[0].rows[0].buckets["31-60"].toFixed(2)), 12878.85);
+  assert.equal(chosen[0].rows[0].buckets["61-90"], 0);
+});

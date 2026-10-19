@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MADIBA SFA">
+  <rect width="512" height="512" rx="96" fill="#073f4c"/>
+  <path d="M128 352V160h72c44 0 76 28 76 72s-32 72-76 72h-36v48H128zm48-84h24c18 0 28-10 28-24s-10-24-28-24h-24v48z" fill="#ffffff"/>
+  <path d="M284 352V160h48v192h-48z" fill="#7fd0df"/>
+  <circle cx="392" cy="256" r="56" fill="#f4b942"/>
+</svg>

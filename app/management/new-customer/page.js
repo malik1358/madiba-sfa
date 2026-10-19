@@ -1,0 +1,1386 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
+import MostVisitedPages from "../../components/MostVisitedPages";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
+import { translateText } from "../../lib/translateText";
+import { detectTable } from "../../lib/schemaGuards";
+import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
+import { queueTransactionAlert } from "../../lib/transactionAlertClient";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { resolveAuthSession } from "../../lib/authSession";
+import ExportableTable from "../../components/ExportableTable";
+import {
+  createOfflineProspectId,
+  normalizeProspectSalesmanCode,
+  resolveProspectCustomerCode,
+} from "../../lib/prospects";
+import { postJsonResilient } from "../../lib/offlineApi";
+import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from "../../lib/offlineProspects";
+import { upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
+import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
+
+const TEXT = {
+  title: { en: "New Customer", ar: "عميل جديد" },
+  subtitle: { en: "Prospect registration", ar: "تسجيل عميل محتمل" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading prospect registration...", ar: "جاري تحميل تسجيل العميل المحتمل..." },
+  orderReceived: { en: "Was an order received?", ar: "هل تم استلام طلب؟" },
+  orderReceivedHint: { en: "Choose Yes to create the order, or No to schedule the next follow-up visit.", ar: "اختر نعم لإنشاء الطلب، أو لا لتحديد موعد زيارة المتابعة القادمة." },
+  yesCreateOrder: { en: "Yes, Create Order", ar: "نعم، إنشاء طلب" },
+  noScheduleFollowUp: { en: "No, Schedule Follow-up", ar: "لا، تحديد متابعة" },
+  nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
+  saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
+  savingFollowUp: { en: "Saving...", ar: "جاري الحفظ..." },
+  linkCustomer: { en: "Link Customer", ar: "ربط عميل" },
+  linkCustomerTitle: { en: "Link prospect to customer", ar: "ربط العميل المحتمل بعميل" },
+  linkCustomerHint: {
+    en: "Enter the ERP customer code (e.g. 1301). The app validates the code and shows the ERP customer name. Prospect and ERP names may differ — linking is by code only.",
+    ar: "أدخل كود العميل في النظام (مثل 1301). يتحقق التطبيق من الكود ويعرض اسم العميل في النظام. قد يختلف اسم العميل المحتمل عن اسم ERP — الربط يتم بالكود فقط.",
+  },
+  prospectNameLabel: { en: "Prospect name", ar: "اسم العميل المحتمل" },
+  erpCustomerNameLabel: { en: "ERP customer name", ar: "اسم العميل في النظام" },
+  namesMayDifferNote: {
+    en: "Names do not need to match. Confirm the customer code is correct.",
+    ar: "لا يشترط تطابق الأسماء. تأكد من صحة كود العميل.",
+  },
+  customerCode: { en: "Customer code", ar: "كود العميل" },
+  copyProspectGps: { en: "Copy prospect GPS to customer", ar: "نسخ GPS من العميل المحتمل إلى العميل" },
+  overwriteCustomerGps: { en: "Replace existing customer GPS", ar: "استبدال GPS الحالي للعميل" },
+  linkSave: { en: "Link", ar: "ربط" },
+  linking: { en: "Linking...", ar: "جاري الربط..." },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  linkedCustomer: { en: "Linked", ar: "مرتبط" },
+  viewCustomer: { en: "View", ar: "عرض" },
+  prospectGpsAvailable: { en: "Prospect GPS available", ar: "GPS متوفر للعميل المحتمل" },
+  customerLookupFailed: { en: "Customer not found for this code.", ar: "لم يتم العثور على عميل بهذا الكود." },
+  suggestedMatches: { en: "Suggested ERP customers without GPS", ar: "عملاء ERP المقترحون بدون GPS" },
+  suggestedMatchesHint: {
+    en: "Best name matches from ERP customers that still need GPS coordinates.",
+    ar: "أفضل التطابقات الاسمية من عملاء ERP الذين ما زالوا يحتاجون إحداثيات GPS.",
+  },
+  loadingSuggestions: { en: "Finding matching customers...", ar: "جاري البحث عن عملاء مطابقين..." },
+  noSuggestedMatches: { en: "No close ERP matches without GPS were found.", ar: "لم يتم العثور على تطابقات ERP قريبة بدون GPS." },
+  useSuggestedCustomer: { en: "Use", ar: "استخدام" },
+  missingGpsLabel: { en: "No GPS", ar: "بدون GPS" },
+  allProspects: { en: "All Prospects", ar: "كل العملاء المحتملين" },
+  allProspectsHint: { en: "All registered prospects in your scope, newest first.", ar: "كل العملاء المحتملين المسجلين ضمن صلاحياتك، الأحدث أولاً." },
+  searchProspects: { en: "Search prospects", ar: "بحث في العملاء المحتملين" },
+  orderNumber: { en: "Order #", ar: "رقم الطلب" },
+  noOrders: { en: "No order", ar: "لا يوجد طلب" },
+};
+
+const INITIAL_FORM = {
+  customer_name_en: "",
+  customer_name_ar: "",
+  shop_name: "",
+  owner_name: "",
+  mobile: "",
+  whatsapp: "",
+  email: "",
+  city: "",
+  area: "",
+  national_address: "",
+  gps_location: "",
+  customer_type: "Retail",
+  salesman_code: "",
+  notes: "",
+};
+
+const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
+
+function parseGpsCoordinates(rawValue) {
+  const text = String(rawValue || "").trim();
+  if (!text.includes(",")) return null;
+
+  const [rawLat, rawLng] = text.split(",").map((part) => part.trim());
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function buildProspectOrderParams({ id, offlineId, customerName, salesmanCode }) {
+  const customerCode = resolveProspectCustomerCode({ id, offline_id: offlineId }) || `PROSPECT-${id}`;
+  const resolvedName = String(customerName || "").trim() || `Prospect ${id || offlineId}`;
+  const params = new URLSearchParams({
+    customer_code: customerCode,
+    customer_name: resolvedName,
+    salesman_code: String(salesmanCode || "").trim(),
+    source: "prospect",
+  });
+  return params.toString();
+}
+
+function prospectRowHasGps(row) {
+  const lat = Number(row?.latitude);
+  const lng = Number(row?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+}
+
+function buildProspectOrderHref(order, row) {
+  if (!order?.id) return "";
+  const params = new URLSearchParams({
+    order_id: String(order.id),
+    customer_code: `PROSPECT-${row.id}`,
+    customer_name: String(row.company_name || row.shop_name || row.customer_name || `Prospect ${row.id}`).trim(),
+    salesman_code: String(row.salesman_code || "").trim(),
+    source: "prospect",
+  });
+  return `/management/new-order?${params.toString()}`;
+}
+
+function prospectMatchesSearch(row, searchText) {
+  const query = String(searchText || "").trim().toLowerCase();
+  if (!query) return true;
+
+  const haystack = [
+    row.id,
+    row.company_name,
+    row.shop_name,
+    row.customer_name,
+    row.contact_person,
+    row.owner_name,
+    row.mobile,
+    row.city,
+    row.area,
+    row.status,
+    row.converted_customer_code,
+    ...(Array.isArray(row.order_numbers) ? row.order_numbers : []),
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+
+  return haystack.includes(query);
+}
+
+async function reverseGeocode(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1&accept-language=en`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error("Reverse geocoding request failed.");
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const address = payload?.address || {};
+  const city = String(address.city || address.town || address.village || address.state || "").trim();
+  const area = String(address.suburb || address.neighbourhood || address.city_district || address.county || address.quarter || "").trim();
+
+  return {
+    city,
+    area,
+    formatted: String(payload?.display_name || "").trim(),
+  };
+}
+
+async function translateToArabic(text) {
+  const translated = await translateText(text, { from: "en", to: "ar" });
+  if (!translated) {
+    throw new Error("Translation request failed.");
+  }
+  return translated;
+}
+
+export default function NewCustomerPage() {
+  const router = useRouter();
+  const { language, dir, setLanguage } = useAppLanguage();
+  const { access } = useModuleAccess();
+  const requireGps = shouldRequireTransactionGps(access.role);
+  const t = translate(language, TEXT);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [schemaWarning, setSchemaWarning] = useState("");
+  const [prospectsEnabled, setProspectsEnabled] = useState(true);
+  const [currentSalesmanCode, setCurrentSalesmanCode] = useState("");
+  const [salesmen, setSalesmen] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [form, setForm] = useState(INITIAL_FORM);
+  const [documents, setDocuments] = useState([]);
+  const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
+  const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
+  const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
+
+  usePopupMessages({
+    message,
+    error,
+    warnings: [schemaWarning, gpsPermissionWarning].filter(Boolean),
+  });
+  const [arabicNameEdited, setArabicNameEdited] = useState(false);
+  const [translatingName, setTranslatingName] = useState(false);
+  const [savedProspect, setSavedProspect] = useState(null);
+  const [showFollowUpDate, setShowFollowUpDate] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [linkProspect, setLinkProspect] = useState(null);
+  const [linkCustomerCode, setLinkCustomerCode] = useState("");
+  const [linkCustomerPreview, setLinkCustomerPreview] = useState(null);
+  const [linkCopyGps, setLinkCopyGps] = useState(true);
+  const [linkOverwriteGps, setLinkOverwriteGps] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkLookupError, setLinkLookupError] = useState("");
+  const [linkSuggestions, setLinkSuggestions] = useState([]);
+  const [loadingLinkSuggestions, setLoadingLinkSuggestions] = useState(false);
+  const [prospectSearch, setProspectSearch] = useState("");
+  const [loadingProspects, setLoadingProspects] = useState(false);
+
+  async function loadProspectsList(accessToken) {
+    setLoadingProspects(true);
+    try {
+      const localProspects = await readLocalProspects();
+      let serverProspects = [];
+
+      if (accessToken) {
+        const response = await fetch("/api/prospects", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && payload.success) {
+          serverProspects = Array.isArray(payload.prospects) ? payload.prospects : [];
+        }
+      }
+
+      const merged = [];
+      const seen = new Set();
+      for (const row of [...localProspects, ...serverProspects]) {
+        const key = String(row?.offline_id || row?.id || "").trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(row);
+      }
+      setRecent(merged);
+    } catch (err) {
+      try {
+        setRecent(await readLocalProspects());
+      } catch {
+        setRecent([]);
+      }
+      if (accessToken) {
+        setError(err.message || "Unable to load prospects.");
+      }
+    } finally {
+      setLoadingProspects(false);
+    }
+  }
+
+  useEffect(() => {
+    const englishName = String(form.customer_name_en || "").trim();
+
+    if (!englishName || arabicNameEdited) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        setTranslatingName(true);
+        const translated = await translateToArabic(englishName);
+        if (translated) {
+          setForm((current) => {
+            if (String(current.customer_name_en || "").trim() !== englishName) {
+              return current;
+            }
+            return { ...current, customer_name_ar: translated };
+          });
+        }
+      } catch {
+        // Ignore translation failures so manual input can still continue.
+      } finally {
+        setTranslatingName(false);
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [form.customer_name_en, arabicNameEdited]);
+
+  useEffect(() => {
+    if (!requireGps) return;
+    if (loading) return;
+    if (form.gps_location) return;
+
+    captureLocation();
+  }, [loading, form.gps_location, requireGps]);
+
+  useEffect(() => {
+    if (!savedProspect) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [savedProspect]);
+
+  useEffect(() => {
+    async function load() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) {
+          throw new Error("Please login again.");
+        }
+
+        const prospectsCheck = await detectTable(supabase, "prospects");
+        const scope = await fetchSalesScope();
+        setCurrentSalesmanCode(scope.currentSalesmanCode || "");
+        setProspectsEnabled(prospectsCheck.available);
+        setSchemaWarning(
+          prospectsCheck.available
+            ? ""
+            : `${prospectsCheck.reason}. Create the prospects table to enable prospect registration.`
+        );
+
+        const salesmanRows = (Array.isArray(scope.visibleMembers) ? scope.visibleMembers : [])
+          .filter((member) => ["salesman", "manager", "admin"].includes(String(member.role || "").toLowerCase()))
+          .map((member) => ({
+            id: member.id,
+            salesman_code: String(member.salesman_code || "").trim(),
+            salesman_name: String(member.salesman_name || "").trim(),
+            role: String(member.role || "").trim(),
+          }))
+          .filter((member) => member.salesman_code)
+          .sort((a, b) => (a.salesman_name || a.salesman_code).localeCompare(b.salesman_name || b.salesman_code));
+
+        if (salesmanRows.length === 0 && scope.currentSalesmanCode) {
+          salesmanRows.push({
+            id: scope.currentUserId || session.user.id,
+            salesman_code: scope.currentSalesmanCode,
+            salesman_name: scope.currentSalesmanCode,
+            role: String(scope.role || "salesman").toLowerCase(),
+          });
+        }
+
+        setSalesmen(salesmanRows);
+        if (salesmanRows.length > 0) {
+          const ownRow = salesmanRows.find(
+            (row) => normalizeProspectSalesmanCode(row.salesman_code) === normalizeProspectSalesmanCode(scope.currentSalesmanCode)
+          );
+          setForm((current) => ({
+            ...current,
+            salesman_code: current.salesman_code
+              || ownRow?.salesman_code
+              || scope.currentSalesmanCode
+              || salesmanRows[0].salesman_code
+              || "",
+          }));
+        }
+
+        await loadProspectsList(session.access_token);
+      } catch (err) {
+        setError(err.message || "Unable to load setup data.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, []);
+
+  async function captureLocation() {
+    if (!navigator.geolocation) {
+      setGpsPermissionWarning("Location is not supported on this device. GPS is required to save a prospect.");
+      return;
+    }
+
+    setGpsPermissionWarning("");
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude.toFixed(6);
+        const lng = position.coords.longitude.toFixed(6);
+        setForm((current) => ({ ...current, gps_location: `${lat}, ${lng}` }));
+        setGpsStatus(`Captured ${lat}, ${lng}`);
+
+        try {
+          const location = await reverseGeocode(lat, lng);
+          if (location.city || location.area) {
+            setForm((current) => ({
+              ...current,
+              city: location.city || current.city,
+              area: location.area || current.area,
+            }));
+
+            const areaLabel = location.area || "-";
+            const cityLabel = location.city || "-";
+            setGpsStatus(`Captured ${lat}, ${lng} • ${areaLabel}, ${cityLabel}`);
+          } else if (location.formatted) {
+            setGpsStatus(`Captured ${lat}, ${lng} • ${location.formatted}`);
+          }
+        } catch {
+          setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
+        }
+      },
+      (positionError) => {
+        if (positionError?.code === 1) {
+          setGpsPermissionWarning("Location permission is blocked. Allow location access in your browser and reload this page.");
+        } else if (positionError?.code === 2) {
+          setGpsPermissionWarning("Location is unavailable right now. Check device GPS/network and reload this page.");
+        } else {
+          setGpsPermissionWarning("Unable to read location. Please allow GPS/location access and reload this page.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  function handleDocumentPick(event) {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+
+    setDocuments((current) => [
+      ...current,
+      {
+        type: selectedDocumentType,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+    ]);
+
+    event.target.value = "";
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    if (!prospectsEnabled) {
+      setError("Prospect registration is disabled until the prospects table is available.");
+      return;
+    }
+
+    if (requireGps && !form.gps_location) {
+      setError("GPS location is required for new customer saving.");
+      return;
+    }
+
+    const normalizedMobile = String(form.mobile || "").replace(/\D/g, "");
+    if (!/^05\d{8}$/.test(normalizedMobile)) {
+      setError("Mobile must be a valid KSA number with 10 digits starting with 05.");
+      return;
+    }
+
+    const parsedGps = form.gps_location ? parseGpsCoordinates(form.gps_location) : null;
+    if (requireGps && !parsedGps) {
+      setError("GPS location must be in the format: latitude, longitude");
+      return;
+    }
+
+    if (!String(form.city || "").trim() || !String(form.area || "").trim()) {
+      setError("City and Area are required. Enter them manually or capture GPS again.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) {
+        throw new Error("Please login again.");
+      }
+
+      const remarks = [
+        form.shop_name && form.shop_name !== form.customer_name_en
+          ? `Customer Name: ${form.customer_name_en}`
+          : "",
+        form.customer_type ? `Customer Type: ${form.customer_type}` : "",
+        form.whatsapp ? `WhatsApp: ${form.whatsapp}` : "",
+        form.email ? `Email: ${form.email}` : "",
+        form.national_address ? `National Address: ${form.national_address}` : "",
+        form.notes,
+        documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
+      ].filter(Boolean).join("\n") || null;
+
+      const payload = {
+        company_name: form.shop_name || form.customer_name_en,
+        company_name_ar: form.customer_name_ar || null,
+        contact_person: form.owner_name || null,
+        mobile: normalizedMobile,
+        city: form.city,
+        area: form.area,
+        latitude: parsedGps ? Number(parsedGps.lat.toFixed(7)) : null,
+        longitude: parsedGps ? Number(parsedGps.lng.toFixed(7)) : null,
+        salesman_code: form.salesman_code || currentSalesmanCode,
+        remarks,
+        offline_id: createOfflineProspectId(),
+      };
+      const offlineId = payload.offline_id;
+      const localProspect = {
+        id: null,
+        offline_id: offlineId,
+        company_name: payload.company_name,
+        company_name_ar: payload.company_name_ar,
+        contact_person: payload.contact_person,
+        mobile: payload.mobile,
+        city: payload.city,
+        area: payload.area,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        salesman_code: payload.salesman_code,
+        remarks: payload.remarks,
+        status: "NEW",
+        created_at: new Date().toISOString(),
+      };
+
+      const saveResult = await postJsonResilient({
+        url: "/api/prospects",
+        queueFirst: true,
+        jsonBody: payload,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: "prospect_create",
+          offlineId,
+        },
+      });
+
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to register prospect.");
+      }
+
+      const data = saveResult.payload?.data || localProspect;
+      const removedColumns = Array.isArray(saveResult.payload?.removedColumns) ? saveResult.payload.removedColumns : [];
+
+      if (removedColumns.length > 0) {
+        const removed = Array.from(new Set(removedColumns)).join(", ");
+        setSchemaWarning(`Prospect was saved, but these missing columns were skipped: ${removed}`);
+      }
+
+      await upsertLocalProspect({
+        ...localProspect,
+        ...data,
+        offline_id: offlineId,
+      });
+
+      try {
+        const scope = await fetchSalesScope();
+        await upsertLocalVisibleCustomer(scope, prospectToOrderCustomer({
+          ...localProspect,
+          offline_id: offlineId,
+        }));
+      } catch {
+        // Local customer cache is best-effort so order creation can still use URL params.
+      }
+
+      queueTransactionAlert(session.access_token, {
+        transactionType: "PROSPECT_REGISTERED",
+        referenceKey: `prospect:${offlineId}:registered`,
+        companyName: form.customer_name_en || form.shop_name,
+        customerCode: resolveProspectCustomerCode({ offline_id: offlineId }),
+      });
+
+      await loadProspectsList(session.access_token);
+
+      const query = buildProspectOrderParams({
+        id: data.id,
+        offlineId,
+        customerName: form.customer_name_en || form.shop_name,
+        salesmanCode: form.salesman_code,
+      });
+
+      setSavedProspect({ id: data.id, offlineId, query });
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setMessage(saveResult.queued
+        ? "Prospect saved on this device. You can create the order now — sync continues in the background."
+        : "Prospect saved. Confirm whether an order was received.");
+    } catch (err) {
+      const message = String(err.message || "Unable to register prospect.");
+      if (message.toLowerCase().includes("row-level security")) {
+        setError("Unable to save this prospect. Confirm the Salesman field shows your code, then try again.");
+      } else {
+        setError(message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveFollowUp() {
+    if ((!savedProspect?.id && !savedProspect?.offlineId) || !followUpDate) {
+      setError("Next Visit Date is required.");
+      return;
+    }
+    try {
+      validateNextVisitDate(followUpDate, { required: true });
+    } catch (validationError) {
+      setError(String(validationError?.message || "Next Visit Date is invalid."));
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setSavingFollowUp(true);
+    setError("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("Please login again.");
+
+      const location = await requireGpsLocation({ role: access.role });
+
+      const result = await postJsonResilient({
+        url: "/api/prospects",
+        method: "PATCH",
+        queueFirst: true,
+        jsonBody: {
+          id: savedProspect.id,
+          offline_id: savedProspect.offlineId || "",
+          follow_up_date: followUpDate,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: "prospect_follow_up",
+          offlineId: savedProspect.offlineId || "",
+        },
+      });
+      if (!result.success) {
+        throw new Error(result.message || "Unable to schedule follow-up visit.");
+      }
+
+      if (location) {
+        try {
+          await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
+            prospect_id: savedProspect.id,
+            follow_up_date: followUpDate,
+          });
+        } catch {
+          // Follow-up is already queued locally; GPS log can sync later.
+        }
+      }
+
+      queueTransactionAlert(session.access_token, {
+        transactionType: "PROSPECT_FOLLOW_UP",
+        referenceKey: `prospect:${savedProspect.id}:follow-up:${followUpDate}`,
+        referenceId: savedProspect.id,
+        companyName: form.customer_name_en || form.shop_name,
+      });
+
+      setRecent((current) => current.map((row) => (
+        row.id === savedProspect.id || row.offline_id === savedProspect.offlineId
+          ? { ...row, status: "FOLLOW_UP", follow_up_date: followUpDate }
+          : row
+      )));
+      setSavedProspect(null);
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setForm((current) => ({ ...INITIAL_FORM, salesman_code: current.salesman_code }));
+      setDocuments([]);
+      setArabicNameEdited(false);
+      setMessage(`Follow-up visit scheduled for ${followUpDate}.`);
+    } catch (err) {
+      setError(err.message || "Unable to schedule follow-up visit.");
+    } finally {
+      setSavingFollowUp(false);
+    }
+  }
+
+  function openLinkProspect(row) {
+    setLinkProspect(row);
+    setLinkCustomerCode("");
+    setLinkCustomerPreview(null);
+    setLinkCopyGps(prospectRowHasGps(row));
+    setLinkOverwriteGps(false);
+    setLinkLookupError("");
+    setLinkSuggestions([]);
+    setError("");
+    void loadLinkSuggestions(row);
+  }
+
+  function closeLinkProspect() {
+    setLinkProspect(null);
+    setLinkCustomerCode("");
+    setLinkCustomerPreview(null);
+    setLinkLookupError("");
+    setLinkSuggestions([]);
+    setLoadingLinkSuggestions(false);
+  }
+
+  async function loadLinkSuggestions(prospectRow) {
+    if (!prospectRow?.id) {
+      setLinkSuggestions([]);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setLoadingLinkSuggestions(true);
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch(
+        `/api/prospects?linkSuggestionsFor=${encodeURIComponent(String(prospectRow.id))}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load customer suggestions.");
+      }
+
+      setLinkSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+    } catch {
+      setLinkSuggestions([]);
+    } finally {
+      setLoadingLinkSuggestions(false);
+    }
+  }
+
+  async function selectLinkSuggestion(suggestion) {
+    const code = String(suggestion?.customer_code || "").trim().toUpperCase();
+    if (!code) return;
+
+    setLinkCustomerCode(code);
+    setLinkCustomerPreview({
+      customer_code: code,
+      customer_name: String(suggestion?.customer_name || "").trim(),
+    });
+    setLinkLookupError("");
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) return;
+
+      const response = await fetch(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && payload.customer) {
+        setLinkCustomerPreview({
+          customer_code: String(payload.customer.customer_code || code).trim(),
+          customer_name: String(payload.customer.customer_name || suggestion?.customer_name || "").trim(),
+        });
+      }
+    } catch {
+      // Keep the suggestion preview when lookup fails silently.
+    }
+  }
+
+  async function lookupLinkCustomer() {
+    const code = String(linkCustomerCode || "").trim().toUpperCase();
+    if (!code) {
+      setLinkCustomerPreview(null);
+      setLinkLookupError("");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success || !payload.customer) {
+        setLinkCustomerPreview(null);
+        setLinkLookupError(t("customerLookupFailed"));
+        return;
+      }
+
+      setLinkCustomerPreview({
+        customer_code: String(payload.customer.customer_code || code).trim(),
+        customer_name: String(payload.customer.customer_name || "").trim(),
+      });
+      setLinkLookupError("");
+    } catch {
+      setLinkCustomerPreview(null);
+      setLinkLookupError(t("customerLookupFailed"));
+    }
+  }
+
+  async function saveProspectLink() {
+    if (!linkProspect?.id) return;
+
+    const customerCode = String(linkCustomerCode || "").trim().toUpperCase();
+    if (!customerCode) {
+      setError(t("customerCode") + " is required.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setLinkSaving(true);
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "link_customer",
+          id: linkProspect.id,
+          customer_code: customerCode,
+          copy_gps: linkCopyGps,
+          overwrite_customer_gps: linkOverwriteGps,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to link prospect to customer.");
+      }
+
+      setRecent((current) => current.map((row) => (
+        row.id === linkProspect.id
+          ? {
+            ...row,
+            status: "CONVERTED",
+            converted_customer_code: result.linkedCustomer?.customer_code || customerCode,
+          }
+          : row
+      )));
+
+      const gpsNote = result.linkedCustomer?.gpsCopied ? " GPS copied to customer." : "";
+      setMessage(`Prospect ${linkProspect.id} linked to ${customerCode}.${gpsNote}`);
+      closeLinkProspect();
+      await loadProspectsList(session.access_token);
+    } catch (err) {
+      setError(err.message || "Unable to link prospect to customer.");
+    } finally {
+      setLinkSaving(false);
+    }
+  }
+
+  const supabaseClient = getSupabaseClient();
+  if (!supabaseClient) {
+    return (
+      <SupabaseUnavailable
+        title="New Customer unavailable"
+        message="Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to register prospects."
+      />
+    );
+  }
+
+  if (loading) {
+    return (
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <div className="moduleLoading">{t("loading")}</div>
+        </div>
+      </main>
+    );
+  }
+
+  const filteredProspects = recent.filter((row) => prospectMatchesSearch(row, prospectSearch));
+
+  return (
+    <MorningAttendanceGate>
+    <main className="modulePage" dir={dir}>
+      <div className="moduleShell">
+        <div className="moduleHeader">
+          <div>
+            <p className="moduleEyebrow">MADIBA SFA</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
+          </div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+        </div>
+
+        {savedProspect && (
+          <div className="moduleModalOverlay">
+            <section className="moduleModal" role="dialog" aria-modal="true" aria-labelledby="order-received-title">
+              <div className="moduleSectionHeader">
+                <h2 id="order-received-title">{t("orderReceived")}</h2>
+              </div>
+              <p className="moduleHint">{t("orderReceivedHint")}</p>
+              <div className="moduleOrderActions">
+                <button type="button" autoFocus onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
+                  {t("yesCreateOrder")}
+                </button>
+                <button type="button" onClick={() => setShowFollowUpDate(true)}>
+                  {t("noScheduleFollowUp")}
+                </button>
+              </div>
+              {showFollowUpDate && (
+                <div className="moduleFormGrid moduleModalForm">
+                  <label>
+                    {t("nextVisitDate")}
+                    <input
+                      className="moduleInput"
+                      type="date"
+                      min={getTodayDateKey()}
+                      value={followUpDate}
+                      onChange={(event) => setFollowUpDate(event.target.value)}
+                    />
+                  </label>
+                  <div className="moduleModalSubmit">
+                    <button type="button" className="modulePrimaryButton" onClick={saveFollowUp} disabled={savingFollowUp || !followUpDate}>
+                      {savingFollowUp ? t("savingFollowUp") : t("saveFollowUp")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Prospect Form</h2>
+          </div>
+
+          <form className="moduleFormGrid" onSubmit={handleSubmit}>
+            <label>
+              Customer Name (English)
+              <input
+                className="moduleInput"
+                required
+                value={form.customer_name_en}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setArabicNameEdited(false);
+                  setForm({ ...form, customer_name_en: next });
+                }}
+              />
+            </label>
+            <label>
+              Customer Name (Arabic)
+              <input
+                className="moduleInput"
+                dir="rtl"
+                value={form.customer_name_ar}
+                onChange={(e) => {
+                  setArabicNameEdited(true);
+                  setForm({ ...form, customer_name_ar: e.target.value });
+                }}
+                placeholder="Auto-translated from English name"
+              />
+              <small className="moduleHint">
+                {translatingName ? "Translating Arabic name..." : "Auto-translated. You can edit this field manually."}
+              </small>
+            </label>
+            <label>
+              Shop Name
+              <input className="moduleInput" required value={form.shop_name} onChange={(e) => setForm({ ...form, shop_name: e.target.value })} />
+            </label>
+            <label>
+              Owner
+              <input className="moduleInput" value={form.owner_name} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} />
+            </label>
+            <label>
+              Mobile
+              <input
+                className="moduleInput"
+                required
+                inputMode="numeric"
+                maxLength={10}
+                pattern="05[0-9]{8}"
+                title="Use 10 digits, starting with 05"
+                value={form.mobile}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+              />
+            </label>
+            <label>
+              WhatsApp
+              <input className="moduleInput" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+            </label>
+            <label>
+              Email
+              <input className="moduleInput" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </label>
+            <label>
+              City
+              <input
+                className="moduleInput"
+                required
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+                placeholder={requireGps ? "Auto-filled from GPS when available" : "Enter city"}
+              />
+            </label>
+            <label>
+              Area
+              <input
+                className="moduleInput"
+                required
+                value={form.area}
+                onChange={(e) => setForm({ ...form, area: e.target.value })}
+                placeholder={requireGps ? "Auto-filled from GPS when available" : "Enter area"}
+              />
+            </label>
+            <label className="moduleFieldFull">
+              National Address
+              <textarea className="moduleTextArea" rows={3} value={form.national_address} onChange={(e) => setForm({ ...form, national_address: e.target.value })} placeholder="Building, street, district, city, postal code, additional number" />
+            </label>
+            <label>
+              Customer Type
+              <select className="moduleInput" value={form.customer_type} onChange={(e) => setForm({ ...form, customer_type: e.target.value })}>
+                <option>Retail</option>
+                <option>Wholesale</option>
+                <option>Key Account</option>
+                <option>HORECA</option>
+              </select>
+            </label>
+            <label>
+              Salesman
+              <select className="moduleInput" required value={form.salesman_code} onChange={(e) => setForm({ ...form, salesman_code: e.target.value })}>
+                <option value="">Select salesman</option>
+                {salesmen.map((salesman) => (
+                  <option key={salesman.id} value={salesman.salesman_code || ""}>
+                    {(salesman.salesman_name || salesman.id) + (salesman.salesman_code ? ` (${salesman.salesman_code})` : "")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="moduleGpsRow">
+              GPS Status
+              <small className="moduleHint">{gpsStatus}</small>
+              {requireGps && (
+                <button type="button" className="moduleSecondaryButton" onClick={captureLocation}>
+                  Retry GPS
+                </button>
+              )}
+            </label>
+            <div className="moduleFieldFull">
+              <div className="moduleSectionHeader">
+                <h2>Documents</h2>
+                <span>CR, VAT, ID, and other supporting files</span>
+              </div>
+              <div className="moduleDocumentRow">
+                <select className="moduleInput" value={selectedDocumentType} onChange={(e) => setSelectedDocumentType(e.target.value)}>
+                  {DOCUMENT_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <input className="moduleInput" type="file" onChange={handleDocumentPick} />
+              </div>
+              {documents.length > 0 && (
+                <ul className="moduleList">
+                  {documents.map((document, index) => (
+                    <li key={`${document.type}-${document.name}-${index}`}>
+                      <strong>{document.type}</strong>
+                      <span>{document.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <label className="moduleFieldFull">
+              Notes
+              <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </label>
+            <div className="moduleFieldFull">
+              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled || Boolean(savedProspect)}>
+                {saving ? "Saving..." : "Save Prospect"}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>{t("allProspects")}</h2>
+            <span>{t("allProspectsHint")} ({recent.length})</span>
+          </div>
+          <label className="moduleFieldFull">
+            {t("searchProspects")}
+            <input
+              className="moduleInput"
+              value={prospectSearch}
+              onChange={(event) => setProspectSearch(event.target.value)}
+              placeholder="Shop, mobile, status, order #..."
+            />
+          </label>
+          <ExportableTable filename="new-customers" sheetName="Prospects" className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Shop</th>
+                  <th>Owner</th>
+                  <th>Mobile</th>
+                  <th>Area</th>
+                  <th>Status</th>
+                  <th>{t("orderNumber")}</th>
+                  <th>Linked Customer</th>
+                  <th>Created</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingProspects ? (
+                  <tr>
+                    <td colSpan={10}>{t("loading")}</td>
+                  </tr>
+                ) : recent.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>No prospects created yet.</td>
+                  </tr>
+                ) : filteredProspects.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>No prospects match your search.</td>
+                  </tr>
+                ) : (
+                  filteredProspects.map((row) => {
+                  const isConverted = String(row.status || "").toUpperCase() === "CONVERTED"
+                    || Boolean(row.converted_customer_code);
+                  const linkedCode = String(row.converted_customer_code || "").trim().toUpperCase();
+                  const orders = Array.isArray(row.orders) ? row.orders : [];
+                  return (
+                  <tr key={row.id}>
+                    <td>{row.id}</td>
+                    <td>{row.company_name || row.shop_name || row.customer_name || "-"}</td>
+                    <td>{row.contact_person || row.owner_name || "-"}</td>
+                    <td>{row.mobile || "-"}</td>
+                    <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                    <td>{row.status || "-"}</td>
+                    <td>
+                      {orders.length > 0 ? (
+                        <div className="moduleInlineStack">
+                          {orders.map((order, index) => (
+                            <span key={`${row.id}-${order.id || order.order_number || index}`}>
+                              {index > 0 ? ", " : ""}
+                              <Link href={buildProspectOrderHref(order, row)}>
+                                {order.order_number}
+                              </Link>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        t("noOrders")
+                      )}
+                    </td>
+                    <td>
+                      {linkedCode ? (
+                        <Link href={`/management/customer-audit?customer_code=${encodeURIComponent(linkedCode)}`}>
+                          {linkedCode}
+                        </Link>
+                      ) : "-"}
+                    </td>
+                    <td>{row.created_at ? new Date(row.created_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <div className="moduleInlineStack moduleActionStack">
+                        {!isConverted ? (
+                          <>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => openLinkProspect(row)}
+                            >
+                              {t("linkCustomer")}
+                            </button>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => {
+                                const query = buildProspectOrderParams({
+                                  id: row.id,
+                                  offlineId: row.offline_id,
+                                  customerName: row.company_name || row.customer_name || row.shop_name,
+                                  salesmanCode: row.salesman_code || form.salesman_code,
+                                });
+                                router.push(`/management/new-order?${query}`);
+                              }}
+                            >
+                              Create Order
+                            </button>
+                          </>
+                        ) : linkedCode ? (
+                          <Link
+                            href={`/management/customer-audit?customer_code=${encodeURIComponent(linkedCode)}`}
+                            className="moduleInlineButton"
+                          >
+                            {t("viewCustomer")}
+                          </Link>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  );
+                  })
+                )}
+              </tbody>
+            </table>
+          </ExportableTable>
+        </section>
+
+        {linkProspect ? (
+          <div className="appPopupOverlay" dir={dir} role="presentation" onClick={closeLinkProspect}>
+            <div
+              className="appPopupDialog appPopupDialogInfo"
+              role="dialog"
+              aria-modal="true"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h2>{t("linkCustomerTitle")}</h2>
+              <p className="moduleHint">{t("linkCustomerHint")}</p>
+              <p><strong>{t("prospectNameLabel")}:</strong> {linkProspect.company_name || linkProspect.shop_name || `Prospect ${linkProspect.id}`}</p>
+              {prospectRowHasGps(linkProspect) ? (
+                <p className="moduleHint">{t("prospectGpsAvailable")}: {Number(linkProspect.latitude).toFixed(6)}, {Number(linkProspect.longitude).toFixed(6)}</p>
+              ) : null}
+              <div className="moduleFieldFull">
+                <div className="moduleSectionHeader">
+                  <h3>{t("suggestedMatches")}</h3>
+                  <span>{t("suggestedMatchesHint")}</span>
+                </div>
+                {loadingLinkSuggestions ? (
+                  <p className="moduleHint">{t("loadingSuggestions")}</p>
+                ) : linkSuggestions.length > 0 ? (
+                  <ul className="moduleList">
+                    {linkSuggestions.map((suggestion) => (
+                      <li key={suggestion.customer_code}>
+                        <div className="moduleInlineStack" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                          <div>
+                            <strong>{suggestion.customer_code}</strong>
+                            <span>{suggestion.customer_name || "-"}</span>
+                            <small className="moduleHint">
+                              {[suggestion.city, suggestion.area].filter(Boolean).join(" / ") || "-"}
+                              {" · "}
+                              {t("missingGpsLabel")}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="moduleInlineButton"
+                            onClick={() => {
+                              void selectLinkSuggestion(suggestion);
+                            }}
+                          >
+                            {t("useSuggestedCustomer")}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="moduleHint">{t("noSuggestedMatches")}</p>
+                )}
+              </div>
+              <label className="moduleFieldFull">
+                {t("customerCode")}
+                <input
+                  className="moduleInput"
+                  value={linkCustomerCode}
+                  onChange={(event) => {
+                    setLinkCustomerCode(event.target.value.toUpperCase());
+                    setLinkCustomerPreview(null);
+                    setLinkLookupError("");
+                  }}
+                  onBlur={() => {
+                    void lookupLinkCustomer();
+                  }}
+                  placeholder="1301"
+                />
+              </label>
+              {linkCustomerPreview ? (
+                <div className="moduleHint">
+                  <p><strong>{t("erpCustomerNameLabel")}:</strong> {linkCustomerPreview.customer_name || "-"}</p>
+                  <p>{t("namesMayDifferNote")}</p>
+                </div>
+              ) : null}
+              {linkLookupError ? (
+                <p className="moduleHint" style={{ color: "var(--module-danger, #b42318)" }}>{linkLookupError}</p>
+              ) : null}
+              {prospectRowHasGps(linkProspect) ? (
+                <>
+                  <label className="moduleCollectorCheckbox">
+                    <input
+                      type="checkbox"
+                      checked={linkCopyGps}
+                      onChange={(event) => setLinkCopyGps(event.target.checked)}
+                    />
+                    <span>{t("copyProspectGps")}</span>
+                  </label>
+                  <label className="moduleCollectorCheckbox">
+                    <input
+                      type="checkbox"
+                      checked={linkOverwriteGps}
+                      disabled={!linkCopyGps}
+                      onChange={(event) => setLinkOverwriteGps(event.target.checked)}
+                    />
+                    <span>{t("overwriteCustomerGps")}</span>
+                  </label>
+                </>
+              ) : null}
+              <div className="moduleInlineStack" style={{ marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={() => {
+                    void saveProspectLink();
+                  }}
+                  disabled={linkSaving}
+                >
+                  {linkSaving ? t("linking") : t("linkSave")}
+                </button>
+                <button type="button" className="moduleInlineButton" onClick={closeLinkProspect}>
+                  {t("cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </main>
+    </MorningAttendanceGate>
+  );
+}

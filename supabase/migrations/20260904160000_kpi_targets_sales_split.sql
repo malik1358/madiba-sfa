@@ -1,0 +1,5 @@
+ALTER TABLE "public"."kpi_targets"
+  ADD COLUMN IF NOT EXISTS "office_supplies_sales_target" numeric(16,2) DEFAULT 0 NOT NULL;
+
+ALTER TABLE "public"."kpi_targets"
+  ADD COLUMN IF NOT EXISTS "other_sales_target" numeric(16,2) DEFAULT 0 NOT NULL;

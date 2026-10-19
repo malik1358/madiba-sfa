@@ -1,0 +1,815 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import {
+  OUTSTANDING_DATASET_KEY,
+  customerCodeCandidates,
+  customerMatchesOutstandingCodeSet,
+  findOutstandingForCustomer,
+  hydrateOutstandingInvoices,
+  laterDateOnly,
+  latestOutstandingInvoiceDate,
+  clampLatestInvoiceDateToOutstandingBuckets,
+  resolveOutstandingCustomerOwnership,
+  summarizeOutstandingBucketsForVisitStatus,
+} from "../../../lib/outstanding";
+import { mergeSalesSnapshots } from "../../../lib/salesHistory";
+import { monthKeyFromDate, summarizeMonthlySales } from "../../../management/my-day/visitPriority";
+import {
+  buildSalesmanScopeMatchers,
+  expandMutualGroupScopeIdentities,
+  mergeMutualGroupProfiles,
+  salesmanScopeIdentities,
+  salesmanValueMatchesScope,
+} from "../../../lib/mutualSalesmanGroups.js";
+import {
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../../lib/salesHierarchy.js";
+import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
+import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
+import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const INACTIVE_META_PREFIX = "customer_inactive_meta:";
+
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function extractEmailLocalPart(email) {
+  const raw = String(email || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.includes("@") ? raw.split("@")[0] : raw;
+}
+
+function normalizeLooseToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function normalizeName(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
+function identitySearchPattern(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z0-9]+/g, "%")
+    .replace(/^%+|%+$/g, "");
+}
+
+function isSalesTeamRole(role) {
+  const normalized = normalizeRole(role);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
+}
+
+function profileCodeCandidates(profile) {
+  return salesmanScopeIdentities(profile);
+}
+
+function authCodeCandidates(authUser) {
+  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+  const localPart = extractEmailLocalPart(authUser?.email);
+
+  return [
+    normalizeCode(metadata.salesman_code),
+    normalizeCode(metadata.salesman_name),
+    normalizeCode(metadata.head_salesman_code),
+    normalizeCode(metadata.head_salesman_name),
+    normalizeCode(localPart),
+    normalizeCode(localPart.replace(/[._-]+/g, " ")),
+    normalizeCode(localPart.replace(/[._-]+/g, "")),
+  ].filter(Boolean);
+}
+
+function fuzzyMatchedProfileCodes(allProfiles, authUser) {
+  const localPart = extractEmailLocalPart(authUser?.email);
+  const localToken = normalizeLooseToken(localPart);
+  if (!localToken) return [];
+
+  return allProfiles
+    .filter((profile) => {
+      const nameToken = normalizeLooseToken(profile?.salesman_name);
+      const codeToken = normalizeLooseToken(profile?.salesman_code);
+      return (
+        (nameToken && (nameToken.includes(localToken) || localToken.includes(nameToken)))
+        || (codeToken && (codeToken.includes(localToken) || localToken.includes(codeToken)))
+      );
+    })
+    .flatMap((profile) => profileCodeCandidates(profile));
+}
+
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice_maker" || normalized === "invoice-maker";
+}
+
+function inactiveMetaKey(customerCode) {
+  return `${INACTIVE_META_PREFIX}${normalizeCode(customerCode)}`;
+}
+
+function parseIsoTimestamp(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseInactiveMarkedAt(rawSettingValue) {
+  try {
+    const parsed = JSON.parse(String(rawSettingValue || "null"));
+    return String(parsed?.marked_at || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveScopeForUser(admin, user) {
+  const userId = user?.id;
+  if (!userId) {
+    throw new Error("Invalid login session");
+  }
+
+  const { data: currentProfile, error: profileError } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name")
+    .eq("id", userId)
+    .single();
+
+  if (profileError || !currentProfile) {
+    throw new Error("Profile not found.");
+  }
+
+  const role = normalizeRole(currentProfile.role);
+  const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
+
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,role,salesman_code,salesman_name")
+      .order("salesman_name"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  const allProfiles = profilesRes.data || [];
+  const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
+  const authUsers = usersRes.data?.users || [];
+  const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
+
+  let members = [];
+  if (["admin", "manager"].includes(role)) {
+    members = scopedProfiles;
+  } else if (isProductPromoterRole(role) && inheritedHeadCode) {
+    const headProfile = {
+      salesman_code: inheritedHeadCode,
+      salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+    };
+    const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
+
+    members = scopedProfiles.filter((profile) => {
+      const profileCode = normalizeCode(profile.salesman_code);
+      return profileCode === inheritedHeadCode || peerIds.has(profile.id);
+    });
+  } else {
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+
+    members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
+
+    if (!members.some((profile) => profile.id === currentProfile.id)) {
+      members = [currentProfile, ...members];
+    }
+  }
+
+  const membersWithTeam = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const scopeMatchers = buildSalesmanScopeMatchers(membersWithTeam);
+  const outstandingSalesmanIdentities = [
+    ...scopeMatchers.codes,
+    ...scopeMatchers.comparableNames,
+    ...scopeMatchers.tokens,
+  ];
+
+  const visibleSalesmanCodes = [...new Set([
+    ...membersWithTeam.flatMap((member) => profileCodeCandidates(member)),
+    ...authCodeCandidates(currentAuthUser),
+    ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
+    ...mutualGroupCodes,
+  ])];
+  const identitySearchPatterns = [...new Set(
+    visibleSalesmanCodes.map(identitySearchPattern).filter(Boolean),
+  )];
+
+  return {
+    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
+    visibleSalesmanCodes,
+    identitySearchPatterns,
+    outstandingSalesmanIdentities,
+    scopeMatchers,
+  };
+}
+
+async function resolveScope(admin, token) {
+  const {
+    data: { user },
+    error: userError,
+  } = await admin.auth.getUser(token);
+
+  if (userError || !user) {
+    throw new Error("Invalid login session");
+  }
+
+  return resolveScopeForUser(admin, user);
+}
+
+export async function resolveScopeForUserId(admin, userId) {
+  const { data: authData, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !authData?.user) {
+    throw new Error("User not found.");
+  }
+  return resolveScopeForUser(admin, authData.user);
+}
+
+async function fetchVisibleCustomers(admin, scope) {
+  const pageSize = 1000;
+  let from = 0;
+  const rows = [];
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  const historyVisibleCustomerCodes = new Set();
+  const outstandingOwnedCustomerCodes = new Set();
+
+  if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
+    const salesPageSize = 2000;
+    let salesFrom = 0;
+    const visibleCodes = Array.from(normalizedScopeCodes);
+
+    while (true) {
+      const { data: salesRows, error: salesError } = await admin
+        .from("active_sales")
+        .select("customer_code,salesman_code")
+        .in("salesman_code", visibleCodes)
+        .range(salesFrom, salesFrom + salesPageSize - 1);
+
+      if (salesError) throw salesError;
+
+      const chunk = salesRows || [];
+      chunk.forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        if (code) historyVisibleCustomerCodes.add(code);
+      });
+
+      if (chunk.length < salesPageSize) break;
+      salesFrom += salesPageSize;
+    }
+  }
+
+  if (!scope.hasAllAccess && scope.identitySearchPatterns.length > 0) {
+    const salesPageSize = 2000;
+    let salesFrom = 0;
+    const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+      `salesman_code.ilike.%${pattern}%`,
+      `salesman_name.ilike.%${pattern}%`,
+    ]);
+
+    while (true) {
+      const { data: salesRows, error: salesError } = await admin
+        .from("active_sales")
+        .select("customer_code,salesman_code,salesman_name")
+        .or(identityFilters.join(","))
+        .range(salesFrom, salesFrom + salesPageSize - 1);
+
+      if (salesError) throw salesError;
+
+      const chunk = salesRows || [];
+      chunk.forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        if (code) historyVisibleCustomerCodes.add(code);
+      });
+
+      if (chunk.length < salesPageSize) break;
+      salesFrom += salesPageSize;
+    }
+  }
+
+  if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
+    const { data: setting, error: outstandingError } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", OUTSTANDING_DATASET_KEY)
+      .maybeSingle();
+
+    if (outstandingError) throw outstandingError;
+
+    try {
+      const dataset = JSON.parse(setting?.setting_value || "null");
+      const ownership = resolveOutstandingCustomerOwnership(
+        dataset,
+        scope.outstandingSalesmanIdentities || scope.visibleSalesmanCodes,
+        scope.scopeMatchers,
+      );
+      ownership.ownedCustomerCodes.forEach((code) => outstandingOwnedCustomerCodes.add(normalizeCode(code)));
+    } catch {
+      // Ignore malformed optional outstanding data and retain sales-based visibility.
+    }
+  }
+
+  while (true) {
+    let query = admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
+      .eq("is_active", true)
+      .order("customer_name")
+      .range(from, from + pageSize - 1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = (data || []).filter((row) => {
+      if (scope.hasAllAccess) return true;
+      if (normalizedScopeCodes.size === 0) return false;
+      const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
+      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
+      const previousSalesmanCode = normalizeCode(row.previous_salesman_code);
+
+      // Always include customers currently assigned to the visible scope, including transfers.
+      if (normalizedScopeCodes.has(rowSalesmanCode) || normalizedScopeCodes.has(previousSalesmanCode)) return true;
+      if (
+        salesmanValueMatchesScope(row.current_salesman_code, scope.scopeMatchers)
+        || salesmanValueMatchesScope(row.previous_salesman_code, scope.scopeMatchers)
+      ) return true;
+
+      if (customerMatchesOutstandingCodeSet(row.customer_code, outstandingOwnedCustomerCodes)) {
+        return true;
+      }
+
+      // Fallback: include customers that have sales history under visible salesman codes.
+      return codeCandidates.some((code) => historyVisibleCustomerCodes.has(code));
+    });
+    rows.push(...chunk);
+
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+async function fetchBasicVisibleCustomers(admin, scope) {
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+  const scopedCodes = [...new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+
+  while (true) {
+    let query = admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
+      .eq("is_active", true)
+      .order("customer_name")
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      if (scopedCodes.length === 0) return [];
+      query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+async function readInactiveMarkedAtMap(admin, customerCodes) {
+  const normalizedCodes = [...new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  if (normalizedCodes.length === 0) return new Map();
+
+  const keys = normalizedCodes.map((code) => inactiveMetaKey(code));
+  const map = new Map();
+
+  for (let start = 0; start < keys.length; start += 200) {
+    const keyChunk = keys.slice(start, start + 200);
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", keyChunk);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(String(row.setting_key || "").replace(INACTIVE_META_PREFIX, ""));
+      if (!code) return;
+      map.set(code, parseInactiveMarkedAt(row.setting_value));
+    });
+  }
+
+  return map;
+}
+
+async function autoReactivateCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let inactiveQuery = admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,previous_salesman_code,latest_transaction_date,updated_at")
+    .eq("is_active", false)
+    .not("latest_transaction_date", "is", null)
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return 0;
+    inactiveQuery = applyCustomerSalesmanScopeFilter(inactiveQuery, scopedCodes);
+  }
+
+  const { data: inactiveRows, error: inactiveError } = await inactiveQuery;
+  if (inactiveError) throw inactiveError;
+
+  const rows = inactiveRows || [];
+  if (rows.length === 0) return 0;
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+  const codesToReactivate = rows
+    .filter((row) => {
+      const customerCode = normalizeCode(row.customer_code);
+      if (!customerCode) return false;
+      const invoiceAt = parseIsoTimestamp(row.latest_transaction_date);
+      if (!invoiceAt) return false;
+      const markedAt = parseIsoTimestamp(markedAtMap.get(customerCode) || row.updated_at);
+      return markedAt > 0 && invoiceAt > markedAt;
+    })
+    .map((row) => normalizeCode(row.customer_code))
+    .filter(Boolean);
+
+  if (codesToReactivate.length === 0) return 0;
+
+  const { error: reactivateError } = await admin
+    .from("customers")
+    .update({ is_active: true })
+    .in("customer_code", codesToReactivate);
+
+  if (reactivateError) throw reactivateError;
+
+  const clearKeys = codesToReactivate.map((code) => inactiveMetaKey(code));
+  for (let start = 0; start < clearKeys.length; start += 200) {
+    const keyChunk = clearKeys.slice(start, start + 200);
+    const { error: clearError } = await admin
+      .from("system_settings")
+      .delete()
+      .in("setting_key", keyChunk);
+
+    if (clearError) throw clearError;
+  }
+
+  return codesToReactivate.length;
+}
+
+async function fetchInactiveCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let query = admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,city,area,updated_at,latitude,longitude")
+    .eq("is_active", false)
+    .order("customer_name")
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return [];
+    query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data || [];
+  if (rows.length === 0) return [];
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+
+  return rows.map((row) => ({
+    ...row,
+    inactive_marked_at: markedAtMap.get(normalizeCode(row.customer_code)) || row.updated_at || null,
+  }));
+}
+
+async function attachRecentSalesValues(admin, customers) {
+  const canonicalCodeByCandidate = new Map();
+  const salesValueByCustomer = new Map();
+  const monthlySalesByCustomer = new Map();
+  const latestSalesDateByCustomer = new Map();
+
+  customers.forEach((customer) => {
+    const canonicalCode = normalizeCode(customer.customer_code);
+    customerCodeCandidates(customer.customer_code).forEach((candidate) => {
+      canonicalCodeByCandidate.set(normalizeCode(candidate), canonicalCode);
+    });
+  });
+
+  const candidateCodes = [...canonicalCodeByCandidate.keys()];
+  const fromDate = new Date();
+  fromDate.setUTCMonth(fromDate.getUTCMonth() - 6);
+
+  for (let start = 0; start < candidateCodes.length; start += 200) {
+    const codeChunk = candidateCodes.slice(start, start + 200);
+    const pageSize = 1000;
+    let from = 0;
+    const salesRows = [];
+
+    while (true) {
+      const { data, error } = await admin
+        .from("sales_raw")
+        .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,item_code,quantity,sales_amount,rate")
+        .gte("transaction_date", fromDate.toISOString().slice(0, 10))
+        .in("customer_code", codeChunk)
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      const rows = data || [];
+      salesRows.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    mergeSalesSnapshots(salesRows).forEach((row) => {
+      const canonicalCode = customerCodeCandidates(row.customer_code)
+        .map((candidate) => canonicalCodeByCandidate.get(normalizeCode(candidate)))
+        .find(Boolean);
+      if (!canonicalCode) return;
+      const amount = Math.max(Number(row.sales_amount || 0), 0);
+      const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
+      salesValueByCustomer.set(canonicalCode, currentValue + amount);
+      const monthKey = monthKeyFromDate(row.transaction_date);
+      if (monthKey && amount > 0) {
+        const months = monthlySalesByCustomer.get(canonicalCode) || new Map();
+        months.set(monthKey, (months.get(monthKey) || 0) + amount);
+        monthlySalesByCustomer.set(canonicalCode, months);
+      }
+      const saleDate = laterDateOnly(row.transaction_date);
+      const currentDate = latestSalesDateByCustomer.get(canonicalCode) || "";
+      if (saleDate && saleDate > currentDate) {
+        latestSalesDateByCustomer.set(canonicalCode, saleDate);
+      }
+    });
+  }
+
+  return customers.map((customer) => {
+    const code = normalizeCode(customer.customer_code);
+    const latestSalesDate = latestSalesDateByCustomer.get(code) || "";
+    const monthlyStats = summarizeMonthlySales(monthlySalesByCustomer.get(code) || new Map());
+    return {
+      ...customer,
+      recent_sales_value: salesValueByCustomer.get(code) || 0,
+      average_monthly_purchase: monthlyStats.averageMonthlyPurchase,
+      highest_monthly_sales: monthlyStats.highestMonthlySales,
+      operational_months: monthlyStats.operationalMonths,
+      latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestSalesDate)
+        || customer.latest_transaction_date,
+    };
+  });
+}
+
+async function attachOutstandingValues(admin, customers) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", OUTSTANDING_DATASET_KEY)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  let dataset = null;
+  try {
+    dataset = JSON.parse(data?.setting_value || "null");
+  } catch {
+    dataset = null;
+  }
+
+  const invoices = hydrateOutstandingInvoices(dataset);
+
+  return customers.map((customer) => {
+    const outstanding = findOutstandingForCustomer(
+      dataset,
+      customer.customer_code,
+      customer.customer_name
+    );
+    const summary = summarizeOutstandingBucketsForVisitStatus(outstanding?.buckets);
+    const latestInvoiceDate = latestOutstandingInvoiceDate(
+      invoices,
+      customer.customer_code,
+      customer.customer_name,
+    );
+    const latestDate = clampLatestInvoiceDateToOutstandingBuckets(
+      laterDateOnly(customer.latest_transaction_date, latestInvoiceDate),
+      summary,
+    );
+
+    return {
+      ...customer,
+      latest_transaction_date: latestDate || customer.latest_transaction_date,
+      outstanding_0_30: summary.days0To30,
+      outstanding_30_60: summary.days30To60,
+      outstanding_61_90: summary.days61To90,
+      outstanding_above_90: summary.daysAbove90,
+    };
+  });
+}
+
+async function loadItemLookup(admin) {
+  const lookup = new Map();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("items_master")
+      .select("item_code,item_name,category")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code) return;
+      lookup.set(code, {
+        item_name: row.item_name || "",
+        category: row.category || "",
+      });
+    });
+
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
+  }
+
+  return lookup;
+}
+
+async function loadActiveSalesMixByCustomer(admin) {
+  const itemLookup = await loadItemLookup(admin);
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("active_sales")
+      .select("customer_code,item_code,item_name,category")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    rows.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
+  }
+
+  return buildSalesMixByCustomer(rows, itemLookup);
+}
+
+export async function buildVisibleCustomersForScope(admin, scope, options = {}) {
+  const includeRecentSales = Boolean(options.includeRecentSales);
+  const includeOutstanding = Boolean(options.includeOutstanding);
+  const excludeBuildingMaterial = Boolean(options.excludeBuildingMaterial);
+  const warnings = [];
+
+  try {
+    await autoReactivateCustomers(admin, scope);
+  } catch {
+    warnings.push("auto-reactivate-unavailable");
+  }
+
+  let customers = [];
+  try {
+    customers = dedupeCustomerMasterRows(await fetchVisibleCustomers(admin, scope));
+  } catch {
+    warnings.push("basic-visible-fallback");
+    customers = dedupeCustomerMasterRows(await fetchBasicVisibleCustomers(admin, scope));
+  }
+
+  let inactiveCustomers = [];
+  try {
+    inactiveCustomers = dedupeCustomerMasterRows(await fetchInactiveCustomers(admin, scope));
+  } catch {
+    warnings.push("inactive-customers-unavailable");
+    inactiveCustomers = [];
+  }
+
+  let responseCustomers = customers;
+
+  if (includeRecentSales) {
+    try {
+      responseCustomers = await attachRecentSalesValues(admin, responseCustomers);
+    } catch {
+      warnings.push("recent-sales-unavailable");
+      responseCustomers = responseCustomers.map((customer) => ({
+        ...customer,
+        recent_sales_value: Number(customer?.recent_sales_value || 0),
+        average_monthly_purchase: Number(customer?.average_monthly_purchase || 0),
+        highest_monthly_sales: Number(customer?.highest_monthly_sales || 0),
+        operational_months: Number(customer?.operational_months || 0),
+      }));
+    }
+  }
+
+  if (excludeBuildingMaterial) {
+    try {
+      const salesMixByCode = await loadActiveSalesMixByCustomer(admin);
+      responseCustomers = excludeBuildingMaterialCustomers(responseCustomers, salesMixByCode);
+    } catch {
+      warnings.push("building-material-filter-unavailable");
+      responseCustomers = excludeBuildingMaterialCustomers(responseCustomers);
+    }
+  }
+
+  if (includeOutstanding) {
+    try {
+      responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+    } catch {
+      warnings.push("outstanding-unavailable");
+      responseCustomers = responseCustomers.map((customer) => ({
+        ...customer,
+        outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
+        outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
+        outstanding_61_90: Number(customer?.outstanding_61_90 || 0),
+        outstanding_above_90: Number(customer?.outstanding_above_90 || 0),
+      }));
+    }
+  }
+
+  return {
+    customers: responseCustomers,
+    inactiveCustomers,
+    warnings,
+  };
+}
+
+export async function GET(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const token = authHeader.replace("Bearer ", "");
+    const scope = await resolveScope(admin, token);
+    const searchParams = new URL(request.url).searchParams;
+    const includeRecentSales = searchParams.get("includeRecentSales") === "1";
+    const includeOutstanding = searchParams.get("includeOutstanding") === "1";
+    const excludeBuildingMaterial = searchParams.get("excludeBuildingMaterial") === "1";
+
+    const {
+      customers: responseCustomers,
+      inactiveCustomers,
+      warnings,
+    } = await buildVisibleCustomersForScope(admin, scope, {
+      includeRecentSales,
+      includeOutstanding,
+      excludeBuildingMaterial,
+    });
+
+    return NextResponse.json({
+      success: true,
+      customers: responseCustomers,
+      inactiveCustomers,
+      warnings,
+      count: responseCustomers.length,
+    }, {
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message || "Unable to load visible customers." }, { status: 500 });
+  }
+}

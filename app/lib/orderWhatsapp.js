@@ -1,0 +1,54 @@
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+export function buildOrderWhatsappSummary(snapshot, language = "en") {
+  const isAr = language === "ar";
+  const labels = {
+    title: isAr ? "طلب مبيعات" : "Sales order",
+    orderId: isAr ? "رقم الطلب" : "Order #",
+    customer: isAr ? "العميل" : "Customer",
+    code: isAr ? "الرمز" : "Code",
+    salesman: isAr ? "رجل البيع" : "Salesman",
+    status: isAr ? "الحالة" : "Status",
+    payment: isAr ? "الدفع" : "Payment",
+    region: isAr ? "المنطقة" : "Region",
+    items: isAr ? "عدد الأصناف" : "Items",
+    totalQty: isAr ? "إجمالي الكمية" : "Total qty",
+    cashDiscount: isAr ? "خصم نقدي" : "Cash discount",
+    valueDiscount: isAr ? "خصم القيمة" : "Value discount",
+    schemeDiscount: isAr ? "خصم العرض" : "Scheme discount",
+    subtotal: isAr ? "المبلغ بدون ضريبة" : "Amount without VAT",
+    vat: isAr ? "ضريبة 15%" : "VAT 15%",
+    totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
+    pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
+  };
+
+  const totals = snapshot.totals || {};
+  const subtotal = Number(totals.amountExclVat || snapshot.grandTotal || 0);
+  const vatAmount = Number(totals.vatAmount || subtotal * 0.15);
+  const totalWithVat = Number(totals.amountInclVat || subtotal + vatAmount);
+  const cashDiscount = Number(totals.cashDiscountTotal || 0);
+  const valueDiscount = Number(totals.valueDiscountTotal || 0);
+  const schemeDiscount = Number(totals.schemeDiscountTotal || 0);
+
+  return [
+    labels.title,
+    `${labels.orderId}: ${snapshot.orderId}`,
+    `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
+    `${labels.code}: ${snapshot.customerCode || "-"}`,
+    `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,
+    `${labels.status}: ${snapshot.statusLabel || "-"}`,
+    `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
+    `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,
+    `${labels.items}: ${snapshot.itemCount || 0}`,
+    `${labels.totalQty}: ${Number(snapshot.totalQuantity || 0)}`,
+    `${labels.cashDiscount}: ${formatMoney(cashDiscount)}`,
+    `${labels.valueDiscount}: ${formatMoney(valueDiscount)}`,
+    `${labels.schemeDiscount}: ${formatMoney(schemeDiscount)}`,
+    `${labels.subtotal}: ${formatMoney(subtotal)}`,
+    `${labels.vat}: ${formatMoney(vatAmount)}`,
+    `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,
+    labels.pdfAttached,
+  ].join("\n");
+}

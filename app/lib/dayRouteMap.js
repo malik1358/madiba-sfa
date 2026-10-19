@@ -1,6 +1,6 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
-import { formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
+import { formatKsaTime, formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
 
 /** Day-route working hours count only non-far customer stops from this KSA hour onward. */
 export const DAY_ROUTE_WORKING_HOURS_START_HOUR = 8;
@@ -374,6 +374,21 @@ function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
 function formatDayRouteWorkingHoursValue(minutes) {
   if (!Number.isFinite(minutes) || minutes <= 0) return "0h";
   return formatWorkingHours(minutes);
+}
+
+/** Same text as the Daily Visit Report line, e.g. `4h 30m (17:19 - 21:49)`. */
+export function formatDayRouteWorkingHoursLabel(hours = {}) {
+  const value = String(hours?.value || "0h").trim() || "0h";
+  const ranges = (hours?.ranges || [])
+    .map((range) => {
+      const from = formatKsaTime(range?.fromAt);
+      const to = formatKsaTime(range?.toAt);
+      if (!from || from === "-" || !to || to === "-") return "";
+      return `${from} - ${to}`;
+    })
+    .filter(Boolean)
+    .join("; ");
+  return ranges ? `${value} (${ranges})` : value;
 }
 
 export function resolveDayRouteWorkingHours(source = [], idleGaps = []) {

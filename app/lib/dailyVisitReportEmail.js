@@ -4,6 +4,7 @@ import {
   buildDayRoutePoints,
   buildDayRouteSvg,
   buildWorkdayRouteStops,
+  formatDayRouteWorkingHoursLabel,
   resolveDayRouteWorkingHours,
 } from "./dayRouteMap.js";
 import {
@@ -322,12 +323,7 @@ export function buildUserVisitReportEmail({
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
   const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints, idleGaps);
-  const workingHoursRanges = (workingHours.ranges || [])
-    .map((range) => `${formatReportTime(range.fromAt)} - ${formatReportTime(range.toAt)}`)
-    .join("; ");
-  const workingHoursValue = workingHoursRanges
-    ? `${workingHours.value} (${workingHoursRanges})`
-    : workingHours.value;
+  const workingHoursValue = formatDayRouteWorkingHoursLabel(workingHours);
   const workingHoursHtml = `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`;
   const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length

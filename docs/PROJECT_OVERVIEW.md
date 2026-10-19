@@ -54,7 +54,7 @@ UI strings are English and Arabic through `app/lib/appLanguage.js`. `profiles.pr
 - **Price catalog**: a scheduled sync writes `price_catalog_cache`. The browser reads `/api/pricing/cache`, not the upstream sheet.
 - **Firebase Cloud Messaging**: server push via `FIREBASE_SERVICE_ACCOUNT_JSON` and `app/lib/fcm.js`.
 - **Email**: SMTP or Resend (`app/lib/mailer.js`) for visit reports, inactivity, missing invoices, supplier orders, salesman resume, outstanding-without-GPS, the visit-plan digest, and invoice-upload notices (order + invoice PDF attachments).
-- **WhatsApp**: the app builds share text and links (visit/collection/order/day summary). Share text includes visit date/time, avg days to pay, and working hours till that message (attendance login→now minus lunch on visit/order shares; day-route total on logout day summary). When payment/receipt attachments cannot be shared natively, WhatsApp still opens with the summary text and the UI prompts to attach photos manually. It does not call the WhatsApp Business API.
+- **WhatsApp**: the app builds share text and links (visit/collection/order/day summary). Share text includes visit date/time, avg days to pay, and working hours till that message using the same near-stop total as Daily Visit Report. When payment/receipt attachments cannot be shared natively, WhatsApp still opens with the summary text and the UI prompts to attach photos manually. It does not call the WhatsApp Business API.
 
 ## How a field day works
 

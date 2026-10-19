@@ -127,6 +127,9 @@ export default function BusinessDashboardPage() {
   const [salesmanStatusFilter, setSalesmanStatusFilter] = useState([]);
   const [receivableLoading, setReceivableLoading] = useState(false);
   const [receivableReport, setReceivableReport] = useState(null);
+  const [salesMixReport, setSalesMixReport] = useState(null);
+  const [salesMixDraft, setSalesMixDraft] = useState(() => emptyGrowthFilters());
+  const [salesMixApplied, setSalesMixApplied] = useState(() => emptyGrowthFilters());
   const [amountMeasure, setAmountMeasure] = useState("sales");
   const [reportPeriod, setReportPeriod] = useState(DEFAULT_BI_REPORT_PERIOD);
   const [customPeriodFrom, setCustomPeriodFrom] = useState("");
@@ -137,7 +140,7 @@ export default function BusinessDashboardPage() {
   const customerCacheKeyRef = useRef("");
   const itemCacheKeyRef = useRef("");
   const salesmanCacheKeyRef = useRef("");
-  const salesMixPeriodKeyRef = useRef("");
+  const salesMixCacheKeyRef = useRef("");
   const receivablePeriodKeyRef = useRef("");
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
@@ -147,10 +150,6 @@ export default function BusinessDashboardPage() {
     [customPeriodFrom, customPeriodTo, reportPeriod],
   );
   const periodRangeLabel = formatBiReportPeriodRange(periodRange);
-  const salesMixApplied = useMemo(
-    () => applyBiReportPeriod(emptyGrowthFilters(), periodRange),
-    [periodRange],
-  );
   const visibleGrowthReport = useMemo(
     () => pickBiMeasure(growthReport, amountMeasure),
     [growthReport, amountMeasure],
@@ -198,6 +197,8 @@ export default function BusinessDashboardPage() {
     setItemApplied((current) => applyBiReportPeriod({ ...current, groupBy: "item" }, periodRange));
     setSalesmanDraft((current) => applyBiReportPeriod(current, periodRange));
     setSalesmanApplied((current) => applyBiReportPeriod({ ...current, groupBy: "salesman" }, periodRange));
+    setSalesMixDraft((current) => applyBiReportPeriod(current, periodRange));
+    setSalesMixApplied((current) => applyBiReportPeriod(current, periodRange));
   }, [periodRange, reportPeriod]);
 
   useEffect(() => {
@@ -327,9 +328,13 @@ export default function BusinessDashboardPage() {
             ...applyBiReportPeriod(emptyGrowthFilters(), periodRange),
             groupBy: "category",
           }));
-          salesMixPeriodKeyRef.current = payload.growth.salesMix
-            ? `${normalizeGrowthFilters(payload.growth.filters).dateFrom}|${normalizeGrowthFilters(payload.growth.filters).dateTo}`
-            : "";
+          const overviewMixKey = JSON.stringify(normalizeGrowthFilters(
+            applyBiReportPeriod(emptyGrowthFilters(), periodRange),
+          ));
+          if (payload.growth.salesMix && (!salesMixCacheKeyRef.current || salesMixCacheKeyRef.current === overviewMixKey)) {
+            setSalesMixReport(payload.growth.salesMix);
+            salesMixCacheKeyRef.current = overviewMixKey;
+          }
         }
         if (payload.customer) {
           setCustomerReport(payload.customer);
@@ -400,7 +405,6 @@ export default function BusinessDashboardPage() {
         ? { ...brandApplied, itemNameContains: "MADIBA" }
         : view === "sales-mix" ? salesMixApplied : growthApplied;
       const normalizedKey = JSON.stringify(normalizeGrowthFilters(requestedFilters));
-      const periodKey = `${normalizeGrowthFilters(requestedFilters).dateFrom}|${normalizeGrowthFilters(requestedFilters).dateTo}`;
 
       if (view === "category-growth" && growthCacheKeyRef.current === normalizedKey) {
         stopSafetyTimer();
@@ -408,7 +412,7 @@ export default function BusinessDashboardPage() {
         return;
       }
 
-      if (view === "sales-mix" && salesMixPeriodKeyRef.current === periodKey) {
+      if (view === "sales-mix" && salesMixCacheKeyRef.current === normalizedKey && salesMixReport) {
         stopSafetyTimer();
         setGrowthLoading(false);
         return;
@@ -451,19 +455,23 @@ export default function BusinessDashboardPage() {
         overviewCacheKeyRef.current = "";
         if (view === "category-growth") {
           growthCacheKeyRef.current = normalizedKey;
-          salesMixPeriodKeyRef.current = payload.salesMix ? periodKey : "";
         } else if (view === "madiba") {
           growthCacheKeyRef.current = `madiba:${normalizedKey}`;
         } else if (view === "sales-mix") {
-          salesMixPeriodKeyRef.current = payload.salesMix ? periodKey : "";
+          setSalesMixReport(payload.salesMix || null);
+          salesMixCacheKeyRef.current = payload.salesMix ? normalizedKey : "";
         }
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load category growth.");
-        setGrowthReport(null);
-        growthCacheKeyRef.current = "";
-        salesMixPeriodKeyRef.current = "";
+        if (view === "sales-mix") {
+          setSalesMixReport(null);
+          salesMixCacheKeyRef.current = "";
+        } else {
+          setGrowthReport(null);
+          growthCacheKeyRef.current = "";
+        }
         overviewCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
@@ -1053,8 +1061,18 @@ export default function BusinessDashboardPage() {
             <SalesMixReport
               language={language}
               loading={growthLoading}
-              report={growthReport?.salesMix}
-              currentMonth={growthReport?.currentMonth}
+              report={salesMixReport}
+              currentMonth={growthReport?.currentMonth || salesMixReport?.currentMonth || ""}
+              draft={salesMixDraft}
+              catalogs={growthCatalogs}
+              applied={salesMixApplied}
+              onDraftChange={setSalesMixDraft}
+              onApply={() => setSalesMixApplied({ ...salesMixDraft, groupBy: "category" })}
+              onClear={() => {
+                const empty = applyBiReportPeriod(emptyGrowthFilters(), periodRange);
+                setSalesMixDraft(empty);
+                setSalesMixApplied(empty);
+              }}
             />
           ) : null}
 

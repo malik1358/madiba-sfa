@@ -57,6 +57,8 @@ export default function CategoryGrowthFilters({
   onClear,
   lockGroupBy = "",
   statusOptions = STATUS_OPTIONS,
+  showSearch = true,
+  showStatusFilters = true,
   hint,
 }) {
   const t = translate(language, TEXT);
@@ -131,25 +133,29 @@ export default function CategoryGrowthFilters({
           {t("quantityMax")}
           <input className="moduleInput" type="number" value={draft.quantityMax || ""} onChange={(event) => patchDraft({ quantityMax: event.target.value })} />
         </label>
-        <label className="moduleField">
-          {t("search")}
-          <input className="moduleInput" type="search" value={search || ""} onChange={(event) => onSearchChange(event.target.value)} />
-        </label>
+        {showSearch ? (
+          <label className="moduleField">
+            {t("search")}
+            <input className="moduleInput" type="search" value={search || ""} onChange={(event) => onSearchChange(event.target.value)} />
+          </label>
+        ) : null}
       </div>
 
-      <div className="moduleBiStatusFilters" aria-label={t("status")}>
-        <span>{t("status")}</span>
-        {statusOptions.map((option) => (
-          <label key={option.key} className="moduleBiStatusOption">
-            <input
-              type="checkbox"
-              checked={(statusFilter || []).includes(option.key)}
-              onChange={() => toggleStatus(option.key)}
-            />
-            {language === "ar" ? option.ar : option.en}
-          </label>
-        ))}
-      </div>
+      {showStatusFilters ? (
+        <div className="moduleBiStatusFilters" aria-label={t("status")}>
+          <span>{t("status")}</span>
+          {statusOptions.map((option) => (
+            <label key={option.key} className="moduleBiStatusOption">
+              <input
+                type="checkbox"
+                checked={(statusFilter || []).includes(option.key)}
+                onChange={() => toggleStatus(option.key)}
+              />
+              {language === "ar" ? option.ar : option.en}
+            </label>
+          ))}
+        </div>
+      ) : null}
 
       <h3 className="moduleBiFilterHeading">{t("fields")}</h3>
       <div className="moduleBiFieldFilters">

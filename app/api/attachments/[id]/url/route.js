@@ -4,7 +4,7 @@ import {
   defaultAccessDeps,
   resolveAttachmentTarget,
 } from "../../../../lib/storage/attachmentAccess.js";
-import { getSignedReadUrl } from "../../../../lib/storage/attachmentStorage.js";
+import { getSignedReadUrl, headObject } from "../../../../lib/storage/attachmentStorage.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,10 +42,22 @@ export async function handleAttachmentUrlRequest({
   const access = await authorizeAttachmentRead(admin, { user, token, target, deps });
   if (!access.allowed) return result(403, { success: false, error: access.reason || "Access denied." });
 
+  let provider = target.object.provider;
+  const key = target.object.key;
+  if (target.legacy && provider === "r2") {
+    try {
+      const head = await headObject(admin, { key, provider: "r2" });
+      if (!head?.exists) provider = "supabase";
+    } catch {
+      console.error("Legacy collection copy is not available in R2. Opening the Supabase original.");
+      provider = "supabase";
+    }
+  }
+
   const download = searchParams?.get("download") === "1";
   const signed = await signUrl(admin, {
-    provider: target.object.provider,
-    key: target.object.key,
+    provider,
+    key,
     downloadName: download ? target.fileName : "",
   });
 

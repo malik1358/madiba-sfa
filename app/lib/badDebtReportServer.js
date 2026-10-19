@@ -3,9 +3,14 @@ import {
   POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
   buildLegalTransferRows,
   buildPotentialBadDebtRows,
+  collapseVisitsByAccount,
+  debtReportVisitCodes,
+  describeCollectionVisit,
+  describeFieldVisit,
   fundsReceivedWindow,
   summarizeDebtRows,
 } from "./badDebtReport.js";
+import { resolveCustomerAccountCode } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 const PAGE_SIZE = 1000;
@@ -86,13 +91,77 @@ async function loadCustomersByCodes(admin, codes = []) {
   return rows;
 }
 
-async function loadActorNames(admin, transfers = []) {
-  const ids = [...new Set(transfers.map((row) => String(row?.transferred_by || "").trim()).filter(Boolean))];
-  if (!ids.length) return {};
+function chunk(values, size) {
+  const list = [...values];
+  const batches = [];
+  for (let index = 0; index < list.length; index += size) batches.push(list.slice(index, index + size));
+  return batches;
+}
+
+function customerCodeAliases(code) {
+  const raw = String(code || "").trim().toUpperCase();
+  const account = resolveCustomerAccountCode(raw);
+  const aliases = new Set([raw, account].filter(Boolean));
+  const stripped = raw.replace(/[A-Z]$/, "");
+  if (/^\d{3,6}$/.test(stripped)) aliases.add(stripped);
+  if (/^\d{3,6}$/.test(raw)) aliases.add(`${raw}C`);
+  return [...aliases];
+}
+
+export async function loadLatestDebtVisits(admin, codes = []) {
+  const aliases = [...new Set((codes || []).flatMap(customerCodeAliases))];
+  const candidates = [];
+
+  for (const batch of chunk(aliases, 20)) {
+    const pages = await Promise.all(batch.map(async (code) => {
+      const { data, error } = await admin
+        .from("collection_visits")
+        .select("customer_code,saved_at,remark_arabic,remark_english,created_by")
+        .eq("customer_code", code)
+        .order("saved_at", { ascending: false })
+        .limit(1);
+      if (error) {
+        if (isMissingSchemaError(error)) return null;
+        throw error;
+      }
+      return describeCollectionVisit(Array.isArray(data) ? data[0] : null);
+    }));
+    candidates.push(...pages.filter(Boolean));
+  }
+
+  for (const batch of chunk(aliases, 80)) {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", batch.map((code) => `visit_report_latest:${code}`));
+    if (error) {
+      if (isMissingSchemaError(error)) break;
+      throw error;
+    }
+    (data || []).forEach((row) => {
+      let parsed = row.setting_value;
+      if (typeof parsed === "string") {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {
+          parsed = null;
+        }
+      }
+      const visit = describeFieldVisit(parsed);
+      if (visit) candidates.push(visit);
+    });
+  }
+
+  return collapseVisitsByAccount(candidates);
+}
+
+async function loadActorNames(admin, ids = []) {
+  const uniqueIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return {};
   const { data, error } = await admin
     .from("profiles")
     .select("id,role,salesman_code,salesman_name,email")
-    .in("id", ids);
+    .in("id", uniqueIds);
   if (error) {
     if (isMissingSchemaError(error)) return {};
     throw error;
@@ -131,18 +200,31 @@ export async function loadDebtReports(admin, {
     loadFundsReceivedVisits(admin, { todayKey }),
   ]);
 
-  const actorNames = await loadActorNames(admin, transfers);
+  const reportRecords = Array.isArray(records) ? records : [];
+  const visits = await loadLatestDebtVisits(admin, debtReportVisitCodes(
+    reportRecords,
+    transfers,
+    fundsReceived,
+    { todayKey },
+  ));
+  const actorNames = await loadActorNames(admin, [
+    ...(transfers || []).map((row) => row?.transferred_by),
+    ...visits.map((visit) => visit.personId),
+  ]);
   const customers = await loadCustomersByCodes(
     admin,
     transfers.map((row) => row?.customer_code),
   );
+  const todayIso = (now instanceof Date ? now : new Date(now)).toISOString();
   const context = {
     fundsReceived,
     transfers,
-    records: Array.isArray(records) ? records : [],
+    records: reportRecords,
     customers,
     actorNames,
+    visits,
     todayKey,
+    todayIso,
   };
   const badDebts = buildPotentialBadDebtRows(context.records, context);
   const legalTransfers = buildLegalTransferRows(context);

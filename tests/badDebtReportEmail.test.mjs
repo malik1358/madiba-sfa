@@ -40,7 +40,16 @@ test("daily bad debt email goes to Malik, Fazlur, and Soyeb", () => {
 test("salesman tables leave legal customers out and the legal table stays separate", () => {
   const badDebts = [
     row(),
-    row({ customerCode: "1002", customerName: "Beta", salesman: "SALEH", outstandingAbove120: 800 }),
+    row({
+      customerCode: "1002",
+      customerName: "Beta",
+      salesman: "SALEH",
+      outstandingAbove120: 800,
+      oldestInvoiceDays: 188,
+      lastVisitDate: "2026-10-02",
+      lastVisitPerson: "SALEH",
+      lastVisitRemark: "Promised Friday",
+    }),
     row({ customerCode: "1004C", customerName: "Legal Hold", salesman: "AHMED", transferredToLegal: true, transferredAt: "2026-09-01" }),
   ];
   const legalTransfers = [
@@ -65,6 +74,9 @@ test("salesman tables leave legal customers out and the legal table stays separa
   assert.equal((message.html.match(/Legal Hold/g) || []).length, 1);
   assert.match(message.html, />New</);
   assert.match(message.html, /#fff4c2/);
+  assert.match(message.html, /Oldest invoice days/);
+  assert.match(message.html, /Promised Friday/);
+  assert.match(message.text, /oldest 188/);
   assert.match(message.text, /NEW 1002/);
   assert.match(message.text, /NEW 2001/);
   assert.equal(message.addedToday, 2);

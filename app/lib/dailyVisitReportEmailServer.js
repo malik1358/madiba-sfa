@@ -29,9 +29,8 @@ import {
   enrichDueCustomersWithVisitWithoutOrder,
 } from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
-import { buildPotentialSalesTargetsDigest, buildPotentialSalesTargetsSection } from "./potentialSalesTargets.js";
+import { buildPotentialSalesTargetsDigest, buildPotentialSalesTargetsSection, potentialSalesTargetMatchesSalesman } from "./potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
-import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 import {
   addKsaCalendarDays,
   getKsaDateString,
@@ -631,14 +630,11 @@ export async function runDailyVisitReportEmailCycle(admin, {
       todayIso: staleAsOfIso,
       agingThresholdDays: resolveOverdueAgingThresholdDays(profile),
     });
-    const scopeMatchers = buildSalesmanScopeMatchers([profile]);
     const profileCode = normalizeSalesmanCode(profile.salesman_code);
     const potentialSalesTargetsSection = potentialSalesTargets ? buildPotentialSalesTargetsSection({
       todayKey: staleAsOfKey,
       rows: potentialSalesTargets.filter((row) => (
-        Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
-          .some((code) => normalizeSalesmanCode(code) === profileCode)
-        || salesmanValueMatchesScope(row.salesman_name || row.salesman_code, scopeMatchers)
+        Boolean(profileCode) && potentialSalesTargetMatchesSalesman(row, profileCode)
       )),
     }) : null;
     const message = buildUserVisitReportEmail({

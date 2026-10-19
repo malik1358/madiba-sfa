@@ -2,6 +2,7 @@ import { isCreditNoteTransaction } from "./paymentBehavior.js";
 import {
   buildPotentialSalesTargetLastVisitMap,
   potentialSalesTargetExpectedSale,
+  potentialSalesTargetSalesmanCode,
   potentialTargetAccountCode,
   potentialSalesTargetMonthKeys,
   potentialSalesTargetSalesMonthKeys,
@@ -180,6 +181,10 @@ export async function loadPotentialSalesTargetCustomers(admin, {
   const lastVisitDates = includeBrowserDetails || includeVisitDetails
     ? await loadBrowserVisitData(admin, candidates, profiles)
     : new Map();
+  const profileByCode = new Map((profiles || []).map((profile) => [
+    String(profile.salesman_code || "").trim().toUpperCase().replace(/\s+/g, " "),
+    profile,
+  ]));
 
   return candidates.map((customer) => {
     const code = potentialTargetAccountCode(customer.customer_code);
@@ -190,22 +195,21 @@ export async function loadPotentialSalesTargetCustomers(admin, {
     const totalOutstanding = (record.invoices || []).reduce((sum, invoice) => (
       sum + Math.max(0, Number(invoice.pending_amount) || 0)
     ), 0);
-    const salesmanCode = String(record.salesman_code || customer.current_salesman_code || customer.previous_salesman_code || "")
-      .trim().toUpperCase();
+    const salesmanCode = potentialSalesTargetSalesmanCode({
+      current_salesman_code: customer.current_salesman_code,
+    });
+    const salesmanName = String(profileByCode.get(salesmanCode)?.salesman_name || salesmanCode || "").trim();
     const invoiceDate = dates.at(-1) || "";
     const orderDate = submittedOrderDates.get(code) || "";
     const salesByMonth = expectedSaleMonthlySales.get(code) || {};
-    const visitBySalesman = {};
-    [record.salesman_code, customer.current_salesman_code, customer.previous_salesman_code]
-      .map((value) => String(value || "").trim().toUpperCase())
-      .filter(Boolean)
-      .forEach((salesman) => {
-        visitBySalesman[salesman] = lastVisitDates.get(`${code}::${salesman}`) || "";
-      });
+    const visitBySalesman = salesmanCode
+      ? { [salesmanCode]: lastVisitDates.get(`${code}::${salesmanCode}`) || "" }
+      : {};
     return {
       ...record,
       ...customer,
       salesman_code: salesmanCode,
+      salesman_name: salesmanName,
       total_outstanding: totalOutstanding,
       last_invoice_date: invoiceDate,
       last_order_invoice_date: [invoiceDate, orderDate].filter(Boolean).sort().at(-1) || "",

@@ -39,6 +39,29 @@ test("sales mix groups cash, credit, local, and import invoices while excluding 
   assert.equal(report.monthlyShares.origin["2026-01"].unclassified_origin_sales_amount, (50 / 350) * 100);
 });
 
+test("sales mix applies the same field filters as the other BI reports", () => {
+  const filteredRows = [
+    { transaction_date: "2026-03-02", voucher_number: "RC/200", local_import: "Local", category: "Gloves", salesman_name: "Ahmed", sales_amount: 40 },
+    { transaction_date: "2026-03-03", voucher_number: "NFD/201", local_import: "Import", category: "Gloves", salesman_name: "Omar", sales_amount: 70 },
+    { transaction_date: "2026-03-04", voucher_number: "RC/202", local_import: "Local", category: "Tissue", salesman_name: "Ahmed", sales_amount: 90 },
+  ];
+  const report = buildSalesMixReport(filteredRows, {
+    ...emptyGrowthFilters(),
+    values: {
+      ...emptyGrowthFilters().values,
+      category: ["Gloves"],
+      salesman: ["Ahmed"],
+    },
+  });
+
+  assert.deepEqual(report.months, ["2026-03"]);
+  assert.equal(report.totals.cash_sales_amount, 40);
+  assert.equal(report.totals.credit_sales_amount, 0);
+  assert.equal(report.totals.local_sales_amount, 40);
+  assert.equal(report.totals.import_sales_amount, 0);
+  assert.equal(report.totals.net_sales, 40);
+});
+
 test("sales mix respects the selected BI date range", () => {
   const report = buildSalesMixReport(rows, {
     ...emptyGrowthFilters(),

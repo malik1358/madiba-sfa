@@ -11,6 +11,7 @@ import {
 import ExportableTable from "../../components/ExportableTable";
 import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
+import CategoryGrowthFilters from "./CategoryGrowthFilters";
 
 const TEXT = {
   title: { en: "Cash, credit, local and import sales", ar: "مبيعات النقدي والآجل والمحلي والمستورد" },
@@ -19,7 +20,11 @@ const TEXT = {
     ar: "مبالغ النقدي والآجل والمصدر هي إجمالي مبيعات الفواتير. تظهر الإشعارات الدائنة والمرتجعات منفصلة وتُخصم لحساب صافي المبيعات. تشمل نسب المصدر أخرى / غير محدد.",
   },
   loading: { en: "Loading sales mix...", ar: "جاري تحميل مزيج المبيعات..." },
-  empty: { en: "No sales match this period.", ar: "لا توجد مبيعات تطابق هذه الفترة." },
+  empty: { en: "No sales match this period and filters.", ar: "لا توجد مبيعات تطابق هذه الفترة والتصفية." },
+  filterHint: {
+    en: "Use the same field filters as the other reports, then Apply. Cash, credit, local, and import totals recalculate for that slice.",
+    ar: "استخدم نفس تصفية الحقول في التقارير الأخرى ثم اضغط تطبيق. تُعاد حسابات النقدي والآجل والمحلي والمستورد لهذه الشريحة.",
+  },
   cashCredit: { en: "Cash vs credit", ar: "نقدي مقابل آجل" },
   localImport: { en: "Local vs import", ar: "محلي مقابل مستورد" },
   cash: { en: "Cash sales", ar: "مبيعات نقدية" },
@@ -250,7 +255,18 @@ function MixCards({ language, mix }) {
   );
 }
 
-export default function SalesMixReport({ language = "en", loading = false, report = null, currentMonth = "" }) {
+export default function SalesMixReport({
+  language = "en",
+  loading = false,
+  report = null,
+  currentMonth = "",
+  draft,
+  catalogs = {},
+  applied,
+  onDraftChange,
+  onApply,
+  onClear,
+}) {
   const t = translate(language, TEXT);
   const mix = report || {};
   const periods = (mix.months || []).slice(-12);
@@ -260,12 +276,43 @@ export default function SalesMixReport({ language = "en", loading = false, repor
   const quarterPeriodLabel = (quarter) => quarterLabel(quarter, currentQuarter);
   const previousMonth = (month, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousMonthKey(month));
   const previousQuarter = (quarter, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousQuarterKey(quarter));
+  const filters = (
+    <CategoryGrowthFilters
+      language={language}
+      draft={draft}
+      catalogs={catalogs}
+      applied={applied}
+      onDraftChange={onDraftChange}
+      onGroupByChange={() => {}}
+      onApply={onApply}
+      onClear={onClear}
+      lockGroupBy="category"
+      showSearch={false}
+      showStatusFilters={false}
+      hint={t("filterHint")}
+    />
+  );
 
-  if (loading) return <div className="moduleLoading">{t("loading")}</div>;
-  if (!periods.length) return <div className="moduleHint">{t("empty")}</div>;
+  if (loading) {
+    return (
+      <>
+        {filters}
+        <div className="moduleLoading">{t("loading")}</div>
+      </>
+    );
+  }
+  if (!periods.length) {
+    return (
+      <>
+        {filters}
+        <div className="moduleHint">{t("empty")}</div>
+      </>
+    );
+  }
 
   return (
     <>
+      {filters}
       <section id="bi-sales-mix" className="moduleSection">
         <div className="moduleSectionHeader"><h2>{t("title")}</h2></div>
         <p className="moduleHint">{t("hint")}</p>

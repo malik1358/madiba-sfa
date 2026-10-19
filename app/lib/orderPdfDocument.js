@@ -44,6 +44,7 @@ import {
   parseOfflineProspectIdFromCustomerCode,
   parseProspectIdFromCustomerCode,
 } from "./prospects.js";
+import { installArabicPdfText, registerArabicPdfFont } from "./pdfArabicText.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
@@ -1018,6 +1019,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 export async function createOrderPdfDocument(snapshot, options = {}) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const { ARABIC_FONT_BASE64 } = await import("./pdfArabicFontData.js");
+  registerArabicPdfFont(doc, ARABIC_FONT_BASE64);
+  installArabicPdfText(doc);
   renderOrderPdfDocument(doc, snapshot, options);
   return doc;
 }

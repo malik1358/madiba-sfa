@@ -20,6 +20,10 @@ import {
   saveSalesUploadFileMeta,
   storeUploadedExcel,
 } from "../../lib/uploadFilesStorage.js";
+import {
+  laterTransactionDate,
+  resolveImportedBookOwner,
+} from "../../lib/customerBookOwner.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -174,19 +178,33 @@ async function loadLatestCustomersFromBatch(admin, batchId, customerCodes) {
   return latestCustomer;
 }
 
-async function upsertCustomersFromLatestMap(admin, latestCustomer) {
-  const transferredByCode = new Map();
-  const { data: transferredRows, error: transferredError } = await admin
-    .from("customers")
-    .select("customer_code,current_salesman_code,previous_salesman_code")
-    .not("previous_salesman_code", "is", null);
+async function loadExistingCustomersByCode(admin, customerCodes) {
+  const existingByCode = new Map();
+  const codes = [...new Set(
+    (customerCodes || []).map((code) => String(code || "").trim()).filter(Boolean),
+  )];
+  const CHUNK = 200;
 
-  if (transferredError) throw transferredError;
-  (transferredRows || []).forEach((row) => {
-    const previous = String(row.previous_salesman_code || "").trim();
-    if (!previous) return;
-    transferredByCode.set(String(row.customer_code || "").trim().toUpperCase(), row);
-  });
+  for (let index = 0; index < codes.length; index += CHUNK) {
+    const chunk = codes.slice(index, index + CHUNK);
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,current_salesman_code,previous_salesman_code,latest_transaction_date")
+      .in("customer_code", chunk);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = String(row.customer_code || "").trim().toUpperCase();
+      if (code) existingByCode.set(code, row);
+    });
+  }
+
+  return existingByCode;
+}
+
+async function upsertCustomersFromLatestMap(admin, latestCustomer) {
+  const existingByCode = await loadExistingCustomersByCode(admin, [...latestCustomer.keys()]);
 
   const customerUpserts = [];
 
@@ -196,9 +214,11 @@ async function upsertCustomersFromLatestMap(admin, latestCustomer) {
       row,
     ] of latestCustomer
   ) {
-    const transferred = transferredByCode.get(String(customerCode || "").trim().toUpperCase());
+    const existing = existingByCode.get(String(customerCode || "").trim().toUpperCase());
+    const transferred = String(existing?.previous_salesman_code || "").trim();
     customerUpserts.push({
       customer_code:
+        existing?.customer_code ||
         customerCode,
 
       customer_name:
@@ -206,11 +226,17 @@ async function upsertCustomersFromLatestMap(admin, latestCustomer) {
         customerCode,
 
       current_salesman_code:
-        transferred?.current_salesman_code ||
-        row.salesman_code,
+        resolveImportedBookOwner({
+          existingSalesman: existing?.current_salesman_code,
+          invoiceSalesman: row.salesman_code,
+          lockedSalesman: transferred ? existing?.current_salesman_code : "",
+        }),
 
       latest_transaction_date:
-        row.transaction_date,
+        laterTransactionDate(
+          existing?.latest_transaction_date,
+          row.transaction_date,
+        ),
 
       is_active: true,
     });

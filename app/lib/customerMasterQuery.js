@@ -5,6 +5,7 @@ import {
   CUSTOMER_MASTER_GPS_SELECT_FALLBACK,
   isMissingGpsAuditError,
 } from "./customerGpsHistory.js";
+import { laterTransactionDate, resolveImportedBookOwner } from "./customerBookOwner.js";
 
 export function normalizeCustomerMasterSearch(value) {
   const trimmed = String(value || "").trim();
@@ -105,6 +106,27 @@ export async function backfillCustomersFromSalesRaw(admin, search) {
 
   const payload = customerRowFromSalesRaw(latest);
   if (!payload.customer_code) return [];
+
+  const { data: existing, error: existingError } = await admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,previous_salesman_code,latest_transaction_date")
+    .eq("customer_code", payload.customer_code)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  if (existing) {
+    const transferred = String(existing.previous_salesman_code || "").trim();
+    payload.customer_code = existing.customer_code || payload.customer_code;
+    payload.current_salesman_code = resolveImportedBookOwner({
+      existingSalesman: existing.current_salesman_code,
+      invoiceSalesman: payload.current_salesman_code,
+      lockedSalesman: transferred ? existing.current_salesman_code : "",
+    }) || null;
+    payload.latest_transaction_date = laterTransactionDate(
+      existing.latest_transaction_date,
+      payload.latest_transaction_date,
+    );
+  }
 
   const { error: upsertError } = await admin
     .from("customers")

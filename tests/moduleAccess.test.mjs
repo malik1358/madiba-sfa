@@ -10,6 +10,7 @@ import {
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
   listAccessibleModules,
+  listAccessibleNavGroups,
   localizedModuleLabel,
   localizedNavGroupLabel,
   matrixRoleKey,
@@ -197,6 +198,22 @@ test("outstanding without GPS is available to management report viewers", () => 
   assert.equal(localizedModuleLabel("outstandingNoGps", "en"), "Outstanding Without GPS");
 });
 
+test("potential bad debts and legal transfers are management reports", () => {
+  for (const moduleKey of ["potentialBadDebts", "legalTransfers"]) {
+    assert.equal(buildModuleAccess({ role: "admin" }).canAccess(moduleKey), true);
+    assert.equal(buildModuleAccess({ role: "report-user" }).canAccess(moduleKey), true);
+    assert.equal(buildModuleAccess({ role: "manager" }).canAccess(moduleKey), true);
+    assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess(moduleKey), true);
+    assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess(moduleKey), false);
+    assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01", collectionOnlyMetadata: true }).canAccess(moduleKey), false);
+  }
+  assert.equal(moduleLabelForPath("/management/potential-bad-debts", "en"), "Potential Bad Debts");
+  assert.equal(moduleLabelForPath("/management/legal-transfers", "ar"), "عملاء محولون للقانوني");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "potentialBadDebts"), true);
+  assert.equal(reports.items.some((item) => item.moduleKey === "legalTransfers"), true);
+});
+
 test("missing catalogue photos is a management report", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("missingCataloguePhotos"), true);
   assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("missingCataloguePhotos"), true);
@@ -217,6 +234,8 @@ test("invoice makers can view every management report without setup access", () 
       "userActivity",
       "workingHours",
       "outstandingNoGps",
+      "potentialBadDebts",
+      "legalTransfers",
       "missingCataloguePhotos",
       "gpsMap",
       "collectionReport",

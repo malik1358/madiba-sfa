@@ -77,7 +77,7 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | paymentCollections | Y | Y | Y | Y | Y | |
 | collectionReport, receiptsNotInTally, userActivity, workingHours | Y | Y | | Y | Y | |
 | dailyVisitReport | Y | Y | Y | Y | Y | |
-| businessDashboard, outstandingNoGps | Y | Y | | | Y | |
+| businessDashboard, outstandingNoGps, potentialBadDebts, legalTransfers | Y | Y | | | Y | |
 | customerGpsHistory | Y | Y | | | | |
 | customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
 | roleAccess | Y | | | | | |
@@ -125,6 +125,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/admin/kpi-targets/details` — role- and sales-scope-protected transaction detail rows behind KPI actual links.
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
+- `/api/bad-debt-reports` — Potential Bad Debts and Customers Transferred to Legal. Management-report roles only. Outstanding comes from the collection book; Funds Received is read from `collection_visits` for the last 10 KSA days. No migration.
 - `/api/admin/push-notifications`, `/api/tally-item-units`, `/api/stock-take`
 
 **Mobile / config / activity**

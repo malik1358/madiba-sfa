@@ -255,6 +255,20 @@ function publicProbes(probes) {
   };
 }
 
+async function linkedSwitched(admin, column, category) {
+  const { data, error } = await admin.from("collection_visits").select(column).not(column, "is", null).limit(300);
+  if (error) throw error;
+  const ids = [...new Set((data || []).map((row) => row[column]).filter(Boolean))];
+  if (!ids.length) return null;
+  const loaded = await admin
+    .from("attachments")
+    .select("id,category,storage_provider,object_key,verified_at,entity_id")
+    .in("id", ids)
+    .eq("category", category);
+  if (loaded.error) throw loaded.error;
+  return (loaded.data || []).find(isSwitchedHistoricalRow) || null;
+}
+
 async function confirmReads(admin) {
   const config = readAttachmentStorageConfig();
   const { data, error } = await admin
@@ -268,8 +282,8 @@ async function confirmReads(admin) {
   const newVerified = rows.filter((row) => row.storage_provider === "r2" && row.verified_at && !isSwitchedHistoricalRow(row));
   const newUnverified = rows.filter((row) => row.storage_provider === "r2" && !row.verified_at);
   const samples = {
-    historicalReceipt: switched.find((row) => row.category === "receipt_copy"),
-    historicalPayment: switched.find((row) => row.category === "payment_copy"),
+    historicalReceipt: await linkedSwitched(admin, "receipt_attachment_id", "receipt_copy"),
+    historicalPayment: await linkedSwitched(admin, "payment_attachment_id", "payment_copy"),
     newReceipt: rows.find((row) => row.category === "receipt_copy" && row.storage_provider === "r2" && !isSwitchedHistoricalRow(row) && row.entity_id),
     newPayment: rows.find((row) => row.category === "payment_copy" && row.storage_provider === "r2" && !isSwitchedHistoricalRow(row) && row.entity_id),
   };
@@ -285,6 +299,7 @@ async function confirmReads(admin) {
     reads[name] = {
       ok: authorized.ok && authorized.host === "r2" && !anonymous.allowed && target.object?.provider === "r2",
       host: authorized.host,
+      status: authorized.status || 0,
       anonymousRejected: !anonymous.allowed,
       provider: target.object?.provider || "",
     };

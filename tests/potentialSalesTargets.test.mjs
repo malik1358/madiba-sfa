@@ -5,6 +5,7 @@ import {
   buildPotentialSalesTargetsSection,
   buildPotentialSalesTargetsDigest,
   buildPotentialSalesTargetLastVisitMap,
+  potentialSalesTargetSalesmanCode,
   daysSincePotentialSalesTargetInvoice,
   filterPotentialSalesTargetsForProfile,
   isPotentialSalesTarget,
@@ -323,6 +324,51 @@ test("browser target loader returns order date, salesperson visit, three complet
   assert.equal(isPotentialSalesTarget(rows[0], { todayKey: "2026-10-09" }), false);
 });
 
+test("target loader assigns the current customer-master salesman ahead of the outstanding file and previous owner", async () => {
+  const dataByTable = {
+    customers: [{
+      customer_code: "1228",
+      customer_name: "Customer 1228",
+      current_salesman_code: "ABDALLA",
+      previous_salesman_code: "JUNAID",
+      is_active: true,
+      latest_transaction_date: "2026-09-20",
+    }],
+    active_sales: [],
+  };
+  const admin = { from(table) {
+    const query = {
+      select() { return this; }, eq() { return this; }, gt() { return this; }, lte() { return this; },
+      in() { return this; }, order() { return this; }, gte() { return this; }, lt() { return this; },
+      async range() { return { data: dataByTable[table] || [], error: null }; },
+    };
+    return query;
+  } };
+  const rows = await loadPotentialSalesTargetCustomers(admin, {
+    records: [{
+      customer_code: "1228",
+      customer_name: "Customer 1228",
+      salesman_code: "JUNAID",
+      salesman_name: "Junaid",
+      invoices: [{ pending_amount: 500, invoice_date: "2026-09-20" }],
+    }],
+    todayKey: "2026-10-19",
+    profiles: [
+      { salesman_code: "ABDALLA", salesman_name: "Abdalla" },
+      { salesman_code: "JUNAID", salesman_name: "Junaid" },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].salesman_code, "ABDALLA");
+  assert.equal(rows[0].salesman_name, "Abdalla");
+  assert.equal(potentialSalesTargetSalesmanCode(rows[0]), "ABDALLA");
+  assert.equal(potentialSalesTargetMatchesSalesman(rows[0], "ABDALLA"), true);
+  assert.equal(potentialSalesTargetMatchesSalesman(rows[0], "JUNAID"), false);
+  const digest = buildPotentialSalesTargetsDigest({ rows, todayKey: "2026-10-19" });
+  assert.match(digest.text, /Abdalla \(ABDALLA\)/);
+  assert.doesNotMatch(digest.text, /Junaid/);
+});
+
 test("daily emails carry salesman-specific potential targets into the company digest", async () => {
   const sent = [];
   const profiles = [
@@ -359,18 +405,20 @@ test("daily emails carry salesman-specific potential targets into the company di
   assert.match(digest.html, /Potential Sales Target Customers/);
 });
 
-test("browser target scope includes current and previous assignments but not another salesman's customers", () => {
+test("browser target scope follows the current customer-master salesman only", () => {
   const rows = [
     { customer_code: "CURRENT", current_salesman_code: "sm001" },
-    { customer_code: "PREVIOUS", previous_salesman_code: "SM001" },
-    { customer_code: "UPLOAD", salesman_name: "Sales One (SM001)" },
+    { customer_code: "PREVIOUS", previous_salesman_code: "SM001", current_salesman_code: "SM002" },
+    { customer_code: "UPLOAD", salesman_code: "SM001", salesman_name: "Sales One (SM001)", current_salesman_code: "ABDALLA" },
     { customer_code: "OTHER", current_salesman_code: "SM002", salesman_name: "Sales Two" },
   ];
   assert.deepEqual(
     filterPotentialSalesTargetsForProfile(rows, { salesman_code: "SM001", salesman_name: "Sales One" })
       .map((row) => row.customer_code),
-    ["CURRENT", "PREVIOUS", "UPLOAD"],
+    ["CURRENT"],
   );
+  assert.equal(potentialSalesTargetMatchesSalesman(rows[2], "ABDALLA"), true);
+  assert.equal(potentialSalesTargetMatchesSalesman(rows[2], "SM001"), false);
 });
 
 test("browser target invoice age is calculated on KSA report date keys", () => {

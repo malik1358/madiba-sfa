@@ -2,12 +2,8 @@ import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { isFarFromCustomer } from "./customerLocation.js";
 import { parseGpsFromActivityNote } from "./geo.js";
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
-import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode } from "./outstanding.js";
+import { isPlaceholderSalesmanValue, normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
-
-function normalizeSalesmanIdentity(value) {
-  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-}
 
 export function potentialTargetAccountCode(value) {
   const code = normalizeCode(resolveCustomerAccountCode(value));
@@ -22,11 +18,8 @@ function potentialTargetInvoiceAgeDays(invoice, todayKey) {
   return age >= 0 ? age : null;
 }
 
-function matchesSalesmanProfile(value, identitySet) {
-  const raw = String(value || "").trim();
-  if (identitySet.has(normalizeSalesmanIdentity(raw))) return true;
-  return [...raw.matchAll(/\(([^)]+)\)/g)]
-    .some((match) => identitySet.has(normalizeSalesmanIdentity(match[1])));
+function normalizeTargetSalesmanCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString() } = {}) {
@@ -54,14 +47,9 @@ export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString()
 }
 
 export function filterPotentialSalesTargetsForProfile(rows = [], profile = {}) {
-  const profileCode = normalizeSalesmanIdentity(profile.salesman_code);
-  const identities = new Set([profileCode, normalizeSalesmanIdentity(profile.salesman_name)].filter(Boolean));
-  return (rows || []).filter((row) => (
-    Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
-      .some((code) => normalizeSalesmanIdentity(code) === profileCode)
-    || matchesSalesmanProfile(row.salesman_code, identities)
-    || matchesSalesmanProfile(row.salesman_name, identities)
-  ));
+  const profileCode = normalizeTargetSalesmanCode(profile.salesman_code);
+  if (!profileCode) return [];
+  return (rows || []).filter((row) => potentialSalesTargetMatchesSalesman(row, profileCode));
 }
 
 export function daysSincePotentialSalesTargetInvoice(row = {}, todayKey = getKsaDateString()) {
@@ -133,7 +121,7 @@ export function buildPotentialSalesTargetsDigest({ rows = [], todayKey = getKsaD
   const groups = new Map();
   (rows || []).filter((row) => isPotentialSalesTarget(row, { todayKey })).forEach((row) => {
     const salesmanCode = potentialSalesTargetSalesmanCode(row);
-    const salesmanName = String(row.salesman_name || row.current_salesman_code || salesmanCode || "Unassigned").trim();
+    const salesmanName = potentialSalesTargetSalesmanName(row, salesmanCode);
     const key = salesmanCode || salesmanName.toUpperCase();
     const group = groups.get(key) || { salesmanCode, salesmanName, rows: [] };
     group.rows.push(row);
@@ -204,15 +192,27 @@ export function potentialSalesTargetExpectedSale(salesByMonth = {}, todayKey = g
 }
 
 export function potentialSalesTargetSalesmanCode(row = {}) {
-  return String(row.salesman_code || row.current_salesman_code || row.previous_salesman_code || "")
-    .trim().toUpperCase().replace(/\s+/g, " ");
+  const current = normalizeTargetSalesmanCode(row.current_salesman_code);
+  if (current && !isPlaceholderSalesmanValue(current)) return current;
+  if (String(row.current_salesman_code || "").trim()) return "";
+  const uploaded = normalizeTargetSalesmanCode(row.salesman_code);
+  return uploaded && !isPlaceholderSalesmanValue(uploaded) ? uploaded : "";
+}
+
+export function potentialSalesTargetSalesmanName(row = {}, salesmanCode = potentialSalesTargetSalesmanCode(row)) {
+  const current = normalizeTargetSalesmanCode(row.current_salesman_code);
+  const uploaded = normalizeTargetSalesmanCode(row.salesman_code);
+  const rawName = String(row.salesman_name || "").trim();
+  const nameIsOwner = !current || !uploaded || uploaded === current
+    || normalizeTargetSalesmanCode(rawName) === current;
+  if (!nameIsOwner) return current || salesmanCode || "Unassigned";
+  return rawName || current || salesmanCode || "Unassigned";
 }
 
 export function potentialSalesTargetMatchesSalesman(row = {}, salesmanCode = "") {
-  const selected = String(salesmanCode || "").trim().toUpperCase().replace(/\s+/g, " ");
+  const selected = normalizeTargetSalesmanCode(salesmanCode);
   if (!selected) return true;
-  return [row.salesman_code, row.current_salesman_code, row.previous_salesman_code]
-    .some((code) => String(code || "").trim().toUpperCase().replace(/\s+/g, " ") === selected);
+  return potentialSalesTargetSalesmanCode(row) === selected;
 }
 
 export function potentialSalesTargetVisitedWithinDays(row = {}, {

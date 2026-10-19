@@ -25,10 +25,10 @@ function comparableName(value) {
 }
 
 function targetMatchesAllowedSalesmen(row, codes, names) {
-  const rowCodes = [row.salesman_code, row.current_salesman_code, row.previous_salesman_code].map(normalizeCode);
-  if (rowCodes.some((code) => code && codes.has(code))) return true;
-  const rowNames = [row.salesman_name, row.outstanding_salesman].map(comparableName);
-  return rowNames.some((name) => name && names.has(name));
+  const owner = potentialSalesTargetSalesmanCode(row);
+  if (!owner) return false;
+  if (codes.has(normalizeCode(owner))) return true;
+  return names.has(comparableName(owner));
 }
 
 async function loadAllProfiles(admin) {
@@ -50,10 +50,8 @@ function salesmanOptionsForTargets(rows, profiles, allowedCodes, allSalesmen) {
   const codes = new Set();
   if (!allSalesmen) (allowedCodes || []).forEach((code) => codes.add(normalizeCode(code)));
   (rows || []).forEach((row) => {
-    [row.salesman_code, row.current_salesman_code, row.previous_salesman_code].forEach((code) => {
-      const normalized = normalizeCode(code);
-      if (normalized) codes.add(normalized);
-    });
+    const owner = potentialSalesTargetSalesmanCode(row);
+    if (owner) codes.add(normalizeCode(owner));
   });
   return [...codes]
     .filter(Boolean)

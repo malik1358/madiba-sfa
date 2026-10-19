@@ -77,7 +77,142 @@ export function achievementPercent(actual, target) {
   return (Number(actual || 0) / goal) * 100;
 }
 
-export function kpiStatus({ actual, target, reportDate }) {
+const HISTORICAL_KPI_KEYS = [
+  "officeSupplies",
+  "otherSales",
+  "collection",
+  "newCustomers",
+  "repeatCustomers",
+];
+
+// Minimum share of a KPI's monthly total that must appear before day 1 of the
+// current month before we trust an individual pace curve. Guards against
+// dividing by near-zero historical values (e.g. one big early-month sale).
+const MIN_PACE_BASELINE_SHARE = 0.02;
+
+// Monthly totals per KPI from historical rows (full months only).
+export function summarizeHistoricalMonth(rows = [], {
+  priorCustomerCodes = [],
+} = {}) {
+  const split = splitSalesActuals(rows);
+  const classified = classifyBuyingCustomers(
+    buyingCustomerCodesFromSales(rows),
+    priorCustomerCodes,
+  );
+  return normalizeHistoricalMonthTotals({
+    officeSupplies: split.officeSupplies,
+    otherSales: split.otherSales,
+    collection: sumCollectionAmount(rows),
+    newCustomers: classified.newCustomers,
+    repeatCustomers: classified.repeatCustomers,
+  });
+}
+
+// Cumulative totals keyed by day-of-month (1-based) from dated rows.
+export function cumulativeByDay(rows = [], dateField = "transaction_date") {
+  const daily = new Map();
+  (rows || []).forEach((row) => {
+    const raw = String(row?.[dateField] || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return;
+    const day = Number(raw.slice(8, 10));
+    if (!day) return;
+    daily.set(day, (daily.get(day) || 0) + Number(row?.amount ?? row?.sales_amount ?? 0));
+  });
+  const sortedDays = [...daily.keys()].sort((left, right) => left - right);
+  const maxDay = sortedDays.length ? sortedDays[sortedDays.length - 1] : 0;
+  const cumulative = [];
+  let running = 0;
+  for (let day = 1; day <= maxDay; day += 1) {
+    running += daily.get(day) || 0;
+    cumulative.push(running);
+  }
+  return cumulative;
+}
+
+export function normalizeHistoricalMonthTotals(totalsByKpi) {
+  const normalized = {};
+  HISTORICAL_KPI_KEYS.forEach((key) => {
+    const value = Number(totalsByKpi?.[key] || 0);
+    normalized[key] = value > 0 ? value : 0;
+  });
+  return normalized;
+}
+
+// Builds per-KPI cumulative daily share curves from trailing months of history.
+// Each entry answers: "of everything this salesman closed in a full month, what
+// share had landed by day D?" — capturing personal pacing (early vs late
+// closers) instead of a raw calendar fraction. A month's `dailyCumulative` may
+// be either a single array (when the month object represents one KPI) or an
+// object keyed by KPI.
+export function buildPaceCurveFromHistory(months = []) {
+  const usableMonths = (months || []).filter((month) => Number(month?.mtdDays || 0) > 0);
+  const perKpi = {};
+  HISTORICAL_KPI_KEYS.forEach((key) => {
+    let baselineTotal = 0;
+    const weightedSums = new Map();
+    usableMonths.forEach((month) => {
+      const daysInMonth = Number(month?.daysInMonth || 0);
+      const mtdDays = Math.min(Number(month.mtdDays || 0), daysInMonth || Number.MAX_SAFE_INTEGER);
+      const total = Number(month?.totals?.[key] || 0);
+      if (!daysInMonth || !mtdDays || !(total > 0)) return;
+      const rawCurve = Array.isArray(month?.dailyCumulative)
+        ? month.dailyCumulative
+        : month?.dailyCumulative?.[key];
+      if (!Array.isArray(rawCurve)) return;
+      baselineTotal += total;
+      for (let day = 1; day <= mtdDays; day += 1) {
+        const reached = Number(rawCurve[day - 1] || 0);
+        const share = Math.min(1, Math.max(0, reached / total));
+        weightedSums.set(day, (weightedSums.get(day) || 0) + share);
+      }
+    });
+    const points = [];
+    for (let day = 1; day <= 31; day += 1) {
+      const sum = weightedSums.get(day);
+      if (sum != null) points.push({ day, share: sum / usableMonths.length });
+    }
+    perKpi[key] = { points, baselineTotal };
+  });
+  return { monthsUsed: usableMonths.length, perKpi };
+}
+
+// Resolves the expected achievement percent at the current day of month.
+// Priority: individual last-3-months pace → team-average pace → calendar pace.
+// New joiners without history fall back to the team average when available,
+// otherwise to the plain calendar pace so they are not marked behind unfairly.
+export function resolveExpectedProgress({
+  kpiKey,
+  reportDate,
+  paceCurve,
+  teamPaceCurve,
+}) {
+  const calendarShare = monthProgressRatio(reportDate);
+  const dateText = String(reportDate || "").trim();
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? (Number(dateText.slice(8, 10)) || 1) : 1;
+  const pickShare = (curve) => {
+    const entry = curve?.perKpi?.[kpiKey];
+    if (!entry) return null;
+    if (entry.baselineTotal < MIN_PACE_BASELINE_SHARE) return null;
+    let best = null;
+    entry.points.forEach((point) => {
+      if (point.day <= day && (best == null || point.day > best.day)) best = point;
+    });
+    if (best == null) return null;
+    if (best.share <= 0) return null;
+    return Math.min(1, Math.max(0, best.share));
+  };
+  const individualShare = pickShare(paceCurve);
+  if (individualShare != null) {
+    return { share: individualShare, source: "individual" };
+  }
+  const teamShare = pickShare(teamPaceCurve);
+  if (teamShare != null) {
+    return { share: teamShare, source: "team" };
+  }
+  return { share: calendarShare, source: "calendar" };
+}
+
+export function kpiStatus({ actual, target, reportDate, expectedProgress }) {
   const achievement = achievementPercent(actual, target);
   if (achievement == null) {
     return { key: "no_target", label: "No target", tone: "neutral" };
@@ -85,7 +220,7 @@ export function kpiStatus({ actual, target, reportDate }) {
   if (achievement >= 100) {
     return { key: "achieved", label: "Achieved", tone: "green" };
   }
-  const expected = monthProgressRatio(reportDate) * 100;
+  const expected = (expectedProgress?.share ?? monthProgressRatio(reportDate)) * 100;
   if (achievement + 0.05 >= expected * 0.85) {
     return { key: "on_track", label: "On track", tone: "orange" };
   }
@@ -176,15 +311,32 @@ export function sumCollectionAmount(rows = []) {
   return (rows || []).reduce((sum, row) => sum + Number(row?.amount_received || 0), 0);
 }
 
-export function buildPerformanceKpi(key, { actual = 0, target = 0, reportDate } = {}) {
+export function buildPerformanceKpi(key, {
+  actual = 0,
+  target = 0,
+  reportDate,
+  paceCurve = null,
+  teamPaceCurve = null,
+} = {}) {
   const achievement = achievementPercent(actual, target);
-  const status = kpiStatus({ actual, target, reportDate });
+  const expectedProgress = resolveExpectedProgress({
+    kpiKey: key,
+    reportDate,
+    paceCurve,
+    teamPaceCurve,
+  });
+  const status = kpiStatus({ actual, target, reportDate, expectedProgress });
   return {
     key,
     label: PERFORMANCE_KPI_LABELS[key] || key,
     actual: Number(actual || 0) || 0,
     target: Number(target || 0) || 0,
     achievement,
+    expectedProgress,
+    expectedAtPace: expectedProgress.share > 0 && Number(target || 0) > 0
+      ? expectedProgress.share * Number(target)
+      : null,
+    paceSource: expectedProgress.source,
     status,
   };
 }
@@ -194,6 +346,7 @@ export const TEAM_PERFORMANCE_VIEW = "TEAM";
 export function consolidatePerformanceSnapshots(snapshots = [], {
   reportDate,
   salesmanName = "Team",
+  teamPaceCurve = null,
 } = {}) {
   const rows = (snapshots || []).filter(Boolean);
   const actuals = emptyPerformanceActuals();
@@ -220,6 +373,7 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
       salesmanName,
       actuals,
       targets,
+      teamPaceCurve,
       updatedAt: latestUpdatedAt,
       updatedByName: latestUpdatedByName,
     }),
@@ -234,6 +388,9 @@ export function buildPerformanceSnapshot({
   salesmanName = "",
   actuals = emptyPerformanceActuals(),
   targets = emptyPerformanceTargets(),
+  paceCurve = null,
+  teamPaceCurve = null,
+  historyMonthsUsed = 0,
   updatedAt = null,
   updatedByName = "",
 } = {}) {
@@ -246,6 +403,8 @@ export function buildPerformanceSnapshot({
     actual: normalizedActuals[key],
     target: normalizedTargets[key],
     reportDate,
+    paceCurve,
+    teamPaceCurve,
   }));
   const hasTargets = kpis.some((kpi) => kpi.target > 0);
   const overall = kpis.reduce((sum, kpi) => sum + Number(kpi.achievement || 0), 0)
@@ -260,6 +419,10 @@ export function buildPerformanceSnapshot({
     targets: normalizedTargets,
     kpis,
     hasTargets,
+    // Attached so team consolidation can rebuild an average pace curve from
+    // member snapshots; harmless extra field for standalone use.
+    paceCurve: paceCurve || null,
+    historyMonthsUsed: Number(historyMonthsUsed || 0) || 0,
     overallAchievement: kpis.some((kpi) => kpi.achievement != null) ? overall : null,
     updatedAt: updatedAt || null,
     updatedByName: String(updatedByName || "").trim(),
@@ -307,5 +470,8 @@ export function formatPerformanceKpiLine(kpi) {
   const actual = formatPerformanceKpiValue(kpi.key, kpi.actual);
   const target = kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—";
   const achievement = formatAchievementPercent(kpi.achievement);
-  return `${kpi.label}: ${actual} / ${target} (${achievement}) — ${kpi.status?.label || "No target"}`;
+  const expected = kpi.expectedAtPace != null
+    ? ` — expected at pace ${formatPerformanceKpiValue(kpi.key, kpi.expectedAtPace)} (${kpi.paceSource || "calendar"})`
+    : "";
+  return `${kpi.label}: ${actual} / ${target} (${achievement}) — ${kpi.status?.label || "No target"}${expected}`;
 }

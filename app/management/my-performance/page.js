@@ -28,6 +28,10 @@ const TEXT = {
   actual: { en: "Actual", ar: "الفعلي" },
   target: { en: "Target", ar: "الهدف" },
   achievement: { en: "Achievement", ar: "الإنجاز" },
+  expectedAtPace: { en: "Expected at your pace", ar: "المتوقع حسب وتيرتك" },
+  paceIndividual: { en: "Pace: your last 3 months", ar: "الوتيرة: آخر 3 أشهر لك" },
+  paceTeam: { en: "Pace: team average (no personal history)", ar: "الوتيرة: متوسط الفريق (لا يوجد سجل شخصي)" },
+  paceCalendar: { en: "Pace: calendar month progress", ar: "الوتيرة: تقدم الشهر التقويمي" },
   updateTargets: { en: "Update KPI targets", ar: "تحديث أهداف الأداء" },
   view: { en: "View", ar: "العرض" },
   team: { en: "Team (consolidated)", ar: "الفريق (مجمع)" },
@@ -53,6 +57,12 @@ const KPI_LABELS = {
   collection: { en: "Collection", ar: "التحصيل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
+};
+
+const PACE_SOURCE_LABELS = {
+  individual: "paceIndividual",
+  team: "paceTeam",
+  calendar: "paceCalendar",
 };
 
 function statusClass(statusKey) {
@@ -215,6 +225,13 @@ export default function MyPerformancePage() {
                   {" · "}
                   {t("target")}: {kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—"}
                 </p>
+                {kpi.target > 0 && kpi.expectedAtPace != null ? (
+                  <p className="moduleKpiMeta">
+                    {t("expectedAtPace")}: {formatPerformanceKpiValue(kpi.key, kpi.expectedAtPace)}
+                    {" · "}
+                    {t(PACE_SOURCE_LABELS[kpi.paceSource] || "paceCalendar")}
+                  </p>
+                ) : null}
                 <em className={`moduleKpiStatus ${statusClass(statusKey)}`}>
                   {STATUS_LABELS[statusKey]?.[language] || kpi.status?.label}
                 </em>

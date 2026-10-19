@@ -6,7 +6,10 @@ import {
   normalizeSalesmanCode,
   TEAM_PERFORMANCE_VIEW,
 } from "../../lib/performanceKpis.js";
-import { loadPerformanceSnapshotsForSalesmen } from "../../lib/performanceKpisServer.js";
+import {
+  buildTeamPaceCurve,
+  loadPerformanceSnapshotsForSalesmen,
+} from "../../lib/performanceKpisServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
@@ -117,10 +120,16 @@ export async function GET(request) {
       salesmen: members,
       reportDate,
     });
+    // Team view is judged against the average pace of its members' last
+    // 3 months rather than a raw calendar fraction.
+    const teamPaceCurve = buildTeamPaceCurve(
+      snapshots.map((snapshot) => snapshot?.paceCurve).filter(Boolean),
+    );
     const teamSnapshot = canViewTeam
       ? consolidatePerformanceSnapshots(snapshots, {
         reportDate,
         salesmanName: `${profile.salesman_name || "Team"} — team`,
+        teamPaceCurve,
       })
       : null;
 

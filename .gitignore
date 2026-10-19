@@ -3,6 +3,7 @@ node_modules
 .vercel
 .env*
 !.env.example
+!.env.production.example
 
 # Android / Capacitor local build artifacts
 android/.gradle/

@@ -1,14 +1,16 @@
-import { isFarFromCustomer } from "./customerLocation.js";
-import { extractWorkdayTimesFromRoute } from "./dayRouteMap.js";
+import { customerHasSavedLocation, isFarFromCustomer } from "./customerLocation.js";
+import { findUnloggedIdleGaps } from "./collectionDaySummary.js";
+import {
+  extractWorkdayTimesFromRoute,
+  formatDayRouteWorkingHoursLabel,
+  resolveDayRouteWorkingHours,
+} from "./dayRouteMap.js";
+import { isAtMadibaStore } from "./madibaStoreLocation.js";
 import { todayAttendanceBounds } from "./morningAttendance.js";
 import {
   timelineRowFromActivityLog,
   timelineRowFromCollectionVisit,
 } from "./visitDistanceWhatsapp.js";
-import {
-  calculateWorkingHoursMinutes,
-  formatWorkingHours,
-} from "./workdayActivity.js";
 
 export const WORKING_HOURS_WHATSAPP_LABELS = {
   workingHours: "Working hours",
@@ -19,6 +21,9 @@ export const WORKING_HOURS_WHATSAPP_TIMEOUT_MS = 8000;
 
 export const WORKING_HOURS_ACTIVITY_ENTRY_TYPES = [
   "VISIT_REPORT",
+  "PROSPECT_FOLLOW_UP",
+  "ORDER_DRAFT",
+  "ORDER_EDITED",
   "ORDER_SUBMITTED",
   "COLLECTION_VISIT",
   "MORNING_ATTENDANCE",
@@ -77,24 +82,36 @@ export function formatWorkingHoursWhatsappLine(hours = null, labels = {}) {
   return lines.find((line) => String(line || "").trim()) || "";
 }
 
-function formatKnownWorkingHours(minutes) {
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    return { known: true, minutes: 0, value: "0h", ranges: [] };
-  }
-  return {
-    known: true,
-    minutes,
-    value: formatWorkingHours(minutes) || "0h",
-    ranges: [],
-  };
+const PUNCH_TYPES = new Set([
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "END_OF_DAY",
+]);
+
+function idleGapsForDayRouteEntries(entries = []) {
+  const times = extractWorkdayTimesFromRoute(entries);
+  const activities = (entries || [])
+    .filter((entry) => {
+      const type = entryType(entry);
+      if (!type || type === "GPS_PING" || PUNCH_TYPES.has(type)) return false;
+      return Boolean(entry?.savedAt || entry?.saved_at);
+    })
+    .map((entry) => ({ savedAt: entry.savedAt || entry.saved_at }));
+  return findUnloggedIdleGaps({
+    visits: [],
+    activities,
+    loginAt: times.loginAt,
+    logoutAt: times.logoutAt,
+    lunchOutAt: times.lunchOutAt,
+    lunchInAt: times.lunchInAt,
+  });
 }
 
 /**
- * Working hours till the WhatsApp message time = attendance clock
- * (login → lunch out + lunch in → message time / logout), matching User Activity /
- * My Day attendance hours with openEndedAt = the visit/order timestamp.
- * This is intentional for per-message WhatsApp; the Working Hours report still
- * uses day-route near-stop segments.
+ * Working hours till the WhatsApp message = the Daily Visit Report total
+ * (`resolveDayRouteWorkingHours`) using only punches and near customer stops
+ * at or before that time. Login-to-now attendance is not used.
  */
 export function resolveWorkingHoursTillMessage({
   entries = [],
@@ -131,21 +148,38 @@ export function resolveWorkingHoursTillMessage({
     }
   }
 
-  const times = extractWorkdayTimesFromRoute(prior);
-  const logoutTs = Date.parse(String(times.logoutAt || ""));
-  const logoutAt = Number.isFinite(logoutTs) && logoutTs <= cutoff
-    ? times.logoutAt
-    : null;
+  const hours = resolveDayRouteWorkingHours(prior, idleGapsForDayRouteEntries(prior));
+  return {
+    known: true,
+    minutes: Number(hours.minutes) > 0 ? Number(hours.minutes) : 0,
+    value: formatDayRouteWorkingHoursLabel(hours),
+    ranges: hours.ranges || [],
+  };
+}
 
-  const minutes = calculateWorkingHoursMinutes({
-    loginAt: times.loginAt,
-    lunchOutAt: times.lunchOutAt,
-    lunchInAt: times.lunchInAt,
-    logoutAt,
-    openEndedAt: cutoffIso,
+export function applyCustomerFarFlags(entries = [], customers = []) {
+  const byCode = new Map(
+    (customers || []).map((row) => [String(row?.customer_code || "").trim().toUpperCase(), row]),
+  );
+  return (entries || []).map((entry) => {
+    const type = entryType(entry);
+    if (!NEAR_CUSTOMER_TRANSACTION_TYPES.has(type)) {
+      return { ...entry, isFarFromCustomer: false };
+    }
+    const location = { latitude: entry.latitude, longitude: entry.longitude };
+    if (isAtMadibaStore(location)) {
+      return { ...entry, isFarFromCustomer: true };
+    }
+    if (entry.customerGpsUpdateAccepted === true) {
+      return { ...entry, isFarFromCustomer: false };
+    }
+    const customer = byCode.get(String(entry.customerCode || "").trim().toUpperCase());
+    if (!customer || !customerHasSavedLocation(customer)) return entry;
+    return {
+      ...entry,
+      isFarFromCustomer: isFarFromCustomer(location, customer),
+    };
   });
-
-  return formatKnownWorkingHours(minutes == null ? 0 : minutes);
 }
 
 export function workingHoursEntryFromTimelineRow(row) {
@@ -160,6 +194,7 @@ export function workingHoursEntryFromTimelineRow(row) {
     latitude: row?.latitude,
     longitude: row?.longitude,
     isFarFromCustomer: Boolean(row?.isFarFromCustomer),
+    customerGpsUpdateAccepted: row?.customerGpsUpdateAccepted === true,
   };
 }
 
@@ -169,10 +204,12 @@ export function buildCurrentWorkingHoursEntry({
   location = null,
   customer = {},
   customerCode = "",
+  customerGpsUpdateAccepted = false,
 } = {}) {
   const type = String(transactionType || "VISIT_REPORT").trim().toUpperCase();
+  const accepted = customerGpsUpdateAccepted === true;
   const far = NEAR_CUSTOMER_TRANSACTION_TYPES.has(type)
-    ? isFarFromCustomer(location, customer)
+    ? (isAtMadibaStore(location) || (!accepted && isFarFromCustomer(location, customer)))
     : false;
   return {
     savedAt: savedAt || new Date().toISOString(),
@@ -181,6 +218,7 @@ export function buildCurrentWorkingHoursEntry({
     latitude: location?.latitude,
     longitude: location?.longitude,
     isFarFromCustomer: far,
+    customerGpsUpdateAccepted: accepted,
   };
 }
 
@@ -190,6 +228,8 @@ function timelineRowFromActivityLogForHours(row) {
   return {
     ...base,
     customerCode: parsed.customer_code || parsed.customerCode || "",
+    customerGpsUpdateAccepted: parsed.customer_gps_update_accepted === true
+      || parsed.customerGpsUpdateAccepted === true,
     transactionType: base.transactionType,
   };
 }
@@ -249,14 +289,33 @@ export async function loadTodayWorkingHoursEntries(supabase, userId) {
     });
   }
 
-  return rows.sort((left, right) => rowTimestamp(left) - rowTimestamp(right));
+  const sorted = rows.sort((left, right) => rowTimestamp(left) - rowTimestamp(right));
+  return applyCustomerFarFlags(sorted, await loadCustomerPins(supabase, sorted));
+}
+
+async function loadCustomerPins(supabase, entries = []) {
+  const codes = [...new Set(
+    (entries || [])
+      .map((entry) => String(entry?.customerCode || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+  if (!codes.length) return [];
+  try {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("customer_code,latitude,longitude")
+      .in("customer_code", codes);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  } catch {
+    return [];
+  }
 }
 
 /**
- * Load cumulative working hours until the WhatsApp message time.
- * Prefer today's attendance punches. On timeout/offline, still compute from
- * whatever entries are available (including currentEntry) so WhatsApp shows
- * "0h" / a real total instead of "-" on queueFirst saves.
+ * Load the Daily Visit Report working-hours total up to the WhatsApp message.
+ * On timeout/offline, still compute from whatever entries are available
+ * (including currentEntry) so queueFirst WhatsApp shows "0h" instead of "-".
  */
 export async function loadWorkingHoursTillMessage({
   supabase,
@@ -283,8 +342,8 @@ export async function loadWorkingHoursTillMessage({
             setTimeout(() => resolve({ ok: false, rows: null }), timelineTimeoutMs);
           }),
         ]);
-        // Prefer a completed fetch; on timeout keep any prefetched punches so
-        // queueFirst WhatsApp still shows login→now hours instead of "0h"/"-".
+        // Prefer a completed fetch; on timeout keep any prefetched stops so
+        // queueFirst WhatsApp still shows the near-stop total instead of "-".
         entries = loaded.ok ? loaded.rows : (cachedEntries || []);
       } else {
         entries = await timelinePromise;

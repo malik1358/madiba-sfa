@@ -7,10 +7,10 @@ import {
   buildIdleBubbles,
   buildWorkdayRouteStops,
   idleBubbleRadius,
+  formatDayRouteWorkingHoursLabel,
   longestIdlePlace,
   resolveDayRouteWorkingHours,
 } from "../lib/dayRouteMap";
-import { formatKsaTime } from "../lib/workdayActivity";
 
 export default function DayRouteMap({
   points = [],
@@ -36,9 +36,7 @@ export default function DayRouteMap({
   const stops = buildWorkdayRouteStops(points, idleGaps);
   const idleBubbles = buildIdleBubbles(points, idleGaps);
   const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : points, idleGaps);
-  const workingHoursRanges = (workingHours.ranges || [])
-    .map((range) => `${formatKsaTime(range.fromAt)} - ${formatKsaTime(range.toAt)}`)
-    .join("; ");
+  const workingHoursLabel = formatDayRouteWorkingHoursLabel(workingHours);
   if (!svg) return null;
 
   return (
@@ -138,14 +136,12 @@ export default function DayRouteMap({
             })}
           </ul>
           <p className="dayRouteMapWorkingHours">
-            <strong>{workingHoursTitle}:</strong> {workingHours.value}
-            {workingHoursRanges ? ` (${workingHoursRanges})` : ""}
+            <strong>{workingHoursTitle}:</strong> {workingHoursLabel}
           </p>
         </div>
       ) : (
         <p className="dayRouteMapWorkingHours">
-          <strong>{workingHoursTitle}:</strong> {workingHours.value}
-          {workingHoursRanges ? ` (${workingHoursRanges})` : ""}
+          <strong>{workingHoursTitle}:</strong> {workingHoursLabel}
         </p>
       )}
     </div>

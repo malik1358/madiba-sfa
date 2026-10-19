@@ -1438,8 +1438,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
       const capturedAt = new Date().toISOString();
       // Prefer local customer data and skip the activity timeline so visit saves
       // stay as fast as offline-first collection entry on flaky mobile data.
-      // Working hours still attempt a short timeline fetch so WhatsApp can show
-      // cumulative hours till this message without blocking the save path.
+      // Working hours still attempt a short timeline fetch so WhatsApp shows the
+      // same near-stop total as Daily Visit Report, up to this visit.
       const [visitDistance, workingHours] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
@@ -1461,6 +1461,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             location,
             customer,
             customerCode: customer.customer_code,
+            customerGpsUpdateAccepted: gpsLocationUpdateAccepted,
           }),
         }),
       ]);

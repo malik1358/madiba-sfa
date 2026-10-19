@@ -183,20 +183,29 @@ export function sumFilteredKpiPaceEstimates(
   const estimates = {};
 
   columns.forEach((key) => {
-    const column = totals[key] || { actual: 0, target: 0 };
-    const liveKpi = buildPerformanceKpi(key, {
-      actual: column.actual,
-      target: column.target,
-      reportDate,
-      todayIso,
+    let estimateSum = 0;
+    let hasEstimate = false;
+    (rows || []).forEach((row) => {
+      if (row?.isTeam) return;
+      const target = rowTargetValue(row, key);
+      const kpi = (row.kpis || []).find((item) => item.key === key);
+      const liveKpi = buildPerformanceKpi(key, {
+        actual: Number(kpi?.actual || 0) || 0,
+        target,
+        reportDate,
+        todayIso,
+        paceShares: row?.paceShares || null,
+      });
+      const estimate = estimateFromPaceGap(target, liveKpi.paceGap);
+      if (estimate == null) return;
+      estimateSum += estimate;
+      hasEstimate = true;
     });
-    const estimate = estimateFromPaceGap(column.target, liveKpi.paceGap);
+    const column = totals[key] || { target: 0 };
     estimates[key] = {
-      estimate,
+      estimate: hasEstimate ? estimateSum : null,
       target: column.target,
-      expected: liveKpi.expected,
-      paceGap: liveKpi.paceGap,
-      achievement: achievementPercent(estimate, column.target),
+      achievement: hasEstimate ? achievementPercent(estimateSum, column.target) : null,
     };
   });
 

@@ -278,6 +278,24 @@ test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
   assert.equal(pace.bySalesman.has("THAMER"), false);
 });
 
+test("sales pace uses each salesman's own last three complete months", async () => {
+  const pace = await loadSalesPaceShares(activeSalesAdmin([
+    { transaction_date: "2026-05-01", salesman_code: "SM01", sales_amount: 1000 },
+    { transaction_date: "2026-06-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-06-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-07-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-07-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-08-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-08-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-08-01", salesman_code: "SM02", sales_amount: 50 },
+    { transaction_date: "2026-08-20", salesman_code: "SM02", sales_amount: 50 },
+  ]), { reportDate: "2026-09-01" });
+
+  assert.equal(pace.bySalesman.get("SM01")[1], 0.25);
+  assert.equal(pace.bySalesman.get("SM02")[1], 0.5);
+  assert.equal(pace.bySalesman.has("SM03"), false);
+});
+
 test("KPI targets use the latest Thamer alias and canonical saves win when newer", async () => {
   const targetRows = [
     { salesman_code: "THAMER", target_month: "2026-09-01", office_supplies_sales_target: 100, local_item_sales_target: 10, other_sales_target: 50, updated_at: "2026-09-02T00:00:00.000Z" },
@@ -378,7 +396,7 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 2,
+    version: 3,
     batchId: "42",
     actualsBySalesman: {
       SM001: {

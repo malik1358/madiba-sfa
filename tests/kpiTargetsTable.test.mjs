@@ -183,31 +183,63 @@ test("target inputs round-trip through thousand separators", () => {
   assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
 });
 
-test("pace estimate footer applies filtered total pace gap to targets", () => {
-  const rows = [ahmed, ali, teamAhmed];
+test("pace estimate footer sums each salesman's own pace gap", () => {
+  const rows = [
+    { ...ahmed, paceShares: { 10: 0.5 } },
+    { ...ali, paceShares: { 10: 0.8 } },
+    teamAhmed,
+  ];
   const estimates = sumFilteredKpiPaceEstimates(rows, ["officeSupplies", "totalSales"], {
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
   });
-  const office = buildPerformanceKpi("officeSupplies", {
-    actual: 70,
-    target: 180,
+  const ahmedOffice = buildPerformanceKpi("officeSupplies", {
+    actual: 40,
+    target: 100,
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
+    paceShares: { 10: 0.5 },
   });
-  const total = buildPerformanceKpi("totalSales", {
-    actual: 100,
-    target: 310,
+  const aliOffice = buildPerformanceKpi("officeSupplies", {
+    actual: 30,
+    target: 80,
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
+    paceShares: { 10: 0.8 },
   });
-  assert.equal(estimates.officeSupplies.estimate, estimateFromPaceGap(180, office.paceGap));
-  assert.equal(estimates.totalSales.estimate, estimateFromPaceGap(310, total.paceGap));
+  const officeEstimate = estimateFromPaceGap(100, ahmedOffice.paceGap)
+    + estimateFromPaceGap(80, aliOffice.paceGap);
+  assert.equal(estimates.officeSupplies.estimate, officeEstimate);
+  assert.notEqual(
+    estimates.officeSupplies.estimate,
+    estimateFromPaceGap(180, buildPerformanceKpi("officeSupplies", {
+      actual: 70,
+      target: 180,
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-10",
+    }).paceGap),
+  );
   assert.equal(estimates.officeSupplies.target, 180);
   assert.equal(
     estimates.officeSupplies.achievement,
-    achievementPercent(estimates.officeSupplies.estimate, 180),
+    achievementPercent(officeEstimate, 180),
   );
+  assert.equal(estimates.totalSales.estimate, (
+    estimateFromPaceGap(190, buildPerformanceKpi("totalSales", {
+      actual: 50,
+      target: 190,
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-10",
+      paceShares: { 10: 0.5 },
+    }).paceGap)
+    + estimateFromPaceGap(120, buildPerformanceKpi("totalSales", {
+      actual: 50,
+      target: 120,
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-10",
+      paceShares: { 10: 0.8 },
+    }).paceGap)
+  ));
 });
 
 test("unique bosses and team members include the boss", () => {

@@ -28,7 +28,8 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 2;
+const PERFORMANCE_KPI_CACHE_VERSION = 3;
+const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
 function isMissingColumnError(error) {
@@ -149,7 +150,7 @@ function shiftMonthStart(iso, monthDelta) {
 
 export async function loadSalesPaceShares(admin, { reportDate } = {}) {
   const monthStart = monthWindow(reportDate).from;
-  const historyStart = shiftMonthStart(monthStart, -6);
+  const historyStart = shiftMonthStart(monthStart, -SALES_PACE_HISTORY_MONTHS);
   const historyLastDay = monthWindow(shiftMonthStart(monthStart, -1)).to;
 
   if (!(historyStart < monthStart)) {

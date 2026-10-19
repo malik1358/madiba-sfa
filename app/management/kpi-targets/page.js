@@ -57,8 +57,8 @@ const TEXT = {
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
   paceEstimateHint: {
-    en: "Month-end if today's ahead/behind pace gap holds (e.g. 21% behind → 79% of target)",
-    ar: "نهاية الشهر إذا استمر فارق المسار الحالي (مثلاً خلف 21٪ → 79٪ من الهدف)",
+    en: "Each salesman's month-end from their own last-3-month pace, then added up",
+    ar: "نهاية الشهر لكل مندوب من مساره لآخر 3 أشهر، ثم يُجمع",
   },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },

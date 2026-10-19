@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildTallyOrderExportRows,
+  withTallyCatalogRates,
   resolveTallySalesRouting,
   resolveTallyVoucherSetup,
   TALLY_EXPORT_COLUMNS,
@@ -40,13 +41,19 @@ test("Table 1 maps region, payment, and BM voucher type", () => {
 
 test("export rows use the Tally voucher columns", () => {
   const rows = buildTallyOrderExportRows({
-    order: { customer_name: "TEST CUST", salesman_code: "ALI", created_at: "2026-10-01T08:00:00Z" },
+    order: {
+      customer_name: "TEST CUST",
+      salesman_code: "ALI",
+      salesman_name: "Thamer",
+      created_at: "2026-10-01T08:00:00Z",
+    },
     lines: [{
       item_code: "A000057",
       item_name: "PAPER",
       quantity: 2,
       rate: 90,
       wholesaleRate: 100,
+      discountPercent: 5,
       category: "PAPER",
       barcode: "628000000001",
     }],
@@ -76,7 +83,31 @@ test("export rows use the Tally voucher columns", () => {
   assert.equal(rows[0].Discount, 10);
   assert.equal(rows[0].godown, "DAMMAM W/H 1");
   assert.equal(rows[0]["SALES LEDGER"], "SALES WHOLESALE");
-  assert.equal(rows[0]["SALES TEAM"], "OTHER THAN ZIA & ASRAR");
+  assert.equal(rows[0]["SALES TEAM"], "Thamer");
   assert.equal(rows[0]["COST CENTER"], "OTHER");
   assert.equal(rows[0]["Tracking No."], "");
+  assert.equal(rows[0].Amount, 180);
+});
+
+test("catalog list rate is the item rate and discount is the per-unit gap", () => {
+  const lines = withTallyCatalogRates(
+    [{ item_code: "A005425", quantity: 100, rate: 55.81, line_value: 5581 }],
+    {
+      pricingRegion: "riyadh",
+      pricingCatalog: { priceMap: { A005425: 64.48 }, regionPriceMaps: { riyadh: { A005425: 64.48 } } },
+    },
+  );
+  const rows = buildTallyOrderExportRows({
+    order: { customer_name: "LIB", salesman_name: "SM13", created_at: "2026-10-19T08:00:00Z" },
+    lines,
+    orderNumber: "PA95",
+    pricingRegion: "riyadh",
+    paymentType: "cash",
+  });
+
+  assert.equal(lines[0].wholesaleRate, 64.48);
+  assert.equal(rows[0]["Item Rate"], 64.48);
+  assert.equal(rows[0].Discount, 8.67);
+  assert.equal(rows[0].Amount, 5581);
+  assert.equal(rows[0]["SALES TEAM"], "SM13");
 });

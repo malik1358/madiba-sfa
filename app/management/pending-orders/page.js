@@ -42,7 +42,9 @@ import {
   createOrderPdfDocument,
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
-import { buildTallyOrderExportRows, TALLY_EXPORT_COLUMNS, unitMapFromItems } from "../../lib/tallyItemUnits";
+import { buildTallyOrderExportRows, TALLY_EXPORT_COLUMNS, unitMapFromItems, withTallyCatalogRates } from "../../lib/tallyItemUnits";
+import { loadPricePayload } from "../../lib/pricePayload";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
@@ -1481,9 +1483,22 @@ export default function PendingOrdersPage() {
 
       const unitMap = await loadTallyUnitMap(lines, token);
       const orderNumber = formatSalesOrderNumber(snapshot) || formatSalesOrderNumber(order) || order.id;
+      let pricingCatalog = null;
+      try {
+        pricingCatalog = await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
+      } catch {
+        pricingCatalog = null;
+      }
+      const exportLines = withTallyCatalogRates(
+        Array.isArray(snapshot.lines) && snapshot.lines.length ? snapshot.lines : lines,
+        {
+          pricingCatalog,
+          pricingRegion: snapshot.pricingRegion,
+        },
+      );
       const exportRows = buildTallyOrderExportRows({
         order,
-        lines: Array.isArray(snapshot.lines) && snapshot.lines.length ? snapshot.lines : lines,
+        lines: exportLines,
         unitMap,
         orderNumber,
         pricingRegion: snapshot.pricingRegion,

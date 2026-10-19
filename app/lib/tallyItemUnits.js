@@ -1,8 +1,10 @@
+import { lookupPositiveRate } from "./itemCodeAliases.js";
 import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_PRICING_REGION,
   normalizePaymentType,
   normalizePricingRegion,
+  regionPriceMapFor,
   vatRateForProduct,
 } from "./regionalPricing.js";
 
@@ -362,6 +364,44 @@ export function discountPercentFromRates(wholesaleRate, netRate) {
   return round2(((wholesale - net) / wholesale) * 100);
 }
 
+export function discountAmountPerUnit(listRate, netRate) {
+  const list = Number(listRate || 0);
+  const net = Number(netRate || 0);
+  if (!(list > 0) || !(net >= 0) || net >= list) return 0;
+  return round2(list - net);
+}
+
+export function resolveTallySalesTeamName(order = {}) {
+  const name = String(order?.salesman_name || order?.salesmanName || "").trim();
+  if (name) return name;
+  return String(order?.salesman_code || order?.salesmanCode || "").trim();
+}
+
+/**
+ * Stamp the regional price-list rate onto lines whose saved rate is already
+ * the net price. Saved line rates stay as billed so the discount is the gap.
+ */
+export function withTallyCatalogRates(lines = [], {
+  pricingCatalog = null,
+  pricingRegion = DEFAULT_PRICING_REGION,
+} = {}) {
+  if (!pricingCatalog) return lines;
+  const priceMap = regionPriceMapFor(
+    pricingCatalog.regionPriceMaps,
+    normalizePricingRegion(pricingRegion),
+    pricingCatalog.priceMap || {},
+  );
+
+  return (Array.isArray(lines) ? lines : []).map((line) => {
+    const catalogRate = lookupPositiveRate(priceMap, line?.item_code, 0);
+    if (!(catalogRate > 0)) return line;
+    const netRate = Number(line?.rate || 0);
+    const existing = Number(line?.wholesaleRate || line?.wholesale_rate || 0);
+    if (existing > netRate && existing > 0) return line;
+    return { ...line, wholesaleRate: catalogRate };
+  });
+}
+
 /**
  * Build one Excel row per order line for Tally sales voucher import.
  */
@@ -416,9 +456,7 @@ export function buildTallyOrderExportRows({
     const vatRate = Number.isFinite(Number(line.vatRate))
       ? Math.max(0, Number(line.vatRate))
       : vatRateForProduct(line);
-    const discount = Number.isFinite(Number(line.discountPercent))
-      ? Number(line.discountPercent)
-      : discountPercentFromRates(listRate, rate);
+    const discount = discountAmountPerUnit(listRate, rate);
     const unit = resolveItemUnit(line, unitMap);
     const amount = Number.isFinite(lineValue) && lineValue > 0
       ? round2(lineValue)
@@ -448,7 +486,7 @@ export function buildTallyOrderExportRows({
       Amount: amount,
       godown: routing.godown,
       "SALES LEDGER": setup.salesLedger,
-      "SALES TEAM": routing.salesTeam,
+      "SALES TEAM": resolveTallySalesTeamName(order) || routing.salesTeam,
       "COST CENTER": routing.costCenter,
       Narration: "",
     };

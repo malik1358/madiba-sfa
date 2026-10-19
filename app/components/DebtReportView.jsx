@@ -51,6 +51,10 @@ const TEXT = {
   above120: { en: ">120", ar: ">120" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
   received: { en: "Received last 10 days", ar: "المستلم آخر 10 أيام" },
+  oldestInvoiceDays: { en: "Oldest invoice days", ar: "أقدم فاتورة بالأيام" },
+  lastVisit: { en: "Last visit", ar: "آخر زيارة" },
+  visitPerson: { en: "Visit person", ar: "اسم الزائر" },
+  remarks: { en: "Remarks", ar: "الملاحظات" },
   legal: { en: "Transferred to legal", ar: "محول للقانوني" },
   transferredOn: { en: "Transferred on", ar: "تاريخ التحويل" },
   transferredBy: { en: "Transferred by", ar: "حوّله" },
@@ -84,7 +88,7 @@ function formatDate(value) {
 }
 
 function filterKeysFor(view) {
-  const keys = ["code", "customer", "salesman", "cityArea", "above120", "totalOutstanding", "received", "legal"];
+  const keys = ["code", "customer", "salesman", "cityArea", "above120", "totalOutstanding", "received", "oldestInvoiceDays", "lastVisit", "visitPerson", "remarks", "legal"];
   if (view === "legal") keys.push("transferredOn", "transferredBy", "note");
   else keys.push("transferredOn", "note");
   return keys;
@@ -98,6 +102,10 @@ function rowFilterValue(row, key, yesLabel, noLabel) {
   if (key === "above120") return formatAmount(row.outstandingAbove120);
   if (key === "totalOutstanding") return formatAmount(row.totalOutstanding);
   if (key === "received") return formatAmount(row.receivedLast10Days);
+  if (key === "oldestInvoiceDays") return row.oldestInvoiceDays ? String(row.oldestInvoiceDays) : "-";
+  if (key === "lastVisit") return formatDate(row.lastVisitDate);
+  if (key === "visitPerson") return excelFilterCellText(row.lastVisitPerson || "-");
+  if (key === "remarks") return excelFilterCellText(row.lastVisitRemark || "-");
   if (key === "legal") return row.transferredToLegal ? yesLabel : noLabel;
   if (key === "transferredOn") return formatDate(row.transferredAt);
   if (key === "transferredBy") return excelFilterCellText(row.transferredBy || "-");
@@ -238,6 +246,10 @@ export default function DebtReportView({ view = "bad-debts" }) {
                         <BiExcelHead label={t("above120")} filterKey="above120" options={options} filters={filters} onChange={setFilter} className="moduleBiTotalCol" />
                         <BiExcelHead label={t("totalOutstanding")} filterKey="totalOutstanding" options={options} filters={filters} onChange={setFilter} className="moduleBiTotalCol" />
                         <BiExcelHead label={t("received")} filterKey="received" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("oldestInvoiceDays")} filterKey="oldestInvoiceDays" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("lastVisit")} filterKey="lastVisit" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("visitPerson")} filterKey="visitPerson" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("remarks")} filterKey="remarks" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("legal")} filterKey="legal" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("transferredOn")} filterKey="transferredOn" options={options} filters={filters} onChange={setFilter} />
                         {view === "legal" ? (
@@ -256,6 +268,10 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td className="moduleBiTotalCol moduleBiMonthCell--down">{formatAmount(row.outstandingAbove120)}</td>
                           <td className="moduleBiTotalCol">{formatAmount(row.totalOutstanding)}</td>
                           <td>{formatAmount(row.receivedLast10Days)}</td>
+                          <td>{row.oldestInvoiceDays || "-"}</td>
+                          <td>{formatDate(row.lastVisitDate)}</td>
+                          <td>{row.lastVisitPerson || "-"}</td>
+                          <td>{row.lastVisitRemark || "-"}</td>
                           <td className={row.transferredToLegal ? "moduleBiMonthCell--down" : ""}>
                             {row.transferredToLegal ? t("yes") : t("no")}
                           </td>
@@ -266,7 +282,7 @@ export default function DebtReportView({ view = "bad-debts" }) {
                       ))}
                       {visibleRows.length === 0 ? (
                         <tr>
-                          <td colSpan={view === "legal" ? 11 : 10}>{t("noRows")}</td>
+                          <td colSpan={view === "legal" ? 15 : 14}>{t("noRows")}</td>
                         </tr>
                       ) : null}
                     </tbody>
@@ -280,6 +296,10 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td className="moduleBiTotalCol"><strong>{formatAmount(visibleSummary.above120)}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(visibleSummary.total)}</strong></td>
                           <td><strong>{formatAmount(visibleSummary.received)}</strong></td>
+                          <td />
+                          <td />
+                          <td />
+                          <td />
                           <td><strong>{visibleSummary.legal}</strong></td>
                           <td colSpan={view === "legal" ? 3 : 2} />
                         </tr>

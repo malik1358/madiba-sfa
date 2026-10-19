@@ -1,6 +1,7 @@
 import {
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
+  resolveInvoiceDays,
 } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
@@ -120,11 +121,100 @@ export function isPotentialBadDebt(record = {}, fundsIndex) {
   return fundsReceivedForCustomer(record?.customer_code, fundsIndex) <= 0;
 }
 
+export function debtReportVisitCodes(records = [], transfers = [], fundsReceived = [], {
+  todayKey = getKsaDateString(),
+  lookbackDays = POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
+} = {}) {
+  const fundsIndex = indexFundsByAccount(fundsReceived, { todayKey, lookbackDays });
+  const codes = (records || [])
+    .filter((record) => isPotentialBadDebt(record, fundsIndex))
+    .map((record) => record?.customer_code);
+  activeLegalTransfers(transfers).forEach((transfer) => codes.push(transfer?.customer_code));
+  return codes;
+}
+
+export function oldestOpenInvoiceDays(record, todayIso = new Date().toISOString()) {
+  let oldest = 0;
+  (record?.invoices || []).forEach((invoice) => {
+    if (positiveMoney(invoice?.pending_amount) <= 0) return;
+    oldest = Math.max(oldest, Math.round(resolveInvoiceDays(invoice, todayIso)));
+  });
+  return oldest;
+}
+
+export function describeCollectionVisit(visit) {
+  if (!visit?.saved_at) return null;
+  const arabic = String(visit.remark_arabic || "").trim();
+  const english = String(visit.remark_english || "").trim();
+  const remark = arabic && english && arabic !== english ? `${arabic} / ${english}` : (arabic || english);
+  return {
+    at: visit.saved_at,
+    remark,
+    personId: String(visit.created_by || visit.scheduled_by_id || "").trim(),
+    personName: String(visit.scheduled_by_name || "").trim(),
+    customerCode: String(visit.customer_code || "").trim(),
+  };
+}
+
+export function describeFieldVisit(report) {
+  const at = report?.captured_at || report?.saved_at || "";
+  if (!at) return null;
+  const note = String(report.note || "").trim();
+  const outcome = String(report.outcome || "").trim();
+  return {
+    at,
+    remark: note || outcome,
+    personId: String(report.saved_by_user_id || "").trim(),
+    personName: String(report.saved_by_name || "").trim(),
+    customerCode: String(report.customer_code || "").trim(),
+  };
+}
+
+export function chooseLatestVisit(candidates = []) {
+  return (candidates || [])
+    .filter((visit) => visit?.at && Number.isFinite(Date.parse(visit.at)))
+    .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))[0] || null;
+}
+
+export function collapseVisitsByAccount(visits = []) {
+  const groups = new Map();
+  (visits || []).filter(Boolean).forEach((visit) => {
+    const key = resolveCustomerAccountCode(visit.customerCode) || String(visit.customerCode || "").trim();
+    if (!key) return;
+    groups.set(key, chooseLatestVisit([groups.get(key), { ...visit, customerCode: key }]));
+  });
+  return [...groups.values()].filter(Boolean);
+}
+
+export function findLatestVisit(customerCode, visits = []) {
+  return chooseLatestVisit(
+    (visits || []).filter((visit) => customerAccountCodesMatch(visit.customerCode, customerCode)),
+  );
+}
+
+function visitColumns(record, customerCode, { visits = [], actorNames = {} } = {}) {
+  const visit = chooseLatestVisit([
+    describeCollectionVisit(record?.latest_collection),
+    findLatestVisit(customerCode, visits),
+  ]);
+  if (!visit) {
+    return { lastVisitDate: "", lastVisitRemark: "", lastVisitPerson: "" };
+  }
+  const personId = String(visit.personId || "").trim();
+  return {
+    lastVisitDate: ksaDateKey(visit.at),
+    lastVisitRemark: String(visit.remark || "").trim(),
+    lastVisitPerson: String(visit.personName || actorNames[personId] || "").trim(),
+  };
+}
+
 function reportRow(record, {
   fundsIndex,
   transfer = null,
   actorNames = {},
   customer = null,
+  visits = [],
+  todayIso = new Date().toISOString(),
 } = {}) {
   const code = String(record?.customer_code || transfer?.customer_code || customer?.customer_code || "").trim();
   const transferred = Boolean(transfer?.is_transferred);
@@ -141,6 +231,8 @@ function reportRow(record, {
     transferredAt: transferred ? ksaDateKey(transfer?.transferred_at) : "",
     transferredBy: transferred ? String(actorNames[actorId] || "").trim() : "",
     legalNote: transferred ? String(transfer?.note || "").trim() : "",
+    oldestInvoiceDays: oldestOpenInvoiceDays(record, todayIso),
+    ...visitColumns(record, code, { visits, actorNames }),
   };
 }
 
@@ -159,18 +251,23 @@ export function buildPotentialBadDebtRows(records = [], {
   fundsReceived = [],
   transfers = [],
   actorNames = {},
+  visits = [],
   todayKey = getKsaDateString(),
+  todayIso = "",
   lookbackDays = POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
 } = {}) {
   const options = { todayKey, lookbackDays };
   const fundsIndex = indexFundsByAccount(fundsReceived, options);
   const legal = activeLegalTransfers(transfers);
+  const asOfIso = todayIso || `${todayKey}T12:00:00+03:00`;
   return (records || [])
     .filter((record) => isPotentialBadDebt(record, fundsIndex))
     .map((record) => reportRow(record, {
       fundsIndex,
       transfer: legal.find((transfer) => customerAccountCodesMatch(transfer.customer_code, record.customer_code)) || null,
       actorNames,
+      visits,
+      todayIso: asOfIso,
     }))
     .sort((left, right) => (
       right.outstandingAbove120 - left.outstandingAbove120
@@ -185,10 +282,13 @@ export function buildLegalTransferRows({
   customers = [],
   fundsReceived = [],
   actorNames = {},
+  visits = [],
   todayKey = getKsaDateString(),
+  todayIso = "",
   lookbackDays = POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
 } = {}) {
   const fundsIndex = indexFundsByAccount(fundsReceived, { todayKey, lookbackDays });
+  const asOfIso = todayIso || `${todayKey}T12:00:00+03:00`;
   return activeLegalTransfers(transfers)
     .map((transfer) => reportRow(
       findMatchingRecord(records, transfer.customer_code),
@@ -196,6 +296,8 @@ export function buildLegalTransferRows({
         fundsIndex,
         transfer,
         actorNames,
+        visits,
+        todayIso: asOfIso,
         customer: findMatchingCustomer(customers, transfer.customer_code),
       },
     ))

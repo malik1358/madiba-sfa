@@ -116,3 +116,36 @@ test("legal report lists every active transfer even without >120 debt", () => {
   assert.equal(rows[1].outstandingAbove120, 0);
   assert.equal(rows[1].legalNote, "Old file");
 });
+
+test("rows keep the oldest open invoice and the later visit", () => {
+  const rows = buildPotentialBadDebtRows([
+    record({
+      invoices: [
+        { pending_amount: 100, invoice_day: 140 },
+        { pending_amount: 50, invoice_date: "2026-01-01" },
+        { pending_amount: 0, invoice_day: 900 },
+      ],
+      latest_collection: {
+        saved_at: "2026-09-20T08:00:00+03:00",
+        remark_english: "Old promise",
+        created_by: "user-old",
+      },
+    }),
+  ], {
+    todayKey,
+    todayIso: "2026-10-19T12:00:00+03:00",
+    actorNames: { "user-new": "FAZLUR" },
+    visits: [{
+      at: "2026-10-11T15:00:00+03:00",
+      remark: "Shop closed",
+      personId: "user-new",
+      personName: "",
+      customerCode: "1001",
+    }],
+  });
+
+  assert.equal(rows[0].oldestInvoiceDays, 291);
+  assert.equal(rows[0].lastVisitDate, "2026-10-11");
+  assert.equal(rows[0].lastVisitPerson, "FAZLUR");
+  assert.equal(rows[0].lastVisitRemark, "Shop closed");
+});

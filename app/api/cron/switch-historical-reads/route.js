@@ -7,6 +7,8 @@ import { getSignedReadUrl, readAttachmentStorageConfig } from "../../../lib/stor
 import { authorizeAttachmentRead, resolveAttachmentTarget } from "../../../lib/storage/attachmentAccess.js";
 import { handleAttachmentUrlRequest } from "../../attachments/[id]/url/route.js";
 import { RECEIPT_R2_BUCKET, sha256Hex } from "../../../lib/storage/copyReceiptsToR2.js";
+import { legacyCollectionCopyRef } from "../../../lib/storage/attachmentRecords.js";
+import { legacyCollectionReadObject, loadVerifiedCopyNames } from "../../../lib/storage/legacyCollectionRead.js";
 import {
   isHistoricalReadSwitchRow,
   isSwitchedHistoricalRow,
@@ -126,7 +128,7 @@ async function probeRollback(admin, row) {
   }
 }
 
-async function authorizedRead(admin, attachmentId) {
+async function authorizedRead(admin, attachmentId, searchParams = new URLSearchParams()) {
   const authClient = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -145,7 +147,7 @@ async function authorizedRead(admin, attachmentId) {
       admin,
       token,
       id: attachmentId,
-      searchParams: new URLSearchParams(),
+      searchParams,
     });
     if (result.status !== 200 || !result.body?.url) return { ok: false, status: result.status, host: "" };
     const response = await fetch(result.body.url);
@@ -320,11 +322,12 @@ async function confirmReads(admin) {
     if (visitError) throw visitError;
     const target = visit ? await resolveAttachmentTarget(admin, { id: "legacy", legacyKind: `${kind}_copy`, legacyRef: String(visit.id) }) : { status: 404 };
     let bytesOk = false;
-    if (target.status === 200 && target.object?.provider === "supabase") {
-      const bytes = await downloadSupabase(admin, target.object.key);
-      bytesOk = bytes.length > 0;
+    if (target.status === 200 && target.object?.provider === "r2") {
+      const source = await downloadSupabase(admin, target.object.key);
+      const remote = Buffer.from(await getR2Object(null, { key: target.object.key }));
+      bytesOk = sha256Hex(source) === sha256Hex(remote);
     }
-    legacy[kind] = { ok: target.object?.provider === "supabase" && bytesOk, provider: target.object?.provider || "" };
+    legacy[kind] = { ok: target.object?.provider === "r2" && bytesOk, provider: target.object?.provider || "" };
   }
 
   const rollbackRow = samples.historicalReceipt;
@@ -338,6 +341,7 @@ async function confirmReads(admin) {
     success: !failed,
     stop: failed,
     stopReason: failed ? "confirm-failed" : "",
+    mode: "confirm",
     switched: switched.length,
     historicalStillSupabase: historicalSupabase.length,
     newVerified: newVerified.length,
@@ -350,6 +354,100 @@ async function confirmReads(admin) {
   };
 }
 
+async function listCollectionVisits(admin) {
+  const rows = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select("id,receipt_copy_url,payment_copy_url,receipt_attachment_id,payment_attachment_id")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  return rows;
+}
+
+async function reconcileLegacyReads(admin) {
+  const config = readAttachmentStorageConfig();
+  if (config.forceSupabaseReads) {
+    return { success: false, stop: true, stopReason: "force-supabase-reads-already-on", mode: "legacy", writeProvider: config.writeProvider };
+  }
+  const [receiptNames, paymentNames, visits] = await Promise.all([
+    loadVerifiedCopyNames(admin, "receipt"),
+    loadVerifiedCopyNames(admin, "payment"),
+    listCollectionVisits(admin),
+  ]);
+  const counts = { receiptR2: 0, receiptSupabase: 0, paymentR2: 0, paymentSupabase: 0, receiptBroken: 0, paymentBroken: 0 };
+  const samples = {};
+  for (const visit of visits) {
+    for (const kind of ["receipt", "payment"]) {
+      if (visit[`${kind}_attachment_id`]) continue;
+      const url = visit[`${kind}_copy_url`];
+      if (!String(url || "").trim()) continue;
+      const base = legacyCollectionCopyRef(visit, kind);
+      if (!base) {
+        counts[`${kind}Broken`] += 1;
+        continue;
+      }
+      const chosen = legacyCollectionReadObject(base, kind, kind === "receipt" ? receiptNames : paymentNames, config);
+      if (chosen?.provider === "r2") counts[`${kind}R2`] += 1;
+      else counts[`${kind}Supabase`] += 1;
+      if (!samples[kind] && chosen?.provider === "r2") samples[kind] = { id: visit.id, key: chosen.key };
+    }
+  }
+
+  const reads = {};
+  for (const kind of ["receipt", "payment"]) {
+    const sample = samples[kind];
+    if (!sample) {
+      reads[kind] = { ok: false, reason: "missing" };
+      continue;
+    }
+    const source = await downloadSupabase(admin, sample.key);
+    const remote = Buffer.from(await getR2Object(null, { key: sample.key }));
+    const authorized = await authorizedRead(admin, "legacy", new URLSearchParams({ kind: `${kind}_copy`, ref: String(sample.id) }));
+    const anonymous = await handleAttachmentUrlRequest({
+      admin,
+      token: "",
+      id: "legacy",
+      searchParams: new URLSearchParams({ kind: `${kind}_copy`, ref: String(sample.id) }),
+    });
+    reads[kind] = {
+      ok: sha256Hex(source) === sha256Hex(remote) && authorized.ok && authorized.host === "r2" && anonymous.status === 401,
+      host: authorized.host,
+      anonymousStatus: anonymous.status,
+      bytes: source.length,
+    };
+  }
+
+  const forced = samples.receipt
+    ? await getSignedReadUrl(admin, {
+      provider: "r2",
+      key: samples.receipt.key,
+      expiresIn: 60,
+      config: { ...config, forceSupabaseReads: true },
+    })
+    : null;
+  const rollbackOk = Boolean(forced) && signedHostKind(forced.url) === "supabase";
+  const stillSupabase = counts.receiptSupabase + counts.paymentSupabase;
+  const broken = counts.receiptBroken + counts.paymentBroken;
+  const failed = stillSupabase > 0 || broken > 0 || !reads.receipt?.ok || !reads.payment?.ok || !rollbackOk;
+  return {
+    success: !failed,
+    stop: failed,
+    stopReason: failed ? "legacy-reconciliation" : "",
+    mode: "legacy",
+    ...counts,
+    writeProvider: config.writeProvider,
+    forceSupabaseReads: config.forceSupabaseReads,
+    reads,
+    rollbackOk,
+  };
+}
+
 export async function POST(request) {
   if (!isCronAuthorized(request)) return json({ success: false, error: "Unauthorized" }, 401);
   if (process.env.VERCEL_ENV !== "production") return json({ success: false, stop: true, stopReason: "not-production" }, 409);
@@ -358,7 +456,7 @@ export async function POST(request) {
   let mode = "check";
   try {
     const body = await request.json();
-    if (body?.mode === "confirm") mode = "confirm";
+    if (body?.mode === "confirm" || body?.mode === "legacy") mode = body.mode;
   } catch {
     mode = "check";
   }
@@ -368,6 +466,10 @@ export async function POST(request) {
     if (r2.bucket !== RECEIPT_R2_BUCKET) return json({ success: false, stop: true, stopReason: "wrong-bucket" }, 409);
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
     if (mode === "confirm") return json(await confirmReads(admin));
+    if (mode === "legacy") {
+      const result = await reconcileLegacyReads(admin);
+      return json(result, result.stop ? 409 : 200);
+    }
     const result = await checkBatch(admin);
     return json(result, result.stop ? 409 : 200);
   } catch (error) {

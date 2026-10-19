@@ -7,6 +7,8 @@ import {
   legacyCustomerDocumentRef,
   legacyOrderInvoiceRef,
 } from "./attachmentRecords.js";
+import { readAttachmentStorageConfig } from "./attachmentStorage.js";
+import { legacyCollectionReadObject, loadVerifiedCopyNames } from "./legacyCollectionRead.js";
 
 const COLLECTION_VISIT_SELECT = "id,customer_code,created_by,receipt_copy_url,payment_copy_url,receipt_attachment_id,payment_attachment_id";
 const COLLECTION_VISIT_LEGACY_SELECT = "id,customer_code,created_by,receipt_copy_url,payment_copy_url";
@@ -173,7 +175,12 @@ async function targetFromLegacy(admin, kind, ref) {
     if (isAttachmentId(attachmentId)) return targetFromAttachmentId(admin, attachmentId);
     const object = legacyCollectionCopyRef(visit, COLLECTION_KIND[kind]);
     if (!object) return { status: 404 };
-    return { status: 200, category: kind, record: null, owner: visit, object, fileName: fileNameFromKey(object.key), legacy: true };
+    const kindName = COLLECTION_KIND[kind];
+    const verifiedNames = await loadVerifiedCopyNames(admin, kindName);
+    const chosen = legacyCollectionReadObject(object, kindName, verifiedNames, {
+      forceSupabaseReads: readAttachmentStorageConfig().forceSupabaseReads,
+    });
+    return { status: 200, category: kind, record: null, owner: visit, object: chosen || object, fileName: fileNameFromKey((chosen || object).key), legacy: true };
   }
 
   if (kind === ATTACHMENT_CATEGORIES.customerDocument) {

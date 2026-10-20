@@ -4,6 +4,7 @@ import {
   buildCollectionStaleOverdueReportUrl,
   COLLECTION_STALE_OVERDUE_EMAIL_LAST_SENT_KEY,
   filterCollectionStaleOverdueRows,
+  selectCollectionRowsForStaleOverdueEmail,
   groupCollectionStaleOverdueBySalesman,
   parseCollectionStaleOverdueLastSent,
   resolveCollectionStaleOverdueDigestCc,
@@ -470,7 +471,7 @@ async function loadDueCollectionCustomers(admin, {
 
   const records = await fetchOutstandingAndCollectionRecords(admin, scope);
   const queues = buildCollectionQueues(records);
-  const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+  const dueCustomers = selectCollectionRowsForStaleOverdueEmail(queues);
   const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(admin, dueCustomers);
   return enrichDueCustomersWithRecentCollectionVisits(admin, withVisitReports, todayKey);
 }

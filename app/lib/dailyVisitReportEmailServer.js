@@ -23,6 +23,7 @@ import {
   buildCollectionStaleOverdueSalesmanSection,
   filterCollectionStaleOverdueRowsForProfile,
   resolveOverdueAgingThresholdDays,
+  selectCollectionRowsForStaleOverdueEmail,
 } from "./collectionStaleOverdueEmail.js";
 import {
   enrichDueCustomersWithRecentCollectionVisits,
@@ -394,7 +395,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
         });
         collectionRecords = records;
         const queues = buildCollectionQueues(records, staleAsOfIso);
-        const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+        const dueCustomers = selectCollectionRowsForStaleOverdueEmail(queues);
         const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
         return enrichDueCustomersWithRecentCollectionVisits(client, withVisitReports, todayKey);
       };

@@ -4,11 +4,13 @@ import assert from "node:assert/strict";
 import {
   buildCollectionStaleOverdueEmail,
   buildCollectionStaleOverdueSalesmanSection,
+  buildCollectionStaleOverdueEmailRow,
   filterCollectionStaleOverdueRows,
   filterCollectionStaleOverdueRowsForProfile,
   groupCollectionStaleOverdueBySalesman,
   isCollectionStaleOverdueRow,
   isSoftAgingSalesman,
+  selectCollectionRowsForStaleOverdueEmail,
   resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
@@ -596,4 +598,39 @@ test("resolveCollectionStaleOverdueRouteTrigger keeps manual reruns manual", () 
   assert.equal(resolveCollectionStaleOverdueRouteTrigger({ force: "true" }), "manual");
   assert.equal(resolveCollectionStaleOverdueRouteTrigger({ to: "ops@madiba.com" }), "manual");
   assert.equal(resolveCollectionStaleOverdueRouteTrigger({ trigger: "cron", date: "2026-09-26" }), "cron");
+});
+
+test("selectCollectionRowsForStaleOverdueEmail keeps overdue legal customers", () => {
+  const due = { customer_code: "D1", due_invoice_count: 1, total_due_amount: 100 };
+  const legalDue = {
+    customer_code: "L1",
+    customer_name: "Legal Shop",
+    due_invoice_count: 2,
+    total_due_amount: 400,
+    legal_transfer: { is_transferred: true },
+  };
+  const legalNotDue = {
+    customer_code: "L2",
+    due_invoice_count: 0,
+    total_due_amount: 0,
+    legal_transfer: { is_transferred: true },
+  };
+  const selected = selectCollectionRowsForStaleOverdueEmail({
+    dueCustomers: [due, { ...legalDue, customer_code: "L1" }],
+    legalCustomers: [legalDue, legalNotDue],
+  });
+  assert.deepEqual(selected.map((row) => row.customer_code), ["D1", "L1"]);
+
+  const emailRow = buildCollectionStaleOverdueEmailRow(legalDue);
+  assert.equal(emailRow.isLegal, true);
+  assert.match(emailRow.customer, /\(Legal\)$/);
+
+  const section = buildCollectionStaleOverdueSalesmanSection({
+    salesmanName: "Parvez",
+    sourceRows: [legalDue],
+    todayKey: "2026-09-26",
+    agingThresholdDays: 30,
+  });
+  assert.match(section.html, /Legal Shop \(Legal\)/);
+  assert.match(section.text, /Legal Shop \(Legal\)/);
 });

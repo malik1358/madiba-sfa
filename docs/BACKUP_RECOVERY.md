@@ -4,7 +4,7 @@
 
 Backup tooling is implemented, but is **not active until merged to main, configured, and verified against production**. No production credentials belong on the developer PC or in `.env.local`. No database migration is required. Google consent and credential setup are operator actions; never send tokens, passwords, signing keys, or the private decryption key through an AI chat.
 
-Workflows: `.github/workflows/google-drive-backup.yml` and `.github/workflows/backup-health.yml`. Standalone Node scripts under `scripts/backup/` do not change app runtime behavior. Production export CLI rejects execution outside GitHub Actions on `main`.
+Workflows: `.github/workflows/google-drive-backup.yml`, `.github/workflows/backup-health.yml`, and the manual `.github/workflows/historical-collection-backup.yml`. The historical job backs up only the 1,589 reconciled receipt and payment copies from R2 after checking them against Supabase. It uses the same age recipient and Drive folder, with a filename the retention cleanup does not match. It does not delete Storage objects. Standalone Node scripts under `scripts/backup/` do not change app runtime behavior. Production export CLI rejects execution outside GitHub Actions on `main`.
 
 ## Schedule and Coverage
 

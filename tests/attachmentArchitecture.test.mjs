@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
@@ -38,6 +38,39 @@ import { buildOptimisticLatestCollection } from "../app/lib/collectionOffline.js
 
 const NOW = Date.parse("2026-10-02T09:00:00.000Z");
 const SUPABASE_URL = "https://project.supabase.co";
+const ACCOUNT = "abc123abc123abc123abc123abc123ab";
+const COPY_SHA = "a".repeat(64);
+const savedEnv = {};
+const savedFetch = globalThis.fetch;
+
+before(() => {
+  for (const [name, value] of Object.entries({
+    R2_ACCOUNT_ID: ACCOUNT,
+    R2_ACCESS_KEY_ID: "AKIDTESTR2",
+    R2_SECRET_ACCESS_KEY: "secretsecretsecretsecretsecretsecret",
+    R2_BUCKET: "madiba-attachments-dev",
+    R2_ENDPOINT: "",
+  })) {
+    savedEnv[name] = process.env[name];
+    process.env[name] = value;
+  }
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (!url.hostname.endsWith(".r2.cloudflarestorage.com")) return savedFetch(input, init);
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: { "content-length": "1" } });
+    if (request.method === "GET") return new Response("file", { status: 200 });
+    return new Response(null, { status: 200, headers: { etag: "\"abc\"" } });
+  };
+});
+
+after(() => {
+  globalThis.fetch = savedFetch;
+  for (const [name, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -165,7 +198,8 @@ test("storeAttachment uploads and records receipt, payment, invoice, and documen
     assert.equal(result.supported, true);
     const row = admin.data.attachments.find((attachment) => attachment.id === result.attachmentId);
     assert.equal(row.category, entry.category);
-    assert.equal(row.storage_provider, "supabase");
+    const collection = entry.category === ATTACHMENT_CATEGORIES.receiptCopy || entry.category === ATTACHMENT_CATEGORIES.paymentCopy;
+    assert.equal(row.storage_provider, collection ? "r2" : "supabase");
     assert.equal(row.object_key, entry.key);
     assert.equal(row.size_bytes, 3);
     assert.equal(row.content_type, "application/pdf");
@@ -173,21 +207,27 @@ test("storeAttachment uploads and records receipt, payment, invoice, and documen
     assert.equal(row.customer_code, "1114C");
     assert.equal(row.uploaded_by, "user-1");
     assert.equal(row.entity_id, entry.entityId ? String(entry.entityId) : null);
-    assert.ok(admin.storage.objects.has(entry.key));
+    assert.equal(admin.storage.objects.has(entry.key), !collection);
   }
 });
 
-test("storeAttachment still uploads when the attachments migration is not applied", async () => {
+test("storeAttachment still uploads invoices when the attachments migration is not applied", async () => {
   const admin = createFakeAdmin({ missingTables: ["attachments"] });
   const result = await storeAttachment(admin, {
+    category: ATTACHMENT_CATEGORIES.orderInvoice,
+    key: "order-invoices/1114C/378/X-1.pdf",
+    body: new Uint8Array([1]),
+    contentType: "application/pdf",
+  });
+  assert.equal(result.attachmentId, null);
+  assert.equal(result.supported, false);
+  assert.ok(admin.storage.objects.has("order-invoices/1114C/378/X-1.pdf"));
+  await assert.rejects(storeAttachment(admin, {
     category: ATTACHMENT_CATEGORIES.receiptCopy,
     key: "payment-collections/receipt-copies/X-1-receipt.jpg",
     body: new Uint8Array([1]),
     contentType: "image/jpeg",
-  });
-  assert.equal(result.attachmentId, null);
-  assert.equal(result.supported, false);
-  assert.ok(admin.storage.objects.has("payment-collections/receipt-copies/X-1-receipt.jpg"));
+  }), /Unable to store the receipt or payment copy/);
 });
 
 test("createAttachmentRecord rejects unknown categories and getAttachmentById ignores bad ids", async () => {
@@ -296,6 +336,7 @@ async function seededAdmin() {
       ],
       system_settings: [
         { setting_key: "order_invoice_meta:378", setting_value: JSON.stringify({ orderId: "378", invoiceFilePath: "1114C/378/old.pdf" }) },
+        { setting_key: "receipt_r2_copy_progress_v1", setting_value: JSON.stringify({ verified: { "receipt-copies/1114C-1-receipt.jpg": COPY_SHA }, reconciled: { "receipt-copies/1114C-1-receipt.jpg": COPY_SHA } }) },
       ],
     },
   });
@@ -425,7 +466,7 @@ test("legacy references resolve historical files and prefer attachment ids when 
   const legacyReceipt = await resolveAttachmentTarget(admin, { id: "legacy", legacyKind: "receipt_copy", legacyRef: "1" });
   assert.equal(legacyReceipt.status, 200);
   assert.equal(legacyReceipt.legacy, true);
-  assert.deepEqual(legacyReceipt.object, { provider: "supabase", key: "payment-collections/receipt-copies/1114C-1-receipt.jpg" });
+  assert.deepEqual(legacyReceipt.object, { provider: "r2", key: "payment-collections/receipt-copies/1114C-1-receipt.jpg" });
 
   const modernViaLegacy = await resolveAttachmentTarget(admin, { id: "legacy", legacyKind: "receipt_copy", legacyRef: "2" });
   assert.equal(modernViaLegacy.record.id, ids.receipt);
@@ -455,8 +496,7 @@ test("legacy resolution works before the attachments migration is applied", asyn
     },
   });
   const target = await resolveAttachmentTarget(admin, { id: "legacy", legacyKind: "receipt_copy", legacyRef: "7" });
-  assert.equal(target.status, 200);
-  assert.equal(target.object.key, "payment-collections/receipt-copies/old.jpg");
+  assert.equal(target.status, 404);
   assert.equal((await resolveAttachmentTarget(admin, { id: "6f9619ff-8b86-4011-b42d-00cf4fc964ff" })).status, 404);
 });
 
@@ -506,7 +546,7 @@ test("endpoint signs only after authorization succeeds", async () => {
   });
   assert.equal(allowed.status, 200);
   assert.equal(signCalls, 1);
-  assert.match(allowed.body.url, /^https:\/\/signed\.example\/payment-collections\/receipt-copies\/.+ttl=300$/);
+  assert.match(allowed.body.url, new RegExp(`${ACCOUNT}\\.r2\\.cloudflarestorage\\.com`));
   assert.equal(allowed.body.category, "receipt_copy");
   assert.ok(Date.parse(allowed.body.expiresAt) > Date.now());
   assert.equal(admin.calls.inserts.filter((entry) => JSON.stringify(entry.row).includes("signed.example")).length, 0, "signed URLs are never stored");
@@ -522,8 +562,8 @@ test("endpoint serves legacy historical receipts through the same authorization"
     deps: accessDeps({ collectionCustomerInScope: async () => true }),
   });
   assert.equal(allowed.status, 200);
-  assert.equal(admin.calls.signed.at(-1).path, "receipt-copies/1114C-1-receipt.jpg");
-  assert.deepEqual(admin.calls.signed.at(-1).options, { download: "1114C-1-receipt.jpg" });
+  assert.match(allowed.body.url, /r2\.cloudflarestorage\.com/);
+  assert.match(decodeURIComponent(allowed.body.url), /1114C-1-receipt\.jpg/);
 
   const denied = await handleAttachmentUrlRequest({ admin, token: "token-1", id: "legacy", searchParams: params({ kind: "receipt_copy", ref: "1" }), deps: accessDeps() });
   assert.equal(denied.status, 403);

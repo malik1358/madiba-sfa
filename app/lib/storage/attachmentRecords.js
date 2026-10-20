@@ -106,7 +106,13 @@ export async function storeAttachment(admin, {
   config = readAttachmentStorageConfig(),
 }) {
   let effectiveConfig = config;
-  if (config.writeProvider === STORAGE_PROVIDERS.r2 && !(await attachmentsSchemaReady(admin))) {
+  const collectionCopy = category === "receipt_copy" || category === "payment_copy";
+  if (collectionCopy) {
+    if (!(await attachmentsSchemaReady(admin))) {
+      throw new Error("Unable to store the receipt or payment copy. Please try again.");
+    }
+    effectiveConfig = { ...config, writeProvider: STORAGE_PROVIDERS.r2, dualWrite: false };
+  } else if (config.writeProvider === STORAGE_PROVIDERS.r2 && !(await attachmentsSchemaReady(admin))) {
     // Without an attachments row an R2 object would be unreachable, so stay on Supabase.
     console.warn("Attachments migration missing; writing attachment to Supabase instead of R2.");
     effectiveConfig = { ...config, writeProvider: STORAGE_PROVIDERS.supabase, dualWrite: false };

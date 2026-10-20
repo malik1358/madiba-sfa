@@ -1,0 +1,61 @@
+name: Delete historical collection copies
+
+on:
+  workflow_dispatch:
+    inputs:
+      resume:
+        description: Continue only when every remaining object is on the approved allowlist
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: delete-historical-collection-copies
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment: production-backup
+    env:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      BACKUP_SUPABASE_URL: ${{ vars.BACKUP_SUPABASE_URL }}
+      BACKUP_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BACKUP_SUPABASE_SERVICE_ROLE_KEY }}
+      BACKUP_SUPABASE_ACCESS_TOKEN: ${{ secrets.BACKUP_SUPABASE_ACCESS_TOKEN }}
+      BACKUP_SUPABASE_PROJECT_REF: ${{ vars.BACKUP_SUPABASE_PROJECT_REF }}
+      BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+      BACKUP_RCLONE_CONFIG: ${{ secrets.BACKUP_RCLONE_CONFIG }}
+      BACKUP_DRIVE_PATH: ${{ vars.BACKUP_DRIVE_PATH }}
+      PRODUCTION_DB_MIGRATIONS_ENABLED: ${{ vars.PRODUCTION_DB_MIGRATIONS_ENABLED }}
+      ALLOW_PARTIAL: ${{ inputs.resume && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Confirm migrations stay disabled and no copy job is running
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$PRODUCTION_DB_MIGRATIONS_ENABLED" != "false" ]; then
+            echo "PRODUCTION_DB_MIGRATIONS_ENABLED is not false"
+            exit 1
+          fi
+          gh run list --status in_progress --limit 50 --json name,databaseId > "$RUNNER_TEMP/runs.json"
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; const runs=JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/runs.json','utf8')); const own=process.env.GITHUB_RUN_ID; const busy=runs.filter((run)=>String(run.databaseId)!==own && /copy receipt|copy payment|delete historical/i.test(run.name)); if (busy.length) { console.error('Another storage job is running'); process.exit(1);} console.log('No receipt or payment copy job is writing. PRODUCTION_DB_MIGRATIONS_ENABLED is false.');"
+      - name: Test deletion allowlist
+        run: node --test tests/historicalCollectionBackup.test.mjs
+      - name: Install rclone
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes rclone
+      - name: Delete approved Supabase collection originals
+        run: node scripts/backup/delete-historical-collection-copies.mjs

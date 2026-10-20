@@ -215,7 +215,7 @@ Do not create a new table for a small flag if the surrounding feature already us
 
 Scripts in `sql/`:
 
-- `payment-collections` — payment and receipt photos (`sql/setup_payment_collections_storage.sql`), **private**
+- `payment-collections` — payment and receipt photos (`sql/setup_payment_collections_storage.sql`), **private**. The approved historical originals are removed only by Actions **Delete historical collection copies**, which uses the Storage API on the exact manifest keys. R2 objects and the encrypted Drive archive stay.
 - `customer-documents` — `sql/setup_customer_documents_storage.sql`, **private**
 - `order-invoices` — created private by the app, **private**
 - Upload-files bucket — `sql/setup_upload_files_storage.sql`, private, unchanged

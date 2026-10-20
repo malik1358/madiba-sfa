@@ -120,6 +120,8 @@ export default function ProductCatalogue({
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [driveSyncing, setDriveSyncing] = useState(false);
+  const [driveNotice, setDriveNotice] = useState("");
   const [sharingCode, setSharingCode] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
@@ -131,14 +133,14 @@ export default function ProductCatalogue({
   const metaRef = useRef(null);
   const hydrateGeneration = useRef(0);
 
-  const request = useCallback(async (url = "/api/product-catalogue", options = {}) => {
+  const request = useCallback(async (url = "/api/product-catalogue", options = {}, timeoutMs = 45000) => {
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error("Supabase is not configured.");
     const session = await getSessionWithTimeout(supabase);
     if (!session?.access_token) throw new Error("Please login again.");
     const { response, payload } = await fetchJsonWithTimeout(url, {
       ...options, headers: { Authorization: `Bearer ${session.access_token}`, ...(options.headers || {}) },
-    }, 45000);
+    }, timeoutMs);
     if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load product photos.");
     return payload;
   }, []);
@@ -593,6 +595,33 @@ export default function ProductCatalogue({
     if (notice) await showPopup(notice);
   }
 
+  async function updateFromDrive() {
+    if (!canManagePhotos || driveSyncing) return;
+    setDriveSyncing(true);
+    setError("");
+    setDriveNotice(ar ? "جاري فحص صور جوجل درايف..." : "Checking Google Drive for new photos...");
+    try {
+      const payload = await request("/api/product-catalogue/drive-sync", { method: "POST" }, 240000);
+      const added = Number(payload.added || 0);
+      const updated = Number(payload.updated || 0);
+      if (payload.alreadyRunning) {
+        setDriveNotice(ar ? "تحديث الصور يعمل بالفعل." : "A photo update is already running.");
+      } else if (added || updated) {
+        setDriveNotice(payload.limited
+          ? (ar ? `أُضيفت ${added} وحُدثت ${updated}. اضغط مرة أخرى لإكمال الباقي.` : `Added ${added} and updated ${updated}. Press again to bring in the rest.`)
+          : (ar ? `أُضيفت ${added} وحُدثت ${updated} من درايف.` : `Added ${added} and updated ${updated} from Drive.`));
+        await refresh();
+      } else {
+        setDriveNotice(ar ? "صور درايف محدّثة." : "Drive photos are already up to date.");
+      }
+    } catch (err) {
+      setDriveNotice("");
+      setError(err.message || (ar ? "تعذر تحديث الصور من درايف." : "Unable to update photos from Drive."));
+    } finally {
+      setDriveSyncing(false);
+    }
+  }
+
   return (
     <section className={`moduleSection ${styles.catalogue}`}>
       <div className="moduleSectionHeader">
@@ -668,6 +697,7 @@ export default function ProductCatalogue({
           </select>
         </label>
         <button type="button" className="moduleInlineButton" disabled={Boolean(busy)} onClick={() => { void refresh(); }}>{ar ? "تحديث الصور" : "Refresh photos"}</button>
+        {canManagePhotos && <button type="button" className="moduleInlineButton" disabled={Boolean(busy) || driveSyncing} onClick={() => { void updateFromDrive(); }}>{driveSyncing ? (ar ? "جاري التحديث من درايف" : "Updating from Drive") : (ar ? "تحديث من درايف" : "Update from Drive")}</button>}
         <button type="button" className="moduleInlineButton" disabled={loading || exporting || Boolean(sharingCode) || catalogueExportCandidates.length === 0} onClick={() => { void exportCatalogue(); }}>
           {exporting ? (exportProgress || (ar ? "جاري التجهيز" : "Preparing")) : (ar ? "تصدير" : "Export")}
         </button>
@@ -679,7 +709,8 @@ export default function ProductCatalogue({
       {unpricedCartCodes.length > 0 && <p role="alert" className={styles.error}>
         {ar ? "بعض أصناف الطلب ليس لها سعر في المدينة ونوع التسعير المحددين. غيّر التسعير أو احذفها من مراجعة الطلب:" : "Some cart items have no price for this city and pricing type. Change pricing or remove them in order review:"} {unpricedCartCodes.join(", ")}
       </p>}
-      {canManagePhotos && <p className="moduleHint">{ar ? "ارفع صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. يمكن إضافة أكثر من صورة للصنف." : "Upload JPEG, PNG, or WebP photos, up to 3 MB each. Add more than one photo per item for the carousel."}</p>}
+      {canManagePhotos && <p className="moduleHint">{ar ? "ارفع صور JPEG أو PNG أو WebP، بحد أقصى 3 ميجابايت للصورة. يمكن إضافة أكثر من صورة للصنف. تحديث من درايف يجلب الصور الجديدة كل 8 ساعات أيضاً." : "Upload JPEG, PNG, or WebP photos, up to 3 MB each. Add more than one photo per item for the carousel. Update from Drive also runs automatically every 8 hours."}</p>}
+      {driveNotice && <p className="moduleHint" role="status">{driveNotice}</p>}
       {canManagePhotos && !photosReady && <p className={styles.notice}>{ar ? "تخزين الصور غير جاهز بعد. طبّق ترحيل الصور في Supabase." : "Photo storage is not ready yet. Apply the product catalogue photos migration in Supabase."}</p>}
       {loading && !offlineSaved && <p role="status">{ar ? "جاري تحميل التعبئة..." : "Loading packing..."}</p>}
       {offlineSaved && typeof navigator !== "undefined" && navigator.onLine === false && <p className="moduleHint">{ar ? "الصور والتعبئة محفوظة على هذا الجهاز." : "Photos and packing are saved on this device."}</p>}

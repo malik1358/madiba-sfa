@@ -189,12 +189,14 @@ async function assertExistingItem(admin, rawCode) {
   return code;
 }
 
-export async function prepareCataloguePhoto(file) {
-  if (!file || typeof file.arrayBuffer !== "function" || !file.size || file.size > MAX_PRODUCT_PHOTO_BYTES) {
-    fail("Choose a JPEG, PNG, or WebP photo no larger than 3 MB.");
+export const MAX_DRIVE_PHOTO_BYTES = 25 * 1024 * 1024;
+
+export async function prepareCataloguePhotoBuffer(buffer, { maxBytes = MAX_PRODUCT_PHOTO_BYTES } = {}) {
+  if (!buffer?.length || buffer.length > maxBytes) {
+    fail(maxBytes > MAX_PRODUCT_PHOTO_BYTES
+      ? "This Drive photo is larger than 25 MB."
+      : "Choose a JPEG, PNG, or WebP photo no larger than 3 MB.", 413);
   }
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_PRODUCT_PHOTO_BYTES) fail("Photo must be no larger than 3 MB.", 413);
   const image = sharp(buffer, { limitInputPixels: 25000000, animated: false });
   let metadata;
   try {
@@ -211,6 +213,13 @@ export async function prepareCataloguePhoto(file) {
   }
 }
 
+export async function prepareCataloguePhoto(file) {
+  if (!file || typeof file.arrayBuffer !== "function" || !file.size || file.size > MAX_PRODUCT_PHOTO_BYTES) {
+    fail("Choose a JPEG, PNG, or WebP photo no larger than 3 MB.");
+  }
+  return prepareCataloguePhotoBuffer(Buffer.from(await file.arrayBuffer()));
+}
+
 export async function uploadCataloguePhoto(admin, user, rawCode, file) {
   const code = await assertExistingItem(admin, rawCode);
   const { error: schemaError } = await admin.from("attachments").select("id").limit(1);
@@ -222,6 +231,23 @@ export async function uploadCataloguePhoto(admin, user, rawCode, file) {
   }
 
   const image = await prepareCataloguePhoto(file);
+  return storeCatalogueJpeg(admin, {
+    code,
+    image,
+    originalFileName: `${code}.jpg`,
+    uploadedBy: user?.id || null,
+  });
+}
+
+export async function storeCatalogueJpeg(admin, {
+  code,
+  image,
+  originalFileName,
+  uploadedBy = null,
+  createdAt = "",
+}) {
+  if (!code) fail("A valid item code is required.");
+  if (!image?.length) fail("Photo is empty.");
   let config = readAttachmentStorageConfig();
   if (config.writeProvider === STORAGE_PROVIDERS.r2) {
     const { error: attachProbe } = await admin.from("attachments").select("id").limit(1);
@@ -252,16 +278,21 @@ export async function uploadCataloguePhoto(admin, user, rawCode, file) {
     const { record, supported } = await createAttachmentRecord(admin, {
       category: ATTACHMENT_CATEGORIES.productCataloguePhoto,
       stored,
-      originalFileName: `${code}.jpg`,
+      originalFileName: originalFileName || `${code}.jpg`,
       entityType: ATTACHMENT_ENTITY_TYPES.productItem,
       entityId: code,
-      uploadedBy: user.id,
+      uploadedBy: uploadedBy || null,
     });
     if (!supported || !record?.id) {
       await deleteObject(admin, { key: stored.key, provider: stored.provider });
       fail(MIGRATION_MESSAGE, 503);
     }
-    return { id: record.id };
+    const stamp = Date.parse(createdAt);
+    if (Number.isFinite(stamp)) {
+      const { error: stampError } = await admin.from("attachments").update({ created_at: new Date(stamp).toISOString() }).eq("id", record.id);
+      if (stampError) console.error("Catalogue photo time stamp failed:", stampError.message);
+    }
+    return { id: record.id, sha256: stored.sha256 || "" };
   } catch (error) {
     try {
       await deleteObject(admin, { key: stored.key, provider: stored.provider });

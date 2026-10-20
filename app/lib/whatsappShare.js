@@ -101,14 +101,144 @@ function normalizeShareFiles(files = []) {
     .filter(Boolean);
 }
 
-async function blobToBase64(blob) {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
+export function shouldOmitWebShareText(userAgent = "") {
+  return /android/i.test(String(userAgent || ""));
+}
+
+export function whatsappCacheFileName(file, index = 0) {
+  const type = String(file?.type || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  const ext = type.includes("pdf") || name.endsWith(".pdf")
+    ? "pdf"
+    : type.includes("png") || name.endsWith(".png")
+      ? "png"
+      : type.includes("webp") || name.endsWith(".webp")
+        ? "webp"
+        : "jpg";
+  return `attachment-${index + 1}.${ext}`;
+}
+
+function isWhatsappImageFile(file) {
+  const type = String(file?.type || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+}
+
+function bytesToBase64(bytes) {
+  const chunkSize = 0x8000;
   let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const slice = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
+    binary += String.fromCharCode.apply(null, Array.from(slice));
   }
   return btoa(binary);
+}
+
+async function blobToBase64(blob) {
+  if (typeof FileReader !== "undefined") {
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("file-read-failed"));
+        reader.readAsDataURL(blob);
+      });
+      const comma = dataUrl.indexOf(",");
+      const encoded = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      if (encoded) return encoded;
+    } catch {
+      // Fall through to the chunked encoder.
+    }
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return bytesToBase64(bytes);
+}
+
+function loadShareImage(file) {
+  return new Promise((resolve, reject) => {
+    if (typeof Image === "undefined" || typeof URL === "undefined") {
+      reject(new Error("image-unavailable"));
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    const timer = setTimeout(() => {
+      URL.revokeObjectURL(url);
+      reject(new Error("image-load-timeout"));
+    }, 8000);
+    image.onload = () => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      reject(new Error("image-load-failed"));
+    };
+    image.src = url;
+  });
+}
+
+async function combineImageFilesForWhatsapp(files) {
+  if (typeof document === "undefined" || files.length < 2) return null;
+  const images = [];
+  for (const file of files) {
+    images.push(await loadShareImage(file));
+  }
+
+  const maxWidth = 1400;
+  const gap = 12;
+  const targetWidth = Math.max(
+    1,
+    ...images.map((image) => Math.min(maxWidth, image.width || maxWidth)),
+  );
+  const heights = images.map((image) => {
+    const scale = targetWidth / Math.max(image.width || targetWidth, 1);
+    return Math.max(1, Math.round((image.height || targetWidth) * scale));
+  });
+  let totalHeight = heights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, images.length - 1);
+  let scaleDown = 1;
+  const maxHeight = 6000;
+  if (totalHeight > maxHeight) {
+    scaleDown = maxHeight / totalHeight;
+    totalHeight = maxHeight;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(targetWidth * scaleDown));
+  canvas.height = Math.max(1, Math.round(totalHeight));
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  let offsetY = 0;
+  images.forEach((image, index) => {
+    const height = Math.max(1, Math.round(heights[index] * scaleDown));
+    context.drawImage(image, 0, offsetY, canvas.width, height);
+    offsetY += height + Math.round(gap * scaleDown);
+  });
+
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.82);
+  });
+  if (!blob) return null;
+  return new File([blob], "collection-attachments.jpg", {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+async function filesForNativeWhatsappShare(files) {
+  if (files.length <= 1 || !files.every(isWhatsappImageFile)) return files;
+  try {
+    const combined = await combineImageFilesForWhatsapp(files);
+    return combined ? [combined] : files;
+  } catch {
+    return files;
+  }
 }
 
 async function canUseNativeFileShare() {
@@ -129,27 +259,66 @@ async function shareFilesViaCapacitor(files, text, dialogTitle, title) {
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
-    const fileName = String(file.name || `receipt-${index + 1}.jpg`).replace(/[^\w.-]+/g, "_");
-    const path = `whatsapp-share/${Date.now()}-${index}-${fileName}`;
-    await Filesystem.writeFile({
+    const fileName = whatsappCacheFileName(file, index);
+    const path = `whatsapp-share/${Date.now()}-${fileName}`;
+    const written = await Filesystem.writeFile({
       path,
       data: await blobToBase64(file),
       directory: Directory.Cache,
       recursive: true,
     });
-    const { uri } = await Filesystem.getUri({
-      path,
-      directory: Directory.Cache,
-    });
+    let uri = String(written?.uri || "");
+    if (!uri.startsWith("file:")) {
+      const located = await Filesystem.getUri({
+        path,
+        directory: Directory.Cache,
+      });
+      uri = String(located?.uri || "");
+    }
+    if (!uri.startsWith("file:")) {
+      throw new Error("share-uri-unavailable");
+    }
     uris.push(uri);
   }
 
+  const shareText = String(text || "").trim();
   await Share.share({
-    title: String(title || text || "WhatsApp share").trim(),
-    text: String(text || "").trim(),
+    title: String(title || "Collection visit").trim(),
+    ...(shareText ? { text: shareText } : {}),
     dialogTitle,
     files: uris,
   });
+}
+
+async function sharePreparedFilesOnWeb(files, { title, message, includeText }) {
+  const payload = {
+    title,
+    files,
+  };
+  if (includeText && message) payload.text = message;
+
+  if (typeof navigator.canShare === "function") {
+    let filesOk = false;
+    let payloadOk = false;
+    try {
+      filesOk = navigator.canShare({ files });
+    } catch {
+      filesOk = false;
+    }
+    try {
+      payloadOk = navigator.canShare(payload);
+    } catch {
+      payloadOk = false;
+    }
+    if (!filesOk && !payloadOk) {
+      throw new Error("files-not-supported");
+    }
+    if (payload.text && filesOk && !payloadOk) {
+      delete payload.text;
+    }
+  }
+
+  await navigator.share(payload);
 }
 
 export async function copyTextToClipboard(text) {
@@ -258,14 +427,39 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const omitWebText = shouldOmitWebShareText(userAgent);
+  const nativeFiles = await filesForNativeWhatsappShare(shareFiles);
 
-  if (await canUseNativeFileShare()) {
+  function cancelledShare(error) {
+    return String(error?.name || "") === "AbortError"
+      || String(error?.message || error || "").toLowerCase().includes("cancel");
+  }
+
+  // Several files make Android's share plugin use */*, and WhatsApp then keeps
+  // only the summary. Send those files through the web share sheet first.
+  if (
+    nativeFiles.length > 1
+    && omitWebText
+    && typeof navigator !== "undefined"
+    && typeof navigator.share === "function"
+  ) {
     try {
-      await shareFilesViaCapacitor(shareFiles, message, dialogTitle, title);
+      await sharePreparedFilesOnWeb(nativeFiles, { title, message, includeText: false });
+      return { success: true, method: "web-share-files", textCopied: Boolean(message) };
+    } catch (error) {
+      if (cancelledShare(error)) {
+        return { success: false, reason: "cancelled" };
+      }
+    }
+  }
+
+  if (await canUseNativeFileShare() && (nativeFiles.length === 1 || !omitWebText)) {
+    try {
+      await shareFilesViaCapacitor(nativeFiles, message, dialogTitle, title);
       return { success: true, method: "capacitor-share-files" };
     } catch (error) {
-      const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
-      if (cancelled) {
+      if (cancelledShare(error)) {
         return { success: false, reason: "cancelled" };
       }
       // Missing native Filesystem/Share (outdated APK) falls through to Web Share / WhatsApp URL.
@@ -274,18 +468,18 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
-      const payload = {
+      await sharePreparedFilesOnWeb(shareFiles, {
         title,
-        text: message,
-        files: shareFiles,
+        message,
+        includeText: !omitWebText,
+      });
+      return {
+        success: true,
+        method: "web-share-files",
+        textCopied: omitWebText && Boolean(message),
       };
-      if (navigator.canShare && !navigator.canShare({ files: shareFiles }) && !navigator.canShare(payload)) {
-        throw new Error("files-not-supported");
-      }
-      await navigator.share(payload);
-      return { success: true, method: "web-share-files" };
     } catch (error) {
-      if (error?.name === "AbortError") {
+      if (cancelledShare(error)) {
         return { success: false, reason: "cancelled" };
       }
     }

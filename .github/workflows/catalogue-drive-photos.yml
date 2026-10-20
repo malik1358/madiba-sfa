@@ -1,0 +1,62 @@
+name: Catalogue Drive Photos
+
+on:
+  schedule:
+    # Every 8 hours. GitHub cron is UTC: 03:00, 11:00 and 19:00 KSA.
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update catalogue photos from Google Drive
+        env:
+          CATALOGUE_DRIVE_PHOTOS_URL: ${{ secrets.CATALOGUE_DRIVE_PHOTOS_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_CATALOGUE_DRIVE_PHOTOS_URL='https://madiba-sfa.vercel.app/api/cron/catalogue-drive-photos'
+          CATALOGUE_DRIVE_PHOTOS_URL_TRIMMED="$(printf '%s' "$CATALOGUE_DRIVE_PHOTOS_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE="$CATALOGUE_DRIVE_PHOTOS_URL_TRIMMED"
+
+          if [[ -z "$CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE" ]]; then
+            echo "CATALOGUE_DRIVE_PHOTOS_URL secret is missing; falling back to default endpoint."
+            CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE="$DEFAULT_CATALOGUE_DRIVE_PHOTOS_URL"
+          elif [[ ! "$CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE" =~ /api/cron/catalogue-drive-photos([/?].*)?$ ]]; then
+            echo "CATALOGUE_DRIVE_PHOTOS_URL secret does not point to /api/cron/catalogue-drive-photos; falling back to default endpoint."
+            CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE="$DEFAULT_CATALOGUE_DRIVE_PHOTOS_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_sync() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 300 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_sync "$CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE" != "$DEFAULT_CATALOGUE_DRIVE_PHOTOS_URL" ]]; then
+            echo "Primary CATALOGUE_DRIVE_PHOTOS_URL failed with HTTP $status_code; retrying default endpoint."
+            CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE="$DEFAULT_CATALOGUE_DRIVE_PHOTOS_URL"
+            status_code="$(post_sync "$CATALOGUE_DRIVE_PHOTOS_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Catalogue Drive photo update failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Catalogue Drive photo update succeeded with HTTP $status_code"
+          cat response.json

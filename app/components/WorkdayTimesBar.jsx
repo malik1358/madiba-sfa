@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useAppPopup } from "./AppPopupProvider";
 import { useModuleAccess } from "../hooks/useModuleAccess";
@@ -13,7 +13,17 @@ import {
   resolveGpsCapturePlatform,
 } from "../lib/geo";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
-import { getKsaDateString, lunchPunchButtons } from "../lib/workdayActivity";
+import {
+  acceptLunchPunch,
+  completeLunchPunch,
+  extractLunchTimes,
+  formatKsaTime,
+  getKsaDateString,
+  ksaDayBounds,
+  lunchPunchButtons,
+  mergeLunchPunchTimes,
+  releaseLunchPunch,
+} from "../lib/workdayActivity";
 
 const TEXT = {
   login: { en: "Login", ar: "تسجيل الدخول" },
@@ -39,26 +49,50 @@ export default function WorkdayTimesBar() {
     lunchOutAt,
     lunchInAt,
     loginTime,
-    lunchOutTime,
-    lunchInTime,
   } = useTodayWorkdayLogs();
   const [busy, setBusy] = useState("");
+  const [savedPunches, setSavedPunches] = useState({});
+  const punchGuardRef = useRef({ inFlight: false, saved: {} });
 
   if (!signedIn) return null;
 
+  const lunchTimes = mergeLunchPunchTimes({ lunchOutAt, lunchInAt }, savedPunches);
   const punches = lunchPunchButtons({
     attendanceRequired: !accessLoading && isMorningAttendanceRequiredForRole(access.role),
     loginAt,
-    lunchOutAt,
-    lunchInAt,
+    lunchOutAt: lunchTimes.lunchOutAt,
+    lunchInAt: lunchTimes.lunchInAt,
   });
 
+  async function readTodayLunchTimes(supabase, userId) {
+    const { startIso, endIso } = ksaDayBounds(getKsaDateString());
+    const { data, error } = await supabase
+      .from("daily_activity_logs")
+      .select("entry_type,note,created_at")
+      .eq("user_id", userId)
+      .in("entry_type", ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN"])
+      .gte("created_at", startIso)
+      .lte("created_at", endIso)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    return extractLunchTimes(data || []);
+  }
+
+  function rememberPunch(entryType, savedAt) {
+    punchGuardRef.current = completeLunchPunch(punchGuardRef.current, entryType, savedAt);
+    setSavedPunches(punchGuardRef.current.saved);
+  }
+
   async function punchLunch(entryType) {
-    if (busy) return;
     if (entryType === "LUNCH_BREAK_OUT" && !punches.lunchOutEnabled) return;
     if (entryType === "LUNCH_BREAK_IN" && !punches.lunchInEnabled) return;
 
+    const claim = acceptLunchPunch(punchGuardRef.current, entryType);
+    if (!claim.accepted) return;
+    punchGuardRef.current = claim.guard;
     setBusy(entryType);
+    let saved = false;
+
     try {
       const supabase = getSupabaseClient();
       if (!supabase) throw new Error("Supabase is not configured.");
@@ -66,20 +100,27 @@ export default function WorkdayTimesBar() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error("Please login again.");
 
-      const location = await requireGpsLocation({ role: access.role });
-      const platform = await resolveGpsCapturePlatform();
-      const note = buildGpsActivityNote(entryType, location, { platform });
-      const { error } = await supabase.from("daily_activity_logs").insert({
-        user_id: session.user.id,
-        entry_type: entryType,
-        note,
-      });
-      if (error) throw error;
+      const existing = await readTodayLunchTimes(supabase, session.user.id);
+      const alreadyAt = entryType === "LUNCH_BREAK_OUT" ? existing.lunchOutAt : existing.lunchInAt;
+      if (!alreadyAt) {
+        const location = await requireGpsLocation({ role: access.role });
+        const platform = await resolveGpsCapturePlatform();
+        const note = buildGpsActivityNote(entryType, location, { platform });
+        const { error } = await supabase.from("daily_activity_logs").insert({
+          user_id: session.user.id,
+          entry_type: entryType,
+          note,
+        });
+        if (error) throw error;
 
-      queueTransactionAlert(session.access_token, {
-        transactionType: entryType,
-        referenceKey: `activity:${session.user.id}:${entryType}:${getKsaDateString()}`,
-      });
+        queueTransactionAlert(session.access_token, {
+          transactionType: entryType,
+          referenceKey: `activity:${session.user.id}:${entryType}:${getKsaDateString()}`,
+        });
+      }
+
+      rememberPunch(entryType, alreadyAt || new Date().toISOString());
+      saved = true;
       notifyWorkdayTimesUpdated();
     } catch {
       showPopup({
@@ -88,6 +129,9 @@ export default function WorkdayTimesBar() {
         variant: "error",
       });
     } finally {
+      if (!saved) {
+        punchGuardRef.current = releaseLunchPunch(punchGuardRef.current);
+      }
       setBusy("");
     }
   }
@@ -100,7 +144,7 @@ export default function WorkdayTimesBar() {
     >
       <span><strong>{t("login")}:</strong> {loginTime}</span>
       <span className="workdayTimesPunch">
-        <strong>{t("lunchOut")}:</strong> {lunchOutTime}
+        <strong>{t("lunchOut")}:</strong> {formatKsaTime(lunchTimes.lunchOutAt)}
         {punches.showLunchOut ? (
           <button
             type="button"
@@ -113,7 +157,7 @@ export default function WorkdayTimesBar() {
         ) : null}
       </span>
       <span className="workdayTimesPunch">
-        <strong>{t("lunchIn")}:</strong> {lunchInTime}
+        <strong>{t("lunchIn")}:</strong> {formatKsaTime(lunchTimes.lunchInAt)}
         {punches.showLunchIn ? (
           <button
             type="button"

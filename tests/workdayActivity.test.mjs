@@ -18,7 +18,10 @@ import {
   dismissLunchPunchNoonReminder,
   getLunchPunchNoonReminderMessage,
   getLunchPunchProgress,
+  acceptLunchPunch,
+  completeLunchPunch,
   lunchPunchButtons,
+  mergeLunchPunchTimes,
   isLunchInSuggestionPath,
   isOnLunchBreak,
   shouldRemindLunchPunchNoon,
@@ -693,6 +696,28 @@ test("lunch punch buttons stay available after login until both punches are save
     showLunchIn: false,
     lunchOutEnabled: false,
     lunchInEnabled: false,
+  });
+});
+
+test("a second lunch punch stays claimed until the saved time is known", () => {
+  const first = acceptLunchPunch({ inFlight: false, saved: {} }, "LUNCH_BREAK_OUT");
+  assert.equal(first.accepted, true);
+  assert.equal(acceptLunchPunch(first.guard, "LUNCH_BREAK_OUT").accepted, false);
+
+  const done = completeLunchPunch(first.guard, "LUNCH_BREAK_OUT", "2026-10-20T09:00:00.000Z");
+  assert.equal(done.inFlight, false);
+  assert.equal(acceptLunchPunch(done, "LUNCH_BREAK_OUT").accepted, false);
+
+  const times = mergeLunchPunchTimes({}, done.saved);
+  assert.deepEqual(lunchPunchButtons({
+    attendanceRequired: true,
+    loginAt: "2026-10-20T06:30:00.000Z",
+    ...times,
+  }), {
+    showLunchOut: false,
+    showLunchIn: true,
+    lunchOutEnabled: false,
+    lunchInEnabled: true,
   });
 });
 

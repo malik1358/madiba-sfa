@@ -184,7 +184,7 @@ export async function syncCatalogueDrivePhotos(admin, {
         const needed = driveFileNeedsDownload({
           ...file,
           stored: storedPhoto ? parseDriveFileMarker(storedPhoto.original_file_name) : null,
-        }, { photoCount: initialPhotoCount, now });
+        }, { photoCount: initialPhotoCount, fillMissing: catchUp, now });
         if (!needed) {
           summary.skipped += 1;
           continue;

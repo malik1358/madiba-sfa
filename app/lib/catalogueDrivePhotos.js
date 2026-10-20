@@ -1,7 +1,7 @@
 export const CATALOGUE_DRIVE_FOLDER_ID = "1Gy9bLmAUEqdrYjGzBIKRTg0eITN3nRd7";
 export const CATALOGUE_DRIVE_SYNC_KEY = "catalogue_drive_photo_sync_v1";
 export const DRIVE_PHOTO_LOOKBACK_MS = 48 * 60 * 60 * 1000;
-export const DRIVE_SYNC_IMPORT_GENERATION = 2;
+export const DRIVE_SYNC_IMPORT_GENERATION = 3;
 export const DRIVE_SYNC_LOCK_MS = 10 * 60 * 1000;
 
 const MONTHS = {
@@ -154,9 +154,9 @@ export function folderNeedsDriveCatchUp(photos) {
     && photos.every((photo) => parseDriveFileMarker(photo.original_file_name));
 }
 
-export function driveFileNeedsDownload(file, { photoCount = 0, now = new Date() } = {}) {
+export function driveFileNeedsDownload(file, { photoCount = 0, fillMissing = false, now = new Date() } = {}) {
   if (!file || file.kind === "folder" || !isDriveImageName(file.name)) return false;
-  if (!photoCount) return true;
+  if (!photoCount || (fillMissing && !file.stored)) return true;
   if (file.stored) return driveRevisionChanged(file.stored, file.modified, now);
   return isRecentDriveLabel(file.modified, now);
 }

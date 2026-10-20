@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-20** — Added a manual production backup for the 1,589 historical receipt and payment copies. It downloads each R2 object, checks the reconciled manifest SHA-256 and the Supabase object size, restores two samples from the archive, then age-encrypts and uploads to the existing private Google Drive backup folder. It does not delete Supabase objects. No migration.
+- **2026-10-20** — Sales KPI pace now stops at the latest uploaded sales date in the current month. A sales file through the 19th is not compared with the 20th. Collection pace still uses today's date. Cache version 4 stores that date. No migration.
 - **2026-10-19** — Potential Bad Debts and the legal-transfer report, and their daily email, now show oldest open invoice days plus the last visit date, visit person, and remarks. The visit is the later of the latest collection visit and the latest field visit. No migration.
 - **2026-10-19** — Sales KPI pace now uses each salesman's own last three complete months. The KPI Targets **Estimate at current pace** row adds those individual month-end figures. Stored pace curves older than cache version 3 are rebuilt on the next load. No migration.
 - **2026-10-19** — Potential Bad Debts is emailed at 08:30 KSA, Saturday–Thursday, to Malik, Fazlur, and Soyeb. Each salesman has a table. Customers already with legal are a separate table. Customers added since the previous email, and legal transfers made today, are highlighted. No migration.

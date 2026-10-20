@@ -442,7 +442,8 @@ export function buildTallyOrderExportRows({
   const partyName = String(order?.customer_name || order?.customer_code || "").trim() || "-";
   const orderNo = String(orderNumber || order?.order_number || order?.id || "").trim();
 
-  return (Array.isArray(lines) ? lines : []).map((line) => {
+  let vatTotal = 0;
+  const itemRows = (Array.isArray(lines) ? lines : []).map((line) => {
     const qty = Number(line.quantity || 0);
     const rate = Number(line.rate || 0);
     const wholesale = Number(line.wholesaleRate || line.wholesale_rate || rate);
@@ -461,6 +462,13 @@ export function buildTallyOrderExportRows({
     const amount = Number.isFinite(lineValue) && lineValue > 0
       ? round2(lineValue)
       : round2(qty * (rate > 0 ? rate : listRate));
+    const explicitVat = Number(line.vatAmount);
+    const lineVat = !(vatRate > 0) || !(amount > 0)
+      ? 0
+      : Number.isFinite(explicitVat) && line.vatAmount != null && line.vatAmount !== ""
+        ? round2(explicitVat)
+        : round2(amount * vatRate);
+    vatTotal += lineVat;
 
     return {
       "Voucher Date": voucherDate,
@@ -471,7 +479,7 @@ export function buildTallyOrderExportRows({
       "Ref.Date": orderDateText,
       "CUSTOMER NAME": partyName,
       PriceListName: setup.priceList,
-      "Charge.Ledgers VAT/Freight": vatRate > 0 ? TALLY_VAT_LEDGER : "",
+      "Charge.Ledgers VAT/Freight": "",
       Barcode: resolveItemBarcode(line, unitMap),
       "Item Name": buildTallyItemName(line, unitMap),
       "order no": orderNo,
@@ -491,6 +499,18 @@ export function buildTallyOrderExportRows({
       Narration: "",
     };
   });
+
+  vatTotal = round2(vatTotal);
+  if (!(vatTotal > 0)) return itemRows;
+
+  const vatRow = Object.fromEntries(TALLY_EXPORT_COLUMNS.map((column) => [column, ""]));
+  vatRow["Voucher Date"] = voucherDate;
+  vatRow["Voucher Type Name"] = setup.voucherType;
+  vatRow["Voucher.Class"] = TALLY_VOUCHER_CLASS;
+  vatRow["Ref.Date"] = orderDateText;
+  vatRow["Charge.Ledgers VAT/Freight"] = TALLY_VAT_LEDGER;
+  vatRow.Amount = vatTotal;
+  return [...itemRows, vatRow];
 }
 
 export function unitMapFromItems(items = []) {

@@ -73,7 +73,13 @@ test("export rows use the Tally voucher columns", () => {
   assert.equal(rows[0]["Ref.No"], "SO-1");
   assert.equal(rows[0]["order no"], "SO-1");
   assert.equal(rows[0]["CUSTOMER NAME"], "TEST CUST");
-  assert.equal(rows[0]["Charge.Ledgers VAT/Freight"], "Output VAT 15% - Non Food Division");
+  assert.equal(rows[0]["Charge.Ledgers VAT/Freight"], "");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1]["Charge.Ledgers VAT/Freight"], "Output VAT 15% - Non Food Division");
+  assert.equal(rows[1].Amount, 27);
+  assert.equal(rows[1]["Voucher Type Name"], "DAMMAM W/S CREDIT");
+  assert.equal(rows[1]["CUSTOMER NAME"], "");
+  assert.equal(rows[1]["Item Name"], "");
   assert.equal(rows[0].Barcode, "628000000001");
   assert.equal(rows[0]["Item Name"], "A000057_PAPERLINE");
   assert.equal(rows[0]["Barcode.Qty"], 2);
@@ -110,4 +116,6 @@ test("catalog list rate is the item rate and discount is the per-unit gap", () =
   assert.equal(rows[0].Discount, 8.67);
   assert.equal(rows[0].Amount, 5581);
   assert.equal(rows[0]["SALES TEAM"], "SM13");
+  assert.equal(rows.at(-1).Amount, 837.15);
+  assert.equal(rows.at(-1)["Charge.Ledgers VAT/Freight"], "Output VAT 15% - Non Food Division");
 });

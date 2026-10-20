@@ -177,7 +177,7 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
 export function sumFilteredKpiPaceEstimates(
   rows = [],
   columns = PERFORMANCE_DISPLAY_KPI_KEYS,
-  { reportDate, todayIso } = {},
+  { reportDate, todayIso, salesAsOfDate } = {},
 ) {
   const totals = sumFilteredKpiColumns(rows, columns);
   const estimates = {};
@@ -195,6 +195,7 @@ export function sumFilteredKpiPaceEstimates(
         reportDate,
         todayIso,
         paceShares: row?.paceShares || null,
+        salesAsOfDate: row?.salesAsOfDate ?? salesAsOfDate,
       });
       const estimate = estimateFromPaceGap(target, liveKpi.paceGap);
       if (estimate == null) return;

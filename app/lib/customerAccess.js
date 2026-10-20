@@ -4,6 +4,18 @@ import {
   resolveOutstandingCustomerOwnership,
 } from "./outstanding.js";
 import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
+
+/** Shape `ensureCustomerVisibleToScope` needs from payment-collections `getSalesScope`. */
+export function collectionCustomerAccessScope(scope) {
+  const scopeProfiles = Array.isArray(scope?.scopeProfiles) ? scope.scopeProfiles : [];
+  return {
+    hasAllAccess: Boolean(scope?.hasAllAccess),
+    visibleSalesmanCodes: scope?.visibleSalesmanCodes || [],
+    sharedCustomerCodes: scope?.sharedCustomerCodes || [],
+    visibleMembers: scopeProfiles,
+    scopeMatchers: buildSalesmanScopeMatchers(scopeProfiles),
+  };
+}
 import { findCustomerByCode } from "./prospectCustomerLink.js";
 import {
   canAccessProspectSalesmanCode,

@@ -78,6 +78,51 @@ export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
   }, null)?.raw || "";
 }
 
+export async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
+  const code = canonicalCustomerCode(customerCode);
+  if (!code) throw new Error("Customer code is required");
+
+  const { data: existing, error: lookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .ilike("customer_code", code)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+  if (existing?.customer_code) return String(existing.customer_code).trim() || code;
+
+  const { data: fuzzyMatches, error: fuzzyLookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .ilike("customer_code", `${code}%`)
+    .limit(25);
+
+  if (fuzzyLookupError) throw fuzzyLookupError;
+
+  const existingCode = resolveExistingCollectionCustomerCode(
+    (fuzzyMatches || []).map((row) => row?.customer_code),
+    code,
+  );
+  if (existingCode) return existingCode;
+
+  const name = String(customerName || code).trim() || code;
+  const { error: insertError } = await admin
+    .from("customers")
+    .insert({
+      customer_code: code,
+      customer_name: name,
+      is_active: true,
+    });
+
+  if (insertError) {
+    const duplicate = String(insertError.message || "").toLowerCase().includes("duplicate");
+    if (duplicate) return code;
+    throw insertError;
+  }
+
+  return code;
+}
+
 export function normalizeCustomerNameKey(value) {
   return String(value || "")
     .trim()

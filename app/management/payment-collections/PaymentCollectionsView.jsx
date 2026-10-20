@@ -131,6 +131,17 @@ const TEXT = {
     en: "No customers match this filter. Clear the customer name/code box to see the full queue.",
     ar: "لا يوجد عملاء مطابقون لهذا التصفية. امسح مربع اسم/كود العميل لعرض القائمة كاملة.",
   },
+  advanceLookupHint: {
+    en: "No outstanding for this code. If you received an advance, open the customer to upload Funds Received.",
+    ar: "لا يوجد رصيد مستحق لهذا الكود. إذا استلمت دفعة مقدمة، افتح العميل لرفع المبلغ المستلم.",
+  },
+  openAdvanceCustomer: { en: "Open for advance upload", ar: "فتح لرفع الدفعة المقدمة" },
+  lookingUpAdvance: { en: "Looking up customer…", ar: "جاري البحث عن العميل…" },
+  advanceLookupFailed: {
+    en: "Could not open that customer for advance upload.",
+    ar: "تعذر فتح هذا العميل لرفع الدفعة المقدمة.",
+  },
+  advanceBadge: { en: "Advance / no outstanding", ar: "دفعة مقدمة / بدون مستحقات" },
   clearCustomerFilter: { en: "Clear customer filter", ar: "مسح تصفية العميل" },
   legalSearchMatch: { en: "Legal", ar: "قانوني" },
   notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
@@ -1144,6 +1155,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [creditColumnFilters, setCreditColumnFilters] = useState(EMPTY_CREDIT_COLUMN_FILTERS);
   const [creditSort, setCreditSort] = useState({ key: "", dir: "asc" });
   const [exportingDueQueue, setExportingDueQueue] = useState(false);
+  const [advanceLookupBusy, setAdvanceLookupBusy] = useState(false);
   const isMobileLayout = useMobileLayout();
   const locationPromptResolverRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -1156,6 +1168,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const queueOfflineRef = useRef(false);
   const urlCustomerFilterAppliedRef = useRef(false);
   const prefilledCollectionOpenedRef = useRef(false);
+  const advanceLookupAttemptedRef = useRef("");
   const workingHoursEntriesRef = useRef([]);
   const { showPopup } = useAppPopup();
 
@@ -1275,6 +1288,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
   // Do not depend on `activeRow` — background queue refreshes replace that
   // object and were wiping in-progress Funds Received entry (looked like a reload loop).
   useEffect(() => {
+    if (activeRow?.is_advance_entry) {
+      setForm({
+        ...buildInitialForm(),
+        visitOutcome: "FUNDS_RECEIVED",
+        receiptMode: "CASH",
+      });
+      return;
+    }
     setForm(buildInitialForm());
   }, [activeRowKey]);
 
@@ -1450,6 +1471,71 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (loadSeqRef.current === seq) {
         setLoading(false);
       }
+    }
+  }
+
+  async function lookupAdvanceCustomerForFilter(rawQuery = customerFilter, { openRow = true } = {}) {
+    const query = String(rawQuery || "").trim();
+    if (!query) return null;
+
+    const existing = [...dueCustomers, ...notDueCustomers, ...legalCustomers].find((row) => (
+      matchesCollectionCustomerQuery(row, query)
+    ));
+    if (existing) {
+      if (openRow) setActiveRowKey(rowKey(existing));
+      return existing;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      showPopup({ message: t("msgSupabaseMissing"), variant: "error" });
+      return null;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      showPopup({ message: t("advanceLookupFailed"), variant: "error" });
+      return null;
+    }
+
+    setAdvanceLookupBusy(true);
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const params = new URLSearchParams({ customer_code: query });
+      const response = await fetch(`/api/payment-collections?${params.toString()}`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || t("advanceLookupFailed"));
+      }
+
+      const advanceRow = payload.advanceCustomer
+        || [...(payload.dueCustomers || []), ...(payload.notDueCustomers || []), ...(payload.legalCustomers || [])]
+          .find((row) => matchesCollectionCustomerQuery(row, query));
+      if (!advanceRow) {
+        throw new Error(t("advanceLookupFailed"));
+      }
+
+      setDueCustomers((current) => {
+        if (current.some((row) => matchesCollectionCustomerQuery(row, advanceRow.customer_code))) {
+          return current;
+        }
+        return [advanceRow, ...current];
+      });
+      setCustomerFilter(String(advanceRow.customer_code || query).trim());
+      if (openRow) setActiveRowKey(rowKey(advanceRow));
+      setError("");
+      return advanceRow;
+    } catch (err) {
+      showPopup({
+        message: localizeApiMessage(err?.message || t("advanceLookupFailed")),
+        variant: "error",
+      });
+      return null;
+    } finally {
+      setAdvanceLookupBusy(false);
     }
   }
 
@@ -1756,7 +1842,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }, []);
 
   useEffect(() => {
-    if (prefilledCollectionOpenedRef.current || loading || typeof window === "undefined") return;
+    if (prefilledCollectionOpenedRef.current || loading || advanceLookupBusy || typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const query = String(params.get("customer") || params.get("customer_code") || "").trim();
     if (!query) {
@@ -1768,11 +1854,17 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const match = [...dueCustomers, ...notDueCustomers, ...legalCustomers].find((row) => (
       matchesCollectionCustomerQuery(row, query)
     ));
-    if (!match) return;
+    if (match) {
+      prefilledCollectionOpenedRef.current = true;
+      setActiveRowKey(rowKey(match));
+      return;
+    }
 
+    if (advanceLookupAttemptedRef.current === query) return;
+    advanceLookupAttemptedRef.current = query;
     prefilledCollectionOpenedRef.current = true;
-    setActiveRowKey(rowKey(match));
-  }, [loading, customerFilter, dueCustomers, notDueCustomers, legalCustomers]);
+    void lookupAdvanceCustomerForFilter(query, { openRow: true });
+  }, [loading, advanceLookupBusy, customerFilter, dueCustomers, notDueCustomers, legalCustomers]);
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
   const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0
@@ -3207,6 +3299,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           <td data-label={t("customerCode")}>{formatCustomerCodeWithPriority(row.customer_code, queuePriority)}</td>
                           <td data-label={t("customer")} className="moduleCollectorCellPrimary">
                             {row.customer_name || row.customer_code}
+                            {row.is_advance_entry ? (
+                              <div className="moduleHint">{t("advanceBadge")}</div>
+                            ) : null}
                             {isNotDue ? (
                               <div className="moduleHint">{t("notYetDueBadge")}</div>
                             ) : null}
@@ -3614,18 +3709,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
             {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
               <div className="moduleHint">
-                {String(customerFilter || "").trim() && queueHasRows({ dueCustomers, notDueCustomers, legalCustomers })
+                {String(customerFilter || "").trim()
                   ? (
                     <>
                       <div>{t("noFilterMatch")}</div>
-                      <button
-                        type="button"
-                        className="moduleInlineButton moduleActionButton"
-                        style={{ marginTop: "8px" }}
-                        onClick={() => setCustomerFilter("")}
-                      >
-                        {t("clearCustomerFilter")}
-                      </button>
+                      <div style={{ marginTop: "6px" }}>{t("advanceLookupHint")}</div>
+                      <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
+                        <button
+                          type="button"
+                          className="modulePrimaryButton"
+                          disabled={advanceLookupBusy}
+                          onClick={() => void lookupAdvanceCustomerForFilter(customerFilter, { openRow: true })}
+                        >
+                          {advanceLookupBusy ? t("lookingUpAdvance") : t("openAdvanceCustomer")}
+                        </button>
+                        <button
+                          type="button"
+                          className="moduleInlineButton moduleActionButton"
+                          onClick={() => setCustomerFilter("")}
+                        >
+                          {t("clearCustomerFilter")}
+                        </button>
+                      </div>
                     </>
                   )
                   : (view === "legal" ? t("noLegal") : t("noDue"))}

@@ -603,6 +603,79 @@ export function findAllLegalTransferCustomerCodes(transfers, customerCode) {
   )];
 }
 
+export function buildAdvanceCollectionQueueRecord({
+  customer = {},
+  visits = [],
+  salesmanName = "",
+  salesmanCode = "",
+} = {}) {
+  const code = normalizeCode(customer?.customer_code);
+  const history = Array.isArray(visits) ? visits.filter(Boolean) : [];
+  const latest = history[0] || null;
+  const masterCode = !isPlaceholderSalesmanValue(customer?.current_salesman_code)
+    ? normalizeCode(customer.current_salesman_code)
+    : "";
+  const resolvedSalesmanCode = normalizeCode(salesmanCode) || masterCode;
+  const resolvedSalesmanName = String(salesmanName || customer?.current_salesman_code || "").trim();
+
+  return {
+    customer_code: code,
+    customer_name: String(customer?.customer_name || "").trim() || code,
+    current_salesman_code: customer?.current_salesman_code || resolvedSalesmanCode || "",
+    salesman_code: resolvedSalesmanCode,
+    salesman_name: resolvedSalesmanName,
+    city: customer?.city || "",
+    area: customer?.area || "",
+    mobile: customer?.mobile || "",
+    latitude: customer?.latitude ?? null,
+    longitude: customer?.longitude ?? null,
+    invoices: [],
+    latest_collection: latest,
+    collection_history: history,
+    legal_transfer: null,
+    is_advance_entry: true,
+    queue_key: code,
+    due_invoice_count: 0,
+    total_due_amount: 0,
+    max_overdue_days: 0,
+    earliest_due_date: "",
+    scheduled_revisit_at: activeScheduledVisitDate(latest?.next_visit_at, latest?.saved_at) || "",
+    exposure_score: 0,
+    outstanding_cash: 0,
+    has_cash_due: false,
+    received_last_10_days: sumCollectionReceivedInLastDays(history, { days: 10 }),
+    probability_score: 0,
+    probability_label: "N/A",
+    recommended_visit: true,
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+    total_outstanding: 0,
+  };
+}
+
+export function injectAdvanceCustomerIntoQueues(queues, advanceRow) {
+  if (!advanceRow?.customer_code) return queues || { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+
+  const dueCustomers = Array.isArray(queues?.dueCustomers) ? [...queues.dueCustomers] : [];
+  const notDueCustomers = Array.isArray(queues?.notDueCustomers) ? [...queues.notDueCustomers] : [];
+  const legalCustomers = Array.isArray(queues?.legalCustomers) ? [...queues.legalCustomers] : [];
+  const alreadyPresent = [...dueCustomers, ...notDueCustomers, ...legalCustomers]
+    .some((row) => customerAccountCodesMatch(row?.customer_code, advanceRow.customer_code));
+
+  if (alreadyPresent) {
+    return { dueCustomers, notDueCustomers, legalCustomers };
+  }
+
+  return {
+    dueCustomers: [advanceRow, ...dueCustomers],
+    notDueCustomers,
+    legalCustomers,
+  };
+}
+
 export function buildCollectionQueues(records, todayIso = new Date().toISOString()) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
   const dueCustomers = [];
@@ -610,6 +683,16 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
+    if (record?.is_advance_entry) {
+      dueCustomers.push(buildAdvanceCollectionQueueRecord({
+        customer: record,
+        visits: record.collection_history || (record.latest_collection ? [record.latest_collection] : []),
+        salesmanName: record.salesman_name,
+        salesmanCode: record.salesman_code,
+      }));
+      return;
+    }
+
     const filteredInvoices = filterCollectionQueueInvoices(record?.invoices);
     if (filteredInvoices.length === 0) return;
 

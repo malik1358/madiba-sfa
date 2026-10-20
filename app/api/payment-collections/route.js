@@ -2,13 +2,16 @@ import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import {
   assertCollectionVisitRemark,
+  buildAdvanceCollectionQueueRecord,
   buildCollectionQueues,
   customerMatchesCollectionScope,
   filterCollectionQueueInvoices,
   findAllLegalTransferCustomerCodes,
   findLegalTransferForCustomer,
+  injectAdvanceCustomerIntoQueues,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
+import { collectionCustomerAccessScope, ensureCustomerVisibleToScope } from "../../lib/customerAccess.js";
 import { enrichCollectionRecordsWithAvgDays } from "../../lib/collectionAvgDays.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
@@ -37,7 +40,7 @@ import {
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "../../lib/outstanding.js";
-import { resolveExistingCollectionCustomerCode } from "../../lib/customerCode.js";
+import { ensureCollectionCustomerRecord } from "../../lib/customerCode.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 import {
@@ -119,6 +122,26 @@ export function findScopedCollectionRecord(records, customerCode) {
   if (!target) return null;
 
   return (records || []).find((record) => customerAccountCodesMatch(record?.customer_code, target)) || null;
+}
+
+export async function resolveCollectionSaveCustomerCode(admin, scope, customerCode) {
+  const requested = canonicalCustomerCode(customerCode);
+  if (!requested) throw new Error("Customer code is required");
+  if (scope?.hasAllAccess) return requested;
+
+  const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+  const matchedRecord = findScopedCollectionRecord(records, requested);
+  if (matchedRecord?.customer_code) {
+    return String(matchedRecord.customer_code).trim() || requested;
+  }
+
+  // Allow advance / zero-outstanding collection saves for customers in sales scope.
+  const customer = await ensureCustomerVisibleToScope(
+    admin,
+    requested,
+    collectionCustomerAccessScope(scope),
+  );
+  return String(customer?.customer_code || requested).trim() || requested;
 }
 
 async function readOutstandingInvoicesFromTable(admin) {
@@ -306,51 +329,6 @@ function formatRouteError(error) {
   }
   if (message) return message;
   return "Unable to save collection visit";
-}
-
-export async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
-  const code = canonicalCustomerCode(customerCode);
-  if (!code) throw new Error("Customer code is required");
-
-  const { data: existing, error: lookupError } = await admin
-    .from("customers")
-    .select("customer_code")
-    .ilike("customer_code", code)
-    .maybeSingle();
-
-  if (lookupError) throw lookupError;
-  if (existing?.customer_code) return String(existing.customer_code).trim() || code;
-
-  const { data: fuzzyMatches, error: fuzzyLookupError } = await admin
-    .from("customers")
-    .select("customer_code")
-    .ilike("customer_code", `${code}%`)
-    .limit(25);
-
-  if (fuzzyLookupError) throw fuzzyLookupError;
-
-  const existingCode = resolveExistingCollectionCustomerCode(
-    (fuzzyMatches || []).map((row) => row?.customer_code),
-    code,
-  );
-  if (existingCode) return existingCode;
-
-  const name = String(customerName || code).trim() || code;
-  const { error: insertError } = await admin
-    .from("customers")
-    .insert({
-      customer_code: code,
-      customer_name: name,
-      is_active: true,
-    });
-
-  if (insertError) {
-    const duplicate = String(insertError.message || "").toLowerCase().includes("duplicate");
-    if (duplicate) return code;
-    throw insertError;
-  }
-
-  return code;
 }
 
 function normalizeStorageError(error) {
@@ -546,6 +524,56 @@ export async function getSalesScope(admin, userId) {
 }
 
 const QUEUE_VISIT_SELECT = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,receipt_copy_url,payment_copy_url";
+
+async function loadAdvanceCollectionVisits(admin, customerCode) {
+  const code = canonicalCustomerCode(customerCode);
+  if (!code || !admin) return [];
+
+  try {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select(QUEUE_VISIT_SELECT)
+      .ilike("customer_code", code)
+      .order("saved_at", { ascending: false })
+      .limit(20);
+    if (error) {
+      if (isMissingTableError(error) || isMissingColumnError(error)) return [];
+      throw error;
+    }
+    return (Array.isArray(data) ? data : []).map(collectionVisitAttachmentSummary);
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveAdvanceCollectionQueueCustomer(admin, scope, customerCode) {
+  const requested = canonicalCustomerCode(customerCode);
+  if (!requested) return null;
+
+  const customer = await ensureCustomerVisibleToScope(
+    admin,
+    requested,
+    collectionCustomerAccessScope(scope),
+  );
+  const visits = await loadAdvanceCollectionVisits(admin, customer.customer_code || requested);
+  const masterCode = !isPlaceholderSalesmanValue(customer.current_salesman_code)
+    ? normalizeCode(customer.current_salesman_code)
+    : "";
+  let salesmanName = "";
+  if (masterCode) {
+    const match = (scope.scopeProfiles || []).find(
+      (profile) => normalizeCode(profile?.salesman_code) === masterCode,
+    );
+    salesmanName = String(match?.salesman_name || customer.current_salesman_code || "").trim();
+  }
+
+  return buildAdvanceCollectionQueueRecord({
+    customer,
+    visits,
+    salesmanCode: masterCode,
+    salesmanName,
+  });
+}
 
 // Copy URLs are read only to derive has_*_copy flags; collectionVisitAttachmentSummary drops them.
 async function loadQueueCollectionVisits(admin) {
@@ -966,6 +994,12 @@ export async function GET(request) {
     });
 
     const scope = await getSalesScope(admin, user.id);
+    const requestUrl = new URL(request.url);
+    const requestedCustomerCode = canonicalCustomerCode(
+      requestUrl.searchParams.get("customer_code")
+      || requestUrl.searchParams.get("customer")
+      || "",
+    );
     const records = await fetchOutstandingAndCollectionRecords(admin, scope);
     let enrichedRecords = records;
     try {
@@ -973,13 +1007,35 @@ export async function GET(request) {
     } catch (enrichError) {
       console.error("Unable to enrich collection avg paying days:", enrichError);
     }
-    const queues = buildCollectionQueues(enrichedRecords);
+    let queues = buildCollectionQueues(enrichedRecords);
+    let advanceCustomer = null;
+
+    if (requestedCustomerCode) {
+      const alreadyQueued = findScopedCollectionRecord([
+        ...(queues.dueCustomers || []),
+        ...(queues.notDueCustomers || []),
+        ...(queues.legalCustomers || []),
+      ], requestedCustomerCode);
+      if (alreadyQueued) {
+        advanceCustomer = alreadyQueued;
+      } else {
+        advanceCustomer = await resolveAdvanceCollectionQueueCustomer(
+          admin,
+          scope,
+          requestedCustomerCode,
+        );
+        if (advanceCustomer) {
+          queues = injectAdvanceCustomerIntoQueues(queues, advanceCustomer);
+        }
+      }
+    }
 
     return Response.json({
       success: true,
       dueCustomers: queues.dueCustomers,
       notDueCustomers: queues.notDueCustomers,
       legalCustomers: queues.legalCustomers,
+      advanceCustomer,
       salesScope: {
         hasAllAccess: scope.hasAllAccess,
         visibleSalesmanCodes: scope.visibleSalesmanCodes,
@@ -1121,15 +1177,8 @@ export async function POST(request) {
     const requiresNextVisit = paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL";
     const validatedNextVisitAt = validateNextVisitDate(nextVisitAt, { required: requiresNextVisit });
 
-    // Verify user has access to this customer
-    if (!scope.hasAllAccess) {
-      const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-      const matchedRecord = findScopedCollectionRecord(records, customerCode);
-      if (!matchedRecord) {
-        throw new Error("You do not have access to this customer");
-      }
-      customerCode = matchedRecord.customer_code;
-    }
+    // Outstanding-queue customers, or sales-scope customers for advance / zero-outstanding saves.
+    customerCode = await resolveCollectionSaveCustomerCode(admin, scope, customerCode);
 
     customerCode = await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 

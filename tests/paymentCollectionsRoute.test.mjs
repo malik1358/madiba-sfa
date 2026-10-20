@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveExistingCollectionCustomerCode } from "../app/lib/customerCode.js";
-import { ensureCollectionCustomerRecord } from "../app/api/payment-collections/route.js";
+import {
+  ensureCollectionCustomerRecord,
+  resolveExistingCollectionCustomerCode,
+} from "../app/lib/customerCode.js";
+import { collectionCustomerAccessScope } from "../app/lib/customerAccess.js";
+import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
 
 test("resolveExistingCollectionCustomerCode reuses suffix account variants like 1608C", () => {
   assert.equal(resolveExistingCollectionCustomerCode(["1608C"], "1608"), "1608C");
@@ -98,4 +102,21 @@ test("ensureCollectionCustomerRecord inserts a new customer only when no matchin
     customer_name: "1608 TEST CUSTOMER",
     is_active: true,
   }]);
+});
+
+test("collectionCustomerAccessScope exposes matchers from scope profiles", () => {
+  const scope = collectionCustomerAccessScope({
+    hasAllAccess: false,
+    visibleSalesmanCodes: ["MOINUDIN KHAJA"],
+    sharedCustomerCodes: ["1507"],
+    scopeProfiles: [{ salesman_code: "MOINUDIN KHAJA", salesman_name: "MOINUDIN KHAJA" }],
+  });
+
+  assert.equal(scope.hasAllAccess, false);
+  assert.deepEqual(scope.visibleSalesmanCodes, ["MOINUDIN KHAJA"]);
+  assert.deepEqual(scope.sharedCustomerCodes, ["1507"]);
+  assert.equal(
+    buildSalesmanScopeMatchers(scope.visibleMembers).codes.has("MOINUDIN KHAJA"),
+    true,
+  );
 });

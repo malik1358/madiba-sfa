@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 
 import {
+  buildAdvanceCollectionQueueRecord,
   buildCollectionPriority,
   buildCollectionQueues,
   buildExposureScore,
@@ -20,6 +21,7 @@ import {
   getCollectionSalesmanLabel,
   buildCollectionSalesmanOptions,
   hasCollectionVisit,
+  injectAdvanceCustomerIntoQueues,
   sumCollectionReceivedInLastDays,
   assertCollectionVisitRemark,
   collectionVisitRequiresRemark,
@@ -1179,4 +1181,61 @@ test("buildCollectionSalesmanOptions lists unique salesman labels from queue row
     "Ahmed Nabil",
     "SM99",
   ]);
+});
+
+test("buildAdvanceCollectionQueueRecord makes a zero-outstanding queue row for advance upload", () => {
+  const row = buildAdvanceCollectionQueueRecord({
+    customer: {
+      customer_code: "1605",
+      customer_name: "Best Energy Company Ltd.",
+      current_salesman_code: "MOINUDIN KHAJA",
+      city: "Al Khobar",
+      area: "Al Khubar Al Janubiyah",
+    },
+    salesmanCode: "MOINUDIN KHAJA",
+    salesmanName: "MOINUDIN KHAJA",
+  });
+
+  assert.equal(row.is_advance_entry, true);
+  assert.equal(row.customer_code, "1605");
+  assert.equal(row.total_due_amount, 0);
+  assert.equal(row.due_invoice_count, 0);
+  assert.deepEqual(row.invoices, []);
+  assert.equal(row.recommended_visit, true);
+});
+
+test("injectAdvanceCustomerIntoQueues prepends advance rows that are not already queued", () => {
+  const advance = buildAdvanceCollectionQueueRecord({
+    customer: { customer_code: "1605", customer_name: "Best Energy Company Ltd." },
+  });
+  const queues = injectAdvanceCustomerIntoQueues({
+    dueCustomers: [{ customer_code: "1017", total_due_amount: 100, invoices: [{ pending_amount: 100 }] }],
+    notDueCustomers: [],
+    legalCustomers: [],
+  }, advance);
+
+  assert.equal(queues.dueCustomers[0].customer_code, "1605");
+  assert.equal(queues.dueCustomers[0].is_advance_entry, true);
+  assert.equal(queues.dueCustomers.length, 2);
+
+  const again = injectAdvanceCustomerIntoQueues(queues, advance);
+  assert.equal(again.dueCustomers.length, 2);
+});
+
+test("buildCollectionQueues keeps explicit advance entries with no invoices", () => {
+  const queues = buildCollectionQueues([
+    {
+      is_advance_entry: true,
+      customer_code: "1605",
+      customer_name: "Best Energy Company Ltd.",
+      current_salesman_code: "MOINUDIN KHAJA",
+      salesman_name: "MOINUDIN KHAJA",
+      invoices: [],
+    },
+  ]);
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1605");
+  assert.equal(queues.dueCustomers[0].is_advance_entry, true);
+  assert.equal(queues.dueCustomers[0].total_due_amount, 0);
 });

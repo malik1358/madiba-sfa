@@ -124,6 +124,47 @@ test("probe failures are stored as an error day", () => {
   assert.equal(record.errors.db_ping, "timeout");
 });
 
+test("auth health keeps the fastest of two attempts", async () => {
+  let authCalls = 0;
+  const fetchImpl = async (url) => {
+    if (String(url).includes("/auth/v1/health")) {
+      authCalls += 1;
+      if (authCalls === 1) await new Promise((resolve) => setTimeout(resolve, 80));
+      return { ok: true, status: 200 };
+    }
+    return { ok: true, status: 200 };
+  };
+  const admin = {
+    from() {
+      const builder = {
+        select() { return builder; },
+        eq() { return builder; },
+        gte() { return builder; },
+        maybeSingle: async () => ({
+          data: { setting_value: JSON.stringify({ version: 1, checks: [] }) },
+          error: null,
+        }),
+        upsert: async () => ({ error: null }),
+        then(resolve, reject) {
+          return Promise.resolve({ count: 4, error: null }).then(resolve, reject);
+        },
+      };
+      return builder;
+    },
+  };
+
+  const result = await runAppPerformanceCheck(admin, {
+    now: new Date("2026-10-20T12:20:00.537Z"),
+    date: "2026-10-20",
+    supabaseUrl: "https://example.supabase.co",
+    fetchImpl,
+    dbProbeAttempts: 2,
+  });
+
+  assert.equal(authCalls, 2);
+  assert.ok(result.metrics.auth_health_ms < 40);
+});
+
 test("a check reads history, stores one day, and ignores a bad external time", async () => {
   let saved = null;
   const admin = {

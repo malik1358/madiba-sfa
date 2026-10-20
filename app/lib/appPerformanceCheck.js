@@ -178,7 +178,7 @@ function finiteMs(value) {
   return Math.round(number);
 }
 
-/** Keep the fastest successful attempt so one cold pooler hit does not mark the day slower. */
+/** Keep the fastest successful attempt so one cold connection does not mark the hour slower. */
 export function pickBestProbeAttempt(attempts) {
   const rows = Array.isArray(attempts) ? attempts : [];
   const okRows = rows.filter((row) => row?.ok);
@@ -219,14 +219,15 @@ async function collectProbeResults(admin, {
     if (!response.ok) throw new Error(`build-info ${response.status}`);
   });
 
-  const authHealth = await timeCall(async () => {
+  // The first attempt opens the Auth connection. A single cold handshake must not mark the hour slower.
+  const authHealth = await timeBestCall(async () => {
     if (!supabaseUrl) throw new Error("Supabase URL missing");
     const response = await fetchImpl(`${supabaseUrl}/auth/v1/health`, {
       headers: supabaseKey ? { apikey: supabaseKey } : {},
       cache: "no-store",
     });
     if (!response.ok && response.status !== 401) throw new Error(`auth health ${response.status}`);
-  });
+  }, dbProbeAttempts);
 
   // Discard one settings round-trip so the timed probes do not pay TLS/pooler cold start alone.
   await warmDatabaseConnection(admin);

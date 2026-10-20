@@ -1,0 +1,39 @@
+name: Historical collection copy backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-collection-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    environment: production-backup
+    env:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      BACKUP_SUPABASE_PROJECT_REF: ${{ vars.BACKUP_SUPABASE_PROJECT_REF }}
+      BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+      BACKUP_RCLONE_CONFIG: ${{ secrets.BACKUP_RCLONE_CONFIG }}
+      BACKUP_DRIVE_PATH: ${{ vars.BACKUP_DRIVE_PATH }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Test historical backup rules
+        run: node --test tests/historicalCollectionBackup.test.mjs
+      - name: Install backup tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes age rclone
+      - name: Download R2 copies, verify, encrypt, and upload
+        run: node scripts/backup/historical-collection-copies.mjs

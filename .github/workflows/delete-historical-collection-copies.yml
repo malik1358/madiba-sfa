@@ -31,6 +31,7 @@ jobs:
       BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
       BACKUP_RCLONE_CONFIG: ${{ secrets.BACKUP_RCLONE_CONFIG }}
       BACKUP_DRIVE_PATH: ${{ vars.BACKUP_DRIVE_PATH }}
+      PRODUCTION_DB_MIGRATIONS_ENABLED: ${{ vars.PRODUCTION_DB_MIGRATIONS_ENABLED }}
       ALLOW_PARTIAL: ${{ inputs.resume && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
@@ -44,8 +45,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          flag="$(gh variable get PRODUCTION_DB_MIGRATIONS_ENABLED)"
-          if [ "$flag" != "false" ]; then
+          if [ "$PRODUCTION_DB_MIGRATIONS_ENABLED" != "false" ]; then
             echo "PRODUCTION_DB_MIGRATIONS_ENABLED is not false"
             exit 1
           fi

@@ -342,6 +342,36 @@ export function getLunchPunchProgress(userLogs = []) {
   return { lunchOut, lunchIn, complete: lunchOut && lunchIn };
 }
 
+/**
+ * Lunch punches used to live only on My Day. Role Access can hide that page,
+ * so the status bar shows the same two actions after morning login.
+ * Lunch in stays visible but locked until lunch out is recorded.
+ */
+export function lunchPunchButtons({
+  attendanceRequired = false,
+  loginAt = null,
+  lunchOutAt = null,
+  lunchInAt = null,
+} = {}) {
+  const lunchOutDone = Boolean(lunchOutAt);
+  const lunchInDone = Boolean(lunchInAt);
+  if (!attendanceRequired || !loginAt || lunchInDone) {
+    return {
+      showLunchOut: false,
+      showLunchIn: false,
+      lunchOutEnabled: false,
+      lunchInEnabled: false,
+    };
+  }
+
+  return {
+    showLunchOut: !lunchOutDone,
+    showLunchIn: true,
+    lunchOutEnabled: !lunchOutDone,
+    lunchInEnabled: lunchOutDone,
+  };
+}
+
 export function shouldRemindLunchPunchNoon({
   loginAt,
   logoutAt,

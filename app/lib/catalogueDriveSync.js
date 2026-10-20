@@ -16,7 +16,9 @@ import {
   driveFileMarker,
   driveFileNeedsDownload,
   driveFolderListUrl,
+  DRIVE_SYNC_IMPORT_GENERATION,
   driveSyncIsLocked,
+  folderNeedsDriveCatchUp,
   parseDriveFileMarker,
   parseDriveFolderListing,
   parseDriveModifiedLabel,
@@ -153,7 +155,8 @@ export async function syncCatalogueDrivePhotos(admin, {
     for (const folder of root) {
       if (summary.limited) break;
       const photos = folder.itemCode ? (photosByCode.get(folder.itemCode) || []) : [];
-      const open = shouldOpenDriveFolder(folder, {
+      const catchUp = (state.importGeneration || 0) < DRIVE_SYNC_IMPORT_GENERATION && folderNeedsDriveCatchUp(photos);
+      const open = catchUp || shouldOpenDriveFolder(folder, {
         photoCount: photos.length,
         savedLabel: Object.prototype.hasOwnProperty.call(folders, folder.id) ? folders[folder.id] : undefined,
         now,
@@ -175,12 +178,13 @@ export async function syncCatalogueDrivePhotos(admin, {
         continue;
       }
       let folderFinished = true;
+      const initialPhotoCount = photos.length;
       for (const file of children) {
         const storedPhoto = photos.find((photo) => parseDriveFileMarker(photo.original_file_name)?.fileId === file.id);
         const needed = driveFileNeedsDownload({
           ...file,
           stored: storedPhoto ? parseDriveFileMarker(storedPhoto.original_file_name) : null,
-        }, { photoCount: photos.length, now });
+        }, { photoCount: initialPhotoCount, now });
         if (!needed) {
           summary.skipped += 1;
           continue;
@@ -231,6 +235,7 @@ export async function syncCatalogueDrivePhotos(admin, {
       startedAt: "",
       checkedAt: now.toISOString(),
       folders,
+      importGeneration: summary.limited ? (state.importGeneration || 0) : DRIVE_SYNC_IMPORT_GENERATION,
       added: summary.added,
       updated: summary.updated,
       linked: summary.linked,

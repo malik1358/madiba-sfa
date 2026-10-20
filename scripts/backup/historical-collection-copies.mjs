@@ -230,6 +230,7 @@ export async function runHistoricalCollectionBackup(env = process.env) {
     const archive = path.join(workspace, "historical-collection-copies.tar.gz");
     await run("tar", ["-czf", archive, "-C", workspace, "files", "manifest.json", "RESTORE.md"]);
     await restoreSamples(archive, workspace, downloaded.entries);
+    await rm(path.join(workspace, "files"), { recursive: true, force: true });
     await publishHistoricalBackup({ config, workspace, archive });
     console.log("Historical collection backup complete. No Supabase objects were deleted.");
   } finally {

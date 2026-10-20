@@ -67,6 +67,7 @@ import {
   buildGpsActivityNote,
   formatCollectionUserDisplayName,
   formatCollectorDisplayName,
+  captureOptionalGpsLocation,
   requireGpsLocation,
   resolveGpsCapturePlatform,
 } from "../../lib/geo";
@@ -1433,7 +1434,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         customer.mobile = normalizeKsaMobile(enteredMobile);
       }
 
-      const location = await captureLocation();
+      const location = await captureOptionalGpsLocation({ role: access.role });
       const gpsLocationUpdateAccepted = await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
       // Prefer local customer data and skip the activity timeline so visit saves

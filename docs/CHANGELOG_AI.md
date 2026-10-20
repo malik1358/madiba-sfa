@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-20** — My Day **Save Visit Report** and its WhatsApp share no longer stop when GPS cannot be read. The visit is stored without coordinates and is not marked FAR. Attendance, orders, and collections still require GPS. No migration.
 - **2026-10-20** — A second tap on the status-bar Lunch out or Lunch in button no longer writes another row while the first save is still refreshing. The punch stays claimed as soon as it is saved. No migration.
 - **2026-10-20** — Lunch out and lunch in buttons are on the status bar after morning login, so a product promoter can punch lunch when Role Access has My Day turned off. Lunch in stays locked until lunch out is saved. No migration.
 - **2026-10-20** — The historical collection deletion job logs bucket and attachment counts. It stops if another bucket changes or if attachment or visit rows decrease. New visits saved while the job is running stay in place. No migration.

@@ -247,12 +247,14 @@ export async function POST(request) {
     const visitLocation = body?.location || {};
     const visitLatitude = Number(visitLocation.latitude ?? body?.latitude);
     const visitLongitude = Number(visitLocation.longitude ?? body?.longitude);
-    if (shouldRequireTransactionGps(scope.role) && (!Number.isFinite(visitLatitude) || !Number.isFinite(visitLongitude))) {
-      return NextResponse.json(
-        { success: false, error: "GPS is required. Allow location access in the browser and try again." },
-        { status: 400 },
-      );
-    }
+    const hasVisitGps = Number.isFinite(visitLatitude) && Number.isFinite(visitLongitude);
+    const storedLocation = hasVisitGps
+      ? {
+        latitude: visitLatitude,
+        longitude: visitLongitude,
+        accuracy: Number(visitLocation.accuracy) || null,
+      }
+      : null;
 
     const visibleCustomer = await ensureCustomerVisible(admin, customerCode, scope);
     const storedCustomerCode = normalizeCode(visibleCustomer.customer_code || customerCode);
@@ -268,19 +270,13 @@ export async function POST(request) {
       note: body?.note ? String(body.note) : null,
       stock_checks: stockChecks,
       captured_at: body?.capturedAt ? String(body.capturedAt) : new Date().toISOString(),
-      location: body?.location || null,
+      location: storedLocation,
       saved_by_user_id: scope.userId,
       saved_at: new Date().toISOString(),
       source: "system_settings_fallback",
     };
 
-    const activityNote = buildGpsActivityNote("VISIT_REPORT", Number.isFinite(visitLatitude) && Number.isFinite(visitLongitude)
-      ? {
-        latitude: visitLatitude,
-        longitude: visitLongitude,
-        accuracy: Number(visitLocation.accuracy) || null,
-      }
-      : value.location,
+    const activityNote = buildGpsActivityNote("VISIT_REPORT", storedLocation,
     {
       customer_code: storedCustomerCode,
       customer_name: value.customer_name,

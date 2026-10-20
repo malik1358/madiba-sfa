@@ -73,6 +73,8 @@ export const GPS_TIMEOUT_ERROR = "TIMEOUT";
 export const GPS_LOCATION_FAILED_ERROR = "LOCATION_FAILED";
 export const GPS_PROBE_DEFAULT_ATTEMPTS = 3;
 export const GPS_PROBE_RETRY_DELAY_MS = 1500;
+/** One short read for visit save/share. A miss must not block the report. */
+export const OPTIONAL_VISIT_GPS_TIMEOUT_MS = 4000;
 export const GPS_PROBE_RETRY_MAXIMUM_AGE_MS = 15000;
 export const GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS = 60000;
 
@@ -342,6 +344,23 @@ export function requireGpsLocation(options = {}) {
     return Promise.resolve(null);
   }
   return captureGpsLocation(options);
+}
+
+export async function captureOptionalGpsLocation(options = {}) {
+  if (!shouldRequireTransactionGps(options.role)) {
+    return null;
+  }
+
+  try {
+    return await probeGpsLocationWithRetries({
+      attempts: 1,
+      retryDelayMs: 0,
+      timeoutMs: Number(options.timeoutMs) || OPTIONAL_VISIT_GPS_TIMEOUT_MS,
+      maximumAge: 0,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function normalizeGpsCapturePlatform(value, source = "") {

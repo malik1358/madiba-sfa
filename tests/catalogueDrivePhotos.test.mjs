@@ -4,6 +4,7 @@ import {
   catalogueDriveItemCode,
   driveFileMarker,
   driveFileNeedsDownload,
+  folderNeedsDriveCatchUp,
   driveRevisionChanged,
   isRecentDriveLabel,
   parseDriveFileMarker,
@@ -77,4 +78,16 @@ test("downloads a new photo and skips an unchanged Drive file", () => {
   assert.equal(driveRevisionChanged(stored, "Oct 20", now), false);
   assert.equal(driveRevisionChanged(stored, "11:00 am", now), true);
   assert.equal(isRecentDriveLabel("Oct 16", now), false);
+});
+
+test("an empty item keeps importing every older Drive image", () => {
+  const older = { id: "old-file", name: "017A1483.JPG", modified: "Oct 12", kind: "file", stored: null };
+  assert.equal(driveFileNeedsDownload(older, { photoCount: 0, now }), true);
+  assert.equal(driveFileNeedsDownload(older, { photoCount: 1, now }), false);
+  assert.equal(driveFileNeedsDownload(older, { photoCount: 1, fillMissing: true, now }), true);
+  const stored = parseDriveFileMarker(driveFileMarker("old-file", "Oct 12", "2026-10-12T00:00:00.000Z"));
+  assert.equal(driveFileNeedsDownload({ ...older, stored, modified: "Oct 12" }, { photoCount: 1, fillMissing: true, now }), false);
+  assert.equal(folderNeedsDriveCatchUp([]), false);
+  assert.equal(folderNeedsDriveCatchUp([{ original_file_name: "A003467.jpg" }]), false);
+  assert.equal(folderNeedsDriveCatchUp([{ original_file_name: driveFileMarker("file-1", "Oct 12", "2026-10-12T00:00:00.000Z") }]), true);
 });

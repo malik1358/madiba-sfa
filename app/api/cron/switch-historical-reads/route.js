@@ -8,7 +8,7 @@ import { authorizeAttachmentRead, resolveAttachmentTarget } from "../../../lib/s
 import { handleAttachmentUrlRequest } from "../../attachments/[id]/url/route.js";
 import { RECEIPT_R2_BUCKET, sha256Hex } from "../../../lib/storage/copyReceiptsToR2.js";
 import { legacyCollectionCopyRef } from "../../../lib/storage/attachmentRecords.js";
-import { legacyCollectionReadObject, loadVerifiedCopyNames } from "../../../lib/storage/legacyCollectionRead.js";
+import { legacyCollectionReadObject, loadVerifiedCopyChecksum, loadVerifiedCopyNames } from "../../../lib/storage/legacyCollectionRead.js";
 import {
   isHistoricalReadSwitchRow,
   isSwitchedHistoricalRow,
@@ -110,6 +110,26 @@ async function mapPool(items, limit, worker) {
 }
 
 async function probeRollback(admin, row) {
+  const key = String(row.object_key || "");
+  if (/^payment-collections\/(?:receipt-copies|payment-copies)\//.test(key)) {
+    const forced = await getSignedReadUrl(admin, {
+      provider: "r2",
+      key,
+      expiresIn: 60,
+      config: { ...readAttachmentStorageConfig(), forceSupabaseReads: true },
+    });
+    if (signedHostKind(forced.url) !== "r2") {
+      throw Object.assign(new Error("Collection read was routed to Supabase."), { integrity: true });
+    }
+    const response = await fetch(forced.url);
+    if (!response.ok) throw new Error("R2 read failed.");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const source = Buffer.from(await getR2Object(null, { key }));
+    if (sha256Hex(bytes) !== sha256Hex(source)) {
+      throw Object.assign(new Error("R2 signed read did not match the stored object."), { integrity: true });
+    }
+    return;
+  }
   const source = await downloadSupabase(admin, row.object_key);
   const forced = await getSignedReadUrl(admin, {
     provider: "r2",
@@ -323,9 +343,10 @@ async function confirmReads(admin) {
     const target = visit ? await resolveAttachmentTarget(admin, { id: "legacy", legacyKind: `${kind}_copy`, legacyRef: String(visit.id) }) : { status: 404 };
     let bytesOk = false;
     if (target.status === 200 && target.object?.provider === "r2") {
-      const source = await downloadSupabase(admin, target.object.key);
       const remote = Buffer.from(await getR2Object(null, { key: target.object.key }));
-      bytesOk = sha256Hex(source) === sha256Hex(remote);
+      const path = String(target.object.key || "").replace(/^payment-collections\//, "");
+      const expected = await loadVerifiedCopyChecksum(admin, kind, path);
+      bytesOk = Boolean(expected) && sha256Hex(remote) === expected;
     }
     legacy[kind] = { ok: target.object?.provider === "r2" && bytesOk, provider: target.object?.provider || "" };
   }
@@ -406,8 +427,9 @@ async function reconcileLegacyReads(admin) {
       reads[kind] = { ok: false, reason: "missing" };
       continue;
     }
-    const source = await downloadSupabase(admin, sample.key);
     const remote = Buffer.from(await getR2Object(null, { key: sample.key }));
+    const path = String(sample.key || "").replace(/^payment-collections\//, "");
+    const expected = await loadVerifiedCopyChecksum(admin, kind, path);
     const authorized = await authorizedRead(admin, "legacy", new URLSearchParams({ kind: `${kind}_copy`, ref: String(sample.id) }));
     const anonymous = await handleAttachmentUrlRequest({
       admin,
@@ -416,10 +438,10 @@ async function reconcileLegacyReads(admin) {
       searchParams: new URLSearchParams({ kind: `${kind}_copy`, ref: String(sample.id) }),
     });
     reads[kind] = {
-      ok: sha256Hex(source) === sha256Hex(remote) && authorized.ok && authorized.host === "r2" && anonymous.status === 401,
+      ok: Boolean(expected) && sha256Hex(remote) === expected && authorized.ok && authorized.host === "r2" && anonymous.status === 401,
       host: authorized.host,
       anonymousStatus: anonymous.status,
-      bytes: source.length,
+      bytes: remote.length,
     };
   }
 
@@ -431,7 +453,8 @@ async function reconcileLegacyReads(admin) {
       config: { ...config, forceSupabaseReads: true },
     })
     : null;
-  const rollbackOk = Boolean(forced) && signedHostKind(forced.url) === "supabase";
+  const collectionKey = /^payment-collections\/(?:receipt-copies|payment-copies)\//.test(String(samples.receipt?.key || ""));
+  const rollbackOk = Boolean(forced) && signedHostKind(forced.url) === (collectionKey ? "r2" : "supabase");
   const stillSupabase = counts.receiptSupabase + counts.paymentSupabase;
   const broken = counts.receiptBroken + counts.paymentBroken;
   const failed = stillSupabase > 0 || broken > 0 || !reads.receipt?.ok || !reads.payment?.ok || !rollbackOk;

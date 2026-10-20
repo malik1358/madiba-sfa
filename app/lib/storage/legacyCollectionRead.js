@@ -48,12 +48,21 @@ export function legacyCollectionStoragePath(object, kind) {
   return path;
 }
 
-export function legacyCollectionReadObject(object, kind, verifiedNames, { forceSupabaseReads = false } = {}) {
+export function verifiedCopyChecksum(progress, name) {
+  const payload = progressObject(progress);
+  const verified = payload.verified && typeof payload.verified === "object" ? payload.verified : {};
+  const reconciled = payload.reconciled && typeof payload.reconciled === "object" ? payload.reconciled : {};
+  const checksum = String(verified[name] || "").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(checksum) || String(reconciled[name] || "").toLowerCase() !== checksum) return "";
+  return checksum;
+}
+
+// Verified flat copies are read from R2. Anything else is unavailable; Supabase is not a fallback.
+export function legacyCollectionReadObject(object, kind, verifiedNames) {
   if (!object?.key) return null;
   const path = legacyCollectionStoragePath(object, kind);
-  const key = path ? `payment-collections/${path}` : String(object.key);
-  const eligible = Boolean(path) && !forceSupabaseReads && verifiedNames?.has(path);
-  return { provider: eligible ? "r2" : "supabase", key };
+  if (!path || !verifiedNames?.has(path)) return null;
+  return { provider: "r2", key: `payment-collections/${path}` };
 }
 
 export async function loadVerifiedCopyNames(admin, kind) {
@@ -69,5 +78,21 @@ export async function loadVerifiedCopyNames(admin, kind) {
     return verifiedCopyNames(data.setting_value);
   } catch {
     return new Set();
+  }
+}
+
+export async function loadVerifiedCopyChecksum(admin, kind, name) {
+  const settingKey = LEGACY_COPY_MANIFEST_KEYS[kind];
+  if (!settingKey || !admin?.from) return "";
+  try {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", settingKey)
+      .maybeSingle();
+    if (error || !data) return "";
+    return verifiedCopyChecksum(data.setting_value, name);
+  } catch {
+    return "";
   }
 }

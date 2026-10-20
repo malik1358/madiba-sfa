@@ -24,6 +24,7 @@ export async function handleAttachmentUrlRequest({
   searchParams,
   deps = defaultAccessDeps,
   signUrl = getSignedReadUrl,
+  head = headObject,
 }) {
   if (!token) return result(401, { success: false, error: "Not authenticated" });
 
@@ -46,11 +47,10 @@ export async function handleAttachmentUrlRequest({
   const key = target.object.key;
   if (target.legacy && provider === "r2") {
     try {
-      const head = await headObject(admin, { key, provider: "r2" });
-      if (!head?.exists) provider = "supabase";
+      const headResult = await head(admin, { key, provider: "r2" });
+      if (!headResult?.exists) return result(404, { success: false, error: "The receipt or payment copy is not available." });
     } catch {
-      console.error("Legacy collection copy is not available in R2. Opening the Supabase original.");
-      provider = "supabase";
+      return result(404, { success: false, error: "The receipt or payment copy is not available." });
     }
   }
 

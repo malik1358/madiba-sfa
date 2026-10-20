@@ -184,6 +184,7 @@ export async function POST(request) {
     return json({ success: false, stop: true, stopReason: "not-production" }, 409);
   }
   if (!supabaseUrl || !serviceKey) return json({ success: false, stop: true, stopReason: "server-config" }, 500);
+  return json({ success: false, stop: true, stopReason: "supabase-originals-retired" }, 409);
 
   let mode = "copy";
   try {

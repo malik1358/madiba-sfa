@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -25,6 +25,38 @@ const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
 const SUPABASE_URL = "https://project.supabase.co";
 const PUBLIC_MARKER = "/storage/v1/object/public/";
 const USER = { id: "user-1" };
+const ACCOUNT = "abc123abc123abc123abc123abc123ab";
+const COPY_SHA = "b".repeat(64);
+const savedEnv = {};
+const savedFetch = globalThis.fetch;
+
+before(() => {
+  for (const [name, value] of Object.entries({
+    R2_ACCOUNT_ID: ACCOUNT,
+    R2_ACCESS_KEY_ID: "AKIDTESTR2",
+    R2_SECRET_ACCESS_KEY: "secretsecretsecretsecretsecretsecret",
+    R2_BUCKET: "madiba-attachments-dev",
+    R2_ENDPOINT: "",
+  })) {
+    savedEnv[name] = process.env[name];
+    process.env[name] = value;
+  }
+  globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (!url.hostname.endsWith(".r2.cloudflarestorage.com")) return savedFetch(input, init);
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: { "content-length": "1" } });
+    return new Response("file", { status: 200 });
+  };
+});
+
+after(() => {
+  globalThis.fetch = savedFetch;
+  for (const [name, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
 
 function listFiles(dir, extensions) {
   const out = [];
@@ -173,6 +205,20 @@ async function historicalAdmin() {
       sales_orders: [{ id: 378, customer_code: "2000C", created_by: "someone", salesman_code: "S9" }],
       system_settings: [
         { setting_key: "order_invoice_meta:378", setting_value: JSON.stringify({ orderId: "378", invoiceFilePath: "2000C/378/i.pdf" }) },
+        {
+          setting_key: "receipt_r2_copy_progress_v1",
+          setting_value: JSON.stringify({
+            verified: { "receipt-copies/1114C-1-receipt.jpg": COPY_SHA, "receipt-copies/1114C-3-receipt.jpg": COPY_SHA },
+            reconciled: { "receipt-copies/1114C-1-receipt.jpg": COPY_SHA, "receipt-copies/1114C-3-receipt.jpg": COPY_SHA },
+          }),
+        },
+        {
+          setting_key: "payment_r2_copy_progress_v1",
+          setting_value: JSON.stringify({
+            verified: { "payment-copies/1114C-1-payment.pdf": COPY_SHA },
+            reconciled: { "payment-copies/1114C-1-payment.pdf": COPY_SHA },
+          }),
+        },
       ],
     },
   });
@@ -188,19 +234,17 @@ test("historical receipt and payment URLs are returned as private signed URLs, n
     const result = await handleAttachmentUrlRequest({ admin, token: "token-1", id: "legacy", searchParams: query({ kind, ref: "1" }), deps });
     assert.equal(result.status, 200, kind);
     assert.doesNotMatch(result.body.url, /\/object\/public\//);
-    assert.match(result.body.url, /^https:\/\/signed\.example\/payment-collections\//);
+    assert.match(result.body.url, /r2\.cloudflarestorage\.com/);
   }
-  assert.deepEqual(admin.calls.signed.map((call) => [call.bucket, call.path, call.expiresIn]), [
-    ["payment-collections", "receipt-copies/1114C-1-receipt.jpg", 300],
-    ["payment-collections", "payment-copies/1114C-1-payment.pdf", 300],
-  ]);
+  assert.equal(admin.calls.signed.length, 0);
 });
 
 test("pre-migration key references resolve and sign the same way", async () => {
   const admin = await historicalAdmin();
   const result = await handleAttachmentUrlRequest({ admin, token: "token-1", id: "legacy", searchParams: query({ kind: "receipt_copy", ref: "3" }), deps: denyAllDeps() });
   assert.equal(result.status, 200, "visit creator");
-  assert.equal(admin.calls.signed[0].path, "receipt-copies/1114C-3-receipt.jpg");
+  assert.match(result.body.url, /r2\.cloudflarestorage\.com/);
+  assert.equal(admin.calls.signed.length, 0);
 });
 
 test("historical customer documents sign file_path only for in-scope users", async () => {

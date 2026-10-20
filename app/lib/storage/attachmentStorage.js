@@ -46,8 +46,17 @@ export function resolveStorageProvider(name = DEFAULT_STORAGE_PROVIDER) {
   return provider;
 }
 
-// Rollback switch: only valid for objects that also exist in Supabase (historical or dual-written).
-function readProviderFor(provider, config) {
+export function isCollectionCopyKey(key) {
+  return /^payment-collections\/(?:receipt-copies|payment-copies)\//.test(String(key || "").replace(/^\/+/, ""));
+}
+
+export function isCollectionCopyCategory(category) {
+  return category === "receipt_copy" || category === "payment_copy";
+}
+
+// Receipt and payment copies are served from R2. The Supabase rollback flag does not apply to them.
+function readProviderFor(provider, config, key) {
+  if (isCollectionCopyKey(key)) return STORAGE_PROVIDERS.r2;
   return config.forceSupabaseReads ? STORAGE_PROVIDERS.supabase : (provider || DEFAULT_STORAGE_PROVIDER);
 }
 
@@ -111,6 +120,15 @@ export async function writeAttachmentObject(admin, {
   const prepared = await prepareBody(body);
   const write = (provider) => putPrepared(admin, provider, { key, prepared, contentType, metadata });
 
+  if (isCollectionCopyCategory(metadata.category)) {
+    try {
+      return { primary: await write(STORAGE_PROVIDERS.r2), secondary: null, fallbackError: null };
+    } catch (r2Error) {
+      console.error("Receipt or payment copy could not be stored in R2.", { key, category: metadata.category, ...describeError(r2Error) });
+      throw Object.assign(new Error("Unable to store the receipt or payment copy. Please try again."), { cause: r2Error });
+    }
+  }
+
   if (config.writeProvider !== STORAGE_PROVIDERS.r2) {
     return { primary: await write(STORAGE_PROVIDERS.supabase), secondary: null, fallbackError: null };
   }
@@ -145,7 +163,7 @@ export async function writeAttachmentObject(admin, {
 }
 
 export async function getObject(admin, { key, provider = DEFAULT_STORAGE_PROVIDER, config = readAttachmentStorageConfig() }) {
-  return resolveStorageProvider(readProviderFor(provider, config)).getObject(admin, { key });
+  return resolveStorageProvider(readProviderFor(provider, config, key)).getObject(admin, { key });
 }
 
 export async function headObject(admin, { key, provider = DEFAULT_STORAGE_PROVIDER }) {
@@ -160,7 +178,7 @@ export async function getSignedReadUrl(admin, {
   config = readAttachmentStorageConfig(),
 }) {
   const ttl = clampSignedUrlTtl(expiresIn ?? config.signedUrlTtlSeconds);
-  const url = await resolveStorageProvider(readProviderFor(provider, config)).getSignedReadUrl(admin, {
+  const url = await resolveStorageProvider(readProviderFor(provider, config, key)).getSignedReadUrl(admin, {
     key,
     expiresIn: ttl,
     downloadName,

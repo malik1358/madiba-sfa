@@ -286,13 +286,12 @@ test("immutable keys are collision-resistant and keep the bucket folders", () =>
 // ---------- write paths ----------
 const RECEIPT = { category: ATTACHMENT_CATEGORIES.receiptCopy, keyInput: { customerCode: "1114C", extension: "jpg" }, body: Buffer.from("receipt"), contentType: "image/jpeg", customerCode: "1114C" };
 
-test("default config writes Supabase with the legacy layout and never calls R2", async () => {
+test("receipt and payment copies write to R2 and do not fall back to Supabase", async () => {
   const admin = createFakeAdmin();
   const result = await storeAttachment(admin, { ...RECEIPT, config: readAttachmentStorageConfig({}) });
-  assert.equal(result.stored.provider, "supabase");
-  assert.match(result.stored.key, /^payment-collections\/receipt-copies\/1114C-\d+-receipt\.jpg$/);
-  assert.equal(admin.data.attachments[0].storage_provider, "supabase");
-  assert.equal(r2.requests.length, 0);
+  assert.equal(result.stored.provider, "r2");
+  assert.match(result.stored.key, /^payment-collections\/receipt-copies\/\d{4}\/\d{2}\/1114C\/\d{8}-[0-9a-f-]{36}\.jpg$/);
+  assert.equal(admin.calls.uploads.length, 0);
 });
 
 test("R2 primary success records storage_provider=r2 with an immutable key", async () => {
@@ -307,61 +306,54 @@ test("R2 primary success records storage_provider=r2 with an immutable key", asy
   assert.equal(result.fallbackError, null);
 });
 
-test("R2 failure falls back to Supabase and the row says supabase", async () => {
+test("R2 failure does not store a receipt copy in Supabase", async () => {
   const admin = createFakeAdmin();
   r2.failPut = 5;
-  const result = await storeAttachment(admin, { ...RECEIPT, contentType: "application/pdf", keyInput: { customerCode: "1114C", extension: "pdf" }, config: R2_CONFIG });
-  const row = admin.data.attachments.find((entry) => entry.id === result.attachmentId);
-  assert.equal(row.storage_provider, "supabase");
-  assert.equal(row.content_type, "application/pdf");
-  assert.ok(admin.storage.objects.has(row.object_key));
+  await assert.rejects(
+    storeAttachment(admin, { ...RECEIPT, contentType: "application/pdf", keyInput: { customerCode: "1114C", extension: "pdf" }, config: R2_CONFIG }),
+    /Unable to store the receipt or payment copy/,
+  );
+  assert.equal(admin.storage.objects.size, 0);
   assert.equal(r2.objects.size, 0);
-  assert.equal(result.fallbackError.status, 500);
-  assert.ok(logs.some((line) => line.includes("R2 write failed; falling back to Supabase")));
+  assert.ok(logs.some((line) => line.includes("could not be stored in R2")));
 });
 
-test("R2 network error also falls back to Supabase", async () => {
+test("R2 network error does not store a receipt copy in Supabase", async () => {
   const admin = createFakeAdmin();
   r2.throwPut = true;
-  const result = await storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG });
-  assert.equal(result.stored.provider, "supabase");
-  assert.match(result.fallbackError.message, /fetch failed/);
+  await assert.rejects(storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG }), /Unable to store the receipt or payment copy/);
+  assert.equal(admin.storage.objects.size, 0);
 });
 
-test("both providers failing aborts the save and records no attachment row", async () => {
+test("a receipt copy is not saved when R2 rejects it", async () => {
   const admin = failingSupabase(createFakeAdmin());
   r2.failPut = 5;
-  await assert.rejects(storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG }), /Unable to store the attachment/);
+  await assert.rejects(storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG }), /Unable to store the receipt or payment copy/);
   assert.equal((admin.data.attachments || []).length, 0);
-  assert.ok(logs.some((line) => line.includes("Supabase fallback write failed")));
 });
 
-test("dual write: R2 success + Supabase safety-copy failure keeps R2 and reports the failure", async () => {
+test("receipt copies do not dual-write to Supabase", async () => {
   const admin = failingSupabase(createFakeAdmin());
   const result = await storeAttachment(admin, { ...RECEIPT, config: { ...R2_CONFIG, dualWrite: true } });
-  const row = admin.data.attachments.find((entry) => entry.id === result.attachmentId);
-  assert.equal(row.storage_provider, "r2");
-  assert.equal(result.secondary.ok, false);
-  assert.equal(result.secondary.error.status, 503);
-  assert.ok(logs.some((line) => line.includes("Supabase safety copy failed; R2 copy kept")));
+  assert.equal(result.stored.provider, "r2");
+  assert.equal(result.secondary, null);
+  assert.equal(admin.storage.objects.size, 0);
 });
 
-test("dual write: both copies at the same key, row still describes the R2 primary", async () => {
+test("receipt copies ignore a requested Supabase dual write", async () => {
   const admin = createFakeAdmin();
   const result = await storeAttachment(admin, { ...RECEIPT, config: { ...R2_CONFIG, dualWrite: true } });
   assert.equal(result.stored.provider, "r2");
-  assert.equal(result.secondary.ok, true);
-  assert.ok(r2.objects.has(result.stored.key));
-  assert.ok(admin.storage.objects.has(result.stored.key));
+  assert.equal(result.secondary, null);
+  assert.equal(admin.storage.objects.size, 0);
   assert.equal(admin.data.attachments.length, 1);
 });
 
-test("R2 mode stays on Supabase when the attachments migration is missing", async () => {
+test("a receipt copy is refused when the attachments table is missing", async () => {
   const admin = createFakeAdmin({ missingTables: ["attachments"] });
-  const result = await storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG });
-  assert.equal(result.stored.provider, "supabase");
-  assert.match(result.stored.key, /-receipt\.jpg$/);
+  await assert.rejects(storeAttachment(admin, { ...RECEIPT, config: R2_CONFIG }), /Unable to store the receipt or payment copy/);
   assert.equal(r2.requests.length, 0);
+  assert.equal(admin.storage.objects.size, 0);
 });
 
 // ---------- reads ----------
@@ -387,7 +379,9 @@ test("reads follow the attachment row provider, not the current write provider",
   process.env.ATTACHMENT_FORCE_SUPABASE_READS = "1";
   try {
     const forced = await getSignedReadUrl(admin, { provider: "r2", key: stored.stored.key });
-    assert.match(forced.url, /^https:\/\/signed\.example\/payment-collections\//, "rollback switch reads the Supabase copy");
+    assert.equal(new URL(forced.url).hostname, `${ACCOUNT}.r2.cloudflarestorage.com`);
+    const invoice = await getSignedReadUrl(admin, { provider: "r2", key: "order-invoices/1114C/1/file.pdf" });
+    assert.match(invoice.url, /^https:\/\/signed\.example\/order-invoices\//);
   } finally {
     delete process.env.ATTACHMENT_FORCE_SUPABASE_READS;
   }

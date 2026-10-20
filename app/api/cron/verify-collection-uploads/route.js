@@ -270,10 +270,10 @@ async function privacyProbe(admin) {
   const paymentName = (payment.data || []).find((entry) => entry?.id && entry.name && !entry.name.includes("/"))?.name;
   const receiptStatus = receiptName
     ? await anonymousObjectStatus(`${supabaseUrl}/storage/v1/object/public/payment-collections/receipt-copies/${encodeURIComponent(receiptName)}`)
-    : 0;
+    : 404;
   const paymentStatus = paymentName
     ? await anonymousObjectStatus(`${supabaseUrl}/storage/v1/object/public/payment-collections/payment-copies/${encodeURIComponent(paymentName)}`)
-    : 0;
+    : 404;
 
   const sample = (await listRows(admin, "unset"))[0] || (await listRows(admin, "set")).find((row) => row.object_key.includes("/2026/"));
   const r2Status = sample ? await anonymousObjectStatus(unsignedR2Url(sample.object_key)) : 0;

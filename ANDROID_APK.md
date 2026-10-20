@@ -248,7 +248,7 @@ Android APK (Capacitor)
 | Location/camera blocked | App info â†’ Permissions â†’ allow Location + Camera |
 | File picker says no files are available | For customer or prospect documents, use **Take Photo** to capture the document, or download the file to an Android Files provider and use **Choose File / PDF**. |
 | `"Filesystem" plugin is not implemented on android` on Generate PDF / WhatsApp share | The phone is on an APK built before Filesystem/Share were synced into the native shell (or without `cap sync`). Install the latest **madiba-sfa-release-apk** from Actions / Play internal. After the web fallback deploys, PDF still downloads without the error, but the native share sheet needs the new APK. |
-| Collection WhatsApp opens text only / asks to attach photos manually | Native file share failed (old APK or WebView). Summary still opens in WhatsApp; attach payment/receipt images by hand, or install the latest APK for one-tap file share. |
+| Collection WhatsApp opens text only / asks to attach photos manually | Force-close and reopen so the phone loads the latest site. The receipt/payment file is included in the share. If the caption is empty, paste the copied summary. A manual-attach warning means file share itself failed. |
 | Old UI after deploy | Force-close app and reopen; web updates come from Vercel automatically |
 | APK install failed | Uninstall old MADIBA SFA first; use latest **madiba-sfa-release-apk** (not an old debug build) |
 

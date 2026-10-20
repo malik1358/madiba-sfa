@@ -5,7 +5,9 @@ import {
   buildWhatsappAppUrl,
   buildWhatsappShareUrl,
   shareTextAndFilesOnWhatsapp,
+  shouldOmitWebShareText,
   toWhatsappShareFile,
+  whatsappCacheFileName,
 } from "../app/lib/whatsappShare.js";
 
 test("buildWhatsappShareUrl encodes message text", () => {
@@ -29,6 +31,14 @@ test("visit summaries share through the WhatsApp composer without a preset numbe
   const url = buildWhatsappShareUrl("Field visit report");
   assert.equal(url.startsWith("https://api.whatsapp.com/send?text="), true);
   assert.equal(url.includes("wa.me/"), false);
+});
+
+test("whatsapp cache names use extensions Android WhatsApp accepts", () => {
+  assert.equal(whatsappCacheFileName({ type: "image/jpeg", name: "receipt copy (1).heic" }, 0), "attachment-1.jpg");
+  assert.equal(whatsappCacheFileName({ type: "application/pdf", name: "receipt.pdf" }, 1), "attachment-2.pdf");
+  assert.equal(whatsappCacheFileName({ type: "image/png", name: "payment.png" }, 2), "attachment-3.png");
+  assert.equal(shouldOmitWebShareText("Mozilla/5.0 (Linux; Android 14; Pixel)"), true);
+  assert.equal(shouldOmitWebShareText("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"), false);
 });
 
 test("toWhatsappShareFile names unnamed blobs for WhatsApp attachments", () => {
@@ -104,6 +114,128 @@ test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is
     assert.equal(result.reason, "files-not-supported");
     assert.equal(result.method, "whatsapp-url");
     assert.ok(openedUrls.some((url) => String(url).includes("whatsapp")));
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousNavigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", previousNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});
+
+test("Android web share sends the collection file and keeps the summary for paste", async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let shared = null;
+
+  globalThis.window = { setTimeout: globalThis.setTimeout.bind(globalThis) };
+  globalThis.document = {
+    body: { appendChild() {}, removeChild() {} },
+    createElement() {
+      return {
+        value: "",
+        style: {},
+        setAttribute() {},
+        focus() {},
+        select() {},
+        setSelectionRange() {},
+      };
+    },
+    execCommand() {
+      return true;
+    },
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)",
+      clipboard: { writeText: async () => {} },
+      canShare: () => true,
+      share: async (payload) => {
+        shared = payload;
+      },
+    },
+  });
+
+  try {
+    const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "receipt.jpg", {
+      type: "image/jpeg",
+    });
+    const result = await shareTextAndFilesOnWhatsapp("Collection visit summary", [file], {
+      title: "Summary",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.method, "web-share-files");
+    assert.equal(result.textCopied, true);
+    assert.equal(shared.text, undefined);
+    assert.equal(shared.files.length, 1);
+    assert.equal(shared.files[0].name, "receipt.jpg");
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousNavigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", previousNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});
+
+test("iPhone web share keeps the collection summary with the file", async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let shared = null;
+
+  globalThis.window = { setTimeout: globalThis.setTimeout.bind(globalThis) };
+  globalThis.document = {
+    body: { appendChild() {}, removeChild() {} },
+    createElement() {
+      return {
+        value: "",
+        style: {},
+        setAttribute() {},
+        focus() {},
+        select() {},
+        setSelectionRange() {},
+      };
+    },
+    execCommand() {
+      return true;
+    },
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)",
+      clipboard: { writeText: async () => {} },
+      canShare: () => true,
+      share: async (payload) => {
+        shared = payload;
+      },
+    },
+  });
+
+  try {
+    const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "receipt.jpg", {
+      type: "image/jpeg",
+    });
+    const result = await shareTextAndFilesOnWhatsapp("Collection visit summary", [file], {
+      title: "Summary",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.method, "web-share-files");
+    assert.equal(shared.text, "Collection visit summary");
+    assert.equal(shared.files.length, 1);
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;

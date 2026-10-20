@@ -189,8 +189,8 @@ export function AppPopupProvider({ children }) {
         ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
         : "Summary copied. Share the PDF and summary on WhatsApp now.")
       : (language === "ar"
-        ? "تم نسخ الملخص. شارك المرفقات والملخص على واتساب الآن."
-        : "Summary copied. Share the attachments and summary on WhatsApp now."))
+        ? "تم نسخ الملخص. المرفق يذهب مع المشاركة. الصق الملخص إذا كان التعليق فارغاً."
+        : "Summary copied. The attachment is included. Paste the summary if the caption is empty."))
     : (language === "ar"
       ? "تم نسخ الملخص. شاركه على واتساب الآن."
       : "Summary copied. Share it on WhatsApp now.");

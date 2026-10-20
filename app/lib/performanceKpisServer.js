@@ -28,7 +28,7 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 3;
+const PERFORMANCE_KPI_CACHE_VERSION = 4;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
@@ -192,6 +192,31 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
   };
 }
 
+export function latestSalesTransactionDate(rows = []) {
+  let latest = "";
+  (rows || []).forEach((row) => {
+    const date = String(row?.transaction_date || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date > latest) latest = date;
+  });
+  return latest;
+}
+
+export async function loadCurrentMonthLastSalesDate(admin, { reportDate } = {}) {
+  const { from, to } = monthWindow(reportDate);
+  try {
+    const rows = await fetchPagedRows(
+      admin,
+      "active_sales",
+      "transaction_date",
+      (query) => query.gte("transaction_date", from).lte("transaction_date", to),
+    );
+    return latestSalesTransactionDate(rows);
+  } catch (error) {
+    if (!isMissingColumnError(error) && !isMissingTableError(error)) throw error;
+    return "";
+  }
+}
+
 export function paceSharesForSalesman(pace, salesmanCode) {
   return pickSalesmanPaceShares(pace, salesmanCode);
 }
@@ -344,10 +369,11 @@ export async function loadPerformanceSnapshot(admin, {
   paceShares = null,
 } = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
-  const [salesActuals, collectionActuals, loadedPace] = await Promise.all([
+  const [salesActuals, collectionActuals, loadedPace, salesAsOfDate] = await Promise.all([
     loadSalesActuals(admin, { salesmanCode: code, reportDate }),
     loadCollectionActual(admin, { salesmanCode: code, reportDate }),
     paceShares ? Promise.resolve(null) : loadSalesPaceShares(admin, { reportDate }),
+    loadCurrentMonthLastSalesDate(admin, { reportDate }),
   ]);
   const classified = classifyBuyingCustomers(
     salesActuals.monthCustomerCodes,
@@ -381,6 +407,7 @@ export async function loadPerformanceSnapshot(admin, {
     updatedByName: resolvedTarget?.updatedByName || "",
     todayIso,
     paceShares: paceSharesForSalesman(resolvedPace, code),
+    salesAsOfDate,
   });
 }
 
@@ -419,6 +446,7 @@ async function readPerformanceKpiCache(admin, reportDate, batchId) {
       || String(cache.batchId || "") !== batchId
       || !cache.actualsBySalesman
       || typeof cache.actualsBySalesman !== "object"
+      || !Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
     ) return null;
     return cache;
   } catch {
@@ -452,7 +480,10 @@ function cacheActualsForSalesman(salesActuals, collectionActuals) {
 }
 
 async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, batchId }) {
-  const pace = await loadSalesPaceShares(admin, { reportDate });
+  const [pace, salesAsOfDate] = await Promise.all([
+    loadSalesPaceShares(admin, { reportDate }),
+    loadCurrentMonthLastSalesDate(admin, { reportDate }),
+  ]);
   const entries = await Promise.all((salesmen || []).map(async (salesman) => {
     const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
     if (!code) return null;
@@ -469,6 +500,7 @@ async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, bat
     builtAt: new Date().toISOString(),
     actualsBySalesman: Object.fromEntries(entries.filter(Boolean)),
     paceBySalesman: Object.fromEntries([...pace.bySalesman.entries()]),
+    salesAsOfDate,
   };
 }
 
@@ -552,6 +584,7 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
         ...(sourceCache?.paceBySalesman || {}),
         ...refreshed.paceBySalesman,
       },
+      salesAsOfDate: refreshed.salesAsOfDate ?? sourceCache?.salesAsOfDate ?? "",
     };
     await writePerformanceKpiCache(admin, reportDate, sourceCache);
   }
@@ -570,6 +603,7 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
       updatedByName: targetsByCode.get(code)?.updatedByName || "",
       todayIso,
       paceShares: paceSharesForSalesman(pace, code),
+      salesAsOfDate: sourceCache.salesAsOfDate ?? "",
     });
   }));
 }

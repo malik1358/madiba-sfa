@@ -138,6 +138,21 @@ export function resolveKpiPaceDate(monthDate, todayIso) {
   return today;
 }
 
+/**
+ * Sales pace stops at the latest uploaded sales date in the open month.
+ * A missing date means no current-month sales are on file yet.
+ * Undefined leaves the calendar date unchanged for callers that do not know the upload.
+ */
+export function resolveSalesPaceAsOfDate(reportDate, todayIso, salesAsOfDate) {
+  const calendar = resolveKpiPaceDate(reportDate, todayIso);
+  if (salesAsOfDate == null) return calendar;
+  const salesDate = String(salesAsOfDate).slice(0, 10);
+  const month = currentMonthDateRange(reportDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) return month.from;
+  if (salesDate < month.from || salesDate > month.to) return month.from;
+  return salesDate < calendar ? salesDate : calendar;
+}
+
 export function monthProgressRatio(reportDate) {
   const date = String(reportDate || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
@@ -241,15 +256,19 @@ export function resolveExpectedPacePercent(key, {
   reportDate,
   todayIso,
   paceShares = null,
+  salesAsOfDate,
 } = {}) {
   const monthEnd = currentMonthDateRange(reportDate).to;
   const today = String(todayIso || reportDate || "").slice(0, 10);
   const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
   if (monthIsComplete) return 100;
-  const paceDate = resolveKpiPaceDate(reportDate, today || reportDate);
+  const salesPace = SALES_PACE_KPI_KEYS.has(key);
+  const paceDate = salesPace
+    ? resolveSalesPaceAsOfDate(reportDate, today || reportDate, salesAsOfDate)
+    : resolveKpiPaceDate(reportDate, today || reportDate);
   return expectedPacePercent(
     paceDate,
-    SALES_PACE_KPI_KEYS.has(key) ? paceShares : null,
+    salesPace ? paceShares : null,
   );
 }
 
@@ -296,6 +315,7 @@ export function kpiStatus({
   reportDate,
   todayIso,
   paceShares = null,
+  salesAsOfDate,
 } = {}) {
   const achievement = achievementPercent(actual, target);
   if (achievement == null) {
@@ -311,7 +331,9 @@ export function kpiStatus({
   const monthEnd = currentMonthDateRange(reportDate).to;
   const today = String(todayIso || reportDate || "").slice(0, 10);
   const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
-  const paceDate = resolveKpiPaceDate(reportDate, today || reportDate);
+  const paceDate = paceShares == null && salesAsOfDate === undefined
+    ? resolveKpiPaceDate(reportDate, today || reportDate)
+    : resolveSalesPaceAsOfDate(reportDate, today || reportDate, salesAsOfDate);
   const expected = monthIsComplete ? 100 : expectedPacePercent(paceDate, paceShares);
   const gap = achievement - expected;
 
@@ -482,14 +504,17 @@ export function buildPerformanceKpi(key, {
   reportDate,
   todayIso,
   paceShares = null,
+  salesAsOfDate,
 } = {}) {
   const achievement = achievementPercent(actual, target);
+  const salesPace = SALES_PACE_KPI_KEYS.has(key);
   const status = kpiStatus({
     actual,
     target,
     reportDate,
     todayIso,
-    paceShares: SALES_PACE_KPI_KEYS.has(key) ? paceShares : null,
+    paceShares: salesPace ? paceShares : null,
+    salesAsOfDate: salesPace ? salesAsOfDate : undefined,
   });
   return {
     key,
@@ -510,6 +535,7 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
   salesmanName = "Team",
   todayIso,
   paceShares = null,
+  salesAsOfDate,
   teamTargets = null,
 } = {}) {
   const rows = (snapshots || []).filter(Boolean);
@@ -544,6 +570,7 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
       updatedByName: latestUpdatedByName,
       todayIso: todayIso || rows[0]?.todayIso,
       paceShares: paceShares || rows[0]?.paceShares || null,
+      salesAsOfDate: salesAsOfDate ?? rows[0]?.salesAsOfDate,
     }),
     isTeam: true,
     memberCount: rows.length,
@@ -561,6 +588,7 @@ export function buildPerformanceSnapshot({
   updatedByName = "",
   todayIso,
   paceShares = null,
+  salesAsOfDate,
 } = {}) {
   const normalizedTargets = normalizePerformanceTargets(targets);
   const normalizedActuals = withTotalSales({
@@ -573,6 +601,7 @@ export function buildPerformanceSnapshot({
     reportDate,
     todayIso,
     paceShares,
+    salesAsOfDate,
   }));
   const componentScored = kpis.filter((kpi) => kpi.key !== "totalSales" && kpi.achievement != null);
   const scored = componentScored.length
@@ -597,6 +626,7 @@ export function buildPerformanceSnapshot({
     published: hasTargets,
     todayIso: todayIso || null,
     paceShares: paceShares || null,
+    salesAsOfDate: salesAsOfDate === undefined ? null : salesAsOfDate,
   };
 }
 

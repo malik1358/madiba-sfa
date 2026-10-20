@@ -5,6 +5,7 @@ import {
   achievementPercent,
   averageCumulativeDayShares,
   buyingCustomerCodesFromSales,
+  buildPerformanceKpi,
   buildPerformanceSnapshot,
   expectedPacePercent,
   ksaWorkdayProgressRatio,
@@ -19,6 +20,7 @@ import {
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
   resolveKpiPaceDate,
+  resolveSalesPaceAsOfDate,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
@@ -26,6 +28,7 @@ import {
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
 import {
+  loadCurrentMonthLastSalesDate,
   loadKpiTargetsBySalesman,
   loadPerformanceSnapshotsForSalesmen,
   loadSalesActuals,
@@ -108,6 +111,53 @@ test("KPI status compares actual/target with expected pace by today", () => {
     paceShares: { 30: 0.694 },
   }).key, "achieved");
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
+});
+
+test("open-month sales pace stops at the latest uploaded sales date", () => {
+  assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", "2026-10-19"), "2026-10-19");
+  assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", "2026-10-20"), "2026-10-20");
+  assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", "2026-10-21"), "2026-10-20");
+  assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", ""), "2026-10-01");
+  assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", undefined), "2026-10-20");
+
+  const shares = { 19: 0.4, 20: 0.7 };
+  const uploaded = kpiStatus({
+    actual: 40,
+    target: 100,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+    paceShares: shares,
+    salesAsOfDate: "2026-10-19",
+  });
+  assert.equal(uploaded.expected, 40);
+
+  const calendar = kpiStatus({
+    actual: 40,
+    target: 100,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+    paceShares: shares,
+  });
+  assert.equal(calendar.expected, 70);
+
+  const collection = buildPerformanceKpi("collection", {
+    actual: 10,
+    target: 100,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+    salesAsOfDate: "2026-10-19",
+  });
+  assert.equal(collection.expected, ksaWorkdayProgressRatio("2026-10-20") * 100);
+
+  const closed = kpiStatus({
+    actual: 40,
+    target: 100,
+    reportDate: "2026-09-01",
+    todayIso: "2026-10-20",
+    paceShares: shares,
+    salesAsOfDate: "2026-09-19",
+  });
+  assert.equal(closed.expected, 100);
 });
 
 test("expected pace uses historical share of month sales by that date", () => {
@@ -296,6 +346,16 @@ test("sales pace uses each salesman's own last three complete months", async () 
   assert.equal(pace.bySalesman.has("SM03"), false);
 });
 
+test("current month pace date is the latest uploaded sales date", async () => {
+  const salesDate = await loadCurrentMonthLastSalesDate(activeSalesAdmin([
+    { transaction_date: "2026-10-18", sales_amount: 10 },
+    { transaction_date: "2026-10-19", sales_amount: 20 },
+    { transaction_date: "2026-09-30", sales_amount: 99 },
+    { transaction_date: "2026-11-01", sales_amount: 99 },
+  ]), { reportDate: "2026-10-01" });
+  assert.equal(salesDate, "2026-10-19");
+});
+
 test("KPI targets use the latest Thamer alias and canonical saves win when newer", async () => {
   const targetRows = [
     { salesman_code: "THAMER", target_month: "2026-09-01", office_supplies_sales_target: 100, local_item_sales_target: 10, other_sales_target: 50, updated_at: "2026-09-02T00:00:00.000Z" },
@@ -396,7 +456,8 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 3,
+    version: 4,
+    salesAsOfDate: "2026-09-08",
     batchId: "42",
     actualsBySalesman: {
       SM001: {

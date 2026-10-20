@@ -4,7 +4,7 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 
 ## App speed history
 
-- One speed sample is taken at 09:00, 12:00, 15:00 and 18:00 KSA, including Friday. Each sample records the same public build-info time, Auth health time, keyed settings read, customer count, and two-day order count. Database probes warm one connection first and keep the fastest of two attempts. History is `system_settings.app_performance_daily_v1`, one row per KSA hour, kept for 90 days. The first samples are `baseline` / `collecting`. After three earlier samples, a timing is `slower` only when it is both 50% above and at least 200 ms above the median of those earlier samples. A slower or failed run emails `malik@pinasz.com`. A repeat in the same KSA hour does not send a second email.
+- One speed sample is taken at 09:00, 12:00, 15:00 and 18:00 KSA, including Friday. Each sample records the same public build-info time, Auth health time, keyed settings read, customer count, and two-day order count. Auth health keeps the fastest of two attempts. Database probes warm one connection first and keep the fastest of two attempts. History is `system_settings.app_performance_daily_v1`, one row per KSA hour, kept for 90 days. The first samples are `baseline` / `collecting`. After three earlier samples, a timing is `slower` only when it is both 50% above and at least 200 ms above the median of those earlier samples. A slower or failed run emails `malik@pinasz.com`. A repeat in the same KSA hour does not send a second email.
 
 ## Roles and gates
 

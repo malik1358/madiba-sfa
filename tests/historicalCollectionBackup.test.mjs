@@ -7,7 +7,11 @@ import { createHash } from "node:crypto";
 import {
   HISTORICAL_COLLECTION_COUNTS,
   assertSignBatch,
+  deletionBatchPlan,
   historicalBackupPlan,
+  manifestDeletionAllowlist,
+  nextDeletionBatch,
+  reconcileDeletionBatch,
   restorationInstructions,
   verifyDownloadedObject,
 } from "../app/lib/storage/historicalCollectionBackup.js";
@@ -113,6 +117,49 @@ test("restoration instructions name the archive contents and do not delete other
   assert.match(text, /payment-collections/);
   assert.match(text, /customer-documents/);
   assert.doesNotMatch(text, /DELETE FROM|service_role/i);
+});
+
+test("deletion batches stay inside the approved historical allowlist", () => {
+  const receipts = names("receipt-copies", HISTORICAL_COLLECTION_COUNTS.receipts);
+  const payments = names("payment-copies", HISTORICAL_COLLECTION_COUNTS.payments);
+  const allow = manifestDeletionAllowlist({
+    receiptProgress: progress(receipts),
+    paymentProgress: progress(payments),
+  });
+  assert.equal(allow.ok, true);
+  assert.equal(allow.entries.length, HISTORICAL_COLLECTION_COUNTS.objects);
+  const files = filesFor(allow.entries.map((entry) => entry.name), 10);
+  const plan = deletionBatchPlan({ files, entries: allow.entries });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.totalBytes, HISTORICAL_COLLECTION_COUNTS.objects * 10);
+  const unexpected = deletionBatchPlan({
+    files: [...files, { path: "customer-documents/a.jpg", bytes: 10 }],
+    entries: allow.entries,
+  });
+  assert.equal(unexpected.ok, false);
+  assert.equal(unexpected.issues.includes("unexpected-object"), true);
+  const partial = deletionBatchPlan({
+    files: files.slice(0, 20),
+    entries: allow.entries,
+    allowPartial: true,
+  });
+  assert.equal(partial.ok, true);
+  const batch = nextDeletionBatch(partial.present.map((entry) => entry.name), allow.entries.map((entry) => entry.name));
+  assert.equal(batch.length, 20);
+  assert.throws(() => nextDeletionBatch(["other/file.jpg"], allow.entries.map((entry) => entry.name)), /Unexpected object/);
+  const after = partial.present.map((entry) => entry.name).filter((name) => !batch.includes(name));
+  assert.deepEqual(reconcileDeletionBatch({
+    beforeNames: partial.present.map((entry) => entry.name),
+    afterNames: after,
+    deletedNames: batch,
+    allowNames: allow.entries.map((entry) => entry.name),
+  }), { remaining: 0, removed: 20 });
+  assert.throws(() => reconcileDeletionBatch({
+    beforeNames: batch,
+    afterNames: ["other/file.jpg"],
+    deletedNames: batch,
+    allowNames: allow.entries.map((entry) => entry.name),
+  }), /Unexpected object/);
 });
 
 test("drive config accepts the production backup remote and rejects a private age key", () => {

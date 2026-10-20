@@ -249,6 +249,26 @@ export function filterCollectionStaleOverdueRows(rows = [], options = {}) {
   return (rows || []).filter((row) => isCollectionStaleOverdueRow(row, options));
 }
 
+export function isLegalCollectionTransfer(row = {}) {
+  return Boolean(row?.legal_transfer?.is_transferred);
+}
+
+export function selectCollectionRowsForStaleOverdueEmail(queues = {}) {
+  const due = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+  const legalDue = (Array.isArray(queues?.legalCustomers) ? queues.legalCustomers : [])
+    .filter((row) => Number(row?.due_invoice_count || 0) > 0 || Number(row?.total_due_amount || 0) > 0);
+  const seen = new Set();
+  const selected = [];
+  [...due, ...legalDue].forEach((row) => {
+    const code = String(row?.customer_code || "").trim().toUpperCase();
+    const key = code || `anon:${selected.length}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    selected.push(row);
+  });
+  return selected;
+}
+
 export function collectionRowMatchesSalesmanProfile(row = {}, profile = {}) {
   const profileIds = collectSalesmanIdentities(profile);
   if (!profileIds.size) return false;
@@ -344,7 +364,9 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
 } = {}) {
   const code = String(row?.customer_code || "").trim();
   const name = String(row?.customer_name || "").trim();
-  const customer = code && name ? `${code} — ${name}` : (code || name || "-");
+  const customerBase = code && name ? `${code} — ${name}` : (code || name || "-");
+  const isLegal = isLegalCollectionTransfer(row);
+  const customer = isLegal && customerBase !== "-" ? `${customerBase} (Legal)` : customerBase;
   const visitKey = resolveLastCollectionVisitDateKey(row);
   const visitWithoutOrderKey = resolveLastVisitWithoutOrderDateKey(row);
   const collectionIsFar = isCollectionVisitFar(row);
@@ -356,6 +378,7 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
   const asOfIso = String(todayIso || "").trim() || `${today}T12:00:00+03:00`;
   return {
     customer,
+    isLegal,
     customerCode: code || "-",
     customerName: name || "-",
     city: String(row?.city || "").trim() || "-",
@@ -419,7 +442,7 @@ function formatVisitDateHtml(label = "Never", isFar = false) {
 function tableRow(row, index) {
   const rowBg = index % 2 === 0 ? "#ffffff" : "#f0fdfa";
   return `<tr style="background:${rowBg};">
-    <td style="border:1px solid #99f6e4;padding:8px;font-weight:700;color:#0f4c5c;">${escapeHtml(row.customer)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;font-weight:700;color:${row.isLegal ? "#9a3412" : "#0f4c5c"};">${escapeHtml(row.customer)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;">${escapeHtml(`${row.city} / ${row.area}`)}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.dueAmount))}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#b91c1c;">${escapeHtml(formatCollectionMoney(row.overdueAmount))}</td>
@@ -585,7 +608,7 @@ export function buildCollectionStaleOverdueEmail({
   const totals = summarizeCollectionStaleOverdueRows(allRows);
   const subject = `Stale overdue collections ${date} — ${totals.customers} customers / ${groups.length} salesmen`;
   const link = String(reportUrl || "").trim();
-  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, no near collection visit in the last ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days, and last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown in the table but do not count as fresh visits. One table per salesman.`;
+  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, no near collection visit in the last ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days, and last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown in the table but do not count as fresh visits. Customers transferred to legal stay on this report and are marked (Legal). One table per salesman.`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">

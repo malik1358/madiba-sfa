@@ -18,6 +18,7 @@ import {
   dismissLunchPunchNoonReminder,
   getLunchPunchNoonReminderMessage,
   getLunchPunchProgress,
+  lunchPunchButtons,
   isLunchInSuggestionPath,
   isOnLunchBreak,
   shouldRemindLunchPunchNoon,
@@ -648,6 +649,51 @@ test("collectWorkdaysNeedingAutoClose closes past days and waits until 23:59 for
     userId,
   );
   assert.deepEqual(pendingSameDayLate, [{ userId, day: "2026-08-25" }]);
+});
+
+test("lunch punch buttons stay available after login until both punches are saved", () => {
+  assert.deepEqual(lunchPunchButtons({ attendanceRequired: false, loginAt: "2026-10-20T06:30:00.000Z" }), {
+    showLunchOut: false,
+    showLunchIn: false,
+    lunchOutEnabled: false,
+    lunchInEnabled: false,
+  });
+  assert.deepEqual(lunchPunchButtons({ attendanceRequired: true }), {
+    showLunchOut: false,
+    showLunchIn: false,
+    lunchOutEnabled: false,
+    lunchInEnabled: false,
+  });
+  assert.deepEqual(lunchPunchButtons({
+    attendanceRequired: true,
+    loginAt: "2026-10-20T06:30:00.000Z",
+  }), {
+    showLunchOut: true,
+    showLunchIn: true,
+    lunchOutEnabled: true,
+    lunchInEnabled: false,
+  });
+  assert.deepEqual(lunchPunchButtons({
+    attendanceRequired: true,
+    loginAt: "2026-10-20T06:30:00.000Z",
+    lunchOutAt: "2026-10-20T09:00:00.000Z",
+  }), {
+    showLunchOut: false,
+    showLunchIn: true,
+    lunchOutEnabled: false,
+    lunchInEnabled: true,
+  });
+  assert.deepEqual(lunchPunchButtons({
+    attendanceRequired: true,
+    loginAt: "2026-10-20T06:30:00.000Z",
+    lunchOutAt: "2026-10-20T09:00:00.000Z",
+    lunchInAt: "2026-10-20T10:00:00.000Z",
+  }), {
+    showLunchOut: false,
+    showLunchIn: false,
+    lunchOutEnabled: false,
+    lunchInEnabled: false,
+  });
 });
 
 test("buildAutoCloseEndOfDayPayload stores auto-closed logout at 11:59 PM KSA", () => {

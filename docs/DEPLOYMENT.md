@@ -107,7 +107,9 @@ The job summary records the actor, SHA, project ref, allowlisted versions, prefl
 
 Readonly credentials keep `SELECT` on ledger `version` only. Named ledger rows (for alias / ledger-only verification) are loaded on `PRODUCTION_DB_MIGRATION_URL` and must match the readonly version set exactly; name mismatches, duplicate alias pairs, and unknown ledger/repo versions fail closed. Allowlisted states stay distinct: `20260930190000` may be schema-present/history-missing; `20261002120000` and `20261002130000` stay genuinely pending until a separately authorized apply. Migrations omitted from the attested list continue to block.
 
-Historical receipt and payment copies can be backed up with Actions **Historical collection copy backup** on `main`. That job only reads R2 and Supabase, encrypts the archive, and uploads it to the private Google Drive backup folder. It is not a deletion job. Receipt and payment-copy reads and new uploads stay on R2; the Supabase rollback flag does not open those files.
+Historical receipt and payment copies can be backed up with Actions **Historical collection copy backup** on `main`. That job only reads R2 and Supabase, encrypts the archive, and uploads it to the private Google Drive backup folder. Receipt and payment-copy reads and new uploads stay on R2; the Supabase rollback flag does not open those files.
+
+Actions **Delete historical collection copies** is the only approved way to remove those Supabase originals. It runs on `main` in the `production-backup` environment, checks the encrypted Drive archive and R2 checksums, then deletes the exact approved keys in batches of 20. Resume mode only continues when every remaining object is still on that allowlist. It does not delete the Drive archive or the R2 originals.
 
 Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
 

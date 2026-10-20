@@ -9,6 +9,11 @@ export const HISTORICAL_COLLECTION_COUNTS = Object.freeze({
 export const HISTORICAL_R2_BUCKET = "madiba-attachments-prod";
 export const HISTORICAL_SUPABASE_BUCKET = "payment-collections";
 export const SIGN_BATCH_LIMIT = 20;
+export const DELETE_BATCH_SIZE = 20;
+export const HISTORICAL_BACKUP_ARCHIVE = "madiba-sfa-historical-collection-copies-20261020T084348Z-39391283566-1.tar.gz.age";
+export const HISTORICAL_BACKUP_ENCRYPTED_BYTES = 1543654457;
+export const HISTORICAL_BACKUP_PLAIN_BYTES = 1579613626;
+export const R2_ONLY_BUILD = "f75e6bd79b496399fcb73ac2985a30335fec0359";
 
 const RECEIPT_FILENAME = /^receipt-copies\/[^/]+$/;
 const PAYMENT_FILENAME = /^payment-copies\/[^/]+$/;
@@ -140,6 +145,80 @@ export function verifyDownloadedObject({ bytes, sha256, supabaseBytes } = {}) {
     throw Object.assign(new Error("Downloaded R2 size does not match the Supabase object."), { code: "size-mismatch" });
   }
   return { sha256: actual, bytes: body.length };
+}
+
+export function manifestDeletionAllowlist({ receiptProgress, paymentProgress } = {}) {
+  const issues = new Set();
+  const receipts = manifestEntries(receiptProgress, RECEIPT_FILENAME, issues);
+  const payments = manifestEntries(paymentProgress, PAYMENT_FILENAME, issues);
+  if (receipts.length !== HISTORICAL_COLLECTION_COUNTS.receipts || payments.length !== HISTORICAL_COLLECTION_COUNTS.payments) {
+    issues.add("manifest-count");
+  }
+  const entries = [...receipts, ...payments].map((entry) => ({
+    ...entry,
+    key: `${HISTORICAL_SUPABASE_BUCKET}/${entry.name}`,
+  }));
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: issues.size === 0, issues: [...issues].sort(), entries };
+}
+
+export function deletionBatchPlan({ files = [], entries = [], allowPartial = false } = {}) {
+  const allow = new Map(entries.map((entry) => [entry.name, entry]));
+  if (allow.size !== HISTORICAL_COLLECTION_COUNTS.objects) {
+    return { ok: false, issues: ["manifest-count"], present: [] };
+  }
+  const issues = new Set();
+  const present = [];
+  const seen = new Set();
+  for (const file of files) {
+    const name = String(file?.path || "").replace(/^\/+/, "");
+    const entry = allow.get(name);
+    if (!entry || seen.has(name)) {
+      issues.add(entry ? "duplicate-object" : "unexpected-object");
+      continue;
+    }
+    seen.add(name);
+    const bytes = Number(file?.bytes);
+    if (!Number.isInteger(bytes) || bytes <= 0) issues.add("missing-size");
+    if (entry.supabaseBytes && Number(entry.supabaseBytes) !== bytes) issues.add("size-mismatch");
+    present.push({ ...entry, supabaseBytes: bytes });
+  }
+  if (!allowPartial && present.length !== HISTORICAL_COLLECTION_COUNTS.objects) issues.add("object-count");
+  if (allowPartial && present.length > HISTORICAL_COLLECTION_COUNTS.objects) issues.add("object-count");
+  const totalBytes = present.reduce((sum, entry) => sum + (Number.isInteger(entry.supabaseBytes) ? entry.supabaseBytes : 0), 0);
+  return {
+    ok: issues.size === 0,
+    issues: [...issues].sort(),
+    present,
+    totalBytes,
+  };
+}
+
+export function nextDeletionBatch(presentNames, allowNames, size = DELETE_BATCH_SIZE) {
+  const allow = new Set(allowNames);
+  const unique = [...new Set(presentNames)];
+  if (unique.some((name) => !allow.has(name))) {
+    throw Object.assign(new Error("Unexpected object in payment-collections."), { code: "unexpected-object" });
+  }
+  return unique.sort().slice(0, size);
+}
+
+export function reconcileDeletionBatch({ beforeNames, afterNames, deletedNames, allowNames }) {
+  const allow = new Set(allowNames);
+  const before = new Set(beforeNames);
+  const after = new Set(afterNames);
+  if ([...before, ...after].some((name) => !allow.has(name))) {
+    throw Object.assign(new Error("Unexpected object in payment-collections."), { code: "unexpected-object" });
+  }
+  for (const name of deletedNames) {
+    if (!before.has(name) || after.has(name)) {
+      throw Object.assign(new Error("Deletion batch did not remove the approved object."), { code: "object-remained" });
+    }
+  }
+  if (after.size !== before.size - new Set(deletedNames).size) {
+    throw Object.assign(new Error("Object count did not match the deletion batch."), { code: "count-mismatch" });
+  }
+  return { remaining: after.size, removed: new Set(deletedNames).size };
 }
 
 export function restorationInstructions() {

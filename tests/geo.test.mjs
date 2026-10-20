@@ -31,6 +31,7 @@ import {
   GPS_TIMEOUT_ERROR,
   GPS_LOCATION_FAILED_ERROR,
   GPS_REQUIRED_ERROR,
+  captureOptionalGpsLocation,
   GPS_PROBE_FALLBACK_MAXIMUM_AGE_MS,
   GPS_PROBE_RETRY_MAXIMUM_AGE_MS,
   formatGpsFailureMessage,
@@ -241,13 +242,26 @@ test("collector morning attendance overlay uses progressive GPS probe and Safari
   assert.match(source, /Phone GPS can be on while Safari still blocks/);
 });
 
-test("my-day visit capture uses shared GPS probe instead of stale browser maximumAge", async () => {
-  const source = await import("node:fs").then((fs) =>
-    fs.readFileSync(new URL("../app/management/my-day/page.js", import.meta.url), "utf8"),
-  );
+test("optional visit GPS continues when the device has no location", async () => {
+  assert.equal(await captureOptionalGpsLocation({ role: "invoice-maker" }), null);
+  assert.equal(await captureOptionalGpsLocation({ role: "salesman", timeoutMs: 50 }), null);
+});
+
+test("my-day visit save and share continue when GPS is unavailable", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../app/management/my-day/page.js", import.meta.url), "utf8");
+  const saveBody = source.split("async function saveVisitReport")[1].split("async function markCustomerInactive")[0];
   assert.match(source, /requireGpsLocation/);
+  assert.match(saveBody, /captureOptionalGpsLocation/);
+  assert.doesNotMatch(saveBody, /await captureLocation\(/);
+  assert.match(saveBody, /presentVisitWhatsappSummary/);
   assert.doesNotMatch(source, /maximumAge:\s*30000/);
   assert.doesNotMatch(source, /navigator\.geolocation\.getCurrentPosition/);
+
+  const route = fs.readFileSync(new URL("../app/api/visit-reports/route.js", import.meta.url), "utf8");
+  const postBody = route.split("export async function POST")[1];
+  assert.doesNotMatch(postBody, /GPS is required/);
+  assert.match(postBody, /storedLocation/);
 });
 
 test("geo probe prefers Capacitor Geolocation on native platforms", async () => {

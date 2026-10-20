@@ -57,8 +57,8 @@ const TEXT = {
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
   paceEstimateHint: {
-    en: "Each salesman's month-end from their own last-3-month pace, then added up",
-    ar: "نهاية الشهر لكل مندوب من مساره لآخر 3 أشهر، ثم يُجمع",
+    en: "Each salesman's month-end from their own last-3-month pace, measured to the latest uploaded sales date, then added up",
+    ar: "نهاية الشهر لكل مندوب من مساره لآخر 3 أشهر حتى آخر تاريخ مبيعات مرفوع، ثم يُجمع",
   },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
@@ -105,6 +105,7 @@ function emptyDraft(snapshot) {
     repeatCustomers: String(snapshot.targets?.repeatCustomers ?? 0),
     kpis: snapshot.kpis || [],
     paceShares: snapshot.paceShares || null,
+    salesAsOfDate: snapshot.salesAsOfDate,
     todayIso: snapshot.todayIso || null,
     reportDate: snapshot.reportDate || null,
   };
@@ -297,12 +298,15 @@ export default function KpiTargetsPage() {
     [columns, visibleRows],
   );
 
+  const salesAsOfDate = visibleRows.find((row) => row.salesAsOfDate != null)?.salesAsOfDate;
+
   const paceEstimates = useMemo(
     () => sumFilteredKpiPaceEstimates(visibleRows, columns, {
       reportDate: `${month}-01`,
       todayIso: getKsaDateString(),
+      salesAsOfDate,
     }),
-    [columns, month, visibleRows],
+    [columns, month, salesAsOfDate, visibleRows],
   );
 
   const individualVisibleCount = visibleRows.filter((row) => !row.isTeam).length;
@@ -474,6 +478,7 @@ export default function KpiTargetsPage() {
                           reportDate: row.reportDate || `${month}-01`,
                           todayIso: row.todayIso || getKsaDateString(),
                           paceShares: row.paceShares,
+                          salesAsOfDate: row.salesAsOfDate ?? salesAsOfDate,
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
@@ -525,6 +530,7 @@ export default function KpiTargetsPage() {
                           target: column.target,
                           reportDate: `${month}-01`,
                           todayIso: getKsaDateString(),
+                          salesAsOfDate,
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const isInformationOnly = key === "cashCollection";

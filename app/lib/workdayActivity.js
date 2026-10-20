@@ -372,6 +372,42 @@ export function lunchPunchButtons({
   };
 }
 
+export function mergeLunchPunchTimes(server = {}, saved = {}) {
+  return {
+    lunchOutAt: server.lunchOutAt || saved.LUNCH_BREAK_OUT || saved.lunchOutAt || null,
+    lunchInAt: server.lunchInAt || saved.LUNCH_BREAK_IN || saved.lunchInAt || null,
+  };
+}
+
+/** One in-flight punch, and a saved punch stays claimed after the request ends. */
+export function acceptLunchPunch(guard, entryType) {
+  const saved = { ...(guard?.saved || {}) };
+  if (!entryType || guard?.inFlight || saved[entryType]) {
+    return { accepted: false, guard: { inFlight: Boolean(guard?.inFlight), saved } };
+  }
+  return {
+    accepted: true,
+    guard: { inFlight: true, saved },
+  };
+}
+
+export function completeLunchPunch(guard, entryType, savedAt) {
+  return {
+    inFlight: false,
+    saved: {
+      ...(guard?.saved || {}),
+      [entryType]: savedAt || guard?.saved?.[entryType] || null,
+    },
+  };
+}
+
+export function releaseLunchPunch(guard) {
+  return {
+    inFlight: false,
+    saved: { ...(guard?.saved || {}) },
+  };
+}
+
 export function shouldRemindLunchPunchNoon({
   loginAt,
   logoutAt,

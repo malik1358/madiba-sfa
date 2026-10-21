@@ -78,7 +78,7 @@ test("customer-history cache is exposed with invalidate/subscribe helpers", asyn
   assert.equal(typeof mobileDataCache.invalidateCustomerHistoryCache, "function");
   assert.equal(typeof mobileDataCache.subscribeCustomerHistoryCacheCleared, "function");
   assert.equal(typeof mobileDataCache.invalidateCollectionQueuesForUser, "function");
-  assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v6");
+  assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v7");
 });
 
 test("collection queue cache keeps v6 current and still reads legacy v5/v4 offline queues", async () => {

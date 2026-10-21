@@ -1110,6 +1110,52 @@ test("referenced credit note settles the named invoice when it is the open bill"
   assert.ok(Math.abs(ledger.outstandingCompareTotals.open_delta) < 0.02);
 });
 
+test("named credit note does not void the previous same-amount bill", () => {
+  // Customer 1486: CN 552 names RNFD/415. RNFD/414 is the day before, same amount and item.
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-12", voucher_number: "RNFD/414", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
+      { transaction_date: "2026-09-13", voucher_number: "552", voucher_type: "Credit Note", reference: "RNFD/415", sales_amount: -10672, item_code: "A004555", quantity: -1000, category: "Office supplies" },
+      { transaction_date: "2026-09-13", voucher_number: "RNFD/415", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
+    ],
+    receipts: [],
+    todayIso: "2026-10-21",
+  });
+
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/414"), false);
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415" && row.credit_note_voucher === "552"), true);
+  const previous = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
+  assert.ok(previous);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "RNFD/415"), false);
+  assert.equal(Number(previous.remaining.toFixed(2)), Number((10672 * 1.15).toFixed(2)));
+});
+
+test("named partial credit note does not void the same-day reissue", () => {
+  // Customer 1602: CN 614 names RNFD/447. RNFD/537 is a same-day reissue for the same total.
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-16", voucher_number: "RNFD/447", voucher_type: "RIYADH W/S CREDIT", sales_amount: 12198, item_code: "A003286", quantity: 10, category: "Sundry" },
+      { transaction_date: "2026-10-05", voucher_number: "614", voucher_type: "Credit Note", reference: "RNFD/447", sales_amount: -5442, item_code: "A003286", quantity: -5, category: "Sundry" },
+      { transaction_date: "2026-10-05", voucher_number: "614", voucher_type: "Credit Note", reference: "RNFD/447", sales_amount: -97, item_code: "A003608", quantity: -30, category: "Personal Care" },
+      { transaction_date: "2026-10-05", voucher_number: "RNFD/537", voucher_type: "RIYADH W/S CREDIT", sales_amount: 5442, item_code: "A003286", quantity: 5, category: "Sundry" },
+      { transaction_date: "2026-10-05", voucher_number: "RNFD/537", voucher_type: "RIYADH W/S CREDIT", sales_amount: 97, item_code: "A003606", quantity: 36, category: "Personal Care" },
+    ],
+    receipts: [],
+    todayIso: "2026-10-21",
+  });
+
+  assert.equal(ledger.reversedInvoices.some((row) => row.credit_note_voucher === "614"), false);
+  const named = ledger.invoices.find((row) => row.voucher_number === "RNFD/447");
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "RNFD/537");
+  assert.ok(named);
+  assert.ok(reissue);
+  assert.equal(Number(reissue.credit_note_settled.toFixed(2)), Number((5539 * 1.15).toFixed(2)));
+  assert.equal(Number(reissue.remaining.toFixed(2)), 0);
+  assert.equal(Number(named.credit_note_settled.toFixed(2)), 0);
+  assert.equal(Number(named.remaining.toFixed(2)), Number((12198 * 1.15).toFixed(2)));
+  assert.deepEqual(reissue.fifo_credit_notes.map((row) => row.voucher_number), ["614"]);
+});
+
 test("next-day matching credit note still counts as immediate reversal", () => {
   const invoices = buildSalesInvoices([
     { transaction_date: "2026-03-10", voucher_number: "S1", sales_amount: 500, category: "Paper" },

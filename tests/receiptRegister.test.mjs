@@ -12,6 +12,7 @@ import {
   receiptRegisterTemplateMatrix,
   receiptRowIdentity,
   stripPaymentVoucherRows,
+  removeUnanchoredDuplicateReceipts,
 } from "../app/lib/receiptRegister.js";
 
 const NEW_FORMAT_HEADER = [
@@ -296,5 +297,157 @@ test("mergeReceiptDatasets upserts by voucher and does not wipe other same-day r
   assert.equal(
     receiptRowIdentity(incoming[0]),
     "2026-10-03|JV-COLLECTION|JV/COLL/2026/0928|1041",
+  );
+});
+
+test("removeUnanchoredDuplicateReceipts drops a customer receipt copied onto a neighbouring voucher", () => {
+  const cleaned = removeUnanchoredDuplicateReceipts([
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1224",
+      customer_name: "RAWAAT MAZAYA",
+      particulars: "1224  RAWAAT MAZAYA",
+      vch_type: "Receipt",
+      vch_no: "1958",
+      amount: 76000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1224",
+      customer_name: "RAWAAT MAZAYA",
+      particulars: "1224  RAWAAT MAZAYA",
+      vch_type: "Receipt",
+      vch_no: "1959",
+      amount: 76000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "",
+      customer_name: "Alrajhi Bank",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1959",
+      amount: 76000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1224",
+      customer_name: "RAWAAT MAZAYA",
+      particulars: "1224  RAWAAT MAZAYA",
+      vch_type: "Receipt",
+      vch_no: "1960",
+      amount: 76000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1536",
+      customer_name: "Al-Bader",
+      particulars: "1536 Al-Bader",
+      vch_type: "Receipt",
+      vch_no: "1960",
+      amount: 6418.66,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "",
+      customer_name: "Alrajhi Bank",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1960",
+      amount: 6418.66,
+      matched: false,
+    },
+  ]);
+
+  assert.equal(cleaned.removed, 2);
+  const kept = cleaned.rows.filter((row) => row.customer_code === "1224").map((row) => row.vch_no);
+  assert.deepEqual(kept, ["1959"]);
+  assert.equal(cleaned.rows.some((row) => row.customer_code === "1536" && row.vch_no === "1960"), true);
+});
+
+test("removeUnanchoredDuplicateReceipts keeps two real receipts of the same amount", () => {
+  const cleaned = removeUnanchoredDuplicateReceipts([
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1008",
+      particulars: "1008 Store",
+      vch_type: "Receipt",
+      vch_no: "10",
+      amount: 500,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "10",
+      amount: 500,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "1008",
+      particulars: "1008 Store",
+      vch_type: "Receipt",
+      vch_no: "11",
+      amount: 500,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-13",
+      customer_code: "",
+      particulars: "Cash",
+      vch_type: "Receipt",
+      vch_no: "11",
+      amount: 500,
+      matched: false,
+    },
+  ]);
+
+  assert.equal(cleaned.removed, 0);
+  assert.equal(cleaned.rows.filter((row) => row.customer_code === "1008").length, 2);
+});
+
+test("removeUnanchoredDuplicateReceipts leaves receipts on or before 10 Oct 2026 in place", () => {
+  const cleaned = removeUnanchoredDuplicateReceipts([
+    {
+      receipt_date: "2026-10-01",
+      customer_code: "1035C",
+      particulars: "1035C",
+      vch_type: "Receipt",
+      vch_no: "1865",
+      amount: 69000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-01",
+      customer_code: "1035C",
+      particulars: "1035C",
+      vch_type: "Receipt",
+      vch_no: "1866",
+      amount: 69000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-01",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1866",
+      amount: 69000,
+      matched: false,
+    },
+  ]);
+
+  assert.equal(cleaned.removed, 0);
+  assert.deepEqual(
+    cleaned.rows.filter((row) => row.customer_code === "1035C").map((row) => row.vch_no),
+    ["1865", "1866"],
   );
 });

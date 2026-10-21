@@ -451,3 +451,67 @@ test("removeUnanchoredDuplicateReceipts leaves receipts on or before 10 Oct 2026
     ["1865", "1866"],
   );
 });
+
+test("removeUnanchoredDuplicateReceipts keeps the later voucher when the same receipt was mapped twice", () => {
+  const cleaned = removeUnanchoredDuplicateReceipts([
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "1573",
+      particulars: "1573 Lamsat",
+      vch_type: "Receipt",
+      vch_no: "1936",
+      amount: 20,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "1139C",
+      particulars: "1139C HAMSAT AL TAWFEER",
+      vch_type: "Receipt",
+      vch_no: "1937",
+      amount: 10000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "1573",
+      particulars: "1573 Lamsat",
+      vch_type: "Receipt",
+      vch_no: "1937",
+      amount: 20,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1937",
+      amount: 10000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "1139C",
+      particulars: "1139C HAMSAT AL TAWFEER",
+      vch_type: "Receipt",
+      vch_no: "1938",
+      amount: 10000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-10",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1938",
+      amount: 10000,
+      matched: false,
+    },
+  ]);
+
+  assert.deepEqual(
+    cleaned.rows.filter((row) => row.customer_code === "1139C").map((row) => row.vch_no),
+    ["1938"],
+  );
+});

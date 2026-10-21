@@ -70,7 +70,7 @@ function deltaClass(value) {
 function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
-  if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
+  if (status === "Reversed" || status === "Tally") return "paymentSettleStatus paymentSettleStatus--reversed";
   if (status === "Matched" || status === "Applied") {
     return "paymentSettleStatus paymentSettleStatus--paid";
   }
@@ -84,6 +84,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
   const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
   const detailCount = receiptCount + creditCount;
+  const tallyOnly = Boolean(invoice.tally_only);
   const machineOpen = Number(invoice.remaining || 0);
   const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
   const openDelta = tallyOpen == null ? null : machineOpen - tallyOpen;
@@ -93,9 +94,9 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
       <tr>
         <td>{invoice.invoice_date || "—"}</td>
         <td>{invoice.voucher_number || "—"}</td>
-        <td>{formatMoney(invoice.amount_excl_vat)}</td>
-        <td>{formatMoney(invoice.amount_incl_vat)}</td>
-        <td>{formatMoney(invoice.paid_amount)}</td>
+        <td>{tallyOnly ? "—" : formatMoney(invoice.amount_excl_vat)}</td>
+        <td>{tallyOnly ? "—" : formatMoney(invoice.amount_incl_vat)}</td>
+        <td>{tallyOnly ? "—" : formatMoney(invoice.paid_amount)}</td>
         <td>{formatMoney(machineOpen)}</td>
         <td>{tallyOpen == null ? "—" : formatMoney(tallyOpen)}</td>
         <td className={openDelta == null ? "" : deltaClass(openDelta)}>
@@ -816,7 +817,7 @@ export default function PaymentSettlementPage() {
                 <p className="moduleHint">
                   Referenced credit notes settle the next voucher after the named Ref like a receipt and count in
                   Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
-                  is the outstanding upload. Open Δ — use{" "}
+                  is the outstanding upload, including a reversed voucher Tally still has pending. Open Δ — use{" "}
                   <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">

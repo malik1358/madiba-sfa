@@ -1915,8 +1915,8 @@ export function buildPaymentSettlementLedger({
   });
 
   // Outstanding refs not found in sales history still belong in Open.
-  // A voucher already reversed by a credit note stays in Reversed by Credit Note
-  // only — do not put it back here with Sales excl VAT 0.
+  // A reversed voucher is not a sales invoice. If Tally still has it pending,
+  // keep a Tally-only line so Tally Open matches the outstanding file.
   const reversedOutstandingRefs = new Set(
     (Array.isArray(reversedInvoices) ? reversedInvoices : [])
       .map((row) => normalizeRef(row.voucher_number))
@@ -1924,7 +1924,33 @@ export function buildPaymentSettlementLedger({
   );
   outstanding.invoices.forEach((row) => {
     const ref = normalizeRef(row.ref_no);
-    if (!ref || matchedOutstandingRefs.has(ref) || reversedOutstandingRefs.has(ref)) return;
+    if (!ref || matchedOutstandingRefs.has(ref)) return;
+    if (reversedOutstandingRefs.has(ref)) {
+      invoiceRows.push({
+        invoice_date: row.invoice_date || "",
+        voucher_number: row.ref_no,
+        amount_excl_vat: 0,
+        amount_incl_vat: 0,
+        gross_amount_excl_vat: 0,
+        gross_amount_incl_vat: 0,
+        paid_amount: 0,
+        fifo_paid: 0,
+        credit_note_settled: 0,
+        credit_note_excl_settled: 0,
+        remaining: 0,
+        fifo_remaining: 0,
+        outstanding_pending: toNumber(row.pending_amount),
+        open_source: "outstanding_reversed",
+        tally_only: true,
+        status: "Tally",
+        payment_days: null,
+        open_days: 0,
+        settlements: [],
+        credit_notes: [],
+        fifo_credit_notes: [],
+      });
+      return;
+    }
     invoiceRows.push({
       invoice_date: row.invoice_date || "",
       voucher_number: row.ref_no,

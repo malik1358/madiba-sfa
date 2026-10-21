@@ -1153,7 +1153,7 @@ test("named credit note does not void the previous same-amount bill", () => {
   assert.equal(Number(previous.remaining.toFixed(2)), Number((10672 * 1.15).toFixed(2)));
 });
 
-test("reversed invoice is not added back from the outstanding upload", () => {
+test("reversed invoice stays a Tally line when the outstanding file still has it", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-09-12", voucher_number: "RNFD/414", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
@@ -1168,11 +1168,21 @@ test("reversed invoice is not added back from the outstanding upload", () => {
     todayIso: "2026-10-21",
   });
 
-  assert.equal(ledger.invoices.some((row) => row.voucher_number === "RNFD/415"), false);
+  const tallyOnly = ledger.invoices.find((row) => row.voucher_number === "RNFD/415");
+  assert.ok(tallyOnly);
+  assert.equal(tallyOnly.tally_only, true);
+  assert.equal(tallyOnly.status, "Tally");
+  assert.equal(Number(tallyOnly.amount_excl_vat), 0);
+  assert.equal(Number(tallyOnly.amount_incl_vat), 0);
+  assert.equal(Number(tallyOnly.remaining), 0);
+  assert.equal(Number(tallyOnly.outstanding_pending), 12272.8);
   assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415" && row.credit_note_voucher === "552"), true);
   const previous = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
   assert.ok(previous);
   assert.equal(Number(previous.amount_excl_vat.toFixed(2)), 10672);
+  assert.equal(Number(previous.outstanding_pending), 12272.8);
+  const tallyTotal = ledger.invoices.reduce((total, row) => total + Number(row.outstanding_pending || 0), 0);
+  assert.equal(Number(tallyTotal.toFixed(2)), Number((12272.8 * 2).toFixed(2)));
 });
 
 test("named partial credit note does not void the same-day reissue", () => {

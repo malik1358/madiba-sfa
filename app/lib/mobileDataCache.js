@@ -53,10 +53,10 @@ function customersCacheKey(scope, enriched = false, includeInactive = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode, { fullHistory = false } = {}) {
-  // v5: invalidate browsers that cached pre-rate-merge double-counted sales (e.g. NFD/1337).
+  // v6: credit note 552 and the other notes added to the active batch must reload.
   // fullHistory = day-1 settlement history, not the 6-month BI window.
   const historySuffix = fullHistory ? ":full" : "";
-  return `history:v5${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  return `history:v6${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -116,7 +116,7 @@ export function subscribeOutstandingCacheCleared(handler) {
   };
 }
 
-export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v5";
+export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v6";
 export const CUSTOMER_HISTORY_CACHE_CLEARED_EVENT = "madiba-customer-history-cache-cleared";
 const CUSTOMER_HISTORY_CACHE_CHANNEL = "madiba-customer-history-cache";
 

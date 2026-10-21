@@ -503,17 +503,28 @@ function amountsClose(left, right) {
   return Math.abs(toNumber(left) - toNumber(right)) < 0.05;
 }
 
+function voucherHasAnotherCustomer(rows, index) {
+  const row = rows[index];
+  const voucherKey = `${row.receipt_date}|${String(row.vch_no || "").trim()}`;
+  const code = normalizeCode(row.customer_code);
+  return rows.some((other, otherIndex) => {
+    if (otherIndex === index) return false;
+    if (!isReceiptCustomerLine(other) || toNumber(other.amount) <= 0) return false;
+    const otherKey = `${other.receipt_date}|${String(other.vch_no || "").trim()}`;
+    if (otherKey !== voucherKey) return false;
+    return normalizeCode(other.customer_code) !== code || amountCents(other.amount) !== amountCents(row.amount);
+  });
+}
+
 /**
  * Tally receipt uploads sometimes repeat one customer receipt on the next
  * voucher number. Keep the copy that sits on the voucher whose bank/cash
  * total matches that receipt, and drop the copies that do not.
  * Same-amount receipts that each have their own matching bank line stay.
- * Copies with no bank line anywhere stay, so a real repeat is not deleted.
- * Receipts on or before 10 Oct 2026 are left alone: bank lines on those
- * vouchers were overwritten, so the matching bank is not a safe guide.
- * Those dates were repaired once from the Tally export.
+ * From 8 Oct 2026, a repeated line on the next voucher is kept on the later number.
  */
 const RECEIPT_VOUCHER_ANCHOR_FROM = "2026-10-11";
+const RECEIPT_CONSECUTIVE_COPY_FROM = "2026-10-08";
 
 export function removeUnanchoredDuplicateReceipts(rows = []) {
   const list = (Array.isArray(rows) ? rows : []).map(buildReceiptRow);
@@ -551,7 +562,7 @@ export function removeUnanchoredDuplicateReceipts(rows = []) {
   const groups = new Map();
   list.forEach((row, index) => {
     if (normalizeName(row.vch_type) !== "RECEIPT") return;
-    if (String(row.receipt_date || "") < RECEIPT_VOUCHER_ANCHOR_FROM) return;
+    if (String(row.receipt_date || "") < RECEIPT_CONSECUTIVE_COPY_FROM) return;
     if (!isReceiptCustomerLine(row) || toNumber(row.amount) <= 0) return;
     if (!/^\d+$/.test(String(row.vch_no || "").trim())) return;
     const key = `${row.receipt_date}|${normalizeCode(row.customer_code)}|${amountCents(row.amount)}`;
@@ -564,10 +575,21 @@ export function removeUnanchoredDuplicateReceipts(rows = []) {
   groups.forEach((group) => {
     const vouchers = new Set(group.map((entry) => entry.vch));
     if (vouchers.size < 2) return;
+    const receiptDate = String(list[group[0].index]?.receipt_date || "");
     const best = group.reduce((max, entry) => Math.max(max, entry.score), 0);
-    if (best <= 0) return;
-    group.forEach((entry) => {
-      if (entry.score < best) drop.add(entry.index);
+    if (receiptDate >= RECEIPT_VOUCHER_ANCHOR_FROM && best > 0) {
+      group.forEach((entry) => {
+        if (entry.score < best) drop.add(entry.index);
+      });
+    }
+    if (receiptDate < RECEIPT_CONSECUTIVE_COPY_FROM) return;
+    const surviving = group.filter((entry) => !drop.has(entry.index));
+    surviving.forEach((entry) => {
+      const voucherNo = Number(entry.vch);
+      const copiedForward = surviving.some((other) => Number(other.vch) === voucherNo + 1);
+      if (!copiedForward) return;
+      if (entry.score >= 2 && !voucherHasAnotherCustomer(list, entry.index)) return;
+      drop.add(entry.index);
     });
   });
 

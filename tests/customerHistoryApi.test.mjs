@@ -64,7 +64,7 @@ test("customer history loads current and full history from the active sales snap
     assert.doesNotMatch(source, /\.from\("sales_raw"\)/);
   }
 
-  assert.match(customerHistoryRoute, /const CACHE_VERSION = 15;/);
+  assert.match(customerHistoryRoute, /const CACHE_VERSION = 16;/);
   assert.match(customerHistoryRoute, /function shouldIncludePeerTransactions/);
   assert.match(customerHistoryRoute, /writeCachedInBackground/);
   assert.match(customerHistoryRoute, /loadReceiptDatasetCached/);

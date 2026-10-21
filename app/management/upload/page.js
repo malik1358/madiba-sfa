@@ -862,7 +862,9 @@ export default function UploadSalesPage() {
             <strong>Receipt Register Upload</strong>
             <p>
               Upload the receipt Excel export (columns: TRANSACTIONDATE, VOUCHERTYPENAME,
-              VOUCHERNUMBER, LEDGERNAME, Cr). Receipt and JV-Collection rows are imported.
+              VOUCHERNUMBER, LEDGERNAME, Dr, Cr). A credit is a receipt. A debit is a
+              payment and reduces that receipt (Round Off on Dr is stored negative).
+              Receipt and JV-Collection rows are imported.
               New vouchers are added and matching vouchers are updated; other existing receipts
               stay in place (partial files no longer wipe the rest of a day). Ledger names are
               mapped to customers by code/name. For parties that are both customer and supplier,

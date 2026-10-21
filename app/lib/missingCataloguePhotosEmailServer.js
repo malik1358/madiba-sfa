@@ -76,7 +76,6 @@ export async function runMissingCataloguePhotoEmailCycle(admin, {
       date: reportDate,
       sentCount: 1,
       missing: report.summary?.missing || 0,
-      pricedMissing: report.summary?.pricedMissing || 0,
       forced: forceSend || isTestSend,
       to,
     };

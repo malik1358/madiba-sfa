@@ -357,8 +357,6 @@ export function parseReceiptRegisterRows(
   const { headerRowIndex, columns } = header;
   const parsed = [];
   const dates = new Set();
-  let matchedCount = 0;
-  let unmatchedCount = 0;
   let skippedPaymentCount = 0;
 
   for (let index = headerRowIndex + 1; index < rows.length; index += 1) {
@@ -389,8 +387,6 @@ export function parseReceiptRegisterRows(
 
     const party = parseParticularsParty(particulars);
     const mapped = mapReceiptPartyToCustomer(party, customerLookup);
-    if (mapped.matched || mapped.customer_code) matchedCount += 1;
-    else unmatchedCount += 1;
 
     const built = buildReceiptRow({
       receipt_date: receiptDate,
@@ -410,12 +406,22 @@ export function parseReceiptRegisterRows(
     dates.add(built.receipt_date);
   }
 
+  const cleaned = removeUnanchoredDuplicateReceipts(parsed);
+  const keptRows = cleaned.rows;
+  let liveMatched = 0;
+  let liveUnmatched = 0;
+  keptRows.forEach((row) => {
+    if (row.matched || row.customer_code) liveMatched += 1;
+    else liveUnmatched += 1;
+  });
+
   return {
-    rows: parsed,
+    rows: keptRows,
     dates: [...dates].sort(),
-    matchedCount,
-    unmatchedCount,
+    matchedCount: liveMatched,
+    unmatchedCount: liveUnmatched,
     skippedPaymentCount,
+    removedDuplicateReceipts: cleaned.removed,
   };
 }
 
@@ -471,6 +477,107 @@ export function receiptRowIdentity(row) {
   return `${date}|${vchType}|${code}|${amount}`;
 }
 
+function ledgerText(row) {
+  return `${row?.particulars || ""} ${row?.customer_name || ""}`;
+}
+
+/** Bank, cash, and charge lines explain a customer receipt. Collector receivables do not. */
+export function isReceiptMoneyLedger(row) {
+  const text = ledgerText(row);
+  if (/receivable/i.test(text)) return false;
+  return /bank|cash|charge/i.test(text);
+}
+
+function isReceiptCustomerLine(row) {
+  if (!normalizeCode(row?.customer_code)) return false;
+  if (isReceiptMoneyLedger(row)) return false;
+  if (/receivable/i.test(ledgerText(row))) return false;
+  return true;
+}
+
+function amountCents(value) {
+  return Math.round(toNumber(value) * 100);
+}
+
+function amountsClose(left, right) {
+  return Math.abs(toNumber(left) - toNumber(right)) < 0.05;
+}
+
+/**
+ * Tally receipt uploads sometimes repeat one customer receipt on the next
+ * voucher number. Keep the copy that sits on the voucher whose bank/cash
+ * total matches that receipt, and drop the copies that do not.
+ * Same-amount receipts that each have their own matching bank line stay.
+ * Copies with no bank line anywhere stay, so a real repeat is not deleted.
+ * Receipts on or before 10 Oct 2026 are left alone: bank lines on those
+ * vouchers were overwritten, so the matching bank is not a safe guide.
+ * Those dates were repaired once from the Tally export.
+ */
+const RECEIPT_VOUCHER_ANCHOR_FROM = "2026-10-11";
+
+export function removeUnanchoredDuplicateReceipts(rows = []) {
+  const list = (Array.isArray(rows) ? rows : []).map(buildReceiptRow);
+  const moneyByVoucher = new Map();
+  const partySumByVoucher = new Map();
+
+  list.forEach((row) => {
+    if (normalizeName(row.vch_type) !== "RECEIPT") return;
+    if (!/^\d+$/.test(String(row.vch_no || "").trim())) return;
+    const voucherKey = `${row.receipt_date}|${String(row.vch_no).trim()}`;
+    if (isReceiptMoneyLedger(row) && toNumber(row.amount) > 0) {
+      const bucket = moneyByVoucher.get(voucherKey) || { sum: 0, amounts: [] };
+      bucket.sum += toNumber(row.amount);
+      bucket.amounts.push(toNumber(row.amount));
+      moneyByVoucher.set(voucherKey, bucket);
+    }
+    if (isReceiptCustomerLine(row) && toNumber(row.amount) > 0) {
+      partySumByVoucher.set(
+        voucherKey,
+        toNumber(partySumByVoucher.get(voucherKey) || 0) + toNumber(row.amount),
+      );
+    }
+  });
+
+  function score(row) {
+    const voucherKey = `${row.receipt_date}|${String(row.vch_no).trim()}`;
+    const money = moneyByVoucher.get(voucherKey);
+    if (!money || money.sum <= 0) return 0;
+    if (money.amounts.some((amount) => amountsClose(amount, row.amount))) return 2;
+    if (amountsClose(money.sum, row.amount)) return 2;
+    if (amountsClose(money.sum, partySumByVoucher.get(voucherKey))) return 1;
+    return 0;
+  }
+
+  const groups = new Map();
+  list.forEach((row, index) => {
+    if (normalizeName(row.vch_type) !== "RECEIPT") return;
+    if (String(row.receipt_date || "") < RECEIPT_VOUCHER_ANCHOR_FROM) return;
+    if (!isReceiptCustomerLine(row) || toNumber(row.amount) <= 0) return;
+    if (!/^\d+$/.test(String(row.vch_no || "").trim())) return;
+    const key = `${row.receipt_date}|${normalizeCode(row.customer_code)}|${amountCents(row.amount)}`;
+    const group = groups.get(key) || [];
+    group.push({ index, score: score(row), vch: String(row.vch_no).trim() });
+    groups.set(key, group);
+  });
+
+  const drop = new Set();
+  groups.forEach((group) => {
+    const vouchers = new Set(group.map((entry) => entry.vch));
+    if (vouchers.size < 2) return;
+    const best = group.reduce((max, entry) => Math.max(max, entry.score), 0);
+    if (best <= 0) return;
+    group.forEach((entry) => {
+      if (entry.score < best) drop.add(entry.index);
+    });
+  });
+
+  if (drop.size === 0) return { rows: list, removed: 0 };
+  return {
+    rows: list.filter((_, index) => !drop.has(index)),
+    removed: drop.size,
+  };
+}
+
 function sortReceiptRows(rows) {
   return [...rows].sort((left, right) => {
     if (left.receipt_date !== right.receipt_date) {
@@ -519,11 +626,13 @@ export function mergeReceiptDatasets(existingRows, incomingRows, _uploadDates = 
     }
   }
 
+  const cleaned = removeUnanchoredDuplicateReceipts([...byKey.values()]);
   return {
-    rows: sortReceiptRows([...byKey.values()]),
+    rows: sortReceiptRows(cleaned.rows),
     added,
     updated,
     unchanged,
+    removedDuplicateReceipts: cleaned.removed,
   };
 }
 
@@ -542,7 +651,10 @@ export function emptyReceiptDataset() {
 
 export function normalizeReceiptDataset(raw) {
   if (!raw || typeof raw !== "object") return emptyReceiptDataset();
-  const rows = Array.isArray(raw.rows) ? raw.rows.map(buildReceiptRow) : [];
+  const cleaned = removeUnanchoredDuplicateReceipts(
+    Array.isArray(raw.rows) ? raw.rows : [],
+  );
+  const rows = cleaned.rows;
   return {
     uploadedAt: String(raw.uploadedAt || ""),
     fileName: String(raw.fileName || ""),

@@ -118,8 +118,10 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
       {open && (invoice.settlements || []).map((settlement, index) => (
         <tr key={`${invoice.invoice_date}-rcpt-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
           <td colSpan={2} style={{ paddingLeft: 18 }}>
-            Paid on {settlement.receipt_date}
-            {settlement.vch_no ? ` · Rcpt ${settlement.vch_no}` : ""}
+            {Number(settlement.amount) < 0 ? "Payment" : "Paid"} on {settlement.receipt_date}
+            {settlement.vch_no
+              ? ` · ${Number(settlement.amount) < 0 ? "" : "Rcpt "}${settlement.vch_no}`
+              : ""}
           </td>
           <td colSpan={2} />
           <td>{formatMoney(settlement.amount)}</td>

@@ -24,6 +24,29 @@ test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () 
   assert.equal(Number(invoices[1].amount.toFixed(2)), 230);
 });
 
+test("matchPaymentsFifo treats a Round Off debit as a negative receipt on that invoice", () => {
+  const transactions = [
+    { transaction_date: "2025-10-20", voucher_number: "1457", sales_amount: 1000, category: "Paper" },
+  ];
+  const receipts = [
+    { receipt_date: "2025-10-20", amount: 1149.55, vch_no: "326", vch_type: "Receipt" },
+    { receipt_date: "2025-10-20", amount: -0.45, vch_no: "RO-1457", vch_type: "Round Off" },
+    { receipt_date: "2025-12-18", amount: 0.25, vch_no: "RO-2219", vch_type: "Round Off" },
+  ];
+  const { allocations, invoices } = matchPaymentsFifo(transactions, receipts);
+  const reversal = allocations.find((row) => row.vch_no === "RO-1457");
+
+  assert.equal(reversal.voucher_number, "1457");
+  assert.equal(reversal.amount, -0.45);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 0.65);
+
+  const ledger = buildPaymentSettlementLedger({ transactions, receipts });
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "1457");
+  assert.equal(Number(invoice.paid_amount.toFixed(2)), 1149.35);
+  assert.equal(invoice.status, "Partial");
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 1149.35);
+});
+
 test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   const { allocations, invoices } = matchPaymentsFifo(
     [

@@ -11,6 +11,7 @@ import {
   shiftMonthKey,
 } from "./monthlyPerformanceMonths.js";
 import { getKsaDateString } from "./workdayActivity.js";
+import { isPaymentVoucherType } from "./receiptRegister.js";
 
 export const HISTORIC_PERFORMANCE_SHORT_LABEL = `${HISTORIC_PERFORMANCE_MONTHS}m`;
 export const HISTORIC_PERFORMANCE_PERIOD_LABEL = `Last ${HISTORIC_PERFORMANCE_MONTHS} months`;
@@ -734,6 +735,18 @@ export function buildPurchaseRegisterRows(receipts = []) {
     });
 }
 
+/**
+ * Negative Payment vouchers (and older negatives with no voucher type) settle
+ * purchases, then sales. Any other debit — Round Off Dr, for example — is a
+ * payment against the receipt and must reduce Paid.
+ */
+export function receiptSettlementKind(row) {
+  if (!(toNumber(row?.amount) < 0)) return "receipt";
+  const type = String(row?.vch_type || "").trim();
+  if (!type || isPaymentVoucherType(type)) return "payment";
+  return "receipt_reversal";
+}
+
 export function buildSortedReceipts(receipts = []) {
   return (Array.isArray(receipts) ? receipts : [])
     // Purchases are AP bills, not cash collections / payments.
@@ -773,6 +786,9 @@ export function buildSortedReceipts(receipts = []) {
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
+ * A debit on any other voucher (Round Off Dr) is a negative receipt: after cash
+ * is applied it reduces Paid on the named invoice (RO-1457 → 1457), or on the
+ * newest paid bill when the voucher number does not name one.
  * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
@@ -823,7 +839,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       vch_no: row.vch_no,
     })),
     ...buildSortedReceipts(receipts).map((row) => ({
-      kind: row.amount < 0 ? "payment" : "receipt",
+      kind: receiptSettlementKind(row),
       date: row.receipt_date,
       amount: Math.abs(row.amount),
       signed_amount: row.amount,
@@ -1012,7 +1028,51 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     return left;
   }
 
+  function linkedDebitInvoiceRef(vchNo) {
+    const match = String(vchNo || "").trim().match(/^RO[-\s/]+(.+)$/i);
+    return match ? String(match[1] || "").trim() : "";
+  }
+
+  function unpayInvoice(event, invoice, requested) {
+    const capacity = Math.max(0, toNumber(invoice.amount) - toNumber(invoice.remaining));
+    const applied = Math.min(toNumber(requested), capacity);
+    if (!(applied > SETTLEMENT_DUST)) return 0;
+    invoice.remaining = toNumber(invoice.remaining) + applied;
+    allocations.push({
+      invoice_date: invoice.invoice_date,
+      voucher_number: invoice.voucher_number,
+      receipt_date: event.date,
+      vch_no: event.vch_no,
+      amount: -applied,
+      days: isoDaysBetween(event.date, invoice.invoice_date),
+    });
+    return applied;
+  }
+
+  function applyDebitReceiptReversal(event) {
+    let left = toNumber(event.amount);
+    const linkedRef = linkedDebitInvoiceRef(event.vch_no);
+    if (linkedRef) {
+      const invoice = invoices.find((row) => (
+        normalizeRef(row.voucher_number) === normalizeRef(linkedRef)
+      ));
+      if (invoice) left -= unpayInvoice(event, invoice, left);
+    } else {
+      const newestPaid = [...invoices].sort((leftInv, rightInv) => {
+        const byDate = String(rightInv.invoice_date || "").localeCompare(String(leftInv.invoice_date || ""));
+        if (byDate !== 0) return byDate;
+        return String(rightInv.voucher_number || "").localeCompare(String(leftInv.voucher_number || ""));
+      });
+      for (const invoice of newestPaid) {
+        if (!(left > SETTLEMENT_DUST)) break;
+        left -= unpayInvoice(event, invoice, left);
+      }
+    }
+    if (left > SETTLEMENT_DUST) unmatchedReceiptAmount -= left;
+  }
+
   for (const event of events) {
+    if (event.kind === "receipt_reversal") continue;
     let remaining = event.amount;
 
     if (event.kind === "purchase") {
@@ -1088,6 +1148,10 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       unmatchedReceiptAmount += remaining;
     }
   }
+
+  events
+    .filter((event) => event.kind === "receipt_reversal")
+    .forEach((event) => applyDebitReceiptReversal(event));
 
   return {
     invoices,
@@ -1793,8 +1857,16 @@ export function buildPaymentSettlementLedger({
       : null;
     const openSource = "fifo";
 
-    const weightedDays = fifoPaid > 0
-      ? settlements.reduce((total, row) => total + (Number(row.days || 0) * toNumber(row.amount)), 0) / fifoPaid
+    const positiveFifoPaid = settlements.reduce((total, row) => {
+      const amount = toNumber(row.amount);
+      return amount > 0 ? total + amount : total;
+    }, 0);
+    const weightedDays = positiveFifoPaid > 0
+      ? settlements.reduce((total, row) => {
+        const amount = toNumber(row.amount);
+        if (amount <= 0) return total;
+        return total + (Number(row.days || 0) * amount);
+      }, 0) / positiveFifoPaid
       : null;
 
     let status = "Open";
@@ -1832,7 +1904,7 @@ export function buildPaymentSettlementLedger({
       open_source: openSource,
       status,
       // Payment days only from cash receipt FIFO — credit notes never enter this average.
-      payment_days: fifoPaid > 0.009 ? roundDays(weightedDays) : null,
+      payment_days: positiveFifoPaid > 0.009 ? roundDays(weightedDays) : null,
       open_days: openDays,
       items: Array.isArray(invoice.items) ? [...invoice.items] : [],
       item_codes: Array.isArray(invoice.item_codes) ? [...invoice.item_codes] : [],
@@ -2130,7 +2202,10 @@ export function buildPaymentSettlementLedger({
   const positiveReceiptSum = cashRows
     .filter((row) => toNumber(row.amount) > 0)
     .reduce((total, row) => total + toNumber(row.amount), 0);
-  const collectedAmount = positiveReceiptSum + toNumber(paymentAppliedToSales);
+  const debitReceiptSum = allocations
+    .filter((row) => toNumber(row.amount) < 0)
+    .reduce((total, row) => total + toNumber(row.amount), 0);
+  const collectedAmount = positiveReceiptSum + toNumber(paymentAppliedToSales) + debitReceiptSum;
 
   // Credit notes already paired as immediate reversals are not deducted again.
   // Remaining credit notes reduce billable sales so: Sales − CN − Collected = Open.

@@ -377,12 +377,12 @@ export function parseReceiptRegisterRows(
 
     const credit = columns.credit >= 0 ? toNumber(row[columns.credit]) : 0;
     const debit = columns.debit >= 0 ? toNumber(row[columns.debit]) : 0;
-    // Receipt / JV collection credit the party (positive). Payment debits the
-    // party for dual customer+supplier ledgers, so it lands as a negative receipt.
-    const signedMagnitude = isPayment
-      ? (debit || credit || 0)
-      : (credit || (debit > 0 ? debit : 0));
-    const amount = isPayment ? -Math.abs(signedMagnitude) : signedMagnitude;
+    // Credit on the party ledger is a receipt. Debit is a payment and reduces
+    // that receipt (Round Off Dr 0.45 is stored as -0.45). Payment vouchers
+    // stay negative even when the amount sits in Cr.
+    const amount = isPayment
+      ? -Math.abs(debit || credit || 0)
+      : (credit - debit);
     if (!receiptDate || !hasReceiptRegisterAmount(amount)) continue;
 
     const party = parseParticularsParty(particulars);

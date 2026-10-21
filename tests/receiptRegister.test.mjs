@@ -155,6 +155,27 @@ test("parseReceiptRegisterRows skips Payment Register rows when option is off", 
   assert.equal(parsed.skippedPaymentCount, 1);
 });
 
+test("parseReceiptRegisterRows stores a debit as a negative receipt and a credit as a receipt", () => {
+  const lookup = {
+    byCode: new Map([
+      ["1075C", { customer_code: "1075C", customer_name: "Asl Al Maarifa company Limited" }],
+    ]),
+    byName: new Map(),
+  };
+  const parsed = parseReceiptRegisterRows([
+    ["TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHERNUMBER", "LEDGERNAME", "Dr", "Cr"],
+    [new Date("2025-10-20T00:00:00.000Z"), "Round Off", "RO-1457", "1075C Asl Al Maarifa company Limited", 0.45, ""],
+    [new Date("2025-12-18T00:00:00.000Z"), "Round Off", "RO-2219", "1075C Asl Al Maarifa company Limited", "", 0.25],
+    [new Date("2025-11-13T00:00:00.000Z"), "Receipt", "286", "1075C Asl Al Maarifa company Limited", "", 10000],
+  ], null, lookup);
+
+  const byVoucher = new Map(parsed.rows.map((row) => [row.vch_no, row.amount]));
+  assert.equal(parsed.rows.length, 3);
+  assert.equal(byVoucher.get("RO-1457"), -0.45);
+  assert.equal(byVoucher.get("RO-2219"), 0.25);
+  assert.equal(byVoucher.get("286"), 10000);
+});
+
 test("parseParticularsParty keeps letter suffixes on customer codes", () => {
   const party = parseParticularsParty("1194C  Muhammed Awad Awn  Al-Rahmani Est.");
   assert.equal(party.customer_code, "1194C");

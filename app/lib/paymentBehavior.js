@@ -787,8 +787,8 @@ export function buildSortedReceipts(receipts = []) {
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
  * A debit on any other voucher (Round Off Dr) is a negative receipt: after cash
- * is applied it reduces Paid on the named invoice (RO-1457 → 1457), or on the
- * newest paid bill when the voucher number does not name one.
+ * is applied it reduces Paid on the newest invoice, so Machine Open stays on
+ * the newest bill and older invoices stay paid.
  * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
@@ -1028,11 +1028,6 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     return left;
   }
 
-  function linkedDebitInvoiceRef(vchNo) {
-    const match = String(vchNo || "").trim().match(/^RO[-\s/]+(.+)$/i);
-    return match ? String(match[1] || "").trim() : "";
-  }
-
   function unpayInvoice(event, invoice, requested) {
     const capacity = Math.max(0, toNumber(invoice.amount) - toNumber(invoice.remaining));
     const applied = Math.min(toNumber(requested), capacity);
@@ -1051,22 +1046,16 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
 
   function applyDebitReceiptReversal(event) {
     let left = toNumber(event.amount);
-    const linkedRef = linkedDebitInvoiceRef(event.vch_no);
-    if (linkedRef) {
-      const invoice = invoices.find((row) => (
-        normalizeRef(row.voucher_number) === normalizeRef(linkedRef)
-      ));
-      if (invoice) left -= unpayInvoice(event, invoice, left);
-    } else {
-      const newestPaid = [...invoices].sort((leftInv, rightInv) => {
-        const byDate = String(rightInv.invoice_date || "").localeCompare(String(leftInv.invoice_date || ""));
-        if (byDate !== 0) return byDate;
-        return String(rightInv.voucher_number || "").localeCompare(String(leftInv.voucher_number || ""));
-      });
-      for (const invoice of newestPaid) {
-        if (!(left > SETTLEMENT_DUST)) break;
-        left -= unpayInvoice(event, invoice, left);
-      }
+    // Cash already paid the oldest invoices. A debit reduces the receipt, so
+    // the open balance stays on the newest bill.
+    const newestPaid = [...invoices].sort((leftInv, rightInv) => {
+      const byDate = String(rightInv.invoice_date || "").localeCompare(String(leftInv.invoice_date || ""));
+      if (byDate !== 0) return byDate;
+      return String(rightInv.voucher_number || "").localeCompare(String(leftInv.voucher_number || ""));
+    });
+    for (const invoice of newestPaid) {
+      if (!(left > SETTLEMENT_DUST)) break;
+      left -= unpayInvoice(event, invoice, left);
     }
     if (left > SETTLEMENT_DUST) unmatchedReceiptAmount -= left;
   }

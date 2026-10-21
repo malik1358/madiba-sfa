@@ -58,7 +58,7 @@ Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.
 - `normalizeAccessRole` lowercases and turns `_` into `-` (`invoice_maker` → `invoice-maker`).
 - `isCollectionOnlyAccess`: role `collector`, or `collection_only` metadata, or salesman code matching `/^CL\d+$/i`.
 - `isFieldSales` for module flags: salesman, manager, admin, invoice-maker, or product-promoter (collectors are then excluded from field modules).
-- GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers).
+- GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers). Visit-report save uses `captureOptionalGpsLocation` and still saves and shares when that read fails.
 - Invoice management: `canManageOrderInvoice` for invoice-maker, admin, manager.
 - Management report viewing: invoice makers can view the Reports group and collection reports, including cross-user data where the report API grants that scope. Report email sending and setup/configuration remain separately gated.
 - Stock take: admin or `profiles.stock_take_access`.

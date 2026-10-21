@@ -1843,9 +1843,16 @@ export function buildPaymentSettlementLedger({
   });
 
   // Outstanding refs not found in sales history still belong in Open.
+  // A voucher already reversed by a credit note stays in Reversed by Credit Note
+  // only — do not put it back here with Sales excl VAT 0.
+  const reversedOutstandingRefs = new Set(
+    (Array.isArray(reversedInvoices) ? reversedInvoices : [])
+      .map((row) => normalizeRef(row.voucher_number))
+      .filter(Boolean),
+  );
   outstanding.invoices.forEach((row) => {
     const ref = normalizeRef(row.ref_no);
-    if (!ref || matchedOutstandingRefs.has(ref)) return;
+    if (!ref || matchedOutstandingRefs.has(ref) || reversedOutstandingRefs.has(ref)) return;
     invoiceRows.push({
       invoice_date: row.invoice_date || "",
       voucher_number: row.ref_no,

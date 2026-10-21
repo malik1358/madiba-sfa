@@ -1130,6 +1130,28 @@ test("named credit note does not void the previous same-amount bill", () => {
   assert.equal(Number(previous.remaining.toFixed(2)), Number((10672 * 1.15).toFixed(2)));
 });
 
+test("reversed invoice is not added back from the outstanding upload", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-12", voucher_number: "RNFD/414", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
+      { transaction_date: "2026-09-13", voucher_number: "552", voucher_type: "Credit Note", reference: "RNFD/415", sales_amount: -10672, item_code: "A004555", quantity: -1000, category: "Office supplies" },
+      { transaction_date: "2026-09-13", voucher_number: "RNFD/415", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
+    ],
+    receipts: [],
+    outstandingInvoices: [
+      { invoice_date: "2026-09-12", ref_no: "RNFD/414", pending_amount: 12272.8 },
+      { invoice_date: "2026-09-13", ref_no: "RNFD/415", pending_amount: 12272.8 },
+    ],
+    todayIso: "2026-10-21",
+  });
+
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "RNFD/415"), false);
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415" && row.credit_note_voucher === "552"), true);
+  const previous = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
+  assert.ok(previous);
+  assert.equal(Number(previous.amount_excl_vat.toFixed(2)), 10672);
+});
+
 test("named partial credit note does not void the same-day reissue", () => {
   // Customer 1602: CN 614 names RNFD/447. RNFD/537 is a same-day reissue for the same total.
   const ledger = buildPaymentSettlementLedger({

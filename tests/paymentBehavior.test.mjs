@@ -24,6 +24,27 @@ test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () 
   assert.equal(Number(invoices[1].amount.toFixed(2)), 230);
 });
 
+test("a debit receipt leaves Machine Open on the newest invoice", () => {
+  const transactions = [
+    { transaction_date: "2025-10-20", voucher_number: "1457", sales_amount: 1000, category: "Paper" },
+    { transaction_date: "2026-01-18", voucher_number: "2645", sales_amount: 1000, category: "Paper" },
+  ];
+  const receipts = [
+    { receipt_date: "2025-11-13", amount: 1150, vch_no: "286", vch_type: "Receipt" },
+    { receipt_date: "2026-01-18", amount: 1150, vch_no: "326", vch_type: "Receipt" },
+    { receipt_date: "2025-10-20", amount: -0.45, vch_no: "RO-1457", vch_type: "Round Off" },
+  ];
+  const ledger = buildPaymentSettlementLedger({ transactions, receipts });
+  const oldest = ledger.invoices.find((row) => row.voucher_number === "1457");
+  const newest = ledger.invoices.find((row) => row.voucher_number === "2645");
+
+  assert.equal(Number(oldest.remaining.toFixed(2)), 0);
+  assert.equal(oldest.status, "Paid");
+  assert.equal(Number(newest.remaining.toFixed(2)), 0.45);
+  assert.equal(newest.status, "Partial");
+  assert.equal(newest.settlements.find((row) => row.vch_no === "RO-1457").amount, -0.45);
+});
+
 test("matchPaymentsFifo treats a Round Off debit as a negative receipt on that invoice", () => {
   const transactions = [
     { transaction_date: "2025-10-20", voucher_number: "1457", sales_amount: 1000, category: "Paper" },

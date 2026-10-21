@@ -13,8 +13,8 @@ import { getSupabaseClient } from "../../lib/supabase";
 const TEXT = {
   title: { en: "Missing Catalogue Photos", ar: "صور الكتالوج الناقصة" },
   subtitle: {
-    en: "Items with no catalogue photo. Building materials and do-not-use names are excluded.",
-    ar: "أصناف بلا صورة في الكتالوج. مواد البناء والأسماء الملغاة مستثناة.",
+    en: "Priced catalogue products with no photo. Items without a price, non-product codes, building materials, and do-not-use names are excluded.",
+    ar: "أصناف الكتالوج المسعّرة بلا صورة. الأصناف بدون سعر والأكواد غير المنتج ومواد البناء والأسماء الملغاة مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading items...", ar: "جاري تحميل الأصناف..." },
@@ -22,12 +22,7 @@ const TEXT = {
   code: { en: "Code", ar: "الكود" },
   item: { en: "Item", ar: "الصنف" },
   category: { en: "Category", ar: "الفئة" },
-  catalogue: { en: "Catalogue", ar: "الكتالوج" },
-  priced: { en: "Priced", ar: "له سعر" },
-  unpriced: { en: "No price", ar: "بدون سعر" },
   total: { en: "Total", ar: "الإجمالي" },
-  pricedMissing: { en: "Priced, no photo", ar: "له سعر وبدون صورة" },
-  unpricedMissing: { en: "No price, no photo", ar: "بدون سعر وبدون صورة" },
   withPhotos: { en: "Already have photos", ar: "لها صور" },
   excluded: { en: "Building materials excluded", ar: "مواد البناء المستثناة" },
   noRows: { en: "Every included item already has a photo.", ar: "كل الأصناف المشمولة لها صورة." },
@@ -127,7 +122,7 @@ export default function MissingCataloguePhotosPage() {
             </div>
             {summary && (
               <p className="moduleHint">
-                {t("pricedMissing")}: {summary.pricedMissing} · {t("unpricedMissing")}: {summary.unpricedMissing} · {t("withPhotos")}: {summary.withPhotos} · {t("excluded")}: {summary.excludedBuilding}
+                {t("withPhotos")}: {summary.withPhotos} · {t("excluded")}: {summary.excludedBuilding}
               </p>
             )}
             {!photosReady && <p className="moduleHint">{t("photosNotReady")}</p>}
@@ -144,7 +139,6 @@ export default function MissingCataloguePhotosPage() {
                       <th>{t("code")}</th>
                       <th>{t("item")}</th>
                       <th>{t("category")}</th>
-                      <th>{t("catalogue")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -153,7 +147,6 @@ export default function MissingCataloguePhotosPage() {
                         <td>{row.code}</td>
                         <td>{row.name}</td>
                         <td>{row.category}</td>
-                        <td>{row.priced ? t("priced") : t("unpriced")}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -162,7 +155,6 @@ export default function MissingCataloguePhotosPage() {
                       <td>{t("total")}</td>
                       <td>{rows.length}</td>
                       <td />
-                      <td>{summary?.pricedMissing || 0}</td>
                     </tr>
                   </tfoot>
                 </table>

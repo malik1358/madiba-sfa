@@ -1,4 +1,5 @@
 import { isBuildingMaterialItem } from "./pricePayload.js";
+import { isCatalogueProductCode } from "./productCatalogue.js";
 
 function doNotUse(name) {
   return /do\s*not\s*use+/i.test(String(name || ""));
@@ -60,7 +61,7 @@ export function missingCataloguePhotoReport({
   let excludedBuilding = 0;
   let withPhotos = 0;
   for (const item of byCode.values()) {
-    if (!item.active && !priced.has(item.code)) continue;
+    if (!isCatalogueProductCode(item.code) || !priced.has(item.code)) continue;
     if (doNotUse(item.name)) continue;
     if (isBuildingCategory(item.category) || isBuildingMaterialItem({
       item_code: item.code,
@@ -78,17 +79,13 @@ export function missingCataloguePhotoReport({
       code: item.code,
       name: item.name || item.code,
       category: catalogueCategoryLabel(item.category),
-      priced: priced.has(item.code),
     });
   }
   rows.sort((a, b) => a.category.localeCompare(b.category) || a.code.localeCompare(b.code));
-  const pricedMissing = rows.filter((row) => row.priced).length;
   return {
     rows,
     summary: {
       missing: rows.length,
-      pricedMissing,
-      unpricedMissing: rows.length - pricedMissing,
       withPhotos,
       excludedBuilding,
     },

@@ -6,7 +6,7 @@ import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import {
   catalogueFrontPhoto, catalogueItemsWithPhotos, cataloguePacking, cataloguePageGate, cataloguePermissions, catalogueSheetPacking,
-  clearCatalogueReturn, hasCataloguePrice, readCatalogueReturn, rememberCatalogueReturn, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
+  clearCatalogueReturn, hasCataloguePrice, isCatalogueProductCode, isVisibleCatalogueItem, readCatalogueReturn, rememberCatalogueReturn, validateCataloguePhoto, MAX_PRODUCT_PHOTO_BYTES,
 } from "../app/lib/productCatalogue.js";
 import {
   buildCatalogueShareLines, catalogueShareLatinWords, catalogueShareTextFromDictionary, catalogueShareUnknownWords,
@@ -183,25 +183,32 @@ test("catalogue only displays finite positive regional prices while New Order ke
     assert.equal(hasCataloguePrice(value), false, String(value));
   }
   for (const value of [0.01, 12, "25.50"]) assert.equal(hasCataloguePrice(value), true);
+  assert.equal(isCatalogueProductCode("A003944"), true);
+  assert.equal(isCatalogueProductCode("b000122"), true);
+  assert.equal(isCatalogueProductCode("ITEMCOUNT"), false);
+  assert.equal(isCatalogueProductCode("NC00143"), false);
+  assert.equal(isVisibleCatalogueItem({ item_code: "A003944" }, 10), true);
+  assert.equal(isVisibleCatalogueItem({ item_code: "A003944" }, 0), false);
+  assert.equal(isVisibleCatalogueItem({ item_code: "NC00143" }, 55), false);
   const source = fs.readFileSync(new URL("../app/management/new-order/page.js", import.meta.url), "utf8");
   const selector = source.slice(source.indexOf("  const filteredItems = useMemo("), source.indexOf("  const groupedItems = useMemo("))
     .replace("const filteredItems =", "result =");
-  const items = ["A", "B", "C", "D", "E"].map((item_code) => ({ item_code, item_name: item_code, category: "Office" }));
+  const items = ["A000001", "A000002", "A000003", "A000004", "A000005", "ITEMCOUNT", "NC00143"].map((item_code) => ({ item_code, item_name: item_code, category: "Office" }));
   function select(catalogueMode, regionPriceList, itemSearch = "", categoryFilter = "ALL") {
     const context = {
       catalogueMode, regionPriceList, itemSearch, categoryFilter, mergedItemsMaster: items,
-      hasCataloguePrice, normalizeText: String, normalizeCategoryLabel: (value) => value,
+      isVisibleCatalogueItem, normalizeText: String, normalizeCategoryLabel: (value) => value,
       useMemo: (fn) => fn(),
     };
     vm.runInNewContext(selector, context);
     return Array.from(context.result, (item) => item.item_code);
   }
-  assert.deepEqual(select(true, { A: 10, B: 0, C: -1, D: "bad" }), ["A"]);
-  assert.deepEqual(select(true, { B: "12" }), ["B"], "switching regions changes visibility");
+  assert.deepEqual(select(true, { A000001: 10, A000002: 0, A000003: -1, A000004: "bad", ITEMCOUNT: 640, NC00143: 55 }), ["A000001"]);
+  assert.deepEqual(select(true, { A000002: "12" }), ["A000002"], "switching regions changes visibility");
   assert.deepEqual(select(true, {}), []);
-  assert.deepEqual(select(true, { A: 10 }, "B"), []);
-  assert.deepEqual(select(true, { A: 10 }, "", "Other"), []);
-  assert.deepEqual(select(false, {}), ["A", "B", "C", "D", "E"]);
+  assert.deepEqual(select(true, { A000001: 10 }, "A000002"), []);
+  assert.deepEqual(select(true, { A000001: 10 }, "", "Other"), []);
+  assert.deepEqual(select(false, {}), ["A000001", "A000002", "A000003", "A000004", "A000005", "ITEMCOUNT", "NC00143"]);
   assert.match(source, /items=\{filteredItems\}/);
   assert.match(source, /filteredItems\.forEach/);
 });

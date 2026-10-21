@@ -68,7 +68,7 @@ import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
-import { hasCataloguePrice } from "../../lib/productCatalogue";
+import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -797,11 +797,11 @@ export default function NewOrderPage() {
     customerInvoices: outstandingInfo.customerInvoices,
   });
   const suggestionItems = useMemo(
-    () => catalogueMode ? mergedItemsMaster.filter((item) => hasCataloguePrice(regionPriceList[item.item_code])) : mergedItemsMaster,
+    () => catalogueMode ? mergedItemsMaster.filter((item) => isVisibleCatalogueItem(item, regionPriceList[item.item_code])) : mergedItemsMaster,
     [catalogueMode, mergedItemsMaster, regionPriceList],
   );
   const suggestionPeers = useMemo(
-    () => catalogueMode ? peerTransactions.filter((row) => hasCataloguePrice(regionPriceList[normalizeCode(row.item_code)])) : peerTransactions,
+    () => catalogueMode ? peerTransactions.filter((row) => isVisibleCatalogueItem({ item_code: row.item_code }, regionPriceList[normalizeCode(row.item_code)])) : peerTransactions,
     [catalogueMode, peerTransactions, regionPriceList],
   );
   const quickOrderSuggestions = useQuickOrder({
@@ -824,12 +824,12 @@ export default function NewOrderPage() {
     () => [
       "ALL",
       ...new Set(
-        mergedItemsMaster
+        (catalogueMode ? suggestionItems : mergedItemsMaster)
           .map((item) => normalizeCategoryLabel(normalizeText(item.category) || "Unclassified"))
           .filter(Boolean)
       ).values(),
     ],
-    [mergedItemsMaster]
+    [catalogueMode, mergedItemsMaster, suggestionItems]
   );
 
   const filteredCustomers = useMemo(() => {
@@ -860,7 +860,7 @@ export default function NewOrderPage() {
     const q = itemSearch.trim().toLowerCase();
 
     return mergedItemsMaster.filter((item) => {
-      if (catalogueMode && !hasCataloguePrice(regionPriceList[item.item_code])) return false;
+      if (catalogueMode && !isVisibleCatalogueItem(item, regionPriceList[item.item_code])) return false;
       if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       return !q || (

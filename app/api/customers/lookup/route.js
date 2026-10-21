@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../lib/customerAccess.js";
 import { resolveCustomerMasterExportFields } from "../../../lib/customerCode.js";
 import { findCustomersByMobile, isValidKsaMobile, normalizeKsaMobile } from "../../../lib/customerContact.js";
+import { findCustomersForSettlementSearch } from "../../../lib/customerSearch.js";
 import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -37,8 +38,9 @@ export async function GET(request) {
     const url = new URL(request.url);
     const customerCode = normalizeCode(url.searchParams.get("code") || url.searchParams.get("customerCode") || "");
     const mobile = normalizeKsaMobile(url.searchParams.get("mobile") || "");
+    const searchQuery = String(url.searchParams.get("q") || "").trim();
 
-    if (!customerCode && !isValidKsaMobile(mobile)) {
+    if (!customerCode && !isValidKsaMobile(mobile) && searchQuery.length < 2) {
       return Response.json({ success: false, error: "Customer code or mobile is required" }, { status: 400 });
     }
 
@@ -46,6 +48,18 @@ export async function GET(request) {
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    if (searchQuery.length >= 2 && !customerCode && !isValidKsaMobile(mobile)) {
+      const payload = await resolveSalesScopeForUserId(admin, user.id);
+      const scope = withSalesScopeMatchers({
+        hasAllAccess: payload.hasAllAccess,
+        visibleSalesmanCodes: payload.visibleSalesmanCodes || [],
+        visibleMembers: payload.visibleMembers || [],
+        sharedCustomerCodes: payload.sharedCustomerCodes || [],
+      });
+      const customers = await findCustomersForSettlementSearch(admin, scope, searchQuery);
+      return Response.json({ success: true, customers });
+    }
 
     if (isValidKsaMobile(mobile) && !customerCode) {
       const matches = await findCustomersByMobile(admin, mobile);

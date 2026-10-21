@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
@@ -26,11 +26,19 @@ const TEXT = {
   back: { en: "← Management", ar: "← الإدارة" },
   audit: { en: "Customers Audit", ar: "عملائي" },
   search: { en: "Search customer code or name", ar: "بحث بكود أو اسم العميل" },
+  load: { en: "Load", ar: "تحميل" },
+  searching: { en: "Searching...", ar: "جاري البحث..." },
+  searchHint: { en: "Search, then choose one customer", ar: "ابحث ثم اختر عميلاً واحداً" },
   loading: { en: "Loading settlement...", ar: "جاري تحميل التسوية..." },
   selectCustomer: {
     en: "Select a customer to see sales, collections, and settlement.",
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
+  pickOne: {
+    en: "Choose one customer from the list.",
+    ar: "اختر عميلاً واحداً من القائمة.",
+  },
+  noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   note: {
     en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover reverses sales cash. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
     ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يعكس تحصيل المبيعات. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
@@ -273,29 +281,21 @@ export default function PaymentSettlementPage() {
   const [message, setMessage] = useState("");
   usePopupMessages({ error, message });
 
-  const [customers, setCustomers] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [matchQuery, setMatchQuery] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [loadingCustomers, setLoadingCustomers] = useState(true);
+  const [searchingCustomers, setSearchingCustomers] = useState(false);
   const [loadingSettlement, setLoadingSettlement] = useState(false);
   const [ledger, setLedger] = useState(null);
   const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
   const [expandedDate, setExpandedDate] = useState("");
   const [autoCode, setAutoCode] = useState("");
+  const autoLoadedRef = useRef("");
+  const searchRequestRef = useRef(0);
 
   const canAccess = access.canAccess("paymentSettlement") || access.canAccess("customerAudit");
-
-  const filteredCustomers = useMemo(() => {
-    const q = customerSearch.trim().toLowerCase();
-    if (!q) return customers.slice(0, 40);
-    return customers
-      .filter((customer) => (
-        String(customer.customer_code || "").toLowerCase().includes(q)
-        || String(customer.customer_name || "").toLowerCase().includes(q)
-      ))
-      .slice(0, 40);
-  }, [customerSearch, customers]);
 
   const unpaidSummary = useMemo(() => {
     if (!ledger?.totals) return null;
@@ -332,27 +332,11 @@ export default function PaymentSettlementPage() {
     };
   }, [ledger]);
 
-  const loadCustomers = useCallback(async () => {
+  const authHeaders = useCallback(async () => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
-    setLoadingCustomers(true);
-    setError("");
-    try {
-      const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible?includeInactive=1", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load customers.");
-      }
-      setCustomers(Array.isArray(payload.customers) ? payload.customers : []);
-    } catch (err) {
-      setError(err.message || "Unable to load customers.");
-      setCustomers([]);
-    } finally {
-      setLoadingCustomers(false);
-    }
+    if (!supabase) return null;
+    const session = await resolveAuthSession(supabase);
+    return { Authorization: `Bearer ${session.access_token}` };
   }, []);
 
   const loadSettlement = useCallback(async (customer) => {
@@ -369,8 +353,8 @@ export default function PaymentSettlementPage() {
     setExpandedDate("");
 
     try {
-      const session = await resolveAuthSession(supabase);
-      const headers = { Authorization: `Bearer ${session.access_token}` };
+      const headers = await authHeaders();
+      if (!headers) return;
       const code = encodeURIComponent(customer.customer_code || "");
       const name = encodeURIComponent(customer.customer_name || "");
 
@@ -414,7 +398,96 @@ export default function PaymentSettlementPage() {
     } finally {
       setLoadingSettlement(false);
     }
-  }, []);
+  }, [authHeaders]);
+
+  const searchCustomers = useCallback(async (query) => {
+    const needle = String(query || "").trim();
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+    if (needle.length < 2) {
+      setMatches([]);
+      setMatchQuery("");
+      setSearchingCustomers(false);
+      return;
+    }
+    setSearchingCustomers(true);
+    try {
+      const headers = await authHeaders();
+      if (!headers || searchRequestRef.current !== requestId) return;
+      const response = await fetch(`/api/customers/lookup?q=${encodeURIComponent(needle)}`, { headers });
+      const payload = await response.json().catch(() => ({}));
+      if (searchRequestRef.current !== requestId) return;
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to search customers.");
+      }
+      setMatches(Array.isArray(payload.customers) ? payload.customers : []);
+      setMatchQuery(needle);
+    } catch (err) {
+      if (searchRequestRef.current !== requestId) return;
+      setMatches([]);
+      setMatchQuery("");
+      setError(err.message || "Unable to search customers.");
+    } finally {
+      if (searchRequestRef.current === requestId) setSearchingCustomers(false);
+    }
+  }, [authHeaders]);
+
+  const chooseCustomer = useCallback((customer) => {
+    if (!customer?.customer_code) return;
+    searchRequestRef.current += 1;
+    setSearchingCustomers(false);
+    setMatches([]);
+    setMatchQuery("");
+    setCustomerSearch(`${customer.customer_code} ${customer.customer_name || ""}`.trim());
+    void loadSettlement(customer);
+  }, [loadSettlement]);
+
+  const submitCustomerSearch = useCallback(async (event) => {
+    event?.preventDefault?.();
+    const needle = customerSearch.trim();
+    if (!needle || loadingSettlement) return;
+
+    const lowered = needle.toLowerCase();
+    const readyMatches = matchQuery.toLowerCase() === lowered ? matches : [];
+    const exact = readyMatches.find((row) => {
+      const code = String(row.customer_code || "").trim().toLowerCase();
+      const label = `${row.customer_code || ""} ${row.customer_name || ""}`.trim().toLowerCase();
+      return code === lowered || label === lowered;
+    });
+    if (exact) {
+      chooseCustomer(exact);
+      return;
+    }
+    if (readyMatches.length === 1) {
+      chooseCustomer(readyMatches[0]);
+      return;
+    }
+
+    setSearchingCustomers(true);
+    setError("");
+    try {
+      const headers = await authHeaders();
+      if (!headers) return;
+      const code = needle.split(/\s+/)[0];
+      const response = await fetch(`/api/customers/lookup?code=${encodeURIComponent(code)}`, { headers });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && payload.customer?.customer_code) {
+        chooseCustomer(payload.customer);
+        return;
+      }
+      if (readyMatches.length > 1) {
+        setError(t("pickOne"));
+        return;
+      }
+      setError(payload.error || t("noMatch"));
+      setMatches([]);
+      setMatchQuery("");
+    } catch (err) {
+      setError(err.message || t("noMatch"));
+    } finally {
+      setSearchingCustomers(false);
+    }
+  }, [authHeaders, chooseCustomer, customerSearch, loadingSettlement, matchQuery, matches, t]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -423,19 +496,57 @@ export default function PaymentSettlementPage() {
   }, []);
 
   useEffect(() => {
-    loadCustomers();
-  }, [loadCustomers]);
+    const needle = customerSearch.trim();
+    const selectedLabel = selectedCustomer
+      ? `${selectedCustomer.customer_code || ""} ${selectedCustomer.customer_name || ""}`.trim()
+      : "";
+    if (
+      needle.length < 2
+      || (selectedLabel && needle.toLowerCase() === selectedLabel.toLowerCase())
+      || (autoCode && needle.toUpperCase() === autoCode.toUpperCase())
+    ) {
+      setMatches([]);
+      setMatchQuery("");
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      void searchCustomers(needle);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [autoCode, customerSearch, searchCustomers, selectedCustomer]);
 
   useEffect(() => {
-    if (!autoCode || !customers.length || selectedCustomer) return;
-    const match = customers.find(
-      (row) => String(row.customer_code || "").toUpperCase() === autoCode.toUpperCase(),
-    );
-    if (match) {
+    if (!autoCode || autoLoadedRef.current === autoCode) return undefined;
+    autoLoadedRef.current = autoCode;
+    let cancelled = false;
+
+    async function openLinkedCustomer() {
       setCustomerSearch(autoCode);
-      void loadSettlement(match);
+      setSearchingCustomers(true);
+      setError("");
+      try {
+        const headers = await authHeaders();
+        if (!headers || cancelled) return;
+        const response = await fetch(`/api/customers/lookup?code=${encodeURIComponent(autoCode)}`, { headers });
+        const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || !payload.success || !payload.customer?.customer_code) {
+          throw new Error(payload.error || TEXT.noMatch.en);
+        }
+        setMatches([]);
+        void loadSettlement(payload.customer);
+      } catch (err) {
+        if (!cancelled) setError(err.message || TEXT.noMatch.en);
+      } finally {
+        if (!cancelled) setSearchingCustomers(false);
+      }
     }
-  }, [autoCode, customers, loadSettlement, selectedCustomer]);
+
+    void openLinkedCustomer();
+    return () => {
+      cancelled = true;
+    };
+  }, [authHeaders, autoCode, loadSettlement]);
 
   useEffect(() => {
     if (!ledger || typeof window === "undefined") return;
@@ -485,10 +596,16 @@ export default function PaymentSettlementPage() {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>Customer</h2>
-              <span>{loadingCustomers ? "Loading customers..." : `${customers.length.toLocaleString()} visible`}</span>
+              <span>
+                {searchingCustomers
+                  ? t("searching")
+                  : matches.length
+                    ? `${matches.length.toLocaleString()} ${language === "ar" ? "نتائج" : "matches"}`
+                    : t("searchHint")}
+              </span>
             </div>
             <p className="moduleHint">{t("note")}</p>
-            <div className="moduleFilterRow">
+            <form className="moduleFilterRow" onSubmit={submitCustomerSearch}>
               <input
                 className="moduleInput"
                 type="text"
@@ -497,17 +614,17 @@ export default function PaymentSettlementPage() {
                 onChange={(event) => setCustomerSearch(event.target.value)}
                 autoComplete="off"
               />
-            </div>
+              <button type="submit" className="moduleInlineButton" disabled={loadingSettlement}>
+                {t("load")}
+              </button>
+            </form>
             <div className="paymentSettleCustomerList">
-              {filteredCustomers.map((customer) => (
+              {matches.map((customer) => (
                 <button
                   type="button"
                   key={customer.customer_code}
                   className="paymentSettleCustomerButton"
-                  onClick={() => {
-                    setCustomerSearch(`${customer.customer_code} ${customer.customer_name || ""}`.trim());
-                    void loadSettlement(customer);
-                  }}
+                  onClick={() => chooseCustomer(customer)}
                 >
                   <strong>{customer.customer_code}</strong>
                   {" — "}

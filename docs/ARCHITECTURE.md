@@ -99,6 +99,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/user/sales-scope` — visible salesman codes
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
+  - Lookup `?q=` returns at most 20 code/name matches inside the caller's sales scope, including inactive customers. Payment Settlement uses that search and then loads one customer. It does not call `/api/customers/visible` on open. Exact `?code=` lookup is unchanged.
 - `/api/customer-history`, `/api/customer-meta`, `/api/customer-documents`, `/api/customer-visits`
   - Settlement/`fullHistory` responses skip peer sales rows unless `includePeers=1` (peers are Quick Order only). Receipt register rows are filtered from an in-process 60s memory cache of `receipt_register_dataset_v1`. Server `customer_history_cache:*` writes are fire-and-forget so the HTTP response is not blocked on upserting large JSON into `system_settings`. Customer Audit opens cache-first with a 45s client timeout.
 - `/api/customer-order-block` (Avg-days order block status + admin override)

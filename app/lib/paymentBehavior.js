@@ -517,7 +517,9 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
  *    names that voucher (Tally forward Ref. No.); blank / unreferenced early CNs
  *    must not reverse a later reissue.
  * 2) Same-day or next-day full amount (classic void / reissue cancel).
+ *    A CN that already names a different voucher is skipped here.
  * 3) Any later date when amount AND items+qty exactly match (full mirror CN).
+ *    A named CN is skipped here too unless the mirror is the named voucher.
  *
  * Orphan / blank CNs stay unpaired when a vouchered CN already covers the void.
  */
@@ -631,13 +633,24 @@ export function findImmediateCreditNoteReversals(
         if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
 
         const noteVoucher = String(note.voucher_number || "").trim();
-        const noteRef = normalizeRef(note.reference || note.voucher_number);
+        const explicitRef = normalizeRef(note.reference);
         const invoiceRef = normalizeRef(invoice.voucher_number);
         const refHit = Boolean(
           invoiceRef
-          && noteRef
-          && (noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef)),
+          && explicitRef
+          && (explicitRef.includes(invoiceRef) || invoiceRef.includes(explicitRef)),
         );
+        // A named credit note may void only that voucher while the named bill
+        // is still open. Once that bill is already reversed, a later CN with the
+        // same Ref. No. may still clear a leftover same-amount twin.
+        if (explicitRef && !refHit) {
+          const namedStillOpen = invoiceList.some((candidate) => {
+            const candidateKey = invoiceKey(candidate.invoice_date, candidate.voucher_number);
+            if (reversedKeys.has(candidateKey)) return false;
+            return noteRefsInvoice(note, candidate);
+          });
+          if (namedStillOpen) return null;
+        }
         const itemOverlap = itemCodeOverlapCount(note.item_codes, invoice.item_codes)
           || itemOverlapCount(note.items, invoice.items);
         const noteHasItems = (Array.isArray(note.item_codes) && note.item_codes.length > 0)

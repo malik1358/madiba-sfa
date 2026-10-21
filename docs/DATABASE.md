@@ -240,13 +240,33 @@ Baseline migration enables RLS and adds policies for customers, documents, follo
 
 Treat RLS as a backstop for browser queries with the publishable key. API authorization is in the route. Changing a policy does not by itself change what `/api/*` returns.
 
+## Data API grants (required from 2026-10-30)
+
+From **30 October 2026**, Supabase stops auto-granting Data API access on **new** tables in `public` for existing projects (SFA production `ynmtlzyqvmurpmfretji` included). Existing tables keep their current grants. Changelog: [Tables not exposed to Data API automatically](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically).
+
+Checked on production (2026-10-21): every live `public` table already has role grants. Almost all grant full table privileges to `anon`, `authenticated`, and `service_role`. `attachments` is intentional service-role only (`REVOKE` from `anon`/`authenticated` in `20261015084023_product_catalogue_photos_attachments.sql`). Default privileges for roles `postgres` and `supabase_admin` still auto-grant new tables today; those defaults are what Oct 30 removes for future objects.
+
+**Rule for every new `CREATE TABLE` / recreate in `public`:** put explicit grants in the same migration (then RLS + policies). Without a grant, PostgREST returns `42501 permission denied` before RLS runs.
+
+```sql
+-- Browser/API roles as needed (omit anon when the table must stay private):
+grant select, insert, update, delete on public.your_table to authenticated;
+grant select, insert, update, delete on public.your_table to service_role;
+-- Service-role-only tables (e.g. attachments):
+-- revoke all on public.your_table from anon, authenticated;
+-- grant select, insert, update, delete on public.your_table to service_role;
+```
+
+Older migrations often omitted grants and relied on platform defaults (`invoices`, `collection_visits`, `customer_gps_history`, `device_push_tokens`, `item_price_history`, stock-take tables, and others). That is fine for already-created production objects. It is **not** fine for any table created after the platform change, or for a fresh `supabase db reset` / preview branch once defaults are revoked. Prefer matching production intent: service-role-only when the app never queries the table from the browser client.
+
 ## Applying a change
 
 1. Add `supabase/migrations/<timestamp>_<name>.sql`.
 2. Prefer `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS`.
-3. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
-4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
-5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
+3. When creating a new `public` table, include explicit `GRANT`s for each role that must reach it via the Data API (`authenticated` / `service_role`, and `anon` only if intentional). Do not rely on automatic default privileges after 2026-10-30.
+4. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
+5. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
+6. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
 
 `20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Run the migration on local/dev first and production only through the normal approved release process; saving a home point in Salesman Hierarchy also clears matching customer pins through the GPS-audited API.
 

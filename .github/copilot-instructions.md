@@ -29,6 +29,7 @@ After any important change to business logic, database structure, reports, authe
 - Preserve existing field functionality (sales, collections, attendance, GPS, orders, settlement, reports).
 - Test changes before finishing: `node --test tests/<name>.test.mjs` and `npm run build` when the build may be affected.
 - Document any database migration required, and that it must be applied in Supabase separately from the git deploy.
+- From 2026-10-30, every new `public` table needs explicit `GRANT`s in the same migration for Data API roles. Existing tables keep current grants. See `docs/DATABASE.md` → Data API grants.
 - Update relevant docs when business logic or architecture changes.
 - Never expose secrets or environment variable values. `.env.example` lists names only.
 - Prefer incremental changes over unnecessary rewrites.

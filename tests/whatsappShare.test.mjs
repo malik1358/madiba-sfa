@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildReceiptSummaryShareImage,
   buildWhatsappAppUrl,
   buildWhatsappShareUrl,
+  prepareWhatsappAttachmentShare,
   shareTextAndFilesOnWhatsapp,
   shouldOmitWebShareText,
   toWhatsappShareFile,
   whatsappCacheFileName,
+  wrapWhatsappSummaryLines,
 } from "../app/lib/whatsappShare.js";
 
 test("buildWhatsappShareUrl encodes message text", () => {
@@ -48,6 +51,37 @@ test("toWhatsappShareFile names unnamed blobs for WhatsApp attachments", () => {
   assert.equal(file.name, "payment-copy.jpg");
   assert.equal(file.type, "image/jpeg");
 });
+
+function createShareCanvasDocument() {
+  return {
+    createElement(tag) {
+      assert.equal(tag, "canvas");
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: "",
+            font: "",
+            textAlign: "",
+            textBaseline: "",
+            direction: "",
+            fillRect() {},
+            fillText() {},
+            drawImage() {},
+            measureText(value) {
+              return { width: String(value || "").length * 8 };
+            },
+          };
+        },
+        toBlob(callback) {
+          callback(new Blob(["jpeg"], { type: "image/jpeg" }));
+        },
+      };
+      return canvas;
+    },
+  };
+}
 
 test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is unavailable", async () => {
   const previousWindow = globalThis.window;
@@ -136,7 +170,10 @@ test("Android web share sends the collection file and keeps the summary for past
   globalThis.window = { setTimeout: globalThis.setTimeout.bind(globalThis) };
   globalThis.document = {
     body: { appendChild() {}, removeChild() {} },
-    createElement() {
+    createElement(tag) {
+      if (tag === "canvas") {
+        return createShareCanvasDocument().createElement("canvas");
+      }
       return {
         value: "",
         style: {},
@@ -169,13 +206,15 @@ test("Android web share sends the collection file and keeps the summary for past
     });
     const result = await shareTextAndFilesOnWhatsapp("Collection visit summary", [file], {
       title: "Summary",
+      loadImage: async () => ({ width: 640, height: 480 }),
     });
     assert.equal(result.success, true);
     assert.equal(result.method, "web-share-files");
     assert.equal(result.textCopied, true);
+    assert.equal(result.embeddedSummary, true);
     assert.equal(shared.text, undefined);
     assert.equal(shared.files.length, 1);
-    assert.equal(shared.files[0].name, "receipt.jpg");
+    assert.equal(shared.files[0].name, "collection-receipt-summary.jpg");
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
@@ -247,4 +286,41 @@ test("iPhone web share keeps the collection summary with the file", async () => 
       delete globalThis.navigator;
     }
   }
+});
+
+test("wrapWhatsappSummaryLines keeps blank lines from the visit summary", () => {
+  const lines = wrapWhatsappSummaryLines("Customer: Test\n\nWorking hours\n4h 30m", 200, () => 10);
+  assert.deepEqual(lines, ["Customer: Test", "", "Working hours", "4h 30m"]);
+});
+
+test("buildReceiptSummaryShareImage prints the summary under the receipt photo", async () => {
+  const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "receipt.jpg", {
+    type: "image/jpeg",
+  });
+  const image = await buildReceiptSummaryShareImage([file], "Customer: 1254\nAmount: 500", {
+    document: createShareCanvasDocument(),
+    loadImage: async () => ({ width: 800, height: 600 }),
+  });
+  assert.equal(image?.type, "image/jpeg");
+  assert.equal(image?.name, "collection-receipt-summary.jpg");
+});
+
+test("Android preparation embeds the summary on the receipt and drops separate text", async () => {
+  const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "receipt.jpg", {
+    type: "image/jpeg",
+  });
+  const prepared = await prepareWhatsappAttachmentShare(
+    "Customer: 1254\nFunds received: 500",
+    [file],
+    {
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)",
+      document: createShareCanvasDocument(),
+      loadImage: async () => ({ width: 640, height: 480 }),
+    },
+  );
+  assert.equal(prepared.embeddedSummary, true);
+  assert.equal(prepared.message, "");
+  assert.equal(prepared.textCopied, true);
+  assert.equal(prepared.files.length, 1);
+  assert.equal(prepared.files[0].name, "collection-receipt-summary.jpg");
 });

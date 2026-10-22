@@ -1,3 +1,4 @@
+import { wrapShareText } from "./catalogueShareCard.js";
 import { normalizeWhatsappNumber } from "./paymentCollections.js";
 
 export function buildWhatsappShareUrl(text, phoneNumber = "") {
@@ -181,15 +182,61 @@ function loadShareImage(file) {
   });
 }
 
-async function combineImageFilesForWhatsapp(files) {
-  if (typeof document === "undefined" || files.length < 2) return null;
+const SUMMARY_FONT_FAMILY = '"Segoe UI", "Noto Naskh Arabic", "Noto Sans Arabic", Tahoma, Arial, sans-serif';
+const SUMMARY_LINE_HEIGHT = 34;
+const SUMMARY_FONT_SIZE = 28;
+const SUMMARY_SIDE_PAD = 36;
+const SUMMARY_TOP_PAD = 28;
+const SUMMARY_MAX_LINES = 48;
+const SHARE_IMAGE_MAX_WIDTH = 1400;
+const SHARE_IMAGE_MAX_HEIGHT = 6000;
+
+export function wrapWhatsappSummaryLines(text, maxWidth, measure) {
+  const width = Number(maxWidth);
+  const paragraphs = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = [];
+  for (const paragraph of paragraphs) {
+    const trimmed = paragraph.trimEnd();
+    if (!trimmed.trim()) {
+      lines.push("");
+      continue;
+    }
+    const wrapped = wrapShareText(trimmed.trim(), width, measure);
+    if (wrapped.length) lines.push(...wrapped);
+    else lines.push(trimmed.trim());
+  }
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+function canvasToJpegFile(canvas, fileName) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        resolve(null);
+        return;
+      }
+      resolve(new File([blob], fileName, {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      }));
+    }, "image/jpeg", 0.84);
+  });
+}
+
+async function stackShareImages(files, {
+  document: doc = globalThis.document,
+  loadImage = loadShareImage,
+  maxWidth = SHARE_IMAGE_MAX_WIDTH,
+  maxHeight = SHARE_IMAGE_MAX_HEIGHT,
+  gap = 12,
+} = {}) {
+  if (!doc?.createElement || !files?.length) return null;
   const images = [];
   for (const file of files) {
-    images.push(await loadShareImage(file));
+    images.push(await loadImage(file));
   }
 
-  const maxWidth = 1400;
-  const gap = 12;
   const targetWidth = Math.max(
     1,
     ...images.map((image) => Math.min(maxWidth, image.width || maxWidth)),
@@ -200,13 +247,12 @@ async function combineImageFilesForWhatsapp(files) {
   });
   let totalHeight = heights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, images.length - 1);
   let scaleDown = 1;
-  const maxHeight = 6000;
   if (totalHeight > maxHeight) {
     scaleDown = maxHeight / totalHeight;
     totalHeight = maxHeight;
   }
 
-  const canvas = document.createElement("canvas");
+  const canvas = doc.createElement("canvas");
   canvas.width = Math.max(1, Math.round(targetWidth * scaleDown));
   canvas.height = Math.max(1, Math.round(totalHeight));
   const context = canvas.getContext("2d");
@@ -221,14 +267,83 @@ async function combineImageFilesForWhatsapp(files) {
     offsetY += height + Math.round(gap * scaleDown);
   });
 
-  const blob = await new Promise((resolve) => {
-    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.82);
-  });
-  if (!blob) return null;
-  return new File([blob], "collection-attachments.jpg", {
-    type: "image/jpeg",
-    lastModified: Date.now(),
-  });
+  return { canvas, context, width: canvas.width, height: canvas.height };
+}
+
+async function combineImageFilesForWhatsapp(files, options = {}) {
+  if (files.length < 2) return files[0] || null;
+  try {
+    const stacked = await stackShareImages(files, options);
+    if (!stacked?.canvas) return null;
+    return canvasToJpegFile(stacked.canvas, "collection-attachments.jpg");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build one JPEG with receipt/payment photos and the visit summary underneath.
+ * Android WhatsApp often drops either the file or the caption when both are
+ * shared separately; embedding the summary keeps them in one message.
+ */
+export async function buildReceiptSummaryShareImage(files, summaryText, options = {}) {
+  const message = String(summaryText || "").trim();
+  const imageFiles = normalizeShareFiles(files).filter(isWhatsappImageFile);
+  if (!message || imageFiles.length === 0) return null;
+
+  const doc = options.document || globalThis.document;
+  if (!doc?.createElement) return null;
+
+  try {
+    const stacked = await stackShareImages(imageFiles, {
+      document: doc,
+      loadImage: options.loadImage || loadShareImage,
+      maxWidth: options.maxWidth || SHARE_IMAGE_MAX_WIDTH,
+      maxHeight: Math.max(1200, (options.maxHeight || SHARE_IMAGE_MAX_HEIGHT) - 800),
+      gap: 12,
+    });
+    if (!stacked?.canvas) return null;
+
+    const measureCanvas = doc.createElement("canvas");
+    const measure = measureCanvas.getContext("2d");
+    if (!measure) return null;
+    measure.font = `500 ${SUMMARY_FONT_SIZE}px ${SUMMARY_FONT_FAMILY}`;
+    const textWidth = Math.max(120, stacked.width - SUMMARY_SIDE_PAD * 2);
+    let lines = wrapWhatsappSummaryLines(message, textWidth, (value) => measure.measureText(value).width);
+    if (lines.length > SUMMARY_MAX_LINES) {
+      lines = lines.slice(0, SUMMARY_MAX_LINES);
+      lines[SUMMARY_MAX_LINES - 1] = `${String(lines[SUMMARY_MAX_LINES - 1] || "").replace(/[.\s…]+$/g, "")}…`;
+    }
+
+    const footerHeight = SUMMARY_TOP_PAD
+      + (lines.length * SUMMARY_LINE_HEIGHT)
+      + SUMMARY_TOP_PAD;
+    const canvas = doc.createElement("canvas");
+    canvas.width = stacked.width;
+    canvas.height = stacked.height + footerHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(stacked.canvas, 0, 0);
+    context.fillStyle = "#0f4c5c";
+    context.fillRect(0, stacked.height, canvas.width, footerHeight);
+    context.fillStyle = "#ffffff";
+    context.font = `500 ${SUMMARY_FONT_SIZE}px ${SUMMARY_FONT_FAMILY}`;
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.direction = "ltr";
+    let y = stacked.height + SUMMARY_TOP_PAD;
+    for (const line of lines) {
+      if (line) context.fillText(line, SUMMARY_SIDE_PAD, y);
+      y += SUMMARY_LINE_HEIGHT;
+    }
+
+    return canvasToJpegFile(canvas, "collection-receipt-summary.jpg");
+  } catch {
+    return null;
+  }
 }
 
 async function filesForNativeWhatsappShare(files) {
@@ -239,6 +354,48 @@ async function filesForNativeWhatsappShare(files) {
   } catch {
     return files;
   }
+}
+
+/**
+ * On Android, put the summary on the receipt image and share that file alone.
+ * A separate text field makes WhatsApp keep the caption and drop the photo.
+ */
+export async function prepareWhatsappAttachmentShare(text, files = [], options = {}) {
+  const message = String(text || "").trim();
+  const shareFiles = normalizeShareFiles(files);
+  const omitSeparateText = options.omitSeparateText === true
+    || shouldOmitWebShareText(options.userAgent || "");
+
+  if (!omitSeparateText || shareFiles.length === 0) {
+    return {
+      message,
+      files: shareFiles,
+      embeddedSummary: false,
+      textCopied: false,
+    };
+  }
+
+  const imageFiles = shareFiles.filter(isWhatsappImageFile);
+  if (message && imageFiles.length > 0) {
+    const composite = await buildReceiptSummaryShareImage(imageFiles, message, options);
+    if (composite) {
+      return {
+        message: "",
+        files: [composite],
+        embeddedSummary: true,
+        textCopied: true,
+      };
+    }
+  }
+
+  return {
+    message: "",
+    files: shareFiles.length === 1
+      ? shareFiles
+      : await filesForNativeWhatsappShare(shareFiles),
+    embeddedSummary: false,
+    textCopied: Boolean(message),
+  };
 }
 
 async function canUseNativeFileShare() {
@@ -410,34 +567,52 @@ export async function shareTextOnWhatsapp(text, options = {}) {
 }
 
 export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}) {
-  const message = String(text || "").trim();
-  const shareFiles = normalizeShareFiles(files);
+  const originalMessage = String(text || "").trim();
+  const incomingFiles = normalizeShareFiles(files);
 
-  if (!message && shareFiles.length === 0) {
+  if (!originalMessage && incomingFiles.length === 0) {
     return { success: false, reason: "empty" };
   }
 
-  if (shareFiles.length === 0) {
-    return shareTextOnWhatsapp(message, options);
+  if (incomingFiles.length === 0) {
+    return shareTextOnWhatsapp(originalMessage, options);
   }
 
-  if (message) {
-    await copyTextToClipboard(message);
+  if (originalMessage) {
+    await copyTextToClipboard(originalMessage);
   }
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
   const omitWebText = shouldOmitWebShareText(userAgent);
-  const nativeFiles = await filesForNativeWhatsappShare(shareFiles);
+  const prepared = await prepareWhatsappAttachmentShare(originalMessage, incomingFiles, {
+    ...options,
+    userAgent,
+    omitSeparateText: omitWebText,
+  });
+  const shareFiles = prepared.files;
+  const shareMessage = prepared.message;
+  const nativeFiles = omitWebText
+    ? shareFiles
+    : await filesForNativeWhatsappShare(shareFiles);
 
   function cancelledShare(error) {
     return String(error?.name || "") === "AbortError"
       || String(error?.message || error || "").toLowerCase().includes("cancel");
   }
 
+  function successResult(method) {
+    return {
+      success: true,
+      method,
+      textCopied: prepared.textCopied || (omitWebText && Boolean(originalMessage)),
+      embeddedSummary: prepared.embeddedSummary,
+    };
+  }
+
   // Several files make Android's share plugin use */*, and WhatsApp then keeps
-  // only the summary. Send those files through the web share sheet first.
+  // only the summary. Prefer a single composite file, then the web share sheet.
   if (
     nativeFiles.length > 1
     && omitWebText
@@ -445,8 +620,12 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     && typeof navigator.share === "function"
   ) {
     try {
-      await sharePreparedFilesOnWeb(nativeFiles, { title, message, includeText: false });
-      return { success: true, method: "web-share-files", textCopied: Boolean(message) };
+      await sharePreparedFilesOnWeb(nativeFiles, {
+        title,
+        message: shareMessage,
+        includeText: false,
+      });
+      return successResult("web-share-files");
     } catch (error) {
       if (cancelledShare(error)) {
         return { success: false, reason: "cancelled" };
@@ -456,8 +635,15 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   if (await canUseNativeFileShare() && (nativeFiles.length === 1 || !omitWebText)) {
     try {
-      await shareFilesViaCapacitor(nativeFiles, message, dialogTitle, title);
-      return { success: true, method: "capacitor-share-files" };
+      // Android: never send a separate text field with the file — WhatsApp keeps
+      // the caption and drops the receipt. The summary is on the image / clipboard.
+      await shareFilesViaCapacitor(
+        nativeFiles,
+        omitWebText ? "" : shareMessage,
+        dialogTitle,
+        title,
+      );
+      return successResult("capacitor-share-files");
     } catch (error) {
       if (cancelledShare(error)) {
         return { success: false, reason: "cancelled" };
@@ -468,16 +654,12 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
-      await sharePreparedFilesOnWeb(shareFiles, {
+      await sharePreparedFilesOnWeb(nativeFiles.length ? nativeFiles : shareFiles, {
         title,
-        message,
-        includeText: !omitWebText,
+        message: shareMessage,
+        includeText: !omitWebText && Boolean(shareMessage),
       });
-      return {
-        success: true,
-        method: "web-share-files",
-        textCopied: omitWebText && Boolean(message),
-      };
+      return successResult("web-share-files");
     } catch (error) {
       if (cancelledShare(error)) {
         return { success: false, reason: "cancelled" };
@@ -487,11 +669,11 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   // Native/Web Share could not attach files (outdated APK, WebView limits, etc.).
   // Still open WhatsApp with the summary text; callers show the attach-manually hint.
-  if (!message) {
+  if (!originalMessage) {
     return { success: false, reason: "files-not-supported" };
   }
 
-  const textResult = await shareTextOnWhatsapp(message, {
+  const textResult = await shareTextOnWhatsapp(originalMessage, {
     ...options,
     preferNativeShare: false,
     preferWhatsappUrl: true,

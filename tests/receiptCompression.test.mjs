@@ -293,8 +293,8 @@ test("collection save sends the same prepared receipt to the API and WhatsApp; p
     new URL("../app/management/payment-collections/PaymentCollectionsView.jsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /const preparedReceipt = await prepareReceiptUploadFile\(form\.receiptCopy\);/);
-  assert.match(source, /const preparedPayment = await prepareUploadFile\(form\.paymentCopy\);/);
+  assert.match(source, /const preparedReceipt = await prepareReceiptUploadFile\(receiptCopyFile\);/);
+  assert.match(source, /const preparedPayment = await prepareUploadFile\(paymentCopyFile\);/);
   assert.match(source, /const receiptFile = toWhatsappShareFile\(preparedReceipt, receiptFallback\);\s*formData\.append\("receiptCopy", receiptFile\);\s*if \(receiptFile\) shareFiles\.push\(receiptFile\);/);
 });
 

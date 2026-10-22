@@ -838,6 +838,9 @@ export function buildSortedReceipts(receipts = []) {
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
+ * A Purchase still open after those Payments settles sales invoices already
+ * dated on or before the purchase (oldest first). It does not prepay a later
+ * invoice, and it is not cash: it stays out of Collected and avg days.
  * A debit on any other voucher (Round Off Dr) is a negative receipt: after cash
  * is applied it reduces Paid on the newest invoice, so Machine Open stays on
  * the newest bill and older invoices stay paid.
@@ -871,6 +874,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   const allocations = [];
   const creditNoteAllocations = [];
   const purchaseAllocations = [];
+  const purchaseSalesAllocations = [];
   const matchedPurchasePayments = [];
   const purchases = [];
   let unmatchedReceiptAmount = 0;
@@ -962,6 +966,14 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         credit_voucher: event.voucher_number || "",
         amount: applied,
         amount_excl_vat: applied * exclRatio,
+      });
+    } else if (event.kind === "purchase_credit" && applied > 0) {
+      purchaseSalesAllocations.push({
+        invoice_date: invoice.invoice_date,
+        voucher_number: invoice.voucher_number,
+        purchase_date: event.date,
+        purchase_voucher: event.vch_no || "",
+        amount: applied,
       });
     }
     invoice.remaining = Math.max(0, invoice.remaining - applied);
@@ -1116,10 +1128,11 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     if (left > SETTLEMENT_DUST) unmatchedReceiptAmount -= left;
   }
 
+  // Payments close Purchases before any sales credit is replayed, so a covered
+  // Purchase does not also reduce AR. The uncovered remainder is a party credit
+  // on the purchase date and is applied with receipts, not after them.
+  const paymentSalesEvents = [];
   for (const event of events) {
-    if (event.kind === "receipt_reversal") continue;
-    let remaining = event.amount;
-
     if (event.kind === "purchase") {
       purchases.push({
         purchase_date: event.date,
@@ -1129,12 +1142,65 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       });
       continue;
     }
+    if (event.kind !== "payment") continue;
+    const left = applyPaymentToPurchases(event);
+    if (hasSettlementAmount(left)) {
+      paymentSalesEvents.push({
+        ...event,
+        kind: "payment_sales",
+        amount: left,
+      });
+    }
+  }
 
-    if (event.kind === "payment") {
-      remaining = applyPaymentToPurchases(event);
-      if (hasSettlementAmount(remaining)) {
-        applyPaymentLeftoverToSales(event, remaining);
+  const arEvents = [
+    ...events.filter((event) => (
+      event.kind === "credit_note"
+      || event.kind === "receipt"
+      || event.kind === "receipt_reversal"
+    )),
+    ...purchases
+      .filter((purchase) => hasSettlementAmount(purchase.remaining))
+      .map((purchase) => ({
+        kind: "purchase_credit",
+        date: purchase.purchase_date,
+        amount: toNumber(purchase.remaining),
+        vch_no: purchase.vch_no || "",
+        purchase,
+      })),
+    ...paymentSalesEvents,
+  ].sort((left, right) => {
+    if (left.date !== right.date) return left.date.localeCompare(right.date);
+    const kindRank = (kind) => (
+      kind === "credit_note" ? 0
+        : kind === "purchase_credit" ? 1
+          : kind === "receipt" ? 2
+            : kind === "payment_sales" ? 3
+              : 4
+    );
+    const rankDelta = kindRank(left.kind) - kindRank(right.kind);
+    if (rankDelta !== 0) return rankDelta;
+    return String(left.vch_no || left.voucher_number || "").localeCompare(
+      String(right.vch_no || right.voucher_number || ""),
+    );
+  });
+
+  for (const event of arEvents) {
+    if (event.kind === "receipt_reversal") continue;
+    let remaining = event.amount;
+
+    if (event.kind === "purchase_credit") {
+      for (const invoice of invoices) {
+        if (!hasSettlementAmount(remaining)) break;
+        if (invoice.invoice_date && event.date && invoice.invoice_date > event.date) continue;
+        remaining = applyToInvoice(event, invoice, remaining);
       }
+      if (event.purchase) event.purchase.remaining = remaining;
+      continue;
+    }
+
+    if (event.kind === "payment_sales") {
+      applyPaymentLeftoverToSales(event, remaining);
       continue;
     }
 
@@ -1203,6 +1269,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     allocations,
     creditNoteAllocations,
     purchaseAllocations,
+    purchaseSalesAllocations,
     matchedPurchasePayments,
     purchases,
     paymentAppliedToPurchases,
@@ -1833,6 +1900,7 @@ export function buildPaymentSettlementLedger({
     allocations,
     creditNoteAllocations,
     purchaseAllocations = [],
+    purchaseSalesAllocations = [],
     matchedPurchasePayments = [],
     purchases = [],
     paymentAppliedToPurchases = 0,
@@ -1864,6 +1932,18 @@ export function buildPaymentSettlementLedger({
     settlementsByInvoice.set(key, list);
   });
 
+  const purchaseSettlementsByInvoice = new Map();
+  purchaseSalesAllocations.forEach((row) => {
+    const key = invoiceKey(row.invoice_date, row.voucher_number);
+    const list = purchaseSettlementsByInvoice.get(key) || [];
+    list.push({
+      purchase_date: row.purchase_date,
+      voucher_number: row.purchase_voucher || "",
+      amount: toNumber(row.amount),
+    });
+    purchaseSettlementsByInvoice.set(key, list);
+  });
+
   const fifoCreditNotesByInvoice = new Map();
   creditNoteAllocations.forEach((row) => {
     const key = invoiceKey(row.invoice_date, row.voucher_number);
@@ -1893,6 +1973,8 @@ export function buildPaymentSettlementLedger({
     const fifoPaid = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
     const fifoCreditNotes = fifoCreditNotesByInvoice.get(key) || [];
     const fifoCreditSettled = fifoCreditNotes.reduce((total, row) => total + toNumber(row.amount), 0);
+    const purchaseSettlements = purchaseSettlementsByInvoice.get(key) || [];
+    const purchaseSettled = purchaseSettlements.reduce((total, row) => total + toNumber(row.amount), 0);
     const fifoRemaining = toNumber(invoice.remaining);
     const amountExclVat = toNumber(invoice.amount_excl_vat);
     const amountInclVat = toNumber(invoice.amount);
@@ -1907,9 +1989,10 @@ export function buildPaymentSettlementLedger({
       matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
     }
 
-    // Paid = cash FIFO + credit-note settlements (CN shows in the receipt/Paid column).
+    // Paid = cash FIFO + credit-note settlements + purchase credits. Purchase
+    // credits show on the invoice but stay out of avg days.
     const remaining = fifoRemaining;
-    const paidAmount = fifoPaid + fifoCreditSettled;
+    const paidAmount = fifoPaid + fifoCreditSettled + purchaseSettled;
     const outstandingPending = hasOutstandingRows
       ? (outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0)
       : null;
@@ -1969,6 +2052,7 @@ export function buildPaymentSettlementLedger({
       items: Array.isArray(invoice.items) ? [...invoice.items] : [],
       item_codes: Array.isArray(invoice.item_codes) ? [...invoice.item_codes] : [],
       settlements,
+      purchase_settlements: purchaseSettlements,
       credit_notes: [],
       fifo_credit_notes: fifoCreditNotes,
     };
@@ -2134,6 +2218,20 @@ export function buildPaymentSettlementLedger({
     collectionsByDateMap.set(row.receipt_date, current);
   });
 
+  const purchaseSalesByKey = new Map();
+  purchaseSalesAllocations.forEach((row) => {
+    const key = `${row.purchase_date}::${row.purchase_voucher}`;
+    const list = purchaseSalesByKey.get(key) || [];
+    list.push({
+      target_kind: "sales",
+      voucher_number: row.voucher_number || "",
+      target_date: row.invoice_date || "",
+      amount: toNumber(row.amount),
+      status: "Applied",
+    });
+    purchaseSalesByKey.set(key, list);
+  });
+
   const purchasesByDateMap = new Map();
   buildPurchaseRegisterRows(receipts).forEach((row) => {
     const current = purchasesByDateMap.get(row.purchase_date) || {
@@ -2149,6 +2247,7 @@ export function buildPaymentSettlementLedger({
       amount: toNumber(row.amount),
       vch_type: row.vch_type || "Purchase",
       kind: "purchase",
+      applications: purchaseSalesByKey.get(`${row.purchase_date}::${row.vch_no}`) || [],
     });
     purchasesByDateMap.set(row.purchase_date, current);
   });
@@ -2334,7 +2433,12 @@ export function buildPaymentSettlementLedger({
     .filter((note) => !String(note.applied_to_voucher || "").trim())
     .reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
   const netSalesInclVat = salesInclVat - creditNoteAmount;
-  const balanceDelta = netSalesInclVat - collectedAmount - openSalesAmount;
+  const purchaseAppliedToSales = purchaseSalesAllocations.reduce(
+    (total, row) => total + toNumber(row.amount),
+    0,
+  );
+  // Purchase credits reduce Open and are not cash, so they sit beside Collected.
+  const balanceDelta = netSalesInclVat - collectedAmount - purchaseAppliedToSales - openSalesAmount;
 
   const tallyFifo = buildTallyFifoDiscrepancies(invoiceRows, {
     unmatchedReceiptAmount,
@@ -2367,6 +2471,7 @@ export function buildPaymentSettlementLedger({
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
     payment_applied_to_purchases: toNumber(paymentAppliedToPurchases),
     payment_applied_to_sales: toNumber(paymentAppliedToSales),
+    purchase_applied_to_sales: purchaseAppliedToSales,
     open_purchase_amount: purchaseRows.reduce((total, row) => total + toNumber(row.remaining), 0),
     purchase_count: purchaseRows.length,
     matched_purchase_payment_count: matchedPurchasePaymentRows.length,

@@ -40,8 +40,8 @@ const TEXT = {
   },
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   note: {
-    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover reverses sales cash. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
-    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يعكس تحصيل المبيعات. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
+    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover settles earlier sales. A Purchase no Payment covers settles sales invoices already dated on or before that purchase, and does not prepay a later invoice. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
+    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يسوي فواتير المبيعات الأقدم. المشتريات التي لا يغطيها سند دفع تسوي فواتير المبيعات بتاريخ الشراء أو قبله، ولا تسدد فاتورة لاحقة. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
 
@@ -83,7 +83,8 @@ function statusClass(status) {
 function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
   const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
-  const detailCount = receiptCount + creditCount;
+  const purchaseCount = Array.isArray(invoice.purchase_settlements) ? invoice.purchase_settlements.length : 0;
+  const detailCount = receiptCount + creditCount + purchaseCount;
   const tallyOnly = Boolean(invoice.tally_only);
   const machineOpen = Number(invoice.remaining || 0);
   const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
@@ -129,6 +130,22 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           <td colSpan={3} />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
+          <td />
+        </tr>
+      ))}
+      {open && (invoice.purchase_settlements || []).map((purchase, index) => (
+        <tr key={`${invoice.invoice_date}-pur-${purchase.voucher_number}-${index}`} className="paymentSettleChildRow">
+          <td colSpan={2} style={{ paddingLeft: 18 }}>
+            Purchase
+            {purchase.voucher_number ? ` · ${purchase.voucher_number}` : ""}
+            {purchase.purchase_date ? ` · ${purchase.purchase_date}` : ""}
+            {" · settles this invoice"}
+          </td>
+          <td colSpan={2} />
+          <td>{formatMoney(purchase.amount)}</td>
+          <td colSpan={3} />
+          <td><span className={statusClass("Applied")}>Purchase</span></td>
+          <td>Not in avg days</td>
           <td />
         </tr>
       ))}
@@ -206,22 +223,68 @@ function DatewiseDayRow({ row, open, onToggle }) {
           <td>{formatMoney(invoice.remaining)}</td>
         </tr>
       ))}
-      {open && purchases.map((purchase, index) => (
-        <tr
-          key={`${row.date}-pur-${purchase.vch_no || index}`}
-          className="paymentSettleChildRow"
-        >
-          <td style={{ paddingLeft: 28 }}>
-            Purchase{purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
-          </td>
-          <td />
-          <td />
-          <td>{formatMoney(purchase.amount)}</td>
-          <td />
-          <td />
-          <td />
-        </tr>
-      ))}
+      {open && purchases.map((purchase, index) => {
+        const applications = Array.isArray(purchase.applications) ? purchase.applications : [];
+        const applied = applications.reduce((total, application) => total + Number(application.amount || 0), 0);
+        const unapplied = Math.max(0, Number(purchase.amount || 0) - applied);
+        if (!applications.length) {
+          return (
+            <tr
+              key={`${row.date}-pur-${purchase.vch_no || index}`}
+              className="paymentSettleChildRow"
+            >
+              <td style={{ paddingLeft: 28 }}>
+                Purchase{purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
+              </td>
+              <td />
+              <td />
+              <td>{formatMoney(purchase.amount)}</td>
+              <td />
+              <td />
+              <td />
+            </tr>
+          );
+        }
+        return [
+          ...applications.map((application, applicationIndex) => (
+            <tr
+              key={`${row.date}-pur-${purchase.vch_no || index}-app-${applicationIndex}`}
+              className="paymentSettleChildRow"
+            >
+              <td style={{ paddingLeft: 28 }}>
+                Purchase
+                {purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
+                {" → Invoice"}
+                {application.voucher_number ? ` ${application.voucher_number}` : ""}
+              </td>
+              <td />
+              <td />
+              <td>{formatMoney(application.amount)}</td>
+              <td />
+              <td />
+              <td />
+            </tr>
+          )),
+          unapplied > 0.009 ? (
+            <tr
+              key={`${row.date}-pur-${purchase.vch_no || index}-open`}
+              className="paymentSettleChildRow"
+            >
+              <td style={{ paddingLeft: 28 }}>
+                Purchase
+                {purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
+                {" · not adjusted against an invoice"}
+              </td>
+              <td />
+              <td />
+              <td>{formatMoney(unapplied)}</td>
+              <td />
+              <td />
+              <td />
+            </tr>
+          ) : null,
+        ];
+      })}
       {open && receipts.map((receipt, index) => {
         const applications = Array.isArray(receipt.applications) ? receipt.applications : [];
         const isPayment = receipt.kind === "payment" || Number(receipt.amount) < 0;
@@ -1240,7 +1303,7 @@ export default function PaymentSettlementPage() {
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
-                  Use + / − on a date to see that day’s invoices, receipts, and the purchase or sales bills a Payment was adjusted against. Collected is sales cash only — a Payment spent on Purchases is not a negative collection.
+                  Use + / − on a date to see that day’s invoices, receipts, and the purchase or sales bills a Payment was adjusted against. A Purchase no Payment covers is listed against the earlier sales invoice it settles. Collected is sales cash only.
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

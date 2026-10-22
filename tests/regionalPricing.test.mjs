@@ -228,6 +228,16 @@ test("vinyl glove SKUs are VAT-exempt even when sales name omits Gloves", () => 
   assert.equal(isVatExemptProduct({ item_name: "A003948_MADIBA VINYL GLOVES SIZE Do Not Use" }), true);
   assert.equal(vatRateForProduct({ item_name: "A003949_MADIBA VINYL Do Not Use" }), 0);
   assert.equal(vatRateForProduct({ item_name: "Paper A4", category: "Stationery" }), 0.15);
+  assert.equal(isVatExemptProduct({
+    category: "Building Material",
+    item_code: "LP00318",
+    item_name: "LP00318_Latex Gloves Crinkle Orange LGC Hi-Tex, 250 Pair/ Cartoon",
+  }), false);
+  assert.equal(vatRateForProduct({
+    category: "Building Material",
+    item_code: "LP00318",
+    item_name: "LP00318_Latex Gloves Crinkle Orange LGC Hi-Tex, 250 Pair/ Cartoon",
+  }), 0.15);
 });
 
 test("glove order lines are priced with zero VAT on New Order and PDF totals", () => {

@@ -118,7 +118,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Sync (`/api/admin/price-sync`) writes a snapshot and the cache, and appends `item_price_history` when a price changes. History UI shows at least the last five prices.
 - VAT default on `products.vat_percent` is 15. Settlement line gross-up uses `regionalPricing.js` (category-aware), not a flat 15 for every line.
 - When both cash and value discounts are active on a line, each percentage is calculated from the selected wholesale/retail base rate (not compounded one on top of the other).
-- **Gloves are VAT-exempt (0%)** on orders and settlement. `isVatExemptProduct` / `vatRateForProduct` in `regionalPricing.js` match `GLOVE`, `VINYL`, or Arabic `قفاز` in category/name/code. `getPricedOrderLine` and `summarizePricedLines` must use that rate (do not hardcode 15% on New Order / order PDF / WhatsApp). Mixed carts label the VAT column as plain `VAT`; gloves-only as `VAT 0%`; taxable-only as `VAT 15%`.
+- **Catalog gloves are VAT-exempt (0%)** on orders and settlement. `isVatExemptProduct` / `vatRateForProduct` in `regionalPricing.js` match `GLOVE`, `VINYL`, or Arabic `قفاز` in category/name/code. Building-material safety gloves (for example LP00318 on NFD/436) stay at 15% even when the name contains Gloves. `getPricedOrderLine` and `summarizePricedLines` must use that rate (do not hardcode 15% on New Order / order PDF / WhatsApp). Mixed carts label the VAT column as plain `VAT`; gloves-only as `VAT 0%`; taxable-only as `VAT 15%`.
 - Item master `tally_unit` / `tally_item_name` feed the Tally sales-voucher Excel export. Sources: `excel_import`, `invoice_pdf`, `manual`.
 
 ## Outstanding and collections

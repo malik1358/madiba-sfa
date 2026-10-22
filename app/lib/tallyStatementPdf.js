@@ -1,42 +1,36 @@
-import { createRequire } from "node:module";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { parseTallyStatementPositionedPages } from "./tallyStatementCompare.js";
 
-const requireFromRoot = createRequire(pathToFileURL(path.join(process.cwd(), "package.json")));
-
-async function loadPdfJs() {
-  const canvas = await import("@napi-rs/canvas");
-  if (typeof globalThis.DOMMatrix === "undefined" && canvas.DOMMatrix) {
-    globalThis.DOMMatrix = canvas.DOMMatrix;
+async function ensureDomPolyfill() {
+  if (typeof globalThis.DOMMatrix !== "undefined"
+    && typeof globalThis.ImageData !== "undefined"
+    && typeof globalThis.Path2D !== "undefined") {
+    return;
   }
-  if (typeof globalThis.ImageData === "undefined" && canvas.ImageData) {
-    globalThis.ImageData = canvas.ImageData;
-  }
-  if (typeof globalThis.Path2D === "undefined" && canvas.Path2D) {
-    globalThis.Path2D = canvas.Path2D;
-  }
-
-  const pdfPath = requireFromRoot.resolve("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdfjs = await import(pathToFileURL(pdfPath).href);
-  if (pdfjs.GlobalWorkerOptions) {
-    try {
-      const workerPath = requireFromRoot.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
-      pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
-    } catch {
-      pdfjs.GlobalWorkerOptions.workerSrc = "";
+  try {
+    const canvas = await import("@napi-rs/canvas");
+    if (typeof globalThis.DOMMatrix === "undefined" && canvas.DOMMatrix) {
+      globalThis.DOMMatrix = canvas.DOMMatrix;
     }
+    if (typeof globalThis.ImageData === "undefined" && canvas.ImageData) {
+      globalThis.ImageData = canvas.ImageData;
+    }
+    if (typeof globalThis.Path2D === "undefined" && canvas.Path2D) {
+      globalThis.Path2D = canvas.Path2D;
+    }
+  } catch {
+    // pdfjs loads canvas itself when this package is unavailable.
   }
-  return pdfjs;
 }
 
 export async function parseTallyStatementPdfBuffer(buffer) {
-  const pdfjs = await loadPdfJs();
-  const doc = await pdfjs.getDocument({
+  await ensureDomPolyfill();
+  const doc = await getDocument({
     data: new Uint8Array(buffer),
     useSystemFonts: true,
     isEvalSupported: false,
     useWorkerFetch: false,
+    disableFontFace: true,
   }).promise;
 
   const pages = [];

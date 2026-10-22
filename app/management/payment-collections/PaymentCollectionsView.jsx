@@ -216,8 +216,8 @@ const TEXT = {
     ar: "تم حفظ الزيارة. شارك هذا الملخص على واتساب الآن — يعمل بدون اتصال أيضاً.",
   },
   whatsappShareAttachmentsHint: {
-    en: "Visit saved. Share the uploaded photos/files together with this summary on WhatsApp.",
-    ar: "تم حفظ الزيارة. شارك الصور/الملفات المرفوعة مع هذا الملخص على واتساب.",
+    en: "Visit saved. Share the receipt/payment photo with this summary on WhatsApp.",
+    ar: "تم حفظ الزيارة. شارك صورة الإيصال/الدفع مع هذا الملخص على واتساب.",
   },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy (optional)", ar: "صورة الدفع (اختياري)" },

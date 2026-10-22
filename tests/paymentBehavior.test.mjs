@@ -184,12 +184,12 @@ test("matchPaymentsFifo settles dual-party Payment against Purchase before sales
   assert.equal(Number(purchaseAllocations[1].amount.toFixed(2)), 29241.89);
   assert.equal(purchaseAllocations[1].purchase_voucher, "58");
   assert.equal(Number(purchases[0].remaining.toFixed(2)), 0);
-  assert.equal(Number(purchases[1].remaining.toFixed(2)), 10145.61);
-  // Purchase must not inflate AR collections / settle the sales invoice beyond the real receipt.
+  // The slice no Payment covered settles the earlier sales invoice. It is not cash.
+  assert.equal(Number(purchases[1].remaining.toFixed(2)), 0);
   assert.equal(allocations.length, 1);
   assert.equal(allocations[0].vch_no, "140");
   assert.equal(Number(allocations[0].amount.toFixed(2)), 35436.1);
-  assert.equal(Number(invoices[0].remaining.toFixed(2)), 22063.9);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 11918.29);
 
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -213,10 +213,75 @@ test("matchPaymentsFifo settles dual-party Payment against Purchase before sales
   );
   assert.ok(sepDay.receipts[0].applications.every((row) => row.target_kind === "purchase"));
   assert.equal(Number(ledger.totals.payment_applied_to_purchases.toFixed(2)), 99679.39);
-  assert.equal(Number(ledger.totals.open_purchase_amount.toFixed(2)), 10145.61);
+  assert.equal(Number(ledger.totals.open_purchase_amount.toFixed(2)), 0);
+  assert.equal(Number(ledger.totals.purchase_applied_to_sales.toFixed(2)), 10145.61);
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 35436.1);
   assert.ok(ledger.settlementEvents.some((row) => (
     row.target_kind === "purchase" && row.vch_no === "Sep//Bpmt0125"
   )));
+});
+
+test("matchPaymentsFifo Purchase with no Payment settles earlier sales and not a later invoice", () => {
+  const { purchaseSalesAllocations, invoices, allocations, purchases } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-05-20", voucher_number: "NFD/845", sales_amount: 5578.5, category: "Stationery" },
+      { transaction_date: "2026-10-15", voucher_number: "RNFD/573", sales_amount: 5857, category: "Stationery" },
+    ],
+    [
+      { receipt_date: "2026-06-20", amount: 2880, vch_no: "P-165", vch_type: "Purchase" },
+      { receipt_date: "2026-10-13", amount: 3000, vch_no: "1965", vch_type: "Receipt" },
+    ],
+  );
+
+  assert.equal(purchaseSalesAllocations.length, 1);
+  assert.equal(purchaseSalesAllocations[0].purchase_voucher, "P-165");
+  assert.equal(purchaseSalesAllocations[0].voucher_number, "NFD/845");
+  assert.equal(Number(purchaseSalesAllocations[0].amount.toFixed(2)), 2880);
+  assert.equal(Number(purchases[0].remaining.toFixed(2)), 0);
+  assert.ok(allocations.every((row) => row.vch_no !== "P-165"));
+  assert.equal(allocations[0].voucher_number, "NFD/845");
+  const earlier = invoices.find((row) => row.voucher_number === "NFD/845");
+  const later = invoices.find((row) => row.voucher_number === "RNFD/573");
+  assert.ok(Math.abs(earlier.remaining - (5578.5 * 1.15 - 2880 - 3000)) < 0.02);
+  assert.equal(Number(later.remaining.toFixed(2)), Number((5857 * 1.15).toFixed(2)));
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-05-20", voucher_number: "NFD/845", sales_amount: 5578.5, category: "Stationery" },
+      { transaction_date: "2026-10-15", voucher_number: "RNFD/573", sales_amount: 5857, category: "Stationery" },
+    ],
+    receipts: [
+      { receipt_date: "2026-06-20", amount: 2880, vch_no: "P-165", vch_type: "Purchase" },
+      { receipt_date: "2026-10-13", amount: 3000, vch_no: "1965", vch_type: "Receipt" },
+    ],
+  });
+  const purchaseDay = ledger.datewise.find((row) => row.date === "2026-06-20");
+  assert.equal(purchaseDay.purchases[0].applications.length, 1);
+  assert.equal(purchaseDay.purchases[0].applications[0].voucher_number, "NFD/845");
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 3000);
+  assert.equal(Number(ledger.totals.purchase_applied_to_sales.toFixed(2)), 2880);
+  assert.equal(ledger.totals.sales_collected_matches_open, true);
+  const settled = ledger.invoices.find((row) => row.voucher_number === "NFD/845");
+  assert.equal(settled.purchase_settlements.length, 1);
+  assert.equal(settled.purchase_settlements[0].voucher_number, "P-165");
+});
+
+test("matchPaymentsFifo open Purchase does not settle a sales invoice dated after it", () => {
+  const { purchaseSalesAllocations, invoices, purchases } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-01-01", voucher_number: "OLD", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-10-08", voucher_number: "LATER", sales_amount: 2000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-02-01", amount: 1150, vch_no: "R1", vch_type: "Receipt" },
+      { receipt_date: "2026-06-20", amount: 2880, vch_no: "P-165", vch_type: "Purchase" },
+    ],
+  );
+
+  assert.equal(purchaseSalesAllocations.length, 0);
+  assert.equal(Number(purchases[0].remaining.toFixed(2)), 2880);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "OLD").remaining.toFixed(2)), 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "LATER").remaining.toFixed(2)), 2300);
 });
 
 test("matchPaymentsFifo Payment leftover after Purchases settles sales invoices", () => {

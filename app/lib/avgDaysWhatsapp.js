@@ -128,8 +128,8 @@ export async function loadCustomerAvgDaysToPay({
 }
 
 /**
- * Prefetch avg days when a visit form opens so save can stay offline-first
- * and still include the figure in WhatsApp when history is already warm.
+ * Prefetch avg days when a visit form opens so a ready figure is on the row
+ * before save. Save still loads once inside the working-hours budget if not.
  */
 export function prefetchCustomerAvgDaysForVisit(options = {}) {
   return loadCustomerAvgDaysToPay(options);
@@ -146,6 +146,41 @@ export async function awaitAvgDaysPrefetch(promise, timeoutMs = 1500) {
         setTimeout(() => resolve(null), timeout);
       }),
     ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Value for a WhatsApp share. Prefer a figure already on the customer row or a
+ * finished prefetch. Otherwise wait for the in-flight prefetch, then one fresh
+ * load, inside the same time budget as the other share lines (working hours).
+ */
+export async function resolveAvgDaysForWhatsapp({
+  local = null,
+  cached = null,
+  pending = null,
+  load = null,
+  timeoutMs = 8000,
+} = {}) {
+  const ready = resolveLocalAvgDaysToPay(local) || resolveLocalAvgDaysToPay(cached);
+  if (ready) return ready;
+
+  const started = Date.now();
+  const limit = Math.max(0, Number(timeoutMs) || 0);
+  const remaining = () => Math.max(0, limit - (Date.now() - started));
+
+  if (pending && typeof pending.then === "function" && remaining() > 0) {
+    const fromPending = resolveLocalAvgDaysToPay(
+      await awaitAvgDaysPrefetch(pending, remaining()),
+    );
+    if (fromPending) return fromPending;
+  }
+
+  if (typeof load !== "function" || remaining() <= 0) return null;
+  try {
+    const loaded = await awaitAvgDaysPrefetch(Promise.resolve().then(() => load()), remaining());
+    return resolveLocalAvgDaysToPay(loaded);
   } catch {
     return null;
   }

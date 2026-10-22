@@ -8098,6 +8098,16 @@ body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleStackedHeaderTable
   color: #5a4a6a;
 }
 
+.paymentSettleStatementLead {
+  background: #fff4df;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+tr.paymentSettleStatementLead td {
+  box-shadow: inset 3px 0 0 #b42318;
+}
+
 /* ==========================================================
    SALES QTY LIMITS (mobile-friendly cards + item search)
    ========================================================== */

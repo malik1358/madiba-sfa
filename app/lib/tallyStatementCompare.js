@@ -860,3 +860,102 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     },
   };
 }
+
+function subsetSumIndexes(items, targetCents) {
+  const limit = items.length > 18 ? 18 : items.length;
+  const pool = items
+    .slice()
+    .sort((left, right) => Math.abs(right.cents) - Math.abs(left.cents))
+    .slice(0, limit);
+  let best = null;
+  const chosen = [];
+
+  function walk(start, sum) {
+    if (Math.abs(sum - targetCents) <= 5) {
+      if (!best || chosen.length < best.length) best = chosen.slice();
+      return;
+    }
+    if (best && chosen.length >= best.length) return;
+    for (let index = start; index < pool.length; index += 1) {
+      if (best && chosen.length + 1 >= best.length) break;
+      chosen.push(pool[index].index);
+      walk(index + 1, sum + pool[index].cents);
+      chosen.pop();
+    }
+  }
+
+  walk(0, 0);
+  return best;
+}
+
+/**
+ * Customer Audit Open Δ is Machine Open minus the outstanding-file total.
+ * The statement movement also includes ledger lines that are not in that file
+ * (a later sale, an unallocated receipt, a purchase). Those lines are returned
+ * separately so the statement difference equals Open Δ.
+ * Difference is SFA minus Tally, the same sign as Open Δ.
+ */
+export function reconcileStatementToOpenDelta(result, { machineOpen, tallyOpen } = {}) {
+  const machine = Number(machineOpen);
+  const tally = Number(tallyOpen);
+  if (!result?.rows || !Number.isFinite(machine) || !Number.isFinite(tally)) return result;
+
+  const openDelta = roundMoney(machine - tally);
+  const tallyNet = Number(result.totals?.tallyNet || 0);
+  const sfaNet = Number(result.totals?.sfaNet || 0);
+  const bridgeTarget = roundMoney((tallyNet - tally) - (sfaNet - machine));
+  const rows = result.rows.map((row) => ({ ...row, leadsGap: false }));
+
+  let bridgeIndexes = [];
+  if (Math.abs(bridgeTarget) > TALLY_STATEMENT_TOLERANCE) {
+    const candidates = [];
+    rows.forEach((row, index) => {
+      const tallyAmount = Math.abs(row.tallyDebit) + Math.abs(row.tallyCredit);
+      const sfaAmount = Math.abs(row.sfaDebit) + Math.abs(row.sfaCredit);
+      const oneSided = tallyAmount <= TALLY_STATEMENT_TOLERANCE || sfaAmount <= TALLY_STATEMENT_TOLERANCE;
+      if (!oneSided || Math.abs(row.difference) <= TALLY_STATEMENT_TOLERANCE) return;
+      candidates.push({ index, cents: Math.round(Number(row.difference) * 100) });
+    });
+    const picked = subsetSumIndexes(candidates, Math.round(bridgeTarget * 100));
+    if (!picked) return result;
+    bridgeIndexes = picked;
+  }
+
+  const bridgeSet = new Set(bridgeIndexes);
+  const bridgeRows = [];
+  const kept = [];
+  rows.forEach((row, index) => {
+    const next = { ...row, difference: roundMoney(-Number(row.difference || 0)) };
+    if (bridgeSet.has(index)) bridgeRows.push(next);
+    else kept.push(next);
+  });
+
+  let running = 0;
+  let leadIndex = -1;
+  kept.forEach((row, index) => {
+    running = roundMoney(running + row.difference);
+    row.runningGap = running;
+    if (leadIndex < 0 && row.status !== "matched" && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
+      leadIndex = index;
+      row.leadsGap = true;
+    }
+  });
+
+  const difference = roundMoney(kept.reduce((total, row) => total + row.difference, 0));
+  if (Math.abs(difference - openDelta) > TALLY_STATEMENT_TOLERANCE) return result;
+
+  return {
+    ...result,
+    rows: kept,
+    bridgeRows,
+    lead: leadIndex >= 0 ? kept[leadIndex] : null,
+    reconciledToOpenDelta: true,
+    totals: {
+      ...result.totals,
+      difference,
+      openDelta: difference,
+      issueCount: kept.filter((row) => row.status !== "matched").length,
+      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
+    },
+  };
+}

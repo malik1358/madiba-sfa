@@ -56,6 +56,12 @@ function median(values) {
 
 /** Same-day / next-day full CNs reverse immediately; exact item+qty mirrors reverse on any later date. */
 export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
+/**
+ * A leftover named credit note may void an exact later mirror this many days
+ * after the note. The next day stays a live reissue (customer 1224, sale 2397).
+ * Customer 1009: credit note 127 voids sale 2446 four days later.
+ */
+export const LEFTOVER_FORWARD_MIRROR_MAX_DAYS = 7;
 /** Two amounts count as the same bill (exact Payment↔Purchase, compare). Not a reason to drop money. */
 const AMOUNT_TOLERANCE = 0.02;
 /** Float noise only. A posted halala (0.01) is real money and must still settle. */
@@ -577,6 +583,11 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
  *    A CN that already names a different voucher is skipped here.
  * 3) Any later date when amount AND items+qty exactly match (full mirror CN).
  *    A named CN is skipped here too unless the mirror is the named voucher.
+ *    A credit note dated before the invoice does not void that later sale,
+ *    except a leftover named note whose own bill is already reversed: it may
+ *    void an exact mirror up to LEFTOVER_FORWARD_MIRROR_MAX_DAYS later
+ *    (customer 1009: credit note 127 voids 2446). The next day stays a reissue
+ *    (customer 1224: 2397 stays open).
  *
  * Orphan / blank CNs stay unpaired when a vouchered CN already covers the void.
  */
@@ -706,8 +717,14 @@ export function findImmediateCreditNoteReversals(
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
 
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
-        if (offset == null || offset < 0) return null;
-        const days = offset;
+        if (offset == null) return null;
+        const invoiceAfterNote = offset < 0;
+        const days = Math.abs(offset);
+        // Next-day bills dated after the credit note are reissues (2397).
+        // Farther than a week is a new sale, not this note.
+        if (invoiceAfterNote && (days <= maxDays || days > LEFTOVER_FORWARD_MIRROR_MAX_DAYS)) {
+          return null;
+        }
 
         if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
 
@@ -722,11 +739,13 @@ export function findImmediateCreditNoteReversals(
         // A named credit note may void only that voucher while the named bill
         // is still open. Once that bill is already reversed, a later CN with the
         // same Ref. No. may still clear a leftover same-amount twin.
-        if (explicitRef && !refHit) {
-          const namedStillOpen = invoiceList.some((candidate) => {
-            const candidateKey = invoiceKey(candidate.invoice_date, candidate.voucher_number);
-            if (reversedKeys.has(candidateKey)) return false;
-            return noteRefsInvoice(note, candidate);
+        const namedBills = explicitRef
+          ? invoiceList.filter((candidate) => noteRefsInvoice(note, candidate))
+          : [];
+        if (explicitRef && !refHit && namedBills.length) {
+          const namedStillOpen = namedBills.some((candidate) => {
+            const namedKey = invoiceKey(candidate.invoice_date, candidate.voucher_number);
+            return !reversedKeys.has(namedKey);
           });
           if (namedStillOpen) return null;
         }
@@ -739,8 +758,9 @@ export function findImmediateCreditNoteReversals(
         const exactMirror = noteHasItems
           && invoiceHasItems
           && itemsAndQtyExactlyMatch(note.items, invoice.items);
-        const withinWindow = days <= maxDays;
+        const withinWindow = !invoiceAfterNote && days <= maxDays;
 
+        if (invoiceAfterNote && (!explicitRef || !namedBills.length || !exactMirror)) return null;
         if (!withinWindow && !exactMirror) return null;
         if (withinWindow && noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) {
           return null;

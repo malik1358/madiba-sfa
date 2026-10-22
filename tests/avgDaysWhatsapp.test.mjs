@@ -6,6 +6,7 @@ import {
   formatAvgDaysToPayWhatsappLines,
   resolveLocalAvgDaysToPay,
 } from "../app/lib/avgDaysWhatsapp.js";
+import { buildPaymentBehavior } from "../app/lib/paymentBehavior.js";
 import { buildOrderWhatsappSummary } from "../app/lib/orderWhatsapp.js";
 import { buildFieldVisitWhatsappSummary } from "../app/lib/fieldVisitWhatsapp.js";
 import { buildCollectionVisitSummary } from "../app/lib/collectionVisitSummary.js";
@@ -120,4 +121,93 @@ test("buildCollectionVisitSummary includes avg days to pay with blank lines arou
 
   assert.match(summary, /Visit date\/time: 30\/08\/2026, 11:15/);
   assert.match(summary, />120: 0\n\nAvg days to pay: 80\n6-month avg: 55\n\nGPS:/);
+});
+
+test("WhatsApp avg days uses the amount-weighted figure and skips cash vouchers", () => {
+  const behavior = buildPaymentBehavior({
+    transactions: [
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "RC/1",
+        voucher_type: "RIYADH CASH SALES",
+        sales_amount: 1000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "CNFD/APR/013",
+        voucher_type: "CASH SALES NON FOOD DIVISION",
+        sales_amount: 1000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+      {
+        transaction_date: "2026-01-10",
+        voucher_number: "NFD/2",
+        voucher_type: "RIYADH W/S CREDIT",
+        sales_amount: 100000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+    ],
+    receipts: [
+      { receipt_date: "2026-01-02", amount: 1000 },
+      { receipt_date: "2026-01-03", amount: 1000 },
+      { receipt_date: "2026-02-09", amount: 100000 },
+    ],
+    todayIso: "2026-03-01",
+  });
+
+  // Equal vote of 1 day, 2 days, and 30 days would be 11. Amount-weighted
+  // credit-only is 30. Cash vouchers must not pull it down.
+  assert.equal(behavior.avgDaysToPay, 30);
+
+  const order = buildOrderWhatsappSummary({
+    customerCode: "1002",
+    customerName: "Test Customer",
+    statusLabel: "Submitted",
+  }, "en", {
+    analytics: { paymentBehavior: behavior },
+  });
+  assert.match(order, /Avg days to pay: 30/);
+
+  const visit = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "1002",
+      customer_name: "Test Customer",
+      avg_days_to_pay: 5,
+    },
+    visitForm: { outcome: "PAYMENT_FOLLOWUP", nextVisitAt: "2026-03-10" },
+    avgDaysToPay: behavior,
+  });
+  assert.match(visit, /Avg days to pay: 30/);
+
+  const collection = buildCollectionVisitSummary(
+    {
+      customer_name: "Test Customer",
+      customer_code: "1002",
+      salesman_name: "Parvez",
+      avg_days_to_pay: 5,
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "FUNDS_RECEIVED",
+      amountReceived: "500",
+      receiptMode: "CASH",
+      nextVisitAt: "2026-03-10",
+    },
+    { avgDaysToPay: behavior },
+  );
+  assert.match(collection, /Avg days to pay: 30/);
+  assert.deepEqual(
+    formatAvgDaysToPayWhatsappLines(behavior),
+    ["", "Avg days to pay: 30"].concat(
+      behavior.avgDaysToPay6m == null ? [] : [`6-month avg: ${behavior.avgDaysToPay6m}`],
+    ),
+  );
 });

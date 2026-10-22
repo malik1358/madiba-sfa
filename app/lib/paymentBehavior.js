@@ -832,9 +832,10 @@ export function buildSortedReceipts(receipts = []) {
  * before the cash invoice only takes that slot when no older bill is still open.
  * Invoices reversed immediately by credit notes are excluded from matching.
  * Unpaired credit notes settle open AR like receipts (VAT-incl) and count in Paid.
- * A CN with an explicit Ref. No. settles the next open voucher(s) after that
- * bill first. The named bill keeps its full sales. Leftover then fills other
- * open invoices, and any remainder settles the named bill when it is still open.
+ * A CN with an explicit Ref. No. settles that named invoice first. Only what
+ * the named bill cannot take (already paid, or the note is larger than the bill)
+ * follows oldest-open FIFO on the other invoices. Sales on the named bill stay
+ * the gross figure; the credit note shows in Paid.
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
@@ -1204,31 +1205,20 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       continue;
     }
 
-    // Referenced credit notes settle later vouchers first. The named bill is
-    // last, and only for what those later bills could not take.
+    // Referenced credit notes settle the named Ref. No. first. Leftover
+    // (bill already paid, or the note is larger than the bill) then follows
+    // oldest-open FIFO on the other invoices.
     if (event.kind === "credit_note") {
       const referencedVoucher = normalizeRef(event.reference);
       if (referencedVoucher) {
-        let seenRef = false;
-        for (const invoice of invoices) {
-          if (!hasSettlementAmount(remaining)) break;
-          if (normalizeRef(invoice.voucher_number) === referencedVoucher) {
-            seenRef = true;
-            continue;
-          }
-          if (!seenRef) continue;
-          remaining = applyToInvoice(event, invoice, remaining);
-        }
-        // Other open invoices, still skipping the named bill.
-        for (const invoice of invoices) {
-          if (!hasSettlementAmount(remaining)) break;
-          if (normalizeRef(invoice.voucher_number) === referencedVoucher) continue;
-          remaining = applyToInvoice(event, invoice, remaining);
-        }
-        // Named bill is still open (no later voucher, or those vouchers are full).
         for (const invoice of invoices) {
           if (!hasSettlementAmount(remaining)) break;
           if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
+          remaining = applyToInvoice(event, invoice, remaining);
+        }
+        for (const invoice of invoices) {
+          if (!hasSettlementAmount(remaining)) break;
+          if (normalizeRef(invoice.voucher_number) === referencedVoucher) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
         continue;
@@ -1879,7 +1869,7 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
- * Referenced credit notes settle later vouchers like receipts (never the named Ref bill).
+ * Referenced credit notes settle the named Ref. No. first, then leftover oldest-open FIFO.
  * Paid = cash FIFO + CN settlements; nested credit notes under an invoice show in the Paid column.
  * Unreferenced orphans follow oldest-open FIFO with cash. Outstanding upload is kept on each row
  * for Tally comparison — it does not rewrite Paid/Open.
@@ -2418,14 +2408,29 @@ export function buildPaymentSettlementLedger({
       return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
     });
 
-  // Display-only attachment for the credit-note table (applied_to_*). Invoice child
-  // rows under Settlement use FIFO allocation so a Ref. No. can settle the next voucher.
+  // Credit-note table "Applied to" follows the same FIFO as the invoice Paid column.
   const creditNotes = attachCreditNotesToInvoices(invoiceRows, unmatchedCreditNotes);
   invoiceRows.forEach((row) => {
     row.credit_notes = (Array.isArray(row.fifo_credit_notes) ? row.fifo_credit_notes : []).map((note) => ({
       ...note,
       kind: note.kind || "Credit Note",
     }));
+  });
+  const appliedByNote = new Map();
+  invoiceRows.forEach((row) => {
+    (row.fifo_credit_notes || []).forEach((chunk) => {
+      const key = `${chunk.credit_date}::${chunk.voucher_number}`;
+      const list = appliedByNote.get(key) || [];
+      if (row.voucher_number && !list.includes(row.voucher_number)) list.push(row.voucher_number);
+      appliedByNote.set(key, list);
+    });
+  });
+  creditNotes.forEach((note) => {
+    const targets = appliedByNote.get(`${note.credit_date}::${note.voucher_number}`);
+    if (targets?.length) {
+      note.applied_to_voucher = targets.join(", ");
+      note.applied_to_date = note.applied_to_date || "";
+    }
   });
 
   const creditNoteAmount = creditNotes.reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);

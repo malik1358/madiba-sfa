@@ -164,6 +164,47 @@ test("a Tally PDF ledger treats the amount column as the customer side", () => {
   assert.equal(parsed.closing.amount, 7795.5);
 });
 
+test("a Tally PDF with plain amounts and To/By markers still reads each line", () => {
+  const page = [
+    { x: 137.9, y: 717.2, width: 22, text: "Date" },
+    { x: 192.2, y: 717.1, width: 52, text: "Particulars" },
+    { x: 335.4, y: 717.2, width: 40, text: "Vch Type" },
+    { x: 442, y: 717.2, width: 36, text: "Vch No." },
+    { x: 483.5, y: 717.1, width: 24, text: "Debit" },
+    { x: 519.8, y: 717.1, width: 28, text: "Credit" },
+    { x: 122.8, y: 706.8, width: 48, text: "15-Apr-26" },
+    { x: 154.6, y: 706.2, width: 12, text: "To" },
+    { x: 167.9, y: 706, width: 140, text: "Sales Non Food Division - Building Material" },
+    { x: 335.4, y: 706.7, width: 90, text: "SALES-NON FOOD DIVISION" },
+    { x: 439, y: 706.8, width: 40, text: "NFD/436" },
+    { x: 473.8, y: 706, width: 25.8, text: "7966.05" },
+    { x: 122.6, y: 665, width: 48, text: "29-Jun-26" },
+    { x: 154.6, y: 664.4, width: 12, text: "By" },
+    { x: 167.9, y: 664.2, width: 140, text: "Alrajhi Bank (525000010006080575484) SAR" },
+    { x: 335.4, y: 664.9, width: 36, text: "Receipt" },
+    { x: 450.5, y: 665, width: 22, text: "1143" },
+    { x: 508.7, y: 664.2, width: 29.8, text: "19550.00" },
+    { x: 154.6, y: 487, width: 12, text: "By" },
+    { x: 205.7, y: 486.7, width: 70, text: "Closing Balance" },
+    { x: 508.7, y: 487, width: 29.8, text: "84180.00" },
+  ];
+
+  const parsed = parseTallyStatementPositionedPages([page]);
+  assert.equal(parsed.error, "");
+  assert.equal(parsed.entries.length, 2);
+  assert.equal(parsed.entries[0].date, "2026-04-15");
+  assert.equal(parsed.entries[0].voucher, "NFD/436");
+  assert.equal(parsed.entries[0].side, "debit");
+  assert.equal(parsed.entries[0].amount, 7966.05);
+  assert.equal(parsed.entries[0].particulars.includes("To"), false);
+  assert.equal(parsed.entries[1].date, "2026-06-29");
+  assert.equal(parsed.entries[1].side, "credit");
+  assert.equal(parsed.entries[1].amount, 19550);
+  assert.equal(parsed.entries[1].voucher, "1143");
+  assert.equal(parsed.closing.side, "credit");
+  assert.equal(parsed.closing.amount, 84180);
+});
+
 test("a supplier payment is a debit and a purchase is a credit", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

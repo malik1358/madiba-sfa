@@ -4,6 +4,7 @@ import {
   ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   blockedByAvgDaysMessage,
   parseOrderBlockOverride,
+  resolveDisplayedOrderBlock,
   resolveOrderBlockStatus,
   resolveOrderSubmissionBlockStatus,
 } from "../app/lib/customerOrderBlock.js";
@@ -47,6 +48,27 @@ test("parseOrderBlockOverride handles invalid JSON safely", () => {
   const override = parseOrderBlockOverride("{invalid");
   assert.equal(override.isUnblocked, false);
   assert.equal(override.note, "");
+});
+
+test("screen block uses the average already loaded and the override from the API", () => {
+  const shown = resolveDisplayedOrderBlock({
+    avgDaysToPay: 29,
+    avgDaysToPay6m: 29,
+    payload: {
+      override: { isUnblocked: false, note: "", updatedAt: "", updatedBy: "" },
+      canAdminOverride: true,
+    },
+  });
+  assert.equal(shown.blocked, false);
+  assert.equal(shown.avgDaysToPay, 29);
+  assert.equal(shown.canAdminOverride, true);
+
+  const blocked = resolveDisplayedOrderBlock({
+    avgDaysToPay: 140,
+    payload: { isAdminUnblocked: true },
+  });
+  assert.equal(blocked.blocked, false);
+  assert.equal(blocked.isAdminUnblocked, true);
 });
 
 test("blocked message includes rounded average", () => {

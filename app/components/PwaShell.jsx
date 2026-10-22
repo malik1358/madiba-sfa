@@ -12,6 +12,7 @@ import { startCataloguePhotoSync } from "../lib/catalogueOfflineClient";
 import { WORKDAY_GATE_READY_EVENT } from "../lib/morningAttendance";
 
 const BACKGROUND_DATA_START_DELAY_MS = 2500;
+const CATALOGUE_SYNC_DELAY_MS = 45000;
 
 async function hydrateMobileSnapshotIfMissing() {
   try {
@@ -44,13 +45,22 @@ export default function PwaShell() {
   useEffect(() => {
     let started = false;
     let fallbackTimer = 0;
+    let catalogueTimer = 0;
+
+    function scheduleCatalogueSync() {
+      if (catalogueTimer) return;
+      catalogueTimer = window.setTimeout(() => {
+        catalogueTimer = 0;
+        void Promise.resolve(startCataloguePhotoSync()).catch(() => {});
+      }, CATALOGUE_SYNC_DELAY_MS);
+    }
 
     function startBackgroundHydrate() {
       if (started) return;
       started = true;
       window.clearTimeout(fallbackTimer);
       hydrateMobileSnapshotIfMissing();
-      void startCataloguePhotoSync();
+      scheduleCatalogueSync();
     }
 
     fallbackTimer = window.setTimeout(startBackgroundHydrate, BACKGROUND_DATA_START_DELAY_MS);
@@ -62,6 +72,7 @@ export default function PwaShell() {
       window.addEventListener("online", onOnline);
       return () => {
         window.clearTimeout(fallbackTimer);
+        window.clearTimeout(catalogueTimer);
         window.removeEventListener(WORKDAY_GATE_READY_EVENT, startBackgroundHydrate);
         window.removeEventListener("online", onOnline);
       };
@@ -72,19 +83,20 @@ export default function PwaShell() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION") && started) {
         hydrateMobileSnapshotIfMissing();
-        void startCataloguePhotoSync();
+        scheduleCatalogueSync();
       }
     });
 
     const onOnline = () => {
       if (!started) return;
       hydrateMobileSnapshotIfMissing();
-      void startCataloguePhotoSync();
+      scheduleCatalogueSync();
     };
     window.addEventListener("online", onOnline);
 
     return () => {
       window.clearTimeout(fallbackTimer);
+      window.clearTimeout(catalogueTimer);
       window.removeEventListener(WORKDAY_GATE_READY_EVENT, startBackgroundHydrate);
       subscription.unsubscribe();
       window.removeEventListener("online", onOnline);

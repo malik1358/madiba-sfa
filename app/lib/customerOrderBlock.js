@@ -66,6 +66,43 @@ export function resolveOrderSubmissionBlockStatus({
   });
 }
 
+export function orderBlockOverrideFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (payload.override && typeof payload.override === "object") {
+    return {
+      isUnblocked: payload.override.isUnblocked === true,
+      note: String(payload.override.note || "").trim(),
+      updatedAt: String(payload.override.updatedAt || "").trim(),
+      updatedBy: String(payload.override.updatedBy || "").trim(),
+    };
+  }
+  return {
+    isUnblocked: payload.isAdminUnblocked === true,
+    note: "",
+    updatedAt: "",
+    updatedBy: "",
+  };
+}
+
+/** Screen badge: avg days already on the page, plus the admin override from the API. */
+export function resolveDisplayedOrderBlock({
+  avgDaysToPay = null,
+  avgDaysToPay6m = null,
+  payload = null,
+} = {}) {
+  if (!payload) return null;
+  const override = orderBlockOverrideFromPayload(payload);
+  return {
+    ...resolveOrderBlockStatus({
+      avgDaysToPay: avgDaysToPay ?? payload.avgDaysToPay ?? null,
+      avgDaysToPay6m: avgDaysToPay6m ?? payload.avgDaysToPay6m ?? null,
+      override,
+    }),
+    override,
+    canAdminOverride: payload.canAdminOverride === true,
+  };
+}
+
 export function blockedByAvgDaysMessage({
   threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   avgDaysToPay = null,

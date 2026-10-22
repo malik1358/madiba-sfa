@@ -47,6 +47,12 @@ async function saveCataloguePhotos() {
       },
       onStored: (id, blob) => emit({ type: "photo", id, blob, meta: next }),
     });
+  } catch (error) {
+    emit({
+      type: "error",
+      message: error?.message || "Unable to load photos and packing.",
+      hasCache: true,
+    });
   } finally {
     emit({ type: "done" });
   }

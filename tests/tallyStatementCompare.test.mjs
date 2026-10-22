@@ -6,6 +6,7 @@ import {
   findTallyStatementHeader,
   parseTallyStatementMatrix,
   parseTallyStatementPositionedPages,
+  reconcileStatementToOpenDelta,
 } from "../app/lib/tallyStatementCompare.js";
 
 const HEADER = ["Date", "Particulars", "Vch Type", "Vch No.", "Debit", "Credit"];
@@ -391,4 +392,51 @@ test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const result = compareTallyStatement(tally, sfa);
   assert.equal(result.totals.agrees, true);
   assert.equal(result.rows[0].status, "matched");
+});
+
+test("customer 1009 statement difference matches Open Δ and keeps ledger-only lines aside", () => {
+  const row = (fields) => ({
+    id: fields.voucher || fields.particulars,
+    status: fields.status || "tally_only",
+    date: fields.date || "2026-10-01",
+    voucher: fields.voucher || "",
+    vchType: fields.vchType || "",
+    particulars: fields.particulars || "",
+    tallyDebit: fields.tallyDebit || 0,
+    tallyCredit: fields.tallyCredit || 0,
+    sfaDebit: fields.sfaDebit || 0,
+    sfaCredit: fields.sfaCredit || 0,
+    difference: (fields.tallyDebit || 0) - (fields.tallyCredit || 0) - ((fields.sfaDebit || 0) - (fields.sfaCredit || 0)),
+    leadsGap: false,
+  });
+  const rows = [
+    row({ voucher: "1358", status: "amount", tallyDebit: 2349, sfaDebit: 2349.45, date: "2025-10-08" }),
+    row({ voucher: "127", status: "sfa_only", sfaCredit: 2415, date: "2025-12-31" }),
+    row({ voucher: "2446", status: "sfa_only", sfaDebit: 2415, date: "2026-01-04" }),
+    row({ voucher: "", particulars: "Cr ROUND OFF", vchType: "Journal", tallyDebit: 1, date: "2026-02-10" }),
+    row({ voucher: "NFD/980", tallyDebit: 4485, date: "2026-06-11" }),
+    row({ voucher: "271", vchType: "Purchase", tallyCredit: 270, date: "2026-10-01" }),
+    row({ voucher: "", particulars: "Receipt", status: "sfa_only", sfaCredit: 1.28, date: "2026-10-09" }),
+    row({ voucher: "JV/Coll/2026/1108", vchType: "JV-Collection", tallyCredit: 1000, date: "2026-10-21" }),
+    row({ voucher: "RNFD/603", tallyDebit: 3220, date: "2026-10-22" }),
+  ];
+  const reconciled = reconcileStatementToOpenDelta({
+    rows,
+    totals: { tallyNet: 10829.28, sfaNet: 4392.45, difference: 6436.83 },
+  }, { machineOpen: 4392.45, tallyOpen: 8879.28 });
+
+  assert.equal(reconciled.reconciledToOpenDelta, true);
+  assert.equal(reconciled.totals.difference, -4486.83);
+  assert.deepEqual(
+    reconciled.bridgeRows.map((line) => line.voucher).sort(),
+    ["271", "JV/Coll/2026/1108", "RNFD/603"],
+  );
+  assert.equal(
+    reconciled.rows.some((line) => line.voucher === "NFD/980"),
+    true,
+  );
+  assert.equal(
+    Math.round(reconciled.rows.reduce((total, line) => total + line.difference, 0) * 100) / 100,
+    -4486.83,
+  );
 });

@@ -223,6 +223,37 @@ test("a round-off that is not the fils on that voucher stays in the mismatch lis
   assert.equal(result.totals.agrees, false);
 });
 
+test("credit note 33 reversing sales 1583 drops both fils when they cross", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["02-11-2025", "Sales", "Sales", "1583", 1111, ""],
+    ["02-11-2025", "Sales", "Sales", "1584", 1366, ""],
+    ["02-11-2025", "Cr Sales Non Food Division", "Credit Note", "33", "", 1111],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    reversedInvoices: [{
+      invoice_date: "2025-11-02",
+      voucher_number: "1583",
+      amount_incl_vat: 1110.9,
+      credit_note_date: "2025-11-02",
+      credit_note_voucher: "33",
+      credit_note_amount: 1110.9,
+    }],
+    invoices: [
+      { invoice_date: "2025-11-02", voucher_number: "1584", amount_incl_vat: 1366.2 },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.rows.find((row) => row.voucher === "1583").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "33").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "1583").difference, 0);
+  assert.equal(result.rows.find((row) => row.voucher === "33").difference, 0);
+  assert.equal(result.rows.find((row) => row.voucher === "1584").status, "amount");
+  assert.equal(result.rows.find((row) => row.voucher === "1584").difference, -0.2);
+  assert.equal(result.lead.voucher, "1584");
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

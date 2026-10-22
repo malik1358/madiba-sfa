@@ -474,6 +474,7 @@ export function buildSfaStatementEntries({
         vchType: "Credit Note",
         side: "credit",
         amount: creditAmount,
+        reversesVoucher: String(invoice.voucher_number || "").trim(),
       });
     }
   });
@@ -488,6 +489,7 @@ export function buildSfaStatementEntries({
       vchType: String(note.voucher_type || note.kind || "Credit Note"),
       side: "credit",
       amount,
+      reversesVoucher: String(note.reference || note.ref_no || "").trim(),
     });
   });
 
@@ -597,6 +599,36 @@ function settleRoundOffRows(rows) {
   return rows.filter((row) => !consumed.has(row));
 }
 
+function sameVoucher(left, right) {
+  const a = voucherKey(left);
+  const b = voucherKey(right);
+  return Boolean(a && b && (a === b || vouchersMatch(a, b)));
+}
+
+// Credit note 33 reverses sales 1583. A +0.10 fils on the sale and −0.10 on
+// the note are the same rounding and leave the mismatch list together.
+function settleCrossedReversals(rows) {
+  rows.forEach((credit) => {
+    const target = credit.reversesVoucher;
+    if (!target || Math.abs(credit.difference) <= TALLY_STATEMENT_TOLERANCE) return;
+    const sale = rows.find((row) => (
+      row !== credit
+      && sameVoucher(row.voucher, target)
+      && (row.tallyDebit > 0 || row.sfaDebit > 0)
+      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
+      && Math.abs(row.difference + credit.difference) <= TALLY_STATEMENT_TOLERANCE
+    ));
+    if (!sale) return;
+    sale.status = "matched";
+    credit.status = "matched";
+    sale.difference = 0;
+    credit.difference = 0;
+    sale.leadsGap = false;
+    credit.leadsGap = false;
+  });
+  return rows;
+}
+
 function lineFromPair(tally, sfa, index) {
   const tallyDebit = tally?.side === "debit" ? roundMoney(tally.amount) : 0;
   const tallyCredit = tally?.side === "credit" ? roundMoney(tally.amount) : 0;
@@ -628,6 +660,7 @@ function lineFromPair(tally, sfa, index) {
     difference,
     runningGap: 0,
     leadsGap: false,
+    reversesVoucher: sfa?.reversesVoucher || "",
   };
 }
 
@@ -704,7 +737,7 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
-  const settledRows = settleRoundOffRows(rows);
+  const settledRows = settleCrossedReversals(settleRoundOffRows(rows));
 
   let running = 0;
   let leadIndex = -1;

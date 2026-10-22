@@ -5,7 +5,7 @@ import {
   customerAssignmentMatchesScope,
 } from "./customerSalesmanAssignment.js";
 
-const SEARCH_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,is_active";
+const SEARCH_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,is_active";
 const SEARCH_LIMIT = 20;
 
 function normalizeSearchText(value) {
@@ -95,5 +95,8 @@ export async function findCustomersForSettlementSearch(admin, scope, query) {
   return rankCustomerSearchRows(merged, query).slice(0, SEARCH_LIMIT).map((row) => ({
     customer_code: row.customer_code,
     customer_name: row.customer_name || "",
+    current_salesman_code: row.current_salesman_code || "",
+    previous_salesman_code: row.previous_salesman_code || "",
+    latest_transaction_date: row.latest_transaction_date || "",
   }));
 }

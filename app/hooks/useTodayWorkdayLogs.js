@@ -16,6 +16,7 @@ export function useTodayWorkdayLogs() {
   const [loginAt, setLoginAt] = useState(null);
   const [lunchOutAt, setLunchOutAt] = useState(null);
   const [lunchInAt, setLunchInAt] = useState(null);
+  const [endOfDayAt, setEndOfDayAt] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -25,6 +26,7 @@ export function useTodayWorkdayLogs() {
       setLoginAt(null);
       setLunchOutAt(null);
       setLunchInAt(null);
+      setEndOfDayAt(null);
       setLoading(false);
       return;
     }
@@ -37,6 +39,7 @@ export function useTodayWorkdayLogs() {
         setLoginAt(null);
         setLunchOutAt(null);
         setLunchInAt(null);
+        setEndOfDayAt(null);
         setLoading(false);
         return;
       }
@@ -49,7 +52,7 @@ export function useTodayWorkdayLogs() {
         .from("daily_activity_logs")
         .select("entry_type,note,created_at")
         .eq("user_id", userId)
-        .in("entry_type", ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN"])
+        .in("entry_type", ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY"])
         .gte("created_at", startIso)
         .lte("created_at", endIso)
         .order("created_at", { ascending: true });
@@ -58,12 +61,14 @@ export function useTodayWorkdayLogs() {
 
       const rows = logs || [];
       const loginLog = rows.find((row) => row.entry_type === "MORNING_ATTENDANCE");
+      const endLog = [...rows].reverse().find((row) => row.entry_type === "END_OF_DAY");
       const { lunchOutAt: lunchOut, lunchInAt: lunchIn } = extractLunchTimes(rows);
 
       if (loginLog) writeGateReadyState(userId, true);
       setLoginAt(loginLog ? logEventIso(loginLog) : null);
       setLunchOutAt(lunchOut);
       setLunchInAt(lunchIn);
+      setEndOfDayAt(endLog ? logEventIso(endLog) : null);
     } catch {
       // Keep last known values on transient failures.
     } finally {
@@ -78,6 +83,7 @@ export function useTodayWorkdayLogs() {
       setLoginAt(null);
       setLunchOutAt(null);
       setLunchInAt(null);
+      setEndOfDayAt(null);
       setLoading(false);
       return undefined;
     }
@@ -113,9 +119,11 @@ export function useTodayWorkdayLogs() {
     loginAt,
     lunchOutAt,
     lunchInAt,
+    endOfDayAt,
     loginTime: formatKsaTime(loginAt),
     lunchOutTime: formatKsaTime(lunchOutAt),
     lunchInTime: formatKsaTime(lunchInAt),
+    endOfDayTime: formatKsaTime(endOfDayAt),
     refresh,
   };
 }

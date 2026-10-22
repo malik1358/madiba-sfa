@@ -131,6 +131,7 @@ function CustomerAuditPageContent() {
     itemMaster,
     itemMasterStatus,
     loading,
+    searching,
     loadingCustomer,
     refreshing,
     expandedCategories,
@@ -409,9 +410,13 @@ function CustomerAuditPageContent() {
   );
 
   useEffect(() => {
+    if (!selectedCustomer?.customer_code) return undefined;
+
+    let cancelled = false;
     async function loadPrices() {
       try {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
+        if (cancelled) return;
         setPriceList(parsed.priceMap || {});
         setRegionPriceMaps(parsed.regionPriceMaps || {});
         setRetailRegionPriceMaps(parsed.retailRegionPriceMaps || {});
@@ -426,7 +431,10 @@ function CustomerAuditPageContent() {
     }
 
     loadPrices();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.customer_code]);
 
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -466,17 +474,33 @@ function CustomerAuditPageContent() {
   }
 
   useEffect(() => {
-    if (!requestedCustomerCode || loading || selectedCustomer) return;
-    if (!customers.length) return;
+    if (!requestedCustomerCode || selectedCustomer) return undefined;
 
-    const target = customers.find(
-      (customer) => String(customer.customer_code || "").trim().toUpperCase() === requestedCustomerCode
-    );
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token || cancelled) return;
 
-    if (target) {
-      handleOpenCustomer(target);
-    }
-  }, [requestedCustomerCode, loading, selectedCustomer, customers, handleOpenCustomer]);
+      const response = await fetch(`/api/customers/lookup?code=${encodeURIComponent(requestedCustomerCode)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (cancelled) return;
+      if (!response.ok || !payload.customer) {
+        setError(payload.error || "Customer not found.");
+        return;
+      }
+      setOrderQuantities({});
+      setShowOrderReview(false);
+      openCustomer(payload.customer);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedCustomerCode, selectedCustomer, openCustomer, setError]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -520,6 +544,7 @@ function CustomerAuditPageContent() {
             setSearch={setSearch}
             salesmen={salesmen}
             openCustomer={handleOpenCustomer}
+            searching={searching}
           />
 
           <div className="auditVersion">Page updated: {PAGE_VERSION}</div>

@@ -300,45 +300,6 @@ async function fetchVisibleCustomersNetwork(accessToken, {
   return payload.customers || [];
 }
 
-async function fetchCustomerHistoryNetwork(
-  accessToken,
-  customerCode,
-  customerName = "",
-  { fullHistory = false } = {},
-) {
-  const params = new URLSearchParams({
-    customerCode: String(customerCode || ""),
-  });
-  if (String(customerName || "").trim()) {
-    params.set("customerName", String(customerName).trim());
-  }
-  if (fullHistory) {
-    params.set("fullHistory", "1");
-    params.set("scope", "settlement");
-  }
-
-  const response = await fetch(
-    `/api/customer-history?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.error || "Unable to load customer history.");
-  }
-
-  return {
-    transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
-    peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
-    receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
-    fromDate: payload.fromDate || "",
-    fullHistory: Boolean(payload.fullHistory),
-  };
-}
-
 async function fetchItemsMasterNetwork() {
   const supabase = getSupabaseClient();
   if (!supabase) {
@@ -484,12 +445,88 @@ export async function fetchVisibleCustomersCached(accessToken, scope, options = 
   );
 }
 
+function historyPayloadFromResponse(payload) {
+  return {
+    transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
+    peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
+    receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
+    fromDate: payload.fromDate || "",
+    fullHistory: Boolean(payload.fullHistory),
+    receiptsPending: Boolean(payload.receiptsPending),
+  };
+}
+
+async function fetchCustomerHistoryNetwork(
+  accessToken,
+  customerCode,
+  customerName = "",
+  { fullHistory = false } = {},
+) {
+  const params = new URLSearchParams({
+    customerCode: String(customerCode || ""),
+  });
+  if (String(customerName || "").trim()) {
+    params.set("customerName", String(customerName).trim());
+  }
+  if (fullHistory) {
+    params.set("fullHistory", "1");
+    params.set("scope", "settlement");
+  }
+
+  const response = await fetch(
+    `/api/customer-history?${params.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || "Unable to load customer history.");
+  }
+
+  return historyPayloadFromResponse(payload);
+}
+
+function fillPendingReceipts({
+  accessToken,
+  customerCode,
+  customerName,
+  fullHistory,
+  cacheKey,
+  onUpdate,
+}) {
+  const delays = [2500, 4000, 8000];
+  void (async () => {
+    for (const delay of delays) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        const fresh = await fetchCustomerHistoryNetwork(
+          accessToken,
+          customerCode,
+          customerName,
+          { fullHistory },
+        );
+        if (!fresh.transactions.length) continue;
+        if (fresh.receiptsPending) continue;
+        await writeCacheEntry(cacheKey, fresh, { ttlMs: CACHE_TTL.customerHistoryMs });
+        onUpdate?.(fresh);
+        return;
+      } catch {
+        // The sales invoices are already on screen. Receipts can arrive on the next open.
+      }
+    }
+  })();
+}
+
 export async function fetchCustomerHistoryCached(accessToken, scope, customerCode, options = {}) {
   const customerName = options.customerName || "";
   // Settlement / unpaid math needs every sales month (day 1 → now), not the 6-month BI window.
   const fullHistory = options.fullHistory !== false;
-  return fetchWithLocalCacheResilient(
-    customerHistoryCacheKey(scope, customerCode, { fullHistory }),
+  const cacheKey = customerHistoryCacheKey(scope, customerCode, { fullHistory });
+  const result = await fetchWithLocalCacheResilient(
+    cacheKey,
     CACHE_TTL.customerHistoryMs,
     () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName, { fullHistory }),
     {
@@ -499,6 +536,19 @@ export async function fetchCustomerHistoryCached(accessToken, scope, customerCod
       revalidate: Boolean(options.revalidate),
     },
   );
+
+  if (result?.data?.receiptsPending && Array.isArray(result.data.transactions) && result.data.transactions.length > 0) {
+    fillPendingReceipts({
+      accessToken,
+      customerCode,
+      customerName,
+      fullHistory,
+      cacheKey,
+      onUpdate: options.onUpdate,
+    });
+  }
+
+  return result;
 }
 
 export async function fetchItemsMasterCached(options = {}) {

@@ -10,6 +10,7 @@ import {
 import { parsePartyName, splitPartyByLeadingCode } from "./customerCode.js";
 
 export const RECEIPT_DATASET_KEY = "receipt_register_dataset_v1";
+export const RECEIPT_DATASET_STAMP_KEY = "receipt_register_uploaded_at";
 
 const HEADER_ALIASES = {
   date: [

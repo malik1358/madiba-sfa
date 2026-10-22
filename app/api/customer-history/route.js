@@ -927,6 +927,9 @@ export async function GET(request) {
     const lite = String(url.searchParams.get("lite") || "").trim() === "1";
     const includePeers = String(url.searchParams.get("includePeers") || "").trim() === "1";
     const wantPeers = shouldIncludePeerTransactions({ fullHistory, includePeers });
+    const waitReceipts = ["1", "true", "yes"].includes(
+      String(url.searchParams.get("waitReceipts") || "").trim().toLowerCase(),
+    );
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
@@ -954,7 +957,9 @@ export async function GET(request) {
     let receipts = receiptsAreCurrent ? cachedReceipts : [];
     let receiptsPending = false;
     if (!receiptsAreCurrent) {
-      if (receiptDatasetIsWarm()) {
+      // Audit can paint sales first. Settlement PDF / New Order pass waitReceipts
+      // because an empty receipt list marks every invoice Open.
+      if (waitReceipts || receiptDatasetIsWarm()) {
         const bundle = await loadCustomerReceiptBundle(admin, customerCode, customerName);
         receipts = bundle.receipts;
         void saveCachedReceipts(admin, key, bundle.receipts, bundle.uploadedAt).catch(() => {});

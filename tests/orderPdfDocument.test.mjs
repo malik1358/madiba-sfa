@@ -956,6 +956,7 @@ test("enrichOrderPdfLiveData requests fullHistory for avg-days settlement ledger
     assert.equal(historyUrls.length, 1);
     assert.match(historyUrls[0], /fullHistory=1/);
     assert.match(historyUrls[0], /scope=settlement/);
+    assert.match(historyUrls[0], /waitReceipts=1/);
   } finally {
     global.fetch = originalFetch;
   }

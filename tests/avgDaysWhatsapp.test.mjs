@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   awaitAvgDaysPrefetch,
   formatAvgDaysToPayWhatsappLines,
+  resolveAvgDaysForWhatsapp,
   resolveLocalAvgDaysToPay,
 } from "../app/lib/avgDaysWhatsapp.js";
 import { buildOrderWhatsappSummary } from "../app/lib/orderWhatsapp.js";
@@ -37,6 +38,53 @@ test("awaitAvgDaysPrefetch times out without blocking forever", async () => {
     await awaitAvgDaysPrefetch(Promise.resolve({ avgDaysToPay: 12, avgDaysToPay6m: null }), 100),
     { avgDaysToPay: 12, avgDaysToPay6m: null },
   );
+});
+
+test("resolveAvgDaysForWhatsapp uses a ready row before any load", async () => {
+  let loads = 0;
+  const result = await resolveAvgDaysForWhatsapp({
+    local: { avg_days_to_pay: 30, avg_days_to_pay_6m: 30 },
+    load: () => {
+      loads += 1;
+      return { avgDaysToPay: 99, avgDaysToPay6m: 99 };
+    },
+    timeoutMs: 50,
+  });
+  assert.deepEqual(result, { avgDaysToPay: 30, avgDaysToPay6m: 30 });
+  assert.equal(loads, 0);
+});
+
+test("resolveAvgDaysForWhatsapp waits for an in-flight prefetch", async () => {
+  let loads = 0;
+  const pending = new Promise((resolve) => {
+    setTimeout(() => resolve({ avgDaysToPay: 30, avgDaysToPay6m: 30 }), 20);
+  });
+  const result = await resolveAvgDaysForWhatsapp({
+    local: {},
+    pending,
+    load: () => {
+      loads += 1;
+      return { avgDaysToPay: 1, avgDaysToPay6m: 1 };
+    },
+    timeoutMs: 200,
+  });
+  assert.deepEqual(result, { avgDaysToPay: 30, avgDaysToPay6m: 30 });
+  assert.equal(loads, 0);
+});
+
+test("resolveAvgDaysForWhatsapp loads once when the row and prefetch are empty", async () => {
+  let loads = 0;
+  const result = await resolveAvgDaysForWhatsapp({
+    local: {},
+    pending: Promise.resolve(null),
+    load: async () => {
+      loads += 1;
+      return { avgDaysToPay: 30, avgDaysToPay6m: 30 };
+    },
+    timeoutMs: 200,
+  });
+  assert.deepEqual(result, { avgDaysToPay: 30, avgDaysToPay6m: 30 });
+  assert.equal(loads, 1);
 });
 
 test("buildOrderWhatsappSummary includes avg days to pay with blank lines around it", () => {

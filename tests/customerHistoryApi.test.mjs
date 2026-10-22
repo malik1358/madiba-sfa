@@ -70,6 +70,17 @@ test("customer history loads current and full history from the active sales snap
   assert.match(customerHistoryRoute, /loadReceiptDatasetCached/);
 });
 
+test("the audit receipt follow-up waits for the register instead of painting sales alone", () => {
+  const cache = fs.readFileSync(
+    new URL("../app/lib/mobileDataCache.js", import.meta.url),
+    "utf8",
+  );
+  const followUp = cache.slice(cache.indexOf("function fillPendingReceipts"));
+  assert.match(followUp, /waitReceipts:\s*true/);
+  assert.match(followUp, /const delays = \[0, 2500\]/);
+  assert.doesNotMatch(followUp.slice(0, followUp.indexOf("export async function fetchItemsMasterCached")), /20000/);
+});
+
 test("settlement history waits for receipts instead of returning every invoice open", () => {
   assert.match(customerHistoryRoute, /const waitReceipts =/);
   assert.match(customerHistoryRoute, /if \(waitReceipts \|\| receiptDatasetIsWarm\(\)\)/);

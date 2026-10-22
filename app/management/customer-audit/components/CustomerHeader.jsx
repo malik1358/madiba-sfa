@@ -5,6 +5,7 @@ import { blockedByAvgDaysMessage } from "../../../lib/customerOrderBlock.js";
 export default function CustomerHeader({
   customer,
   analytics,
+  receiptsPending = false,
   outstandingSalesman = "",
   orderBlock = null,
   canManageOrderBlock = false,
@@ -46,8 +47,10 @@ export default function CustomerHeader({
         </div>
         <div className="auditSummaryCard">
           <span>Avg Days to Pay</span>
-          <strong>{avgDaysLabel}</strong>
-          {payment?.avgDaysToPay != null ? (
+          <strong>{receiptsPending ? "…" : avgDaysLabel}</strong>
+          {receiptsPending ? (
+            <em className="auditSummaryCardMeta">Loading receipts…</em>
+          ) : payment?.avgDaysToPay != null ? (
             <em className="auditSummaryCardMeta">
               Lifetime
               {Number(payment.openAmountInAvg || 0) > 0.009
@@ -55,7 +58,7 @@ export default function CustomerHeader({
                 : " · from collected receipts"}
             </em>
           ) : null}
-          {payment?.avgDaysToPay6m != null ? (
+          {!receiptsPending && payment?.avgDaysToPay6m != null ? (
             <em className="auditSummaryCardMeta">
               {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {payment.avgDaysToPay6m} days
               {Number(payment.openAmountInAvg6m || 0) > 0.009
@@ -63,7 +66,7 @@ export default function CustomerHeader({
                 : ""}
             </em>
           ) : null}
-          {payment?.avgDaysPaidOnly != null
+          {!receiptsPending && payment?.avgDaysPaidOnly != null
             && Number(payment.openAmountInAvg || 0) > 0.009
             && payment.avgDaysPaidOnly !== payment.avgDaysToPay ? (
             <em className="auditSummaryCardMeta">
@@ -98,9 +101,11 @@ export default function CustomerHeader({
         <div className="auditSummaryCard">
           <span>Receipt amount (last 10 days)</span>
           <strong>
-            {receiptAmountLast10Days > 0
-              ? receiptAmountLast10Days.toLocaleString("en-US", { maximumFractionDigits: 0 })
-              : "0"}
+            {receiptsPending
+              ? "…"
+              : (receiptAmountLast10Days > 0
+                ? receiptAmountLast10Days.toLocaleString("en-US", { maximumFractionDigits: 0 })
+                : "0")}
           </strong>
         </div>
         <div className="auditSummaryCard">

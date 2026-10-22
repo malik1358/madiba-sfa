@@ -4,7 +4,7 @@ export const DEFAULT_PAYMENT_TYPE = "credit";
 export const VALUE_DISCOUNT_THRESHOLD_SAR = 5000;
 export const VAT_RATE = 0.15;
 
-/** Gloves are the only catalog products sold without VAT. */
+/** Catalog gloves are sold without VAT. Building-material safety gloves are not. */
 export function isVatExemptProduct({
   category = "",
   item_name = "",
@@ -13,6 +13,8 @@ export function isVatExemptProduct({
 } = {}) {
   if (vatExempt === true) return true;
   if (vatExempt === false) return false;
+  const categoryText = String(category || "").trim().toUpperCase();
+  if (categoryText.includes("BUILDING MATERIAL")) return false;
   const haystack = `${category} ${item_name} ${item_code}`.toUpperCase();
   // Catalog names say "Gloves"; dirty sales uploads sometimes truncate to "VINYL" only
   // (e.g. A003949_MADIBA VINYL Do Not Use) while Tally still posts them excl VAT.

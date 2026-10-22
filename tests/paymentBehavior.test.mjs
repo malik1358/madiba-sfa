@@ -654,6 +654,24 @@ test("gloves sales stay excl VAT when matching receipts", () => {
   assert.equal(Number(paper.amount.toFixed(2)), 1150);
 });
 
+test("building-material safety gloves on NFD/436 take 15% VAT", () => {
+  const invoices = buildSalesInvoices([
+    { transaction_date: "2026-04-15", voucher_number: "NFD/436", sales_amount: 6319, category: "Building Material", item_name: "Safety Helmet" },
+    {
+      transaction_date: "2026-04-15",
+      voucher_number: "NFD/436",
+      sales_amount: 608,
+      category: "Building Material",
+      item_code: "LP00318",
+      item_name: "LP00318_Latex Gloves Crinkle Orange LGC Hi-Tex, 250 Pair/ Cartoon",
+    },
+  ]);
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].amount_excl_vat, 6927);
+  assert.equal(Number(invoices[0].amount.toFixed(2)), 7966.05);
+});
+
 test("settlement Sales total keeps gloves without VAT and paper with 15%", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

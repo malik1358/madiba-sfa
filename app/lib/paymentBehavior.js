@@ -252,7 +252,8 @@ function sortVoucherRows(rows) {
 /**
  * Collapse sales history lines into invoice-level rows (voucher + date).
  * Sales amounts are exclusive of VAT; receipts are inclusive, so each line is
- * grossed up at 15% unless it is a gloves (VAT-exempt) product.
+ * grossed up at 15% unless it is a catalog gloves product. Building-material
+ * safety gloves stay at 15%.
  */
 export function buildSalesInvoices(transactions = []) {
   const map = new Map();

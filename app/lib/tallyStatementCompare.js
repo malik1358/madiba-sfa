@@ -282,6 +282,105 @@ function closingSide(text) {
   return "";
 }
 
+const PENDING_HEADER_KEYS = {
+  date: new Set(["date"]),
+  ref: new Set(["refno", "refnumber", "billno", "billrefno"]),
+  person: new Set(["salesperson", "salesman"]),
+  amount: new Set(["pending", "pendingamount", "amount"]),
+  due: new Set(["dueon", "duedate"]),
+  overdue: new Set(["overdue", "overduebydays", "bydays"]),
+};
+
+function pendingHeaderKey(text) {
+  const key = compactHeader(text);
+  const found = Object.entries(PENDING_HEADER_KEYS).find(([, aliases]) => aliases.has(key));
+  return found ? found[0] : "";
+}
+
+function nearestPendingColumn(item, headers) {
+  let bestKey = "";
+  let bestDistance = Infinity;
+  Object.entries(headers).forEach(([key, header]) => {
+    const distance = Math.abs(item.x - header.x);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestKey = key;
+    }
+  });
+  return bestKey;
+}
+
+/**
+ * Tally Bills Receivable prints Date, Ref. No., and Pending Amount instead of
+ * Debit and Credit. Each row is still an open customer bill.
+ */
+export function parsePendingBillsPositionedPages(pages) {
+  const pageList = Array.isArray(pages) ? pages : [];
+  const rows = pageList.flatMap((page) => clusterPositionedRows(page));
+  const banner = rows.map((row) => joinColumn(row.items)).join(" ").toLowerCase();
+  const headers = {};
+  rows.forEach((row) => {
+    row.items.forEach((item) => {
+      const key = pendingHeaderKey(item.text);
+      if (!key) return;
+      const current = headers[key];
+      if (!current || item.y > current.y) headers[key] = item;
+    });
+  });
+  const recognized = Boolean(headers.date && headers.ref && headers.amount && (
+    headers.due || headers.overdue || /pending bills|bills receivable/.test(banner)
+  ));
+  if (!recognized) return null;
+
+  const headerFloor = Math.min(...Object.values(headers).map((item) => item.y)) - 4;
+  const entries = [];
+  let closing = null;
+  rows.forEach((row) => {
+    if (row.y >= headerFloor) return;
+    const buckets = { date: [], ref: [], person: [], amount: [], due: [], overdue: [] };
+    row.items.forEach((item) => {
+      if (pendingHeaderKey(item.text)) return;
+      const column = nearestPendingColumn(item, headers);
+      if (column) buckets[column].push(item);
+    });
+    const date = excelDateToIso(datedText(joinColumn(buckets.date)));
+    const voucher = joinColumn(buckets.ref);
+    const person = joinColumn(buckets.person);
+    const due = excelDateToIso(joinColumn(buckets.due));
+    const overdueDays = toNumber(joinColumn(buckets.overdue));
+    const amount = buckets.amount.reduce((total, item) => total + toNumber(item.text), 0);
+    if (!amount) return;
+    if (!date && !voucher) {
+      closing = { amount, side: "debit" };
+      return;
+    }
+    const particulars = [
+      person,
+      due ? `due ${due}` : "",
+      overdueDays ? `${overdueDays}d overdue` : "",
+    ].filter(Boolean).join(" · ");
+    entries.push({
+      date,
+      particulars,
+      vchType: "Pending bill",
+      voucher,
+      side: "debit",
+      amount,
+    });
+  });
+
+  if (!entries.length) return null;
+  const partial = /page\s+([2-9]|\d{2,})/i.test(banner);
+  return {
+    entries,
+    opening: null,
+    closing,
+    error: "",
+    report: "pending_bills",
+    partial,
+  };
+}
+
 /**
  * Read a Tally ledger PDF after text items have positions.
  * Amount column decides debit vs credit. To/By and Dr/Cr printed beside the
@@ -361,6 +460,8 @@ export function parseTallyStatementPositionedPages(pages) {
   });
 
   if (!sawHeader || !entries.length) {
+    const pending = parsePendingBillsPositionedPages(pageList);
+    if (pending?.entries?.length) return pending;
     return {
       entries,
       opening,
@@ -442,8 +543,28 @@ export function buildSfaStatementEntries({
   creditNotes = [],
   receipts = [],
   purchases = [],
+  openOnly = false,
 } = {}) {
   const entries = [];
+
+  if (openOnly) {
+    (Array.isArray(invoices) ? invoices : []).forEach((invoice) => {
+      if (invoice?.open_source === "outstanding" || invoice?.tally_only) return;
+      const voucher = String(invoice?.voucher_number || "").trim();
+      const date = String(invoice?.invoice_date || "").slice(0, 10);
+      if (!voucher || !date) return;
+      if (invoice.remaining == null && invoice.fifo_remaining == null) return;
+      entries.push({
+        date,
+        voucher,
+        particulars: "Open invoice",
+        vchType: "Pending bill",
+        side: "debit",
+        amount: Math.max(0, toNumber(invoice.remaining ?? invoice.fifo_remaining)),
+      });
+    });
+    return entries;
+  }
 
   (Array.isArray(invoices) ? invoices : []).forEach((invoice) => {
     if (invoice?.open_source === "outstanding" || invoice?.tally_only) return;
@@ -789,9 +910,11 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return { tally, sfa };
   });
 
-  pool.filter((row) => !row.used).forEach((sfa) => {
-    pairs.push({ tally: null, sfa });
-  });
+  if (tallyParsed?.report !== "pending_bills") {
+    pool.filter((row) => !row.used).forEach((sfa) => {
+      pairs.push({ tally: null, sfa });
+    });
+  }
 
   const vatScale = detectVatScale(pairs.map((pair) => ({
     tallyAmount: toNumber(pair.tally?.amount),

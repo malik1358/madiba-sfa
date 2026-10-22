@@ -205,6 +205,63 @@ test("a Tally PDF with plain amounts and To/By markers still reads each line", (
   assert.equal(parsed.closing.amount, 84180);
 });
 
+test("a Tally pending-bills PDF is compared with the SFA open amount", () => {
+  const page = [
+    { x: 266.8, y: 713.5, width: 91, text: "Bills Receivable" },
+    { x: 281, y: 674.6, width: 63, text: "Pending Bills" },
+    { x: 563.2, y: 658.3, width: 29, text: "Page 4" },
+    { x: 56.2, y: 646.7, width: 22, text: "Date" },
+    { x: 94.1, y: 647, width: 37, text: "Ref. No." },
+    { x: 361.1, y: 647.9, width: 54, text: "Sales Person" },
+    { x: 475.3, y: 646.7, width: 39, text: "Pending" },
+    { x: 526.8, y: 647, width: 32, text: "Due on" },
+    { x: 564.5, y: 647, width: 27, text: "Overdue" },
+    { x: 477.2, y: 634.8, width: 37, text: "Amount" },
+    { x: 564.5, y: 635.2, width: 27, text: "by days" },
+    { x: 39.4, y: 617.2, width: 38, text: "27-Jun-26" },
+    { x: 94.1, y: 617.5, width: 45, text: "NFD/1030" },
+    { x: 361.1, y: 618.4, width: 13, text: "Zia" },
+    { x: 470.5, y: 617.2, width: 44, text: "20,024.33" },
+    { x: 520.4, y: 617.5, width: 38, text: "11-Aug-26" },
+    { x: 580.8, y: 617.5, width: 11, text: "70" },
+    { x: 39.5, y: 593.4, width: 38, text: "13-Oct-26" },
+    { x: 94.1, y: 593.8, width: 45, text: "NFD/2018" },
+    { x: 361.1, y: 594.6, width: 13, text: "Zia" },
+    { x: 470.5, y: 593.8, width: 44, text: "64,975.00" },
+    { x: 520.4, y: 593.8, width: 38, text: "27-Nov-26" },
+    { x: 469.9, y: 581.4, width: 44, text: "89,599.33" },
+  ];
+
+  const parsed = parseTallyStatementPositionedPages([page]);
+  assert.equal(parsed.report, "pending_bills");
+  assert.equal(parsed.entries.length, 2);
+  assert.equal(parsed.entries[0].date, "2026-06-27");
+  assert.equal(parsed.entries[0].voucher, "NFD/1030");
+  assert.equal(parsed.entries[0].side, "debit");
+  assert.equal(parsed.entries[0].amount, 20024.33);
+  assert.equal(parsed.entries[0].particulars, "Zia · due 2026-08-11 · 70d overdue");
+  assert.equal(parsed.entries[1].voucher, "NFD/2018");
+  assert.equal(parsed.entries[1].amount, 64975);
+  assert.equal(parsed.closing.amount, 89599.33);
+
+  const sfa = buildSfaStatementEntries({
+    openOnly: true,
+    invoices: [
+      { invoice_date: "2026-06-27", voucher_number: "NFD/1030", amount_incl_vat: 25000, remaining: 20024.33 },
+      { invoice_date: "2026-10-13", voucher_number: "NFD/2018", amount_incl_vat: 64975, remaining: 1000 },
+      { invoice_date: "2026-01-02", voucher_number: "NFD/1", amount_incl_vat: 500, remaining: 500 },
+    ],
+    receipts: [{ receipt_date: "2026-08-01", vch_no: "900", amount: 5000 }],
+  });
+  assert.equal(sfa.length, 3);
+  const result = compareTallyStatement(parsed, sfa);
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows.find((row) => row.voucher === "NFD/1030").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "NFD/2018").status, "amount");
+  assert.equal(result.rows.some((row) => row.voucher === "NFD/1"), false);
+  assert.equal(result.rows.some((row) => row.voucher === "900"), false);
+});
+
 test("a supplier payment is a debit and a purchase is a credit", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

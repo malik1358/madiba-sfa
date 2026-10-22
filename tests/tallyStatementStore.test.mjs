@@ -30,5 +30,18 @@ test("stored statement keeps ledger lines and drops the file bytes", () => {
 
   const again = readTallyStatementRecord(JSON.stringify(record));
   assert.equal(again.entries[0].voucher, "1358");
+  assert.equal(again.report, "");
   assert.equal(readTallyStatementRecord("{"), null);
+});
+
+test("a pending-bills statement keeps its report kind", () => {
+  const record = buildTallyStatementRecord({
+    report: "pending_bills",
+    closing: { amount: 89599.33, side: "debit" },
+    entries: [
+      { date: "2026-06-27", voucher: "NFD/1030", particulars: "Zia", vchType: "Pending bill", side: "debit", amount: 20024.33 },
+    ],
+  });
+  assert.equal(record.report, "pending_bills");
+  assert.equal(readTallyStatementRecord(JSON.stringify(record)).report, "pending_bills");
 });

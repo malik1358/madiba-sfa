@@ -53,6 +53,10 @@ const TEXT = {
     en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). It stays on this customer for every user. Each time the customer is opened, the lines are compared again with the current SFA ledger.",
     ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يبقى الكشف على هذا العميل لكل المستخدمين. عند فتح العميل تُقارن السطور من جديد مع دفتر SFA الحالي.",
   },
+  statementPendingHint: {
+    en: "These are Tally pending bills. Each one is compared with the SFA open amount for the same voucher.",
+    ar: "هذه فواتير تالي المعلقة. تُقارن كل فاتورة مع المبلغ المفتوح في SFA لنفس القسيمة.",
+  },
   statementUpload: { en: "Upload Tally statement", ar: "رفع كشف تالي" },
   statementClear: { en: "Clear", ar: "مسح" },
   statementShowMatched: { en: "Show matched lines", ar: "عرض السطور المطابقة" },
@@ -753,10 +757,11 @@ export default function PaymentSettlementPage() {
       creditNotes: ledger.creditNotes,
       receipts: statementReceipts,
       purchases,
+      openOnly: storedStatement.report === "pending_bills",
     }));
     const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
     const hasTallyOpen = invoices.some((row) => row.outstanding_pending != null);
-    if (!hasTallyOpen) return compared;
+    if (storedStatement.report === "pending_bills" || !hasTallyOpen) return compared;
     return reconcileStatementToOpenDelta(compared, {
       machineOpen: Number(ledger.totals?.open_sales_amount || 0),
       tallyOpen: invoices.reduce(
@@ -1053,6 +1058,9 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">{t("statementHint")}</p>
+                {storedStatement?.report === "pending_bills" ? (
+                  <p className="moduleHint">{t("statementPendingHint")}</p>
+                ) : null}
                 <div className="moduleFilterRow">
                   <button
                     type="button"

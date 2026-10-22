@@ -96,6 +96,56 @@ test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the
   assert.match(summary, /Distance from customer: 0.12 km/);
   assert.match(summary, /Distance from previous: 3.40 km/);
   assert.match(summary, /Est. waiting: 25 min/);
+  assert.doesNotMatch(summary, /Last visit date/);
+});
+
+test("buildFieldVisitWhatsappSummary appends last visit date after GPS metrics", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "1010",
+      customer_name: "Adwaa Al Asaar",
+      outstanding_0_30: 0,
+      outstanding_30_60: 3132.6,
+      outstanding_61_90: 2380.85,
+      outstanding_above_90: 0,
+      last_visit_date: "2026-10-15",
+    },
+    visitForm: {
+      outcome: "COME_BACK_LATER",
+      nextVisitAt: "2026-10-25",
+      visitAt: "2026-10-21T16:51:00.000Z",
+    },
+    salesmanName: "BELAL (BELAL)",
+    visitDistance: {
+      latitude: 24.592775,
+      longitude: 46.711635,
+      distanceFromCustomerKm: 0.09,
+      distanceFromPreviousKm: 0,
+      waitingMinutes: null,
+    },
+    lastVisitAt: "2026-10-15",
+  });
+
+  assert.match(summary, /Est\. waiting: -\n\nLast visit date: 15\/10\/2026\./);
+  assert.doesNotMatch(summary, /Last visit date:[\s\S]*GPS:/);
+  assert.ok(summary.trimEnd().endsWith("Last visit date: 15/10/2026."));
+});
+
+test("buildFieldVisitWhatsappSummary reads last visit date from the customer row", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "1034",
+      customer_name: "Al Fursan",
+      last_visit_date: "2026-09-01T10:00:00.000Z",
+    },
+    visitForm: {
+      outcome: "ORDER_TAKEN",
+      nextVisitAt: "2026-09-20",
+    },
+    salesmanName: "OSAMA",
+  });
+
+  assert.match(summary, /Last visit date: 01\/09\/2026/);
 });
 
 test("buildFieldVisitWhatsappSummary stays English when UI language is Arabic", () => {

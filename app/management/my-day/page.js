@@ -1491,6 +1491,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         visitDistance,
         workingHours,
         avgDaysToPay,
+        // Previous near visit (before this save). Customer row is updated after.
+        lastVisitAt: customer.last_visit_date || null,
       });
       void copyTextToClipboard(summaryText);
       const platform = await resolveGpsCapturePlatform();

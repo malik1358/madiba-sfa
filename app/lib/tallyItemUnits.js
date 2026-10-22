@@ -1,3 +1,8 @@
+import {
+  canonicalCustomerCode,
+  isProspectCustomerCode,
+  splitPartyByLeadingCode,
+} from "./customerCode.js";
 import { lookupPositiveRate } from "./itemCodeAliases.js";
 import {
   DEFAULT_PAYMENT_TYPE,
@@ -371,6 +376,59 @@ export function discountAmountPerUnit(listRate, netRate) {
   return round2(list - net);
 }
 
+export function ledgerNamesFromSalesRows(rows = []) {
+  const names = [];
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const party = row?.source_data?.["Party Name"] || row?.party_name || row?.partyName;
+    if (party) names.push(party);
+    if (row?.customer_name) names.push(row.customer_name);
+  });
+  return names;
+}
+
+/**
+ * Pick the imported Tally ledger string for this account.
+ * Spacing is kept as it arrived in the sales file, for example
+ * "1037  AL-IBTIKAR LIBRARY FOR TRADING EST."
+ */
+export function chooseTallyLedgerName(customerCode, candidates = []) {
+  const code = canonicalCustomerCode(customerCode);
+  if (!code) return "";
+
+  const counts = new Map();
+  (Array.isArray(candidates) ? candidates : []).forEach((raw) => {
+    const ledger = String(raw || "").trim();
+    if (!ledger) return;
+    const parsed = splitPartyByLeadingCode(ledger);
+    if (canonicalCustomerCode(parsed.customer_code) !== code || !parsed.customer_name) return;
+    counts.set(ledger, (counts.get(ledger) || 0) + 1);
+  });
+
+  let best = "";
+  let bestCount = 0;
+  counts.forEach((count, ledger) => {
+    if (count > bestCount || (count === bestCount && ledger.length > best.length)) {
+      best = ledger;
+      bestCount = count;
+    }
+  });
+  return best;
+}
+
+export function resolveTallyCustomerLedgerName(order = {}) {
+  const explicit = String(order?.tally_ledger_name || order?.tallyLedgerName || "").trim();
+  if (explicit) return explicit;
+
+  const code = String(order?.customer_code || "").trim();
+  const name = String(order?.customer_name || "").trim();
+  if (isProspectCustomerCode(code)) return name || code || "-";
+
+  const fromName = chooseTallyLedgerName(code, [name]);
+  if (fromName) return fromName;
+  if (code && name) return `${code} ${name}`.trim();
+  return name || code || "-";
+}
+
 export function resolveTallySalesTeamName(order = {}) {
   const name = String(order?.salesman_name || order?.salesmanName || "").trim();
   if (name) return name;
@@ -439,7 +497,7 @@ export function buildTallyOrderExportRows({
   });
   const voucherDate = formatTallyDate(exportDate);
   const orderDateText = formatTallyDate(orderDate || order?.created_at || order?.submitted_at || exportDate);
-  const partyName = String(order?.customer_name || order?.customer_code || "").trim() || "-";
+  const partyName = resolveTallyCustomerLedgerName(order);
   const orderNo = String(orderNumber || order?.order_number || order?.id || "").trim();
 
   let vatTotal = 0;

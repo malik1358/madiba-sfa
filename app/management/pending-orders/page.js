@@ -1496,8 +1496,24 @@ export default function PendingOrdersPage() {
           pricingRegion: snapshot.pricingRegion,
         },
       );
+      let tallyLedgerName = "";
+      const customerCode = String(order?.customer_code || "").trim();
+      if (customerCode && token) {
+        try {
+          const ledgerResponse = await fetch(
+            `/api/tally-customer-ledger?code=${encodeURIComponent(customerCode)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const ledgerPayload = await ledgerResponse.json().catch(() => ({}));
+          if (ledgerResponse.ok && ledgerPayload.ledgerName) {
+            tallyLedgerName = String(ledgerPayload.ledgerName);
+          }
+        } catch {
+          tallyLedgerName = "";
+        }
+      }
       const exportRows = buildTallyOrderExportRows({
-        order,
+        order: { ...order, tally_ledger_name: tallyLedgerName },
         lines: exportLines,
         unitMap,
         orderNumber,

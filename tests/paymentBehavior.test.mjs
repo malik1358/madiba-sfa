@@ -496,6 +496,56 @@ test("isCashSalesVoucher detects RC/DC/JC and skips credit notes", () => {
   assert.equal(isCashSalesVoucher("CN/149"), false);
 });
 
+test("cash vouchers stay out of the amount-weighted avg days", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "RC/1",
+        voucher_type: "RIYADH CASH SALES",
+        sales_amount: 1000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "CNFD/APR/013",
+        voucher_type: "CASH SALES NON FOOD DIVISION",
+        sales_amount: 1000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+      {
+        transaction_date: "2026-01-10",
+        voucher_number: "NFD/2",
+        voucher_type: "RIYADH W/S CREDIT",
+        sales_amount: 100000,
+        category: "Gloves",
+        item_name: "Nitrile Gloves",
+      },
+    ],
+    receipts: [
+      { receipt_date: "2026-01-02", amount: 1000 },
+      { receipt_date: "2026-01-03", amount: 1000 },
+      { receipt_date: "2026-02-09", amount: 100000 },
+    ],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "RC/9", pending_amount: 50000, invoice_day: 200 },
+    ],
+    todayIso: "2026-03-01",
+  });
+
+  const cash = ledger.invoices.find((row) => row.voucher_number === "RC/1");
+  const cnfd = ledger.invoices.find((row) => row.voucher_number === "CNFD/APR/013");
+  const credit = ledger.invoices.find((row) => row.voucher_number === "NFD/2");
+  assert.equal(cash.status, "Paid");
+  assert.equal(cash.payment_days, null);
+  assert.equal(cnfd.payment_days, null);
+  assert.equal(credit.payment_days, 30);
+  assert.equal(ledger.summary.avgDaysToPay, 30);
+  assert.equal(ledger.summary.openAmountInAvg, 0);
+});
+
 test("first receipt after cash voucher settles cash before older credit invoices", () => {
   // Older credit open, then cash RC â€” first receipt after RC must clear RC first.
   const { allocations, invoices } = matchPaymentsFifo(

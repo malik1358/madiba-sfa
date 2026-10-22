@@ -1874,3 +1874,97 @@ test("blank early CN still must not reverse a next-day reissue", () => {
   assert.equal(ledger.invoices.some((row) => row.voucher_number === "2397"), true);
 });
 
+test("customer 1009 credit note 127 reverses later invoice 2446", () => {
+  const item = { item_code: "A003234", quantity: 250, category: "Paper", sales_amount: 2100 };
+  const credit = { ...item, sales_amount: -2100, quantity: -250, voucher_type: "Credit Note" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-12-31", voucher_number: "2387", voucher_type: "Sales", ...item },
+      { transaction_date: "2025-12-31", voucher_number: "2388", voucher_type: "Sales", ...item },
+      { transaction_date: "2025-12-31", voucher_number: "126", reference: "2387", ...credit },
+      { transaction_date: "2025-12-31", voucher_number: "127", reference: "2387", ...credit },
+      { transaction_date: "2026-01-04", voucher_number: "2446", voucher_type: "Sales", ...item },
+      { transaction_date: "2026-01-04", voucher_number: "4", reference: "2388", ...credit },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-22",
+  });
+
+  const byInvoice = Object.fromEntries(
+    (ledger.reversedInvoices || []).map((row) => [row.voucher_number, row.credit_note_voucher]),
+  );
+  assert.equal(byInvoice["2387"], "126");
+  assert.equal(byInvoice["2388"], "4");
+  assert.equal(byInvoice["2446"], "127");
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "2446"), false);
+});
+
+test("customer 1442 leftover credit note 381 reverses debit note 009", () => {
+  const item = { item_code: "A003600", quantity: 1, category: "Paper", sales_amount: 925 };
+  const credit = { ...item, sales_amount: -925, quantity: -1, voucher_type: "Credit Note", reference: "RNFD/092" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-07-09", voucher_number: "RNFD/092", voucher_type: "RIYADH W/S CREDIT", ...item },
+      { transaction_date: "2026-07-13", voucher_number: "375", ...credit },
+      { transaction_date: "2026-07-14", voucher_number: "381", ...credit },
+      { transaction_date: "2026-07-16", voucher_number: "009", voucher_type: "Debit Note Sales", ...item },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-22",
+  });
+
+  const byInvoice = Object.fromEntries(
+    (ledger.reversedInvoices || []).map((row) => [row.voucher_number, row.credit_note_voucher]),
+  );
+  assert.equal(byInvoice["RNFD/092"], "375");
+  assert.equal(byInvoice["009"], "381");
+});
+
+test("two credit notes on 2384 still leave next-day reissue 2397 open", () => {
+  const item = { item_code: "P-200", quantity: 6, category: "Paper", sales_amount: 18026.2 };
+  const credit = { ...item, sales_amount: -18026.2, quantity: -6, voucher_type: "Credit Note", reference: "2384" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-12-31", voucher_number: "2384", voucher_type: "Sales", ...item },
+      { transaction_date: "2025-12-31", voucher_number: "0131", ...credit },
+      { transaction_date: "2025-12-31", voucher_number: "121", ...credit },
+      { transaction_date: "2026-01-01", voucher_number: "2397", voucher_type: "Sales", ...item },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-22",
+  });
+
+  const reversed = (ledger.reversedInvoices || []).map((row) => row.voucher_number);
+  assert.deepEqual(reversed, ["2384"]);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "2397"), true);
+});
+
+test("a credit note that already voided its named bill does not take a later identical sale", () => {
+  const item = { item_code: "P-300", quantity: 1, category: "Paper", sales_amount: 500 };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-12-01", voucher_number: "100", voucher_type: "Sales", ...item },
+      {
+        transaction_date: "2025-12-01",
+        voucher_number: "50",
+        voucher_type: "Credit Note",
+        reference: "100",
+        ...item,
+        sales_amount: -500,
+        quantity: -1,
+      },
+      { transaction_date: "2025-12-05", voucher_number: "140", voucher_type: "Sales", ...item },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-22",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "100");
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "140"), true);
+});
+

@@ -629,6 +629,53 @@ function settleCrossedReversals(rows) {
   return rows;
 }
 
+function voucherTail(value) {
+  const match = String(value || "").trim().match(/(\d+)\s*$/);
+  if (!match) return "";
+  return match[1].replace(/^0+(?=\d)/, "");
+}
+
+function clearCrossedRow(row) {
+  row.status = "matched";
+  row.difference = 0;
+  row.leadsGap = false;
+}
+
+// Invoice 1769 is reversed by credit note 48, so DG-1769 and VAT-DG-1769
+// cross DG-48 and VAT-DG-48 when the amounts are equal and opposite.
+function settleReversedFamilies(rows) {
+  const pairs = [];
+  rows.forEach((row) => {
+    const invoiceTail = voucherTail(row.reversesVoucher);
+    const creditTail = voucherTail(row.voucher);
+    if (!invoiceTail || !creditTail || invoiceTail === creditTail) return;
+    if (pairs.some((pair) => pair.invoiceTail === invoiceTail && pair.creditTail === creditTail)) return;
+    pairs.push({ invoiceTail, creditTail });
+  });
+
+  pairs.forEach(({ invoiceTail, creditTail }) => {
+    const invoiceRows = rows.filter((row) => (
+      voucherTail(row.voucher) === invoiceTail
+      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
+    ));
+    const creditRows = rows.filter((row) => (
+      voucherTail(row.voucher) === creditTail
+      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
+    ));
+    invoiceRows.forEach((invoiceRow) => {
+      if (Math.abs(invoiceRow.difference) <= TALLY_STATEMENT_TOLERANCE) return;
+      const match = creditRows.find((creditRow) => (
+        Math.abs(creditRow.difference) > TALLY_STATEMENT_TOLERANCE
+        && Math.abs(invoiceRow.difference + creditRow.difference) <= TALLY_STATEMENT_TOLERANCE
+      ));
+      if (!match) return;
+      clearCrossedRow(invoiceRow);
+      clearCrossedRow(match);
+    });
+  });
+  return rows;
+}
+
 // Sales 1825, discount 1825, and VAT-DG-1825 are one voucher. When their
 // differences add up to zero they leave the mismatch list together.
 function settleNetZeroVoucherGroups(rows) {
@@ -761,7 +808,9 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
-  const settledRows = settleNetZeroVoucherGroups(settleCrossedReversals(settleRoundOffRows(rows)));
+  const settledRows = settleNetZeroVoucherGroups(
+    settleReversedFamilies(settleCrossedReversals(settleRoundOffRows(rows))),
+  );
 
   let running = 0;
   let leadIndex = -1;

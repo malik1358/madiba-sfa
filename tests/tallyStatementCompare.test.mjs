@@ -300,6 +300,59 @@ test("a same-number discount that does not net to zero stays in the mismatch lis
   assert.equal(result.totals.agrees, false);
 });
 
+test("discount and VAT on invoice 1769 cross the same lines on credit note 48", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["17-11-2025", "Sales", "Sales", "1769", 1000, ""],
+    ["19-11-2025", "Credit Note", "Credit Note", "48", "", 1000],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    reversedInvoices: [{
+      invoice_date: "2025-11-17",
+      voucher_number: "1769",
+      amount_incl_vat: 1000,
+      credit_note_date: "2025-11-19",
+      credit_note_voucher: "48",
+      credit_note_amount: 1000,
+    }],
+    receipts: [
+      { receipt_date: "2025-11-17", vch_no: "DG-1769", amount: -330, vch_type: "1769 Discount Given" },
+      { receipt_date: "2025-11-17", vch_no: "VAT-DG-1769", amount: -49.5, vch_type: "1769 Discount Given" },
+      { receipt_date: "2025-11-19", vch_no: "DG-48", amount: 330, vch_type: "48 Discount Given" },
+      { receipt_date: "2025-11-19", vch_no: "VAT-DG-48", amount: 49.5, vch_type: "48 Discount Given" },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  for (const voucher of ["DG-1769", "VAT-DG-1769", "DG-48", "VAT-DG-48"]) {
+    assert.equal(result.rows.find((row) => row.voucher === voucher).status, "matched", voucher);
+  }
+  assert.equal(result.lead, null);
+  assert.equal(result.totals.agrees, true);
+});
+
+test("the same discount lines stay when credit note 48 does not reverse invoice 1769", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["17-11-2025", "Sales", "Sales", "1769", 1000, ""],
+    ["19-11-2025", "Sales", "Sales", "1900", 10, ""],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2025-11-17", voucher_number: "1769", amount_incl_vat: 1000 },
+      { invoice_date: "2025-11-19", voucher_number: "1900", amount_incl_vat: 10 },
+    ],
+    receipts: [
+      { receipt_date: "2025-11-17", vch_no: "DG-1769", amount: -330, vch_type: "1769 Discount Given" },
+      { receipt_date: "2025-11-19", vch_no: "DG-48", amount: 330, vch_type: "48 Discount Given" },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.rows.find((row) => row.voucher === "DG-1769").status, "sfa_only");
+  assert.equal(result.rows.find((row) => row.voucher === "DG-48").status, "sfa_only");
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

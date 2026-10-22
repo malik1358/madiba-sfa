@@ -49,8 +49,8 @@ const TEXT = {
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   statementTitle: { en: "Tally statement check", ar: "مطابقة كشف تالي" },
   statementHint: {
-    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV) with Date, Particulars, Vch Type, Vch No., Debit, and Credit. The first line where the running totals split is the entry behind the mismatch.",
-    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV) بأعمدة التاريخ والبيان ونوع القسيمة ورقمها والمدين والدائن. أول سطر يفترق فيه الإجمالي الجاري هو القيد المسبب للفرق.",
+    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). It stays on this customer for every user. Each time the customer is opened, the lines are compared again with the current SFA ledger.",
+    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يبقى الكشف على هذا العميل لكل المستخدمين. عند فتح العميل تُقارن السطور من جديد مع دفتر SFA الحالي.",
   },
   statementUpload: { en: "Upload Tally statement", ar: "رفع كشف تالي" },
   statementClear: { en: "Clear", ar: "مسح" },
@@ -452,8 +452,7 @@ export default function PaymentSettlementPage() {
   const [loadingSettlement, setLoadingSettlement] = useState(false);
   const [ledger, setLedger] = useState(null);
   const [statementReceipts, setStatementReceipts] = useState([]);
-  const [statementFileName, setStatementFileName] = useState("");
-  const [statementResult, setStatementResult] = useState(null);
+  const [storedStatement, setStoredStatement] = useState(null);
   const [showMatchedStatement, setShowMatchedStatement] = useState(false);
   const statementInputRef = useRef(null);
   const [historyMeta, setHistoryMeta] = useState(null);
@@ -517,8 +516,7 @@ export default function PaymentSettlementPage() {
     setMessage("");
     setLedger(null);
     setStatementReceipts([]);
-    setStatementFileName("");
-    setStatementResult(null);
+    setStoredStatement(null);
     setShowMatchedStatement(false);
     setHistoryMeta(null);
     setExpandedInvoice("");
@@ -530,13 +528,15 @@ export default function PaymentSettlementPage() {
       const code = encodeURIComponent(customer.customer_code || "");
       const name = encodeURIComponent(customer.customer_name || "");
 
-      const [historyResponse, outstandingResponse] = await Promise.all([
+      const [historyResponse, outstandingResponse, statementResponse] = await Promise.all([
         fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement&waitReceipts=1`, { headers }),
         fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
+        fetch(`/api/tally-statement?customerCode=${code}`, { headers }),
       ]);
 
       const historyPayload = await historyResponse.json().catch(() => ({}));
       const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+      const statementPayload = await statementResponse.json().catch(() => ({}));
 
       if (!historyResponse.ok || !historyPayload.success) {
         throw new Error(historyPayload.error || "Unable to load sales/receipt history.");
@@ -555,8 +555,9 @@ export default function PaymentSettlementPage() {
       setSelectedCustomer(customer);
       setLedger(nextLedger);
       setStatementReceipts(Array.isArray(historyPayload.receipts) ? historyPayload.receipts : []);
-      setStatementFileName("");
-      setStatementResult(null);
+      setStoredStatement(statementResponse.ok && statementPayload.statement?.entries?.length
+        ? statementPayload.statement
+        : null);
       setShowMatchedStatement(false);
       setHistoryMeta({
         fromDate: historyPayload.fromDate || "",
@@ -731,6 +732,23 @@ export default function PaymentSettlementPage() {
     document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [ledger]);
 
+  const statementResult = useMemo(() => {
+    if (!storedStatement?.entries?.length || !ledger) return null;
+    const purchases = (ledger.datewise || []).flatMap((day) => (
+      (day.purchases || []).map((row) => ({
+        ...row,
+        purchase_date: row.purchase_date || day.date,
+      }))
+    ));
+    return compareTallyStatement(storedStatement, buildSfaStatementEntries({
+      invoices: ledger.invoices,
+      reversedInvoices: ledger.reversedInvoices,
+      creditNotes: ledger.creditNotes,
+      receipts: statementReceipts,
+      purchases,
+    }));
+  }, [ledger, statementReceipts, storedStatement]);
+
   const statementRows = useMemo(() => {
     const rows = Array.isArray(statementResult?.rows) ? statementResult.rows : [];
     if (showMatchedStatement) return rows;
@@ -755,56 +773,63 @@ export default function PaymentSettlementPage() {
   const onStatementFile = useCallback(async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !ledger) return;
+    if (!file || !ledger || !selectedCustomer?.customer_code) return;
     setError("");
     try {
-      let parsed;
+      const headers = await authHeaders();
+      if (!headers) return;
       const isPdf = /\.pdf$/i.test(file.name || "") || String(file.type || "").includes("pdf");
+      let response;
       if (isPdf) {
-        const headers = await authHeaders();
-        if (!headers) return;
         const body = new FormData();
         body.append("file", file);
-        const response = await fetch("/api/tally-statement", {
-          method: "POST",
-          headers,
-          body,
-        });
-        parsed = await response.json().catch(() => ({}));
-        if (!response.ok || !parsed?.entries?.length) {
-          throw new Error(parsed?.error || t("statementPdf"));
-        }
+        body.append("customerCode", selectedCustomer.customer_code);
+        response = await fetch("/api/tally-statement", { method: "POST", headers, body });
       } else {
         const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-        parsed = parseTallyStatementWorkbook(workbook);
+        const parsed = parseTallyStatementWorkbook(workbook);
+        if (!parsed.entries.length) {
+          setError(parsed.error || t("statementNone"));
+          return;
+        }
+        response = await fetch("/api/tally-statement", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerCode: selectedCustomer.customer_code,
+            fileName: file.name,
+            entries: parsed.entries,
+            opening: parsed.opening,
+            closing: parsed.closing,
+          }),
+        });
       }
-      if (!parsed.entries.length) {
-        setStatementResult(null);
-        setStatementFileName("");
-        setError(parsed.error || t("statementNone"));
-        return;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.statement?.entries?.length) {
+        throw new Error(payload?.error || t("statementNone"));
       }
-      const purchases = (ledger.datewise || []).flatMap((day) => (
-        (day.purchases || []).map((row) => ({
-          ...row,
-          purchase_date: row.purchase_date || day.date,
-        }))
-      ));
-      const compared = compareTallyStatement(parsed, buildSfaStatementEntries({
-        invoices: ledger.invoices,
-        reversedInvoices: ledger.reversedInvoices,
-        creditNotes: ledger.creditNotes,
-        receipts: statementReceipts,
-        purchases,
-      }));
-      setStatementFileName(file.name || "");
-      setStatementResult(compared);
+      setStoredStatement(payload.statement);
     } catch (err) {
-      setStatementResult(null);
-      setStatementFileName("");
       setError(err?.message || t("statementNone"));
     }
-  }, [authHeaders, ledger, statementReceipts, t]);
+  }, [authHeaders, ledger, selectedCustomer, t]);
+
+  const clearStatement = useCallback(async () => {
+    const code = selectedCustomer?.customer_code;
+    const headers = await authHeaders();
+    if (code && headers) {
+      const response = await fetch(`/api/tally-statement?customerCode=${encodeURIComponent(code)}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setError(payload.error || "Unable to clear the Tally statement.");
+        return;
+      }
+    }
+    setStoredStatement(null);
+  }, [authHeaders, selectedCustomer]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -995,7 +1020,12 @@ export default function PaymentSettlementPage() {
               <section className="moduleSection" id="tally-statement">
                 <div className="moduleSectionHeader">
                   <h2>{t("statementTitle")}</h2>
-                  <span>{statementFileName}</span>
+                  <span>
+                    {storedStatement?.fileName || ""}
+                    {storedStatement?.uploadedAt
+                      ? ` · ${String(storedStatement.uploadedAt).slice(0, 16).replace("T", " ")}`
+                      : ""}
+                  </span>
                 </div>
                 <p className="moduleHint">{t("statementHint")}</p>
                 <div className="moduleFilterRow">
@@ -1013,14 +1043,11 @@ export default function PaymentSettlementPage() {
                     hidden
                     onChange={onStatementFile}
                   />
-                  {statementResult ? (
+                  {storedStatement ? (
                     <button
                       type="button"
                       className="moduleInlineButton"
-                      onClick={() => {
-                        setStatementResult(null);
-                        setStatementFileName("");
-                      }}
+                      onClick={() => { void clearStatement(); }}
                     >
                       {t("statementClear")}
                     </button>

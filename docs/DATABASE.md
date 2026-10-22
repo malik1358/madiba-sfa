@@ -196,6 +196,7 @@ Schemes and quantity limits are settings, not tables:
 | `mobile_field_snapshot_meta_v1` | Mobile snapshot metadata |
 | `offline_data_version_v1` | Client cache busting |
 | `customer_meta:<code>` | Per-customer extra meta |
+| `tally_statement_v1:<code>` | Parsed Tally customer ledger lines for Payment Settlement. Shared by every user. The comparison is rebuilt from live SFA data; the PDF is not stored. |
 | `customer_order_block_override:<code>` | Admin override to allow orders when Avg Days to Pay auto-block is triggered |
 | `customer_inactive_meta:<code>` | Inactive-with-outstanding flags |
 | `visit_report_latest:<code>` / `visit_report_history:<code>:` | Field visit reports |

@@ -2,7 +2,7 @@ export function buildCustomerHistoryApiUrl(
   customerHistoryApi,
   customerCode,
   customerName = "",
-  { fullHistory = false, scope = "", refresh = false } = {},
+  { fullHistory = false, scope = "", refresh = false, waitReceipts = false } = {},
 ) {
   const [baseUrl, existingQuery = ""] = String(customerHistoryApi || "").split("?", 2);
   const params = new URLSearchParams(existingQuery);
@@ -26,6 +26,10 @@ export function buildCustomerHistoryApiUrl(
     params.set("refresh", "1");
   }
 
+  if (waitReceipts) {
+    params.set("waitReceipts", "1");
+  }
+
   const query = params.toString();
   return query ? `${baseUrl}?${query}` : baseUrl;
 }
@@ -40,5 +44,8 @@ export function buildSettlementCustomerHistoryUrl(
     fullHistory: true,
     scope: "settlement",
     refresh,
+    // Order PDF and New Order draw Paid/Open immediately. They cannot use the
+    // audit screen's "receipts arrive later" response, or every bill looks open.
+    waitReceipts: true,
   });
 }

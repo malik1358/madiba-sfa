@@ -19,7 +19,7 @@ test("buildSettlementCustomerHistoryUrl keeps New Order on full settlement histo
 
   assert.equal(
     url,
-    "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement&refresh=1",
+    "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement&refresh=1&waitReceipts=1",
   );
 });
 
@@ -32,7 +32,7 @@ test("buildSettlementCustomerHistoryUrl trims customer name whitespace", () => {
 
   assert.equal(
     url,
-    "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement",
+    "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement&waitReceipts=1",
   );
 });
 
@@ -45,7 +45,7 @@ test("buildSettlementCustomerHistoryUrl appends params to existing query", () =>
 
   assert.equal(
     url,
-    "/api/customer-history?foo=1&customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement",
+    "/api/customer-history?foo=1&customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement&waitReceipts=1",
   );
 });
 
@@ -68,6 +68,11 @@ test("customer history loads current and full history from the active sales snap
   assert.match(customerHistoryRoute, /function shouldIncludePeerTransactions/);
   assert.match(customerHistoryRoute, /writeCachedInBackground/);
   assert.match(customerHistoryRoute, /loadReceiptDatasetCached/);
+});
+
+test("settlement history waits for receipts instead of returning every invoice open", () => {
+  assert.match(customerHistoryRoute, /const waitReceipts =/);
+  assert.match(customerHistoryRoute, /if \(waitReceipts \|\| receiptDatasetIsWarm\(\)\)/);
 });
 
 test("customer history skips peer rows on full settlement history unless includePeers=1", () => {

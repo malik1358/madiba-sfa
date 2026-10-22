@@ -7,6 +7,17 @@ function formatDateOnly(value) {
   return formatKsaDateOnly(value, "");
 }
 
+function formatLastVisitDateDisplay(value) {
+  const input = String(value || "").trim();
+  if (!input) return "";
+  // My Day stores latest near visit as a KSA calendar day (YYYY-MM-DD).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    return formatKsaDateOnly(input, "");
+  }
+  const dateTime = formatKsaDateTime(input);
+  return dateTime && dateTime !== "-" ? dateTime : formatKsaDateOnly(input, "");
+}
+
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -40,6 +51,7 @@ export function buildFieldVisitWhatsappSummary({
   includeOutstanding = true,
   avgDaysToPay = null,
   workingHours = null,
+  lastVisitAt = null,
 } = {}) {
   const labels = {
     title: "Field visit report",
@@ -60,6 +72,7 @@ export function buildFieldVisitWhatsappSummary({
     totalOutstanding: "Total",
     avgDaysToPay: "Avg days to pay",
     avgDaysToPay6mLabel: "6-month avg",
+    lastVisitDate: "Last visit date",
   };
 
   const outcome = formatFieldVisitOutcome(visitForm.outcome, "en");
@@ -103,6 +116,16 @@ export function buildFieldVisitWhatsappSummary({
     labels,
   ));
   lines.push(...formatVisitDistanceWhatsappLines(visitDistance));
+
+  const resolvedLastVisitAt = lastVisitAt
+    ?? customer.last_visit_date
+    ?? customer.lastVisitDate
+    ?? "";
+  const lastVisitDate = formatLastVisitDateDisplay(resolvedLastVisitAt);
+  if (lastVisitDate) {
+    // Match collection WhatsApp: blank line, then last visit after GPS metrics.
+    lines.push("", `${labels.lastVisitDate}: ${lastVisitDate}.`);
+  }
 
   return lines.join("\n");
 }

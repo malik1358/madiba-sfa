@@ -629,6 +629,30 @@ function settleCrossedReversals(rows) {
   return rows;
 }
 
+// Sales 1825, discount 1825, and VAT-DG-1825 are one voucher. When their
+// differences add up to zero they leave the mismatch list together.
+function settleNetZeroVoucherGroups(rows) {
+  const groups = [];
+  rows.forEach((row) => {
+    if (!voucherKey(row.voucher)) return;
+    const group = groups.find((items) => items.some((other) => sameVoucher(other.voucher, row.voucher)));
+    if (group) group.push(row);
+    else groups.push([row]);
+  });
+  groups.forEach((group) => {
+    const open = group.filter((row) => Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE);
+    if (open.length < 2) return;
+    const net = roundMoney(open.reduce((total, row) => total + row.difference, 0));
+    if (Math.abs(net) > TALLY_STATEMENT_TOLERANCE) return;
+    open.forEach((row) => {
+      row.status = "matched";
+      row.difference = 0;
+      row.leadsGap = false;
+    });
+  });
+  return rows;
+}
+
 function lineFromPair(tally, sfa, index) {
   const tallyDebit = tally?.side === "debit" ? roundMoney(tally.amount) : 0;
   const tallyCredit = tally?.side === "credit" ? roundMoney(tally.amount) : 0;
@@ -737,7 +761,7 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
-  const settledRows = settleCrossedReversals(settleRoundOffRows(rows));
+  const settledRows = settleNetZeroVoucherGroups(settleCrossedReversals(settleRoundOffRows(rows)));
 
   let running = 0;
   let leadIndex = -1;

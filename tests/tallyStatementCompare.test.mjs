@@ -254,6 +254,52 @@ test("credit note 33 reversing sales 1583 drops both fils when they cross", () =
   assert.equal(result.lead.voucher, "1584");
 });
 
+test("sales 1825, its discount, and VAT-DG-1825 leave together when they net to zero", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["19-11-2025", "Sales Non Food Division - Stationery", "Sales", "1825", 18595.5, ""],
+    ["19-11-2025", "Sales", "Sales", "1900", 400, ""],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2025-11-19", voucher_number: "1825", amount_incl_vat: 18975 },
+      { invoice_date: "2025-11-19", voucher_number: "1900", amount_incl_vat: 400 },
+    ],
+    receipts: [
+      { receipt_date: "2025-11-19", vch_no: "1825", amount: 330, vch_type: "1825 Discount Given" },
+      { receipt_date: "2025-11-19", vch_no: "VAT-DG-1825", amount: 49.5, vch_type: "1825 Discount Given" },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.rows.find((row) => row.voucher === "1825" && row.vchType === "Sales").status, "matched");
+  assert.equal(result.rows.some((row) => row.voucher === "VAT-DG-1825" && row.status !== "matched"), false);
+  assert.equal(result.rows.filter((row) => String(row.voucher).includes("1825") && row.status !== "matched").length, 0);
+  assert.equal(result.rows.find((row) => row.voucher === "1900").status, "matched");
+  assert.equal(result.lead, null);
+  assert.equal(result.totals.agrees, true);
+  assert.equal(result.totals.difference, 0);
+});
+
+test("a same-number discount that does not net to zero stays in the mismatch list", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["19-11-2025", "Sales", "Sales", "1825", 18595.5, ""],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2025-11-19", voucher_number: "1825", amount_incl_vat: 18975 },
+    ],
+    receipts: [
+      { receipt_date: "2025-11-19", vch_no: "1825", amount: 330, vch_type: "1825 Discount Given" },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.rows.filter((row) => row.status !== "matched").length, 2);
+  assert.equal(result.totals.agrees, false);
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

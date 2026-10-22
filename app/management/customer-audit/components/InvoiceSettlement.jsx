@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ExportableTable from "../../../components/ExportableTable";
 import { HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
+import { formatSettlementOpenDelta, isSettlementOpenDeltaDust } from "../../../lib/settlementOpenDelta.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -26,16 +27,12 @@ function statusClass(status) {
 }
 
 function formatDelta(value) {
-  const amount = Number(value || 0);
-  if (Math.abs(amount) < 0.005) return "0";
-  const sign = amount > 0 ? "+" : "";
-  return `${sign}${formatMoney(amount)}`;
+  return formatSettlementOpenDelta(value);
 }
 
 function deltaClass(value) {
-  const amount = Number(value || 0);
-  if (Math.abs(amount) < 0.005) return "";
-  return amount > 0 ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
+  if (isSettlementOpenDeltaDust(value)) return "";
+  return Number(value || 0) > 0 ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
 }
 
 function InvoiceSettlementRow({ invoice, open, onToggle }) {

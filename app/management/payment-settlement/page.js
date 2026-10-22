@@ -13,6 +13,7 @@ import {
   HISTORIC_PERFORMANCE_PERIOD_LABEL,
   HISTORIC_PERFORMANCE_SHORT_LABEL,
 } from "../../lib/paymentBehavior.js";
+import { formatSettlementOpenDelta } from "../../lib/settlementOpenDelta.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -54,10 +55,7 @@ function formatCount(value) {
 }
 
 function formatDelta(value) {
-  const number = Number(value || 0);
-  if (Math.abs(number) <= 0.009) return "0";
-  const sign = number > 0 ? "+" : "";
-  return `${sign}${number.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return formatSettlementOpenDelta(value);
 }
 
 function deltaClass(value) {

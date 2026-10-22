@@ -8045,6 +8045,42 @@ button.moduleBiDashKpi:focus-visible {
   font-weight: 700;
 }
 
+/* Settlement grids use moduleBiTable, which pins headings at top: 0.
+   That slides them under the status bar and navigation. Keep them below
+   that chrome, and do not trap them in a horizontal-only scroll box. */
+.moduleTableWrap:has(> .paymentSettleTable) {
+  overflow: visible;
+}
+
+.paymentSettleTable.moduleBiTable thead tr:first-child th,
+.paymentSettleTable.moduleStackedHeaderTable thead tr:first-child th {
+  position: sticky;
+  top: var(--sticky-table-top);
+  z-index: 8;
+  background: #0f4c5c;
+}
+
+.paymentSettleTable.moduleBiTable thead tr:nth-child(2) th,
+.paymentSettleTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  position: sticky;
+  top: calc(var(--sticky-table-top) + var(--module-stacked-header-row1, 40px));
+  z-index: 7;
+}
+
+body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleBiTable thead tr:first-child th,
+body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleStackedHeaderTable thead tr:first-child th {
+  top: calc(var(--sticky-table-top) + 16px);
+}
+
+body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleBiTable thead tr:nth-child(2) th,
+body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  top: calc(var(--sticky-table-top) + 16px + var(--module-stacked-header-row1, 40px));
+}
+
+.paymentSettleTable.moduleBiTable thead th:first-child {
+  z-index: 9;
+}
+
 .paymentSettleDateCell {
   display: inline-flex;
   align-items: center;

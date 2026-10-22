@@ -5,11 +5,8 @@ import {
   fetchCustomerHistoryCached,
   fetchItemsMasterCached,
   fetchSalesScopeCached,
-  fetchVisibleCustomersCached,
-  hydrateFoundationFromCache,
   subscribeCustomerHistoryCacheCleared,
 } from '../../../lib/mobileDataCache';
-import { dedupeCustomerMasterRows } from '../../../lib/customerMasterQuery';
 
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
@@ -24,7 +21,8 @@ export function useCustomerData({ setError, setMessage }) {
   const [loadingVisits, setLoadingVisits] = useState(false);
   const [itemMaster, setItemMaster] = useState([]);
   const [itemMasterStatus, setItemMasterStatus] = useState('Not loaded');
-  const [loading, setLoading] = useState(true);
+  const [loading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [loadingCustomer, setLoadingCustomer] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
@@ -38,92 +36,53 @@ export function useCustomerData({ setError, setMessage }) {
     selectedCustomerRef.current = selectedCustomer;
   }, [selectedCustomer]);
 
-  const loadFoundation = useCallback(async () => {
-    const supabase = getSupabaseClient();
-
-    if (!supabase) {
-      setError('Supabase is not configured.');
-      setLoading(false);
-      return;
+  useEffect(() => {
+    const queryText = search.trim();
+    if (queryText.length < 2) {
+      setCustomers([]);
+      setSalesmen([]);
+      setSearching(false);
+      return undefined;
     }
 
-    setLoading(true);
-    setRefreshing(false);
-    setError('');
-
-    try {
-      await withTimeout((async () => {
-        const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
-        if (!session) {
-          throw new Error('Please login again.');
-        }
-
-        const hydrated = await hydrateFoundationFromCache(session.user.id);
-        if (hydrated) {
-          setAccessScope(hydrated.scope);
-          setCustomers(dedupeCustomerMasterRows(hydrated.customers));
-          setItemMaster(hydrated.itemsMaster);
-          setItemMasterStatus(hydrated.itemMasterStatus);
-          setSalesmen([
-            ...new Set((hydrated.scope.visibleMembers || []).map((member) => member.salesman_code).filter(Boolean)),
-          ].sort());
-          setLoading(false);
-          setRefreshing(true);
-        }
-
-        const scopeResult = await fetchSalesScopeCached({
-          onUpdate: (freshScope) => {
-            setAccessScope(freshScope);
-            setRefreshing(false);
-          },
-        });
-        const scope = scopeResult.scope;
-        setAccessScope(scope);
-        if (scopeResult.fromCache && scopeResult.stale) {
-          setRefreshing(true);
-        }
-
-        const customersResult = await fetchVisibleCustomersCached(session.access_token, scope, {
-          includeInactive: true,
-          onUpdate: (freshCustomers) => {
-            setCustomers(dedupeCustomerMasterRows(Array.isArray(freshCustomers) ? freshCustomers : []));
-            setRefreshing(false);
-          },
-        });
-        setCustomers(dedupeCustomerMasterRows(Array.isArray(customersResult.data) ? customersResult.data : []));
-
-        const itemsResult = await fetchItemsMasterCached({
-          onUpdate: (freshItems) => {
-            setItemMaster(freshItems.rows || []);
-            setItemMasterStatus(freshItems.status || 'Not loaded');
-            setRefreshing(false);
-          },
-        });
-        setItemMaster(itemsResult.data.rows || []);
-        setItemMasterStatus(itemsResult.data.status || 'Not loaded');
-
-        const salesmanCodes = [
-          ...new Set([
-            ...(scope.visibleSalesmanCodes || []),
-            ...(scope.mutualSalesmanCodes || []),
-            ...(scope.visibleMembers || []).map((member) => member.salesman_code),
-          ].filter(Boolean)),
-        ].sort();
-
-        setSalesmen(salesmanCodes);
-      })(), LOAD_TIMEOUT_MS, 'Customer data load timed out. Please refresh the page or login again.');
-    } catch (err) {
-      const message = String(err.message || '');
-      if (message === 'SESSION_TIMEOUT') {
-        setError('Session check timed out. Please refresh the page or login again.');
-      } else {
-        setError(message || 'Unable to load customer data.');
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setError('Supabase is not configured.');
+        return;
       }
-    } finally {
-      setRefreshing(false);
-      setLoading(false);
-    }
-  }, [setError]);
+
+      setSearching(true);
+      setError('');
+      try {
+        const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
+        if (!session?.access_token) throw new Error('Please login again.');
+
+        const response = await fetch(`/api/customers/lookup?q=${encodeURIComponent(queryText)}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || 'Unable to search customers.');
+        }
+        if (cancelled) return;
+
+        const rows = Array.isArray(payload.customers) ? payload.customers : [];
+        setCustomers(rows);
+        setSalesmen([...new Set(rows.map((row) => row.current_salesman_code).filter(Boolean))].sort());
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Unable to search customers.');
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [search, setError]);
 
   const openCustomer = useCallback(async (customer) => {
     const supabase = getSupabaseClient();
@@ -151,6 +110,7 @@ export function useCustomerData({ setError, setMessage }) {
       }
 
       const scope = accessScope || (await fetchSalesScopeCached()).scope;
+      if (!accessScope) setAccessScope(scope);
       // Cache-first so the detail screen unlocks immediately. Uploads already wipe the
       // shared history cache and trigger refreshSelectedCustomerHistory for fresh FIFO math.
       // Blocking revalidate here left the UI on "Loading customer history..." for the full
@@ -189,12 +149,24 @@ export function useCustomerData({ setError, setMessage }) {
         return Array.isArray(payload.visits) ? payload.visits : [];
       });
 
+      const itemsPromise = fetchItemsMasterCached()
+        .then((itemsResult) => {
+          if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
+          setItemMaster(itemsResult.data.rows || []);
+          setItemMasterStatus(itemsResult.data.status || 'Not loaded');
+        })
+        .catch((itemError) => {
+          if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
+          setItemMasterStatus(itemError.message || 'Unable to load items.');
+        });
+
       const [historyResult, visitRows] = await Promise.all([
         historyPromise,
         visitsPromise.catch((visitError) => {
           setError(visitError.message || 'Unable to load customer visits.');
           return [];
         }),
+        itemsPromise,
       ]);
 
       setTransactions(historyResult.data.transactions || []);
@@ -262,10 +234,6 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
   }, [setError, setMessage]);
 
-  useEffect(() => {
-    loadFoundation();
-  }, [loadFoundation]);
-
   return {
     customers,
     salesmen,
@@ -282,6 +250,7 @@ export function useCustomerData({ setError, setMessage }) {
     itemMaster,
     itemMasterStatus,
     loading,
+    searching,
     loadingCustomer,
     refreshing,
     expandedCategories,

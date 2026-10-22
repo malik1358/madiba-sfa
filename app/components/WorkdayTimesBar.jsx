@@ -5,7 +5,7 @@ import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useAppPopup } from "./AppPopupProvider";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { useTodayWorkdayLogs } from "../hooks/useTodayWorkdayLogs";
-import { isMorningAttendanceRequiredForRole, notifyWorkdayTimesUpdated } from "../lib/morningAttendance";
+import { insertMorningAttendanceOnce, notifyMorningAttendanceComplete, notifyWorkdayTimesUpdated } from "../lib/morningAttendance";
 import { getSupabaseClient } from "../lib/supabase";
 import {
   buildGpsActivityNote,
@@ -20,7 +20,6 @@ import {
   formatKsaTime,
   getKsaDateString,
   ksaDayBounds,
-  lunchPunchButtons,
   mergeLunchPunchTimes,
   releaseLunchPunch,
 } from "../lib/workdayActivity";
@@ -29,12 +28,11 @@ const TEXT = {
   login: { en: "Login", ar: "تسجيل الدخول" },
   lunchOut: { en: "Lunch out", ar: "خروج الغداء" },
   lunchIn: { en: "Lunch in", ar: "عودة الغداء" },
-  punchLunchOut: { en: "Lunch out", ar: "خروج الغداء" },
-  punchLunchIn: { en: "Lunch in", ar: "عودة الغداء" },
+  dayOut: { en: "Out", ar: "خروج" },
   saving: { en: "Saving", ar: "جارٍ الحفظ" },
   saveFailed: {
-    en: "Unable to save the lunch punch. Check location access and try again.",
-    ar: "تعذر حفظ بصمة الغداء. تحقق من إذن الموقع وحاول مرة أخرى.",
+    en: "Unable to save the punch. Check location access and try again.",
+    ar: "تعذر حفظ البصمة. تحقق من إذن الموقع وحاول مرة أخرى.",
   },
 };
 
@@ -42,12 +40,13 @@ export default function WorkdayTimesBar() {
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const { showPopup } = useAppPopup();
-  const { access, loading: accessLoading } = useModuleAccess();
+  const { access } = useModuleAccess();
   const {
     signedIn,
     loginAt,
     lunchOutAt,
     lunchInAt,
+    endOfDayAt,
     loginTime,
   } = useTodayWorkdayLogs();
   const [busy, setBusy] = useState("");
@@ -57,12 +56,20 @@ export default function WorkdayTimesBar() {
   if (!signedIn) return null;
 
   const lunchTimes = mergeLunchPunchTimes({ lunchOutAt, lunchInAt }, savedPunches);
-  const punches = lunchPunchButtons({
-    attendanceRequired: !accessLoading && isMorningAttendanceRequiredForRole(access.role),
-    loginAt,
-    lunchOutAt: lunchTimes.lunchOutAt,
-    lunchInAt: lunchTimes.lunchInAt,
-  });
+  const loginDone = Boolean(loginAt || savedPunches.MORNING_ATTENDANCE);
+  const lunchOutDone = Boolean(lunchTimes.lunchOutAt);
+  const lunchInDone = Boolean(lunchTimes.lunchInAt);
+  const dayOutDone = Boolean(endOfDayAt || savedPunches.END_OF_DAY);
+  const lunchOutEnabled = loginDone && !lunchOutDone && !dayOutDone;
+  const lunchInEnabled = lunchOutDone && !lunchInDone && !dayOutDone;
+
+  function showSaveError() {
+    showPopup({
+      title: language === "ar" ? "الحضور" : "Attendance",
+      message: language === "ar" ? TEXT.saveFailed.ar : TEXT.saveFailed.en,
+      variant: "error",
+    });
+  }
 
   async function readTodayLunchTimes(supabase, userId) {
     const { startIso, endIso } = ksaDayBounds(getKsaDateString());
@@ -83,14 +90,25 @@ export default function WorkdayTimesBar() {
     setSavedPunches(punchGuardRef.current.saved);
   }
 
-  async function punchLunch(entryType) {
-    if (entryType === "LUNCH_BREAK_OUT" && !punches.lunchOutEnabled) return;
-    if (entryType === "LUNCH_BREAK_IN" && !punches.lunchInEnabled) return;
-
+  async function claimPunch(entryType) {
     const claim = acceptLunchPunch(punchGuardRef.current, entryType);
-    if (!claim.accepted) return;
+    if (!claim.accepted) return false;
     punchGuardRef.current = claim.guard;
     setBusy(entryType);
+    return true;
+  }
+
+  function finishPunch(saved) {
+    if (!saved) {
+      punchGuardRef.current = releaseLunchPunch(punchGuardRef.current);
+    }
+    setBusy("");
+  }
+
+  async function punchLunch(entryType) {
+    if (entryType === "LUNCH_BREAK_OUT" && !lunchOutEnabled) return;
+    if (entryType === "LUNCH_BREAK_IN" && !lunchInEnabled) return;
+    if (!(await claimPunch(entryType))) return;
     let saved = false;
 
     try {
@@ -123,51 +141,104 @@ export default function WorkdayTimesBar() {
       saved = true;
       notifyWorkdayTimesUpdated();
     } catch {
-      showPopup({
-        title: language === "ar" ? "الغداء" : "Lunch",
-        message: language === "ar" ? TEXT.saveFailed.ar : TEXT.saveFailed.en,
-        variant: "error",
-      });
+      showSaveError();
     } finally {
-      if (!saved) {
-        punchGuardRef.current = releaseLunchPunch(punchGuardRef.current);
+      finishPunch(saved);
+    }
+  }
+
+  async function punchDay(entryType) {
+    if (entryType === "MORNING_ATTENDANCE" && loginDone) return;
+    if (entryType === "END_OF_DAY" && (!loginDone || dayOutDone)) return;
+    if (!(await claimPunch(entryType))) return;
+    let saved = false;
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) throw new Error("Supabase is not configured.");
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("Please login again.");
+
+      const location = await requireGpsLocation({ role: access.role });
+      const platform = await resolveGpsCapturePlatform();
+      const note = buildGpsActivityNote(entryType, location, { platform });
+
+      let insertedFresh = true;
+      if (entryType === "MORNING_ATTENDANCE") {
+        const result = await insertMorningAttendanceOnce(supabase, session.user.id, note);
+        insertedFresh = !result.alreadyExists;
+      } else {
+        const { error } = await supabase.from("daily_activity_logs").insert({
+          user_id: session.user.id,
+          entry_type: entryType,
+          note,
+        });
+        if (error) throw error;
       }
-      setBusy("");
+
+      if (insertedFresh) {
+        queueTransactionAlert(session.access_token, {
+          transactionType: entryType,
+          referenceKey: `activity:${session.user.id}:${entryType}:${getKsaDateString()}`,
+        });
+      }
+
+      rememberPunch(entryType, new Date().toISOString());
+      saved = true;
+      if (entryType === "MORNING_ATTENDANCE") notifyMorningAttendanceComplete();
+      else notifyWorkdayTimesUpdated();
+    } catch {
+      showSaveError();
+    } finally {
+      finishPunch(saved);
     }
   }
 
   return (
-    <div
-      className={`workdayTimesBar${punches.showLunchOut || punches.showLunchIn ? " workdayTimesBar--punches" : ""}`}
-      role="status"
-      dir={dir}
-    >
-      <span><strong>{t("login")}:</strong> {loginTime}</span>
+    <div className="workdayTimesBar workdayTimesBar--punches" role="status" dir={dir}>
       <span className="workdayTimesPunch">
-        <strong>{t("lunchOut")}:</strong> {formatKsaTime(lunchTimes.lunchOutAt)}
-        {punches.showLunchOut ? (
-          <button
-            type="button"
-            className="workdayTimesPunchButton"
-            onClick={() => punchLunch("LUNCH_BREAK_OUT")}
-            disabled={!punches.lunchOutEnabled || Boolean(busy)}
-          >
-            {busy === "LUNCH_BREAK_OUT" ? t("saving") : t("punchLunchOut")}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="workdayTimesPunchButton"
+          onClick={() => punchDay("MORNING_ATTENDANCE")}
+          disabled={loginDone || Boolean(busy)}
+        >
+          {busy === "MORNING_ATTENDANCE" ? t("saving") : t("login")}
+        </button>
+        <strong>{t("login")}:</strong> {loginTime}
       </span>
       <span className="workdayTimesPunch">
+        <button
+          type="button"
+          className="workdayTimesPunchButton"
+          onClick={() => punchLunch("LUNCH_BREAK_OUT")}
+          disabled={!lunchOutEnabled || Boolean(busy)}
+        >
+          {busy === "LUNCH_BREAK_OUT" ? t("saving") : t("lunchOut")}
+        </button>
+        <strong>{t("lunchOut")}:</strong> {formatKsaTime(lunchTimes.lunchOutAt)}
+      </span>
+      <span className="workdayTimesPunch">
+        <button
+          type="button"
+          className="workdayTimesPunchButton"
+          onClick={() => punchLunch("LUNCH_BREAK_IN")}
+          disabled={!lunchInEnabled || Boolean(busy)}
+        >
+          {busy === "LUNCH_BREAK_IN" ? t("saving") : t("lunchIn")}
+        </button>
         <strong>{t("lunchIn")}:</strong> {formatKsaTime(lunchTimes.lunchInAt)}
-        {punches.showLunchIn ? (
-          <button
-            type="button"
-            className="workdayTimesPunchButton"
-            onClick={() => punchLunch("LUNCH_BREAK_IN")}
-            disabled={!punches.lunchInEnabled || Boolean(busy)}
-          >
-            {busy === "LUNCH_BREAK_IN" ? t("saving") : t("punchLunchIn")}
-          </button>
-        ) : null}
+      </span>
+      <span className="workdayTimesPunch">
+        <button
+          type="button"
+          className="workdayTimesPunchButton"
+          onClick={() => punchDay("END_OF_DAY")}
+          disabled={!loginDone || dayOutDone || Boolean(busy)}
+        >
+          {busy === "END_OF_DAY" ? t("saving") : t("dayOut")}
+        </button>
       </span>
     </div>
   );

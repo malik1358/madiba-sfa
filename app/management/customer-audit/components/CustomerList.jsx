@@ -2,7 +2,7 @@ import { shortDate } from '../lib/format';
 import { customerMasterDedupeKey } from '../../../lib/customerMasterQuery';
 import { resolveCustomerMasterExportFields } from '../../../lib/customerCode';
 
-export default function CustomerList({ customers, selectedSalesman, setSelectedSalesman, search, setSearch, salesmen, openCustomer }) {
+export default function CustomerList({ customers, selectedSalesman, setSelectedSalesman, search, setSearch, salesmen, openCustomer, searching = false }) {
   return (
     <>
       <div className="auditFilters">
@@ -24,7 +24,11 @@ export default function CustomerList({ customers, selectedSalesman, setSelectedS
       </div>
 
       <div className="auditCustomerCount">
-        <strong>{customers.length}</strong> customers
+        {search.trim().length < 2
+          ? "Search a customer code or name. Details load after you choose one."
+          : searching
+            ? "Searching..."
+            : <><strong>{customers.length}</strong> matches</>}
       </div>
 
       <div className="auditCustomerList">
@@ -53,7 +57,9 @@ export default function CustomerList({ customers, selectedSalesman, setSelectedS
         })}
       </div>
 
-      {customers.length === 0 && <div className="auditEmpty">No customers match the current filters.</div>}
+      {search.trim().length >= 2 && !searching && customers.length === 0 && (
+        <div className="auditEmpty">No customers match the current filters.</div>
+      )}
     </>
   );
 }

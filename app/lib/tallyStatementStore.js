@@ -43,6 +43,7 @@ export function buildTallyStatementRecord(parsed, {
     uploadedBy: String(uploadedBy || "").trim().slice(0, 120),
     opening: cleanBalance(parsed?.opening),
     closing: cleanBalance(parsed?.closing),
+    report: parsed?.report === "pending_bills" ? "pending_bills" : "",
     entries,
   };
 }

@@ -474,6 +474,7 @@ export function buildSfaStatementEntries({
         vchType: "Credit Note",
         side: "credit",
         amount: creditAmount,
+        reversesVoucher: String(invoice.voucher_number || "").trim(),
       });
     }
   });
@@ -488,6 +489,7 @@ export function buildSfaStatementEntries({
       vchType: String(note.voucher_type || note.kind || "Credit Note"),
       side: "credit",
       amount,
+      reversesVoucher: String(note.reference || note.ref_no || "").trim(),
     });
   });
 
@@ -548,6 +550,85 @@ function detectVatScale(pairs) {
   return "";
 }
 
+function isRoundOffRow(row) {
+  const type = `${row?.vchType || ""} ${row?.particulars || ""}`.toLowerCase();
+  const voucher = String(row?.voucher || "");
+  return type.includes("round off") || type.includes("roundoff") || /^RO[\s/-]*\d/i.test(voucher);
+}
+
+function roundOffBaseKey(row) {
+  return voucherKey(row?.voucher).replace(/^RO/, "");
+}
+
+function roundOffAmount(row) {
+  return roundMoney(Math.max(
+    toNumber(row?.tallyDebit),
+    toNumber(row?.tallyCredit),
+    toNumber(row?.sfaDebit),
+    toNumber(row?.sfaCredit),
+  ));
+}
+
+// RO-1076 is the fils rounding of voucher 1076. When that fils equals the
+// invoice gap, the two lines are one rounding and leave the mismatch list.
+function settleRoundOffRows(rows) {
+  const consumed = new Set();
+  rows.forEach((roundOff) => {
+    if (consumed.has(roundOff) || !isRoundOffRow(roundOff)) return;
+    const baseKey = roundOffBaseKey(roundOff);
+    const amount = roundOffAmount(roundOff);
+    if (!baseKey || amount <= TALLY_STATEMENT_TOLERANCE) return;
+    const base = rows.find((row) => (
+      row !== roundOff
+      && !consumed.has(row)
+      && !isRoundOffRow(row)
+      && voucherKey(row.voucher) === baseKey
+      && Math.abs(Math.abs(row.difference) - amount) <= TALLY_STATEMENT_TOLERANCE
+    ));
+    if (!base) return;
+    if (base.difference > 0) {
+      base.sfaDebit = roundMoney(base.sfaDebit + base.difference);
+    } else if (base.difference < 0) {
+      base.sfaCredit = roundMoney(base.sfaCredit + Math.abs(base.difference));
+    }
+    base.difference = roundMoney((base.tallyDebit - base.tallyCredit) - (base.sfaDebit - base.sfaCredit));
+    base.status = "matched";
+    base.leadsGap = false;
+    consumed.add(roundOff);
+  });
+  return rows.filter((row) => !consumed.has(row));
+}
+
+function sameVoucher(left, right) {
+  const a = voucherKey(left);
+  const b = voucherKey(right);
+  return Boolean(a && b && (a === b || vouchersMatch(a, b)));
+}
+
+// Credit note 33 reverses sales 1583. A +0.10 fils on the sale and −0.10 on
+// the note are the same rounding and leave the mismatch list together.
+function settleCrossedReversals(rows) {
+  rows.forEach((credit) => {
+    const target = credit.reversesVoucher;
+    if (!target || Math.abs(credit.difference) <= TALLY_STATEMENT_TOLERANCE) return;
+    const sale = rows.find((row) => (
+      row !== credit
+      && sameVoucher(row.voucher, target)
+      && (row.tallyDebit > 0 || row.sfaDebit > 0)
+      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
+      && Math.abs(row.difference + credit.difference) <= TALLY_STATEMENT_TOLERANCE
+    ));
+    if (!sale) return;
+    sale.status = "matched";
+    credit.status = "matched";
+    sale.difference = 0;
+    credit.difference = 0;
+    sale.leadsGap = false;
+    credit.leadsGap = false;
+  });
+  return rows;
+}
+
 function lineFromPair(tally, sfa, index) {
   const tallyDebit = tally?.side === "debit" ? roundMoney(tally.amount) : 0;
   const tallyCredit = tally?.side === "credit" ? roundMoney(tally.amount) : 0;
@@ -579,6 +660,7 @@ function lineFromPair(tally, sfa, index) {
     difference,
     runningGap: 0,
     leadsGap: false,
+    reversesVoucher: sfa?.reversesVoucher || "",
   };
 }
 
@@ -655,9 +737,11 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
+  const settledRows = settleCrossedReversals(settleRoundOffRows(rows));
+
   let running = 0;
   let leadIndex = -1;
-  rows.forEach((row, index) => {
+  settledRows.forEach((row, index) => {
     running = roundMoney(running + row.difference);
     row.runningGap = running;
     if (leadIndex < 0 && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
@@ -666,13 +750,13 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     }
   });
 
-  const sum = (pick) => roundMoney(rows.reduce((total, row) => total + pick(row), 0));
+  const sum = (pick) => roundMoney(settledRows.reduce((total, row) => total + pick(row), 0));
   const tallyDebit = sum((row) => row.tallyDebit);
   const tallyCredit = sum((row) => row.tallyCredit);
   const sfaDebit = sum((row) => row.sfaDebit);
   const sfaCredit = sum((row) => row.sfaCredit);
   const difference = roundMoney((tallyDebit - tallyCredit) - (sfaDebit - sfaCredit));
-  const issueCount = rows.filter((row) => row.status !== "matched").length;
+  const issueCount = settledRows.filter((row) => row.status !== "matched").length;
 
   return {
     from,
@@ -681,8 +765,8 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     closing: tallyParsed?.closing || null,
     sheetName: tallyParsed?.sheetName || "",
     vatScale,
-    rows,
-    lead: leadIndex >= 0 ? rows[leadIndex] : null,
+    rows: settledRows,
+    lead: leadIndex >= 0 ? settledRows[leadIndex] : null,
     totals: {
       tallyDebit,
       tallyCredit,
@@ -691,7 +775,7 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
       tallyNet: roundMoney(tallyDebit - tallyCredit),
       sfaNet: roundMoney(sfaDebit - sfaCredit),
       difference,
-      matchedCount: rows.length - issueCount,
+      matchedCount: settledRows.length - issueCount,
       issueCount,
       agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
     },

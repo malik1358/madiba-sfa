@@ -357,44 +357,18 @@ async function filesForNativeWhatsappShare(files) {
 }
 
 /**
- * On Android, put the summary on the receipt image and share that file alone.
- * A separate text field makes WhatsApp keep the caption and drop the photo.
+ * Share the receipt photo as an image and the visit summary as text.
+ * Several photos are stacked into one JPEG so Android WhatsApp does not drop them.
  */
-export async function prepareWhatsappAttachmentShare(text, files = [], options = {}) {
+export async function prepareWhatsappAttachmentShare(text, files = []) {
   const message = String(text || "").trim();
   const shareFiles = normalizeShareFiles(files);
-  const omitSeparateText = options.omitSeparateText === true
-    || shouldOmitWebShareText(options.userAgent || "");
-
-  if (!omitSeparateText || shareFiles.length === 0) {
-    return {
-      message,
-      files: shareFiles,
-      embeddedSummary: false,
-      textCopied: false,
-    };
-  }
-
-  const imageFiles = shareFiles.filter(isWhatsappImageFile);
-  if (message && imageFiles.length > 0) {
-    const composite = await buildReceiptSummaryShareImage(imageFiles, message, options);
-    if (composite) {
-      return {
-        message: "",
-        files: [composite],
-        embeddedSummary: true,
-        textCopied: true,
-      };
-    }
-  }
 
   return {
-    message: "",
-    files: shareFiles.length === 1
-      ? shareFiles
-      : await filesForNativeWhatsappShare(shareFiles),
+    message,
+    files: shareFiles.length <= 1 ? shareFiles : await filesForNativeWhatsappShare(shareFiles),
     embeddedSummary: false,
-    textCopied: Boolean(message),
+    textCopied: false,
   };
 }
 
@@ -584,18 +558,9 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
-  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  const omitWebText = shouldOmitWebShareText(userAgent);
-  const prepared = await prepareWhatsappAttachmentShare(originalMessage, incomingFiles, {
-    ...options,
-    userAgent,
-    omitSeparateText: omitWebText,
-  });
+  const prepared = await prepareWhatsappAttachmentShare(originalMessage, incomingFiles);
   const shareFiles = prepared.files;
   const shareMessage = prepared.message;
-  const nativeFiles = omitWebText
-    ? shareFiles
-    : await filesForNativeWhatsappShare(shareFiles);
 
   function cancelledShare(error) {
     return String(error?.name || "") === "AbortError"
@@ -606,40 +571,16 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     return {
       success: true,
       method,
-      textCopied: prepared.textCopied || (omitWebText && Boolean(originalMessage)),
-      embeddedSummary: prepared.embeddedSummary,
+      textCopied: Boolean(originalMessage),
+      embeddedSummary: false,
     };
   }
 
-  // Several files make Android's share plugin use */*, and WhatsApp then keeps
-  // only the summary. Prefer a single composite file, then the web share sheet.
-  if (
-    nativeFiles.length > 1
-    && omitWebText
-    && typeof navigator !== "undefined"
-    && typeof navigator.share === "function"
-  ) {
+  if (await canUseNativeFileShare()) {
     try {
-      await sharePreparedFilesOnWeb(nativeFiles, {
-        title,
-        message: shareMessage,
-        includeText: false,
-      });
-      return successResult("web-share-files");
-    } catch (error) {
-      if (cancelledShare(error)) {
-        return { success: false, reason: "cancelled" };
-      }
-    }
-  }
-
-  if (await canUseNativeFileShare() && (nativeFiles.length === 1 || !omitWebText)) {
-    try {
-      // Android: never send a separate text field with the file — WhatsApp keeps
-      // the caption and drops the receipt. The summary is on the image / clipboard.
       await shareFilesViaCapacitor(
-        nativeFiles,
-        omitWebText ? "" : shareMessage,
+        shareFiles,
+        shareMessage,
         dialogTitle,
         title,
       );
@@ -654,10 +595,10 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
-      await sharePreparedFilesOnWeb(nativeFiles.length ? nativeFiles : shareFiles, {
+      await sharePreparedFilesOnWeb(shareFiles, {
         title,
         message: shareMessage,
-        includeText: !omitWebText && Boolean(shareMessage),
+        includeText: Boolean(shareMessage),
       });
       return successResult("web-share-files");
     } catch (error) {

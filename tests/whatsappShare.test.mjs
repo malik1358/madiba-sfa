@@ -211,10 +211,10 @@ test("Android web share sends the collection file and keeps the summary for past
     assert.equal(result.success, true);
     assert.equal(result.method, "web-share-files");
     assert.equal(result.textCopied, true);
-    assert.equal(result.embeddedSummary, true);
-    assert.equal(shared.text, undefined);
+    assert.equal(result.embeddedSummary, false);
+    assert.equal(shared.text, "Collection visit summary");
     assert.equal(shared.files.length, 1);
-    assert.equal(shared.files[0].name, "collection-receipt-summary.jpg");
+    assert.equal(shared.files[0].name, "receipt.jpg");
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
@@ -305,7 +305,7 @@ test("buildReceiptSummaryShareImage prints the summary under the receipt photo",
   assert.equal(image?.name, "collection-receipt-summary.jpg");
 });
 
-test("Android preparation embeds the summary on the receipt and drops separate text", async () => {
+test("Android preparation keeps the summary as text and the receipt as the image", async () => {
   const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "receipt.jpg", {
     type: "image/jpeg",
   });
@@ -314,13 +314,10 @@ test("Android preparation embeds the summary on the receipt and drops separate t
     [file],
     {
       userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)",
-      document: createShareCanvasDocument(),
-      loadImage: async () => ({ width: 640, height: 480 }),
     },
   );
-  assert.equal(prepared.embeddedSummary, true);
-  assert.equal(prepared.message, "");
-  assert.equal(prepared.textCopied, true);
+  assert.equal(prepared.embeddedSummary, false);
+  assert.equal(prepared.message, "Customer: 1254\nFunds received: 500");
   assert.equal(prepared.files.length, 1);
-  assert.equal(prepared.files[0].name, "collection-receipt-summary.jpg");
+  assert.equal(prepared.files[0].name, "receipt.jpg");
 });

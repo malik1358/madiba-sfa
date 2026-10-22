@@ -69,7 +69,13 @@ import { prepareReceiptUploadFile, prepareUploadFile } from "../../lib/compressU
 import { createClientSubmissionId } from "../../lib/collectionSubmission";
 import { openAttachment } from "../../lib/openAttachment";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
-import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
+import {
+  formatAvgDaysToPayWhatsappLines,
+  loadCustomerAvgDaysToPay,
+  prefetchCustomerAvgDaysForVisit,
+  resolveAvgDaysForWhatsapp,
+  resolveLocalAvgDaysToPay,
+} from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import {
@@ -1170,6 +1176,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const prefilledCollectionOpenedRef = useRef(false);
   const advanceLookupAttemptedRef = useRef("");
   const workingHoursEntriesRef = useRef([]);
+  const avgDaysPrefetchByCodeRef = useRef(new Map());
+  const avgDaysResolvedByCodeRef = useRef(new Map());
   const { showPopup } = useAppPopup();
 
   usePopupMessages({ error });
@@ -1184,6 +1192,67 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   useEffect(() => {
     activeRowKeyRef.current = activeRowKey;
+  }, [activeRowKey]);
+
+  function rememberCollectionAvgDays(codeKey, avgDays) {
+    if (!codeKey || !avgDays) return;
+    avgDaysResolvedByCodeRef.current.set(codeKey, avgDays);
+    const apply = (current) => (current || []).map((row) => {
+      if (String(row?.customer_code || "").trim().toUpperCase() !== codeKey) return row;
+      return {
+        ...row,
+        avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
+        avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
+      };
+    });
+    setDueCustomers(apply);
+    setNotDueCustomers(apply);
+    setLegalCustomers(apply);
+  }
+
+  useEffect(() => {
+    if (!activeRowKey) return undefined;
+    const row = [
+      ...(queuesRef.current.dueCustomers || []),
+      ...(queuesRef.current.notDueCustomers || []),
+      ...(queuesRef.current.legalCustomers || []),
+    ].find((item) => rowKey(item) === activeRowKey);
+    const codeKey = String(row?.customer_code || "").trim().toUpperCase();
+    if (!codeKey || resolveLocalAvgDaysToPay(row) || avgDaysResolvedByCodeRef.current.has(codeKey)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const client = getSupabaseClient();
+        if (!client) return;
+        const session = await resolveAuthSession(client, 8000);
+        if (!session?.access_token || cancelled) return;
+        const existingPromise = avgDaysPrefetchByCodeRef.current.get(codeKey);
+        const promise = existingPromise || prefetchCustomerAvgDaysForVisit({
+          accessToken: session.access_token,
+          customerCode: row.customer_code,
+          customerName: row.customer_name || "",
+        });
+        if (!existingPromise) avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
+        try {
+          const avgDays = await promise;
+          if (!avgDays || cancelled) return;
+          rememberCollectionAvgDays(codeKey, avgDays);
+        } finally {
+          if (avgDaysPrefetchByCodeRef.current.get(codeKey) === promise) {
+            avgDaysPrefetchByCodeRef.current.delete(codeKey);
+          }
+        }
+      } catch {
+        // Avg days stays optional until save resolves it.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeRowKey]);
 
   useEffect(() => {
@@ -2166,11 +2235,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
-      // Prefer local queue data for avg days and skip the activity timeline.
-      // Live history/timeline fetches were making every save wait on the network
-      // even when the visit itself can be queued offline. Distance-from-customer
-      // still uses GPS + customer coords; the API patches previous-visit distance
-      // when the queued save syncs.
+      // Skip the activity timeline so the visit can still queue offline.
+      // Avg days runs in parallel with working hours (same 8s budget): the queue
+      // row, a finished prefetch, the in-flight prefetch, then one history load.
+      // Phone snapshots often omit the figure, which was dropping it from WhatsApp.
       const visitSavedAt = new Date().toISOString();
       const visitCustomer = locationUpdate.customer || row;
       const currentHoursEntry = buildCurrentWorkingHoursEntry({
@@ -2180,7 +2248,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customer: visitCustomer,
         customerCode: row.customer_code,
       });
-      const [visitDistance, workingHours] = await Promise.all([
+      const [visitDistance, workingHours, avgDaysToPay] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -2198,6 +2266,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
           localEntries: workingHoursEntriesRef.current,
           currentEntry: currentHoursEntry,
         }),
+        resolveAvgDaysForWhatsapp({
+          local: row,
+          cached: customerCodeKey ? avgDaysResolvedByCodeRef.current.get(customerCodeKey) : null,
+          pending: customerCodeKey ? avgDaysPrefetchByCodeRef.current.get(customerCodeKey) : null,
+          timeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
+          load: session.access_token && customerCodeKey
+            ? () => loadCustomerAvgDaysToPay({
+              accessToken: session.access_token,
+              customerCode: row.customer_code,
+              customerName: row.customer_name || "",
+              scope: salesScope,
+            })
+            : null,
+        }),
       ]);
       if (workingHours?.known !== false) {
         workingHoursEntriesRef.current = [
@@ -2205,7 +2287,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           currentHoursEntry,
         ];
       }
-      const avgDaysToPay = resolveLocalAvgDaysToPay(row);
+      if (avgDaysToPay && customerCodeKey) {
+        rememberCollectionAvgDays(customerCodeKey, avgDaysToPay);
+      }
 
       const summaryText = buildVisitSummary(
         row,

@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import {
@@ -14,6 +16,11 @@ import {
   HISTORIC_PERFORMANCE_SHORT_LABEL,
 } from "../../lib/paymentBehavior.js";
 import { formatSettlementOpenDelta } from "../../lib/settlementOpenDelta.js";
+import {
+  buildSfaStatementEntries,
+  compareTallyStatement,
+  parseTallyStatementWorkbook,
+} from "../../lib/tallyStatementCompare.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -40,11 +47,103 @@ const TEXT = {
     ar: "اختر عميلاً واحداً من القائمة.",
   },
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
+  statementTitle: { en: "Tally statement check", ar: "مطابقة كشف تالي" },
+  statementHint: {
+    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV) with Date, Particulars, Vch Type, Vch No., Debit, and Credit. The first line where the running totals split is the entry behind the mismatch.",
+    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV) بأعمدة التاريخ والبيان ونوع القسيمة ورقمها والمدين والدائن. أول سطر يفترق فيه الإجمالي الجاري هو القيد المسبب للفرق.",
+  },
+  statementUpload: { en: "Upload Tally statement", ar: "رفع كشف تالي" },
+  statementClear: { en: "Clear", ar: "مسح" },
+  statementShowMatched: { en: "Show matched lines", ar: "عرض السطور المطابقة" },
+  statementWindow: { en: "Statement dates", ar: "تواريخ الكشف" },
+  statementTallyNet: { en: "Tally movement", ar: "حركة تالي" },
+  statementSfaNet: { en: "SFA movement", ar: "حركة SFA" },
+  statementDiff: { en: "Difference", ar: "الفرق" },
+  statementIssues: { en: "Entries that differ", ar: "قيود مختلفة" },
+  statementAgree: {
+    en: "Every voucher in this statement matches SFA. No single entry is opening a gap.",
+    ar: "كل قسيمة في هذا الكشف تطابق SFA. لا يوجد قيد واحد يفتح فرقاً.",
+  },
+  statementLeadTally: {
+    en: "This Tally entry is not in SFA. It is the first line that opens the gap.",
+    ar: "هذا القيد موجود في تالي وغير موجود في SFA. وهو أول سطر يفتح الفرق.",
+  },
+  statementLeadSfa: {
+    en: "This SFA entry is not on the Tally statement. It is the first line that opens the gap.",
+    ar: "هذا القيد موجود في SFA وغير موجود في كشف تالي. وهو أول سطر يفتح الفرق.",
+  },
+  statementLeadAmount: {
+    en: "This voucher is in both, but the amounts differ. It is the first line that opens the gap.",
+    ar: "هذه القسيمة موجودة في الطرفين لكن المبلغ مختلف. وهو أول سطر يفتح الفرق.",
+  },
+  statementLeadVat: {
+    en: "These vouchers differ by about 15% VAT. Tally and SFA are not on the same VAT basis. The gap starts at this voucher.",
+    ar: "هذه القسائم تختلف بحوالي 15% ضريبة. تالي وSFA ليسا على نفس أساس الضريبة. الفرق يبدأ من هذه القسيمة.",
+  },
+  statementDate: { en: "Date", ar: "التاريخ" },
+  statementVoucher: { en: "Voucher", ar: "القسيمة" },
+  statementType: { en: "Type", ar: "النوع" },
+  statementParticulars: { en: "Particulars", ar: "البيان" },
+  statementTallyDr: { en: "Tally debit", ar: "مدين تالي" },
+  statementTallyCr: { en: "Tally credit", ar: "دائن تالي" },
+  statementSfaDr: { en: "SFA debit", ar: "مدين SFA" },
+  statementSfaCr: { en: "SFA credit", ar: "دائن SFA" },
+  statementCause: { en: "Cause", ar: "السبب" },
+  statementTotal: { en: "Total", ar: "الإجمالي" },
+  causeMatched: { en: "Matched", ar: "مطابق" },
+  causeAmount: { en: "Amount differs", ar: "المبلغ مختلف" },
+  causeTally: { en: "In Tally only", ar: "في تالي فقط" },
+  causeSfa: { en: "In SFA only", ar: "في SFA فقط" },
+  causeVat: { en: "VAT basis", ar: "أساس الضريبة" },
+  causeLeads: { en: "Opens the gap", ar: "يفتح الفرق" },
+  statementPdf: {
+    en: "Could not read that Tally PDF. Export the customer ledger with Date, Debit, and Credit columns.",
+    ar: "تعذر قراءة ملف PDF من تالي. صدّر دفتر العميل بأعمدة التاريخ والمدين والدائن.",
+  },
+  statementNone: {
+    en: "No ledger lines found. Use a Tally ledger export with Date, Debit, and Credit columns.",
+    ar: "لم يتم العثور على سطور دفتر. استخدم تصدير دفتر تالي بأعمدة التاريخ والمدين والدائن.",
+  },
   note: {
     en: "Referenced credit notes settle the named Ref. No. first (VAT-incl) and count in Paid. They do not cut that bill's sales figure. Only what the named bill cannot take follows oldest-open FIFO. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover settles earlier sales. A Purchase no Payment covers settles sales invoices already dated on or before that purchase, and does not prepay a later invoice. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
     ar: "إشعار دائن بمرجع يسوي الفاتورة المذكورة في رقم المرجع أولاً (مع الضريبة) ويُحسب في المدفوع، دون تخفيض رقم مبيعات تلك الفاتورة. ما لا تسعه الفاتورة يتبع الأقدم أولاً. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يسوي فواتير المبيعات الأقدم. المشتريات التي لا يغطيها سند دفع تسوي فواتير المبيعات بتاريخ الشراء أو قبله، ولا تسدد فاتورة لاحقة. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
+
+const STATEMENT_FILTER_KEYS = [
+  "date",
+  "voucher",
+  "type",
+  "particulars",
+  "tallyDebit",
+  "tallyCredit",
+  "sfaDebit",
+  "sfaCredit",
+  "difference",
+  "cause",
+];
+
+function statementCauseKey(row) {
+  if (row?.status === "tally_only") return "causeTally";
+  if (row?.status === "sfa_only") return "causeSfa";
+  if (row?.status === "vat") return "causeVat";
+  if (row?.status === "amount") return "causeAmount";
+  return "causeMatched";
+}
+
+function statementFilterValue(row, key) {
+  if (key === "date") return row.date || "—";
+  if (key === "voucher") return row.voucher || "—";
+  if (key === "type") return row.vchType || "—";
+  if (key === "particulars") return row.particulars || "—";
+  if (key === "cause") return row.status || "";
+  if (key === "tallyDebit") return formatMoney(row.tallyDebit);
+  if (key === "tallyCredit") return formatMoney(row.tallyCredit);
+  if (key === "sfaDebit") return formatMoney(row.sfaDebit);
+  if (key === "sfaCredit") return formatMoney(row.sfaCredit);
+  if (key === "difference") return formatMoney(row.difference);
+  return "";
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -352,6 +451,11 @@ export default function PaymentSettlementPage() {
   const [searchingCustomers, setSearchingCustomers] = useState(false);
   const [loadingSettlement, setLoadingSettlement] = useState(false);
   const [ledger, setLedger] = useState(null);
+  const [statementReceipts, setStatementReceipts] = useState([]);
+  const [statementFileName, setStatementFileName] = useState("");
+  const [statementResult, setStatementResult] = useState(null);
+  const [showMatchedStatement, setShowMatchedStatement] = useState(false);
+  const statementInputRef = useRef(null);
   const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
   const [expandedDate, setExpandedDate] = useState("");
@@ -412,6 +516,10 @@ export default function PaymentSettlementPage() {
     setError("");
     setMessage("");
     setLedger(null);
+    setStatementReceipts([]);
+    setStatementFileName("");
+    setStatementResult(null);
+    setShowMatchedStatement(false);
     setHistoryMeta(null);
     setExpandedInvoice("");
     setExpandedDate("");
@@ -446,6 +554,10 @@ export default function PaymentSettlementPage() {
 
       setSelectedCustomer(customer);
       setLedger(nextLedger);
+      setStatementReceipts(Array.isArray(historyPayload.receipts) ? historyPayload.receipts : []);
+      setStatementFileName("");
+      setStatementResult(null);
+      setShowMatchedStatement(false);
       setHistoryMeta({
         fromDate: historyPayload.fromDate || "",
         fullHistory: Boolean(historyPayload.fullHistory),
@@ -618,6 +730,81 @@ export default function PaymentSettlementPage() {
     if (!hash) return;
     document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [ledger]);
+
+  const statementRows = useMemo(() => {
+    const rows = Array.isArray(statementResult?.rows) ? statementResult.rows : [];
+    if (showMatchedStatement) return rows;
+    return rows.filter((row) => row.status !== "matched");
+  }, [showMatchedStatement, statementResult]);
+
+  const statementValueOf = useCallback((row, key) => {
+    if (key === "cause") {
+      const lead = row.leadsGap ? `${t("causeLeads")} · ` : "";
+      return `${lead}${t(statementCauseKey(row))}`;
+    }
+    return statementFilterValue(row, key);
+  }, [t]);
+
+  const {
+    filters: statementFilters,
+    options: statementOptions,
+    visibleRows: visibleStatementRows,
+    setFilter: setStatementFilter,
+  } = useBiExcelFilters(statementRows, STATEMENT_FILTER_KEYS, statementValueOf);
+
+  const onStatementFile = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !ledger) return;
+    setError("");
+    try {
+      let parsed;
+      const isPdf = /\.pdf$/i.test(file.name || "") || String(file.type || "").includes("pdf");
+      if (isPdf) {
+        const headers = await authHeaders();
+        if (!headers) return;
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch("/api/tally-statement", {
+          method: "POST",
+          headers,
+          body,
+        });
+        parsed = await response.json().catch(() => ({}));
+        if (!response.ok || !parsed?.entries?.length) {
+          throw new Error(parsed?.error || t("statementPdf"));
+        }
+      } else {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+        parsed = parseTallyStatementWorkbook(workbook);
+      }
+      if (!parsed.entries.length) {
+        setStatementResult(null);
+        setStatementFileName("");
+        setError(parsed.error || t("statementNone"));
+        return;
+      }
+      const purchases = (ledger.datewise || []).flatMap((day) => (
+        (day.purchases || []).map((row) => ({
+          ...row,
+          purchase_date: row.purchase_date || day.date,
+        }))
+      ));
+      const compared = compareTallyStatement(parsed, buildSfaStatementEntries({
+        invoices: ledger.invoices,
+        reversedInvoices: ledger.reversedInvoices,
+        creditNotes: ledger.creditNotes,
+        receipts: statementReceipts,
+        purchases,
+      }));
+      setStatementFileName(file.name || "");
+      setStatementResult(compared);
+    } catch (err) {
+      setStatementResult(null);
+      setStatementFileName("");
+      setError(err?.message || t("statementNone"));
+    }
+  }, [authHeaders, ledger, statementReceipts, t]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -803,6 +990,164 @@ export default function PaymentSettlementPage() {
                     )}
                   </div>
                 </div>
+              </section>
+
+              <section className="moduleSection" id="tally-statement">
+                <div className="moduleSectionHeader">
+                  <h2>{t("statementTitle")}</h2>
+                  <span>{statementFileName}</span>
+                </div>
+                <p className="moduleHint">{t("statementHint")}</p>
+                <div className="moduleFilterRow">
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    onClick={() => statementInputRef.current?.click()}
+                  >
+                    {t("statementUpload")}
+                  </button>
+                  <input
+                    ref={statementInputRef}
+                    type="file"
+                    accept=".pdf,.xlsx,.xls,.csv,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    hidden
+                    onChange={onStatementFile}
+                  />
+                  {statementResult ? (
+                    <button
+                      type="button"
+                      className="moduleInlineButton"
+                      onClick={() => {
+                        setStatementResult(null);
+                        setStatementFileName("");
+                      }}
+                    >
+                      {t("statementClear")}
+                    </button>
+                  ) : null}
+                  <label className="moduleHint">
+                    <input
+                      type="checkbox"
+                      checked={showMatchedStatement}
+                      onChange={(event) => setShowMatchedStatement(event.target.checked)}
+                    />
+                    {" "}
+                    {t("statementShowMatched")}
+                  </label>
+                </div>
+                {statementResult ? (
+                  <>
+                    <div className="auditSummaryGrid">
+                      <div className="auditSummaryCard">
+                        <span>{t("statementWindow")}</span>
+                        <strong>
+                          {statementResult.from || "—"}
+                          {" → "}
+                          {statementResult.to || "—"}
+                        </strong>
+                        {statementResult.opening?.amount ? (
+                          <em className="auditSummaryCardMeta">
+                            Opening {formatMoney(statementResult.opening.amount)}
+                            {" "}
+                            {statementResult.opening.side === "credit" ? "Cr" : "Dr"}
+                          </em>
+                        ) : null}
+                      </div>
+                      <div className="auditSummaryCard">
+                        <span>{t("statementTallyNet")}</span>
+                        <strong>{formatMoney(statementResult.totals.tallyNet)}</strong>
+                      </div>
+                      <div className="auditSummaryCard">
+                        <span>{t("statementSfaNet")}</span>
+                        <strong>{formatMoney(statementResult.totals.sfaNet)}</strong>
+                      </div>
+                      <div className="auditSummaryCard">
+                        <span>{t("statementDiff")}</span>
+                        <strong className={Math.abs(statementResult.totals.difference) > 0.05 ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up"}>
+                          {formatMoney(statementResult.totals.difference)}
+                        </strong>
+                        <em className="auditSummaryCardMeta">
+                          {statementResult.totals.issueCount}
+                          {" "}
+                          {t("statementIssues")}
+                        </em>
+                      </div>
+                    </div>
+                    <p className={statementResult.lead ? "paymentSettleStatementLead" : "moduleHint"}>
+                      {statementResult.lead ? (
+                        <>
+                          <strong>
+                            {statementResult.lead.date || "—"}
+                            {" · "}
+                            {statementResult.lead.voucher || "—"}
+                            {" · "}
+                            {formatMoney(statementResult.lead.difference)}
+                          </strong>
+                          {" "}
+                          {statementResult.lead.status === "sfa_only" ? t("statementLeadSfa")
+                            : statementResult.lead.status === "amount" ? t("statementLeadAmount")
+                              : statementResult.lead.status === "vat" ? t("statementLeadVat")
+                                : t("statementLeadTally")}
+                        </>
+                      ) : t("statementAgree")}
+                    </p>
+                    <ExportableTable filename="tally-statement-mismatch" sheetName="Statement" className="moduleTableWrap">
+                      <table className="moduleTable moduleBiTable paymentSettleTable">
+                        <thead>
+                          <tr>
+                            <BiExcelHead label={t("statementDate")} filterKey="date" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementVoucher")} filterKey="voucher" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementType")} filterKey="type" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementParticulars")} filterKey="particulars" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementTallyDr")} filterKey="tallyDebit" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementTallyCr")} filterKey="tallyCredit" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementSfaDr")} filterKey="sfaDebit" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementSfaCr")} filterKey="sfaCredit" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                            <BiExcelHead label={t("statementDiff")} filterKey="difference" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} className="moduleBiTotalCol" />
+                            <BiExcelHead label={t("statementCause")} filterKey="cause" options={statementOptions} filters={statementFilters} onChange={setStatementFilter} />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visibleStatementRows.map((row) => (
+                            <tr key={row.id} className={row.leadsGap ? "paymentSettleStatementLead" : undefined}>
+                              <td>{row.date || "—"}</td>
+                              <td>{row.voucher || "—"}</td>
+                              <td>{row.vchType || "—"}</td>
+                              <td>{row.particulars || "—"}</td>
+                              <td>{formatMoney(row.tallyDebit)}</td>
+                              <td>{formatMoney(row.tallyCredit)}</td>
+                              <td>{formatMoney(row.sfaDebit)}</td>
+                              <td>{formatMoney(row.sfaCredit)}</td>
+                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (Math.abs(row.difference) > 0.05 ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
+                                {formatMoney(row.difference)}
+                              </td>
+                              <td>
+                                {row.leadsGap ? `${t("causeLeads")} · ` : ""}
+                                {t(statementCauseKey(row))}
+                              </td>
+                            </tr>
+                          ))}
+                          {!visibleStatementRows.length && (
+                            <tr>
+                              <td colSpan={10}>{t("statementAgree")}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <td colSpan={4}><strong>{t("statementTotal")}</strong></td>
+                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.tallyDebit, 0))}</strong></td>
+                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.tallyCredit, 0))}</strong></td>
+                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaDebit, 0))}</strong></td>
+                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaCredit, 0))}</strong></td>
+                            <td className="moduleBiTotalCol"><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </ExportableTable>
+                  </>
+                ) : null}
               </section>
 
               <section className="moduleSection">

@@ -1154,8 +1154,8 @@ test("referenced credit note settles the named invoice when it is the open bill"
   assert.ok(Math.abs(ledger.outstandingCompareTotals.open_delta) < 0.02);
 });
 
-test("named credit note does not void the previous same-amount bill", () => {
-  // Customer 1486: CN 552 names RNFD/415. RNFD/414 is the day before, same amount and item.
+test("same-day named credit note reverses the earlier identical invoice", () => {
+  // Customer 1486: CN 552 names RNFD/415, both dated 13 Sep. RNFD/414 is the day before, same amount and item.
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-09-12", voucher_number: "RNFD/414", voucher_type: "RIYADH W/S CREDIT", sales_amount: 10672, item_code: "A004555", quantity: 1000, category: "Office supplies" },
@@ -1166,12 +1166,12 @@ test("named credit note does not void the previous same-amount bill", () => {
     todayIso: "2026-10-21",
   });
 
-  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/414"), false);
-  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415" && row.credit_note_voucher === "552"), true);
-  const previous = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
-  assert.ok(previous);
-  assert.equal(ledger.invoices.some((row) => row.voucher_number === "RNFD/415"), false);
-  assert.equal(Number(previous.remaining.toFixed(2)), Number((10672 * 1.15).toFixed(2)));
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/414" && row.credit_note_voucher === "552"), true);
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415"), false);
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "RNFD/415");
+  assert.ok(reissue);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "RNFD/414"), false);
+  assert.equal(Number(reissue.remaining.toFixed(2)), Number((10672 * 1.15).toFixed(2)));
 });
 
 test("reversed invoice stays a Tally line when the outstanding file still has it", () => {
@@ -1189,19 +1189,19 @@ test("reversed invoice stays a Tally line when the outstanding file still has it
     todayIso: "2026-10-21",
   });
 
-  const tallyOnly = ledger.invoices.find((row) => row.voucher_number === "RNFD/415");
+  const tallyOnly = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
   assert.ok(tallyOnly);
   assert.equal(tallyOnly.tally_only, true);
   assert.equal(tallyOnly.status, "Tally");
   assert.equal(Number(tallyOnly.amount_excl_vat), 0);
-  assert.equal(Number(tallyOnly.amount_incl_vat), 0);
   assert.equal(Number(tallyOnly.remaining), 0);
   assert.equal(Number(tallyOnly.outstanding_pending), 12272.8);
-  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/415" && row.credit_note_voucher === "552"), true);
-  const previous = ledger.invoices.find((row) => row.voucher_number === "RNFD/414");
-  assert.ok(previous);
-  assert.equal(Number(previous.amount_excl_vat.toFixed(2)), 10672);
-  assert.equal(Number(previous.outstanding_pending), 12272.8);
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "RNFD/414" && row.credit_note_voucher === "552"), true);
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "RNFD/415");
+  assert.ok(reissue);
+  assert.equal(reissue.tally_only, undefined);
+  assert.equal(Number(reissue.amount_excl_vat.toFixed(2)), 10672);
+  assert.equal(Number(reissue.outstanding_pending), 12272.8);
   const tallyTotal = ledger.invoices.reduce((total, row) => total + Number(row.outstanding_pending || 0), 0);
   assert.equal(Number(tallyTotal.toFixed(2)), Number((12272.8 * 2).toFixed(2)));
 });

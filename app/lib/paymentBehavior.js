@@ -89,6 +89,25 @@ export function isCashSalesVoucher(voucherNumber = "") {
   return /^[A-Z]{0,2}C\d*$/.test(prefix);
 }
 
+/** Voucher type such as RIYADH CASH SALES or CASH SALES NON FOOD DIVISION. */
+export function isCashSalesVoucherType(voucherType = "") {
+  return String(voucherType || "").toUpperCase().includes("CASH");
+}
+
+/**
+ * Left out of avg days only. FIFO Paid/Open is unchanged.
+ * RC/DC/JC, a CASH voucher type (CNFD cash sales, Riyadh/Dammam cash), or a
+ * voucher already marked from sales history.
+ */
+export function isExcludedFromAvgDays(row = {}, cashRefs = null) {
+  if (row?.exclude_from_avg_days || row?.is_cash) return true;
+  if (isCashSalesVoucherType(row?.voucher_type)) return true;
+  const ref = String(row?.ref_no || row?.voucher_number || "").trim();
+  if (isCashSalesVoucher(ref)) return true;
+  const key = String(ref || "").trim().toUpperCase().replace(/\s+/g, "");
+  return Boolean(key && cashRefs?.has?.(key));
+}
+
 function normalizeRef(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
@@ -247,19 +266,25 @@ export function buildSalesInvoices(transactions = []) {
 
     const amountInclVat = lineVatInclAmount(row, amountExclVat);
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
+    const voucherType = String(row?.voucher_type || "").trim();
+    const lineExcluded = isCashSalesVoucher(voucher) || isCashSalesVoucherType(voucherType);
     const key = `${invoiceDate}::${voucher || "NO-VOUCHER"}`;
     const current = map.get(key) || {
       invoice_date: invoiceDate,
       voucher_number: voucher,
+      voucher_type: voucherType,
       amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
+      exclude_from_avg_days: lineExcluded,
       items: [],
       item_codes: [],
     };
     current.amount_excl_vat += amountExclVat;
     current.amount += amountInclVat;
     current.remaining = current.amount;
+    current.exclude_from_avg_days = current.exclude_from_avg_days && lineExcluded;
+    if (voucherType && !current.voucher_type) current.voucher_type = voucherType;
     pushItemFingerprint(current, row);
     map.set(key, current);
   });
@@ -831,6 +856,8 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       ...invoice,
       remaining: toNumber(invoice.amount),
       is_cash: isCashSalesVoucher(invoice.voucher_number),
+      exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days)
+        || isCashSalesVoucher(invoice.voucher_number),
       cash_first_receipt_used: false,
     }));
   const pairedCreditNoteKeys = new Set(
@@ -920,6 +947,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
           vch_no: event.vch_no,
           amount: applied,
           days,
+          exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
         });
       }
     } else if (event.kind === "credit_note" && applied > 0) {
@@ -1066,6 +1094,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       vch_no: event.vch_no,
       amount: -applied,
       days: isoDaysBetween(event.date, invoice.invoice_date),
+      exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
     });
     return applied;
   }
@@ -1235,6 +1264,7 @@ function summarizeOutstandingUnpaid(outstandingCustomer = null, outstandingInvoi
  * Paid chunks use sales→receipt days. Open unpaid use current age, but only
  * when older than the paid-only average so fresh large invoices cannot pull
  * the avg down — open age can raise the metric, never reduce it.
+ * Cash vouchers (RC/DC/JC and CASH voucher types) are omitted.
  *
  * @param {number|null} [minOpenDaysExclusive] When set, open invoices with
  *   open_days <= this floor are excluded from the blend.
@@ -1248,6 +1278,7 @@ export function buildDaysToPayObservations({
   const openFloor = minOpenDaysExclusive == null ? null : Number(minOpenDaysExclusive);
 
   (Array.isArray(allocations) ? allocations : []).forEach((row) => {
+    if (isExcludedFromAvgDays(row)) return;
     const amount = toNumber(row?.amount);
     const days = Number(row?.days);
     if (amount > 0.009 && Number.isFinite(days) && days >= 0) {
@@ -1256,6 +1287,7 @@ export function buildDaysToPayObservations({
   });
 
   (Array.isArray(openInvoices) ? openInvoices : []).forEach((row) => {
+    if (isExcludedFromAvgDays(row)) return;
     const amount = toNumber(row?.pending_amount ?? row?.remaining);
     const days = Number(row?.open_days);
     if (!(amount > 0.009 && Number.isFinite(days) && days >= 0)) return;
@@ -1362,12 +1394,22 @@ function buildPaymentBehaviorCore({
     .sort((left, right) => right.open_days - left.open_days);
 
   const outstanding = summarizeOutstandingUnpaid(outstandingCustomer, outstandingInvoices, today);
+  const cashRefs = new Set(
+    invoices
+      .filter((invoice) => invoice.exclude_from_avg_days || invoice.is_cash)
+      .map((invoice) => normalizeRef(invoice.voucher_number))
+      .filter(Boolean),
+  );
+  const keepForAvgDays = (row) => !isExcludedFromAvgDays(row, cashRefs);
   // Prefer outstanding upload rows (book truth) for open age; else FIFO residual.
-  const openForAvg = outstanding.invoices.length > 0
-    ? outstanding.invoices
-    : unpaidFromSales;
+  const openForAvg = (
+    outstanding.invoices.length > 0 ? outstanding.invoices : unpaidFromSales
+  ).filter(keepForAvgDays);
 
-  const paidObservations = buildDaysToPayObservations({ allocations, openInvoices: [] });
+  const paidObservations = buildDaysToPayObservations({
+    allocations: allocations.filter(keepForAvgDays),
+    openInvoices: [],
+  });
   const paidAmount = paidObservations.reduce((total, row) => total + row.amount, 0);
   const paidAvgRaw = weightedAverageDays(paidObservations);
   const avgDaysPaidOnly = roundDays(paidAvgRaw);
@@ -1376,7 +1418,7 @@ function buildPaymentBehaviorCore({
   // With no paid history, all open invoices are included (no floor to spoil).
   const openFloor = paidAvgRaw != null ? paidAvgRaw : null;
   const blendedObservations = buildDaysToPayObservations({
-    allocations,
+    allocations: allocations.filter(keepForAvgDays),
     openInvoices: openForAvg,
     minOpenDaysExclusive: openFloor,
   });
@@ -1918,8 +1960,10 @@ export function buildPaymentSettlementLedger({
       outstanding_pending: outstandingPending,
       open_source: openSource,
       status,
-      // Payment days only from cash receipt FIFO — credit notes never enter this average.
-      payment_days: positiveFifoPaid > 0.009 ? roundDays(weightedDays) : null,
+      // Payment days only from receipt FIFO. Cash vouchers and credit notes stay out of the avg.
+      payment_days: invoice.exclude_from_avg_days || invoice.is_cash || positiveFifoPaid <= 0.009
+        ? null
+        : roundDays(weightedDays),
       open_days: openDays,
       items: Array.isArray(invoice.items) ? [...invoice.items] : [],
       item_codes: Array.isArray(invoice.item_codes) ? [...invoice.item_codes] : [],

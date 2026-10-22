@@ -497,7 +497,9 @@ function fillPendingReceipts({
   cacheKey,
   onUpdate,
 }) {
-  const delays = [2500, 4000, 8000];
+  // One follow-up after the screen has had time to finish opening. Do not stack
+  // more full-history scans on top of the request that just returned.
+  const delays = [20000];
   void (async () => {
     for (const delay of delays) {
       await new Promise((resolve) => setTimeout(resolve, delay));

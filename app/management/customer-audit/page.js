@@ -60,6 +60,7 @@ import { buildOrderCatalog } from "./lib/orderHelpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import { isAdminRole } from "../../lib/moduleAccess.js";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient.js";
+import { resolveDisplayedOrderBlock } from "../../lib/customerOrderBlock.js";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -145,6 +146,14 @@ function CustomerAuditPageContent() {
     customer: outstandingInfo.customer,
     customerInvoices: outstandingInfo.customerInvoices,
   });
+  const displayedOrderBlock = useMemo(
+    () => resolveDisplayedOrderBlock({
+      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
+      payload: orderBlock,
+    }),
+    [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
+  );
   const paymentSettlement = useMemo(() => {
     if (analytics?.paymentSettlement) return analytics.paymentSettlement;
     // Outstanding bills are already listed above. Do not paint them as the
@@ -231,7 +240,7 @@ function CustomerAuditPageContent() {
     accessScope,
     language,
     userRole: access.role,
-    orderBlock,
+    orderBlock: displayedOrderBlock,
   });
 
   const schemeApplications = useMemo(
@@ -344,9 +353,10 @@ function CustomerAuditPageContent() {
   }, [selectedCustomer?.customer_code, selectedCustomer?.customer_name]);
 
   const toggleOrderBlockOverride = useCallback(async () => {
-    if (!selectedCustomer?.customer_code || !orderBlock || !isAdmin) return;
+    if (!selectedCustomer?.customer_code || !displayedOrderBlock || !isAdmin) return;
     const supabase = getSupabaseClient();
     if (!supabase) return;
+    const nextUnblocked = !displayedOrderBlock.isAdminUnblocked;
     setUpdatingOrderBlock(true);
     setError("");
 
@@ -365,21 +375,21 @@ function CustomerAuditPageContent() {
         body: JSON.stringify({
           customerCode: selectedCustomer.customer_code,
           customerName: selectedCustomer.customer_name,
-          isUnblocked: !orderBlock.isAdminUnblocked,
+          isUnblocked: nextUnblocked,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || "Unable to update customer unblock override.");
       }
-      setOrderBlock((current) => ({ ...(current || {}), ...payload }));
-      setMessage(payload.isAdminUnblocked ? "Customer unblocked for sales order by admin." : "Customer follows automatic block rule now.");
+      setOrderBlock(payload);
+      setMessage(nextUnblocked ? "Customer unblocked for sales order by admin." : "Customer follows automatic block rule now.");
     } catch (err) {
       setError(err.message || "Unable to update customer unblock override.");
     } finally {
       setUpdatingOrderBlock(false);
     }
-  }, [isAdmin, orderBlock, selectedCustomer, setError, setMessage]);
+  }, [displayedOrderBlock, isAdmin, selectedCustomer, setError, setMessage]);
 
   const visibleOutstandingBuckets = useMemo(() => {
     const resolved = resolveOutstandingBucketLabels(
@@ -556,7 +566,7 @@ function CustomerAuditPageContent() {
           customer={selectedCustomer}
           analytics={analytics}
           outstandingSalesman={outstandingSalesman}
-          orderBlock={orderBlock}
+          orderBlock={displayedOrderBlock}
           canManageOrderBlock={isAdmin}
           updatingOrderBlock={updatingOrderBlock}
           onToggleOrderBlock={toggleOrderBlockOverride}

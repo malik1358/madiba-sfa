@@ -65,7 +65,7 @@ import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber, formatSalesOrderNumberForDisplay } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
-import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
+import { blockedByAvgDaysMessage, resolveDisplayedOrderBlock, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
@@ -1042,23 +1042,14 @@ export default function NewOrderPage() {
     [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer, paymentType]
   );
   const orderBlockFromAnalytics = useMemo(
-    () => {
-      if (orderBlock) {
-        return {
-          ...orderBlock,
-          ...resolveOrderBlockStatus({
-            avgDaysToPay: orderBlock.avgDaysToPay,
-            avgDaysToPay6m: orderBlock.avgDaysToPay6m,
-            threshold: orderBlock.threshold,
-            override: orderBlock.override || orderBlock,
-          }),
-        };
-      }
-      return resolveOrderBlockStatus({
-        avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
-        avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
-      });
-    },
+    () => resolveDisplayedOrderBlock({
+      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
+      payload: orderBlock,
+    }) || resolveOrderBlockStatus({
+      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
+    }),
     [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
   );
   const orderBlockedMessage = orderBlockFromAnalytics.blocked

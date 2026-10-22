@@ -7,9 +7,88 @@ import { readCacheEntry, writeCacheEntry } from "../lib/localDataStore";
 import { getSupabaseClient } from "../lib/supabase";
 
 const ACCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const ACCESS_MEMORY_MS = 60 * 1000;
+
+let sharedAccessLoad = null;
+let sharedAccessMemory = { userId: "", context: null, at: 0 };
 
 function accessCacheKey(userId) {
   return `moduleAccess:v2:${String(userId || "").trim()}`;
+}
+
+async function fetchRoleModuleMatrix(accessToken) {
+  if (!accessToken) return null;
+  try {
+    const { response, payload } = await fetchJsonWithTimeout(
+      "/api/role-module-access",
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      8000,
+    );
+    if (!response.ok || !payload?.success || !payload.matrix) return null;
+    return payload.matrix;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchProfileRow(supabase, userId) {
+  const profileQuery = supabase
+    .from("profiles")
+    .select("role,salesman_code,stock_take_access")
+    .eq("id", userId)
+    .maybeSingle();
+  let profileRes = await withTimeout(profileQuery, 8000, "PROFILE_TIMEOUT");
+
+  if (profileRes.error) {
+    profileRes = await withTimeout(
+      supabase
+        .from("profiles")
+        .select("role,salesman_code")
+        .eq("id", userId)
+        .maybeSingle(),
+      8000,
+      "PROFILE_TIMEOUT",
+    );
+  }
+
+  if (profileRes.error) throw profileRes.error;
+  return profileRes.data;
+}
+
+function loadSharedAccessContext(supabase, session) {
+  const userId = String(session?.user?.id || "").trim();
+  if (!userId) return Promise.resolve(null);
+
+  const now = Date.now();
+  if (
+    sharedAccessMemory.userId === userId
+    && sharedAccessMemory.context
+    && now - sharedAccessMemory.at < ACCESS_MEMORY_MS
+  ) {
+    return Promise.resolve(sharedAccessMemory.context);
+  }
+
+  if (sharedAccessLoad?.userId === userId) return sharedAccessLoad.promise;
+
+  const promise = (async () => {
+    const profile = await fetchProfileRow(supabase, userId);
+    const roleModuleMatrix = await fetchRoleModuleMatrix(session.access_token);
+    const context = {
+      role: profile?.role,
+      salesmanCode: profile?.salesman_code,
+      collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
+      stockTakeAccess: profile?.stock_take_access === true,
+      roleModuleMatrix,
+    };
+    sharedAccessMemory = { userId, context, at: Date.now() };
+    writeCacheEntry(accessCacheKey(userId), context, { ttlMs: ACCESS_TTL_MS }).catch(() => {});
+    return context;
+  })().finally(() => {
+    if (sharedAccessLoad?.promise === promise) sharedAccessLoad = null;
+  });
+
+  sharedAccessLoad = { userId, promise };
+  return promise;
 }
 
 export function useModuleAccess() {
@@ -39,21 +118,6 @@ export function useModuleAccess() {
       return undefined;
     }
 
-    async function loadRoleModuleMatrix(accessToken) {
-      if (!accessToken) return null;
-      try {
-        const { response, payload } = await fetchJsonWithTimeout(
-          "/api/role-module-access",
-          { headers: { Authorization: `Bearer ${accessToken}` } },
-          8000,
-        );
-        if (!response.ok || !payload?.success || !payload.matrix) return null;
-        return payload.matrix;
-      } catch {
-        return null;
-      }
-    }
-
     async function loadAccess(session) {
       accessLoadPending = true;
       try {
@@ -77,40 +141,10 @@ export function useModuleAccess() {
           // Continue with the live profile fetch.
         }
 
-        const profileQuery = supabase
-          .from("profiles")
-          .select("role,salesman_code,stock_take_access")
-          .eq("id", session.user.id)
-          .maybeSingle();
-        let profileRes = await withTimeout(profileQuery, 8000, "PROFILE_TIMEOUT");
-
-        if (profileRes.error) {
-          profileRes = await withTimeout(
-            supabase
-              .from("profiles")
-              .select("role,salesman_code")
-              .eq("id", session.user.id)
-              .maybeSingle(),
-            8000,
-            "PROFILE_TIMEOUT",
-          );
-        }
-
-        if (profileRes.error) throw profileRes.error;
-
-        const profile = profileRes.data;
-        const roleModuleMatrix = await loadRoleModuleMatrix(session.access_token);
-        const context = {
-          role: profile?.role,
-          salesmanCode: profile?.salesman_code,
-          collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
-          stockTakeAccess: profile?.stock_take_access === true,
-          roleModuleMatrix,
-        };
-        if (!cancelled) {
+        const context = await loadSharedAccessContext(supabase, session);
+        if (!cancelled && context) {
           setAccess(buildModuleAccess(context));
         }
-        writeCacheEntry(cacheKey, context, { ttlMs: ACCESS_TTL_MS }).catch(() => {});
       } catch {
         // Keep cached access when the live profile request fails offline.
       } finally {

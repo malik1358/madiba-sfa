@@ -531,7 +531,7 @@ export default function PaymentSettlementPage() {
       const name = encodeURIComponent(customer.customer_name || "");
 
       const [historyResponse, outstandingResponse] = await Promise.all([
-        fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement`, { headers }),
+        fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement&waitReceipts=1`, { headers }),
         fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
       ]);
 

@@ -460,7 +460,7 @@ async function fetchCustomerHistoryNetwork(
   accessToken,
   customerCode,
   customerName = "",
-  { fullHistory = false } = {},
+  { fullHistory = false, waitReceipts = false } = {},
 ) {
   const params = new URLSearchParams({
     customerCode: String(customerCode || ""),
@@ -472,6 +472,7 @@ async function fetchCustomerHistoryNetwork(
     params.set("fullHistory", "1");
     params.set("scope", "settlement");
   }
+  if (waitReceipts) params.set("waitReceipts", "1");
 
   const response = await fetch(
     `/api/customer-history?${params.toString()}`,
@@ -497,18 +498,18 @@ function fillPendingReceipts({
   cacheKey,
   onUpdate,
 }) {
-  // One follow-up after the screen has had time to finish opening. Do not stack
-  // more full-history scans on top of the request that just returned.
-  const delays = [20000];
+  // The first history response can return sales before the receipt register.
+  // Ask again with waitReceipts so Paid / Machine Open are not painted from sales alone.
+  const delays = [0, 2500];
   void (async () => {
     for (const delay of delays) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       try {
         const fresh = await fetchCustomerHistoryNetwork(
           accessToken,
           customerCode,
           customerName,
-          { fullHistory },
+          { fullHistory, waitReceipts: true },
         );
         if (!fresh.transactions.length) continue;
         if (fresh.receiptsPending) continue;
@@ -516,7 +517,7 @@ function fillPendingReceipts({
         onUpdate?.(fresh);
         return;
       } catch {
-        // The sales invoices are already on screen. Receipts can arrive on the next open.
+        // Keep the settlement section on "Loading receipts" until a later try.
       }
     }
   })();

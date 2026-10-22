@@ -517,6 +517,10 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
  *    A CN dated before its referenced invoice is still allowed when the reference
  *    names that voucher (Tally forward Ref. No.); blank / unreferenced early CNs
  *    must not reverse a later reissue.
+ *    If the named voucher is the same day as the credit note and an exact
+ *    amount-and-items invoice from the day before is still open, the credit note
+ *    reverses that earlier invoice (customer 1486: CN 552 → RNFD/414). The
+ *    same-day named voucher stays open as the reissue.
  * 2) Same-day or next-day full amount (classic void / reissue cancel).
  *    A CN that already names a different voucher is skipped here.
  * 3) Any later date when amount AND items+qty exactly match (full mirror CN).
@@ -607,7 +611,29 @@ export function findImmediateCreditNoteReversals(
 
     const best = targets[0];
     if (!best) continue;
-    pushReversal(best.invoice, note, best.offset);
+
+    // Same-day named voucher is the reissue. Reverse the bill made the day
+    // before the credit note when it is the same amount and the same items.
+    let chosen = best;
+    if (best.offset === 0) {
+      const earlier = invoiceList
+        .map((invoice, index) => {
+          const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+          if (reversedKeys.has(key)) return null;
+          const invoiceAmount = toNumber(invoice.amount);
+          if (invoiceAmount <= AMOUNT_TOLERANCE) return null;
+          if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
+          const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
+          if (offset == null || offset <= 0 || offset > maxDays) return null;
+          if (!itemsAndQtyExactlyMatch(note.items, invoice.items)) return null;
+          return { invoice, index, offset };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.offset - right.offset || left.index - right.index)[0];
+      if (earlier) chosen = earlier;
+    }
+
+    pushReversal(chosen.invoice, note, chosen.offset);
   }
 
   // Pass 2: fingerprint / ±1-day window for notes and invoices still free.

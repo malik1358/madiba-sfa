@@ -40,8 +40,8 @@ const TEXT = {
   },
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   note: {
-    en: "Referenced credit notes settle the next voucher(s) after the named Ref like a receipt (VAT-incl) and count in Paid — they do not cut the referenced bill's sales. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover reverses sales cash. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
-    ar: "إشعار دائن بمرجع يسوي الفاتورة التالية بعد رقم المرجع مثل إيصال (مع الضريبة) ويُحسب في المدفوع — ولا يخفض مبيعات الفاتورة المشار إليها. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يعكس تحصيل المبيعات. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
+    en: "Referenced credit notes settle the named Ref. No. first (VAT-incl) and count in Paid. They do not cut that bill's sales figure. Only what the named bill cannot take follows oldest-open FIFO. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover reverses sales cash. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
+    ar: "إشعار دائن بمرجع يسوي الفاتورة المذكورة في رقم المرجع أولاً (مع الضريبة) ويُحسب في المدفوع، دون تخفيض رقم مبيعات تلك الفاتورة. ما لا تسعه الفاتورة يتبع الأقدم أولاً. الإشعارات بلا مرجع تتبع الأقدم أولاً. مدفوعات الطرف المزدوج تسوي المشتريات أولاً ثم المتبقي يعكس تحصيل المبيعات. المفتوح لا يُجبر على ملف المستحقات. متوسط الأيام من الإيصالات ثم الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الكامل الفوري يبقى في المبيعات ويُستبعد من المتوسط.",
   },
 };
 
@@ -815,7 +815,7 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Referenced credit notes settle the next voucher after the named Ref like a receipt and count in
+                  Referenced credit notes settle the named Ref. No. and count in
                   Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
                   is the outstanding upload, including a reversed voucher Tally still has pending. Open Δ — use{" "}
                   <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below.

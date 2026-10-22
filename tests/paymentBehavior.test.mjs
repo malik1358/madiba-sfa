@@ -988,7 +988,7 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
-test("referenced credit note settles the next invoice like a receipt (2395-style)", () => {
+test("referenced credit note settles the named invoice (2395-style)", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "2395", sales_amount: 10220, category: "Paper" },
@@ -1014,24 +1014,23 @@ test("referenced credit note settles the next invoice like a receipt (2395-style
   const next = ledger.invoices.find((row) => row.voucher_number === "2749");
   assert.ok(first);
   assert.ok(next);
-  // Referenced bill keeps full sales; cash only. CN 56 (1320×1.15=1518) hits 2749 Paid.
+  // CN 56 (1320×1.15=1518) settles named bill 2395. Later cash pays the rest. 2749 is untouched.
   assert.equal(Number(first.amount_excl_vat.toFixed(2)), 10220);
   assert.equal(Number(first.amount_incl_vat.toFixed(2)), 11753);
-  assert.equal(Number(first.credit_note_settled.toFixed(2)), 0);
+  assert.equal(Number(first.credit_note_settled.toFixed(2)), 1518);
   assert.equal(Number(first.fifo_paid.toFixed(2)), 10235);
-  assert.equal(Number(first.paid_amount.toFixed(2)), 10235);
-  assert.equal(Number(first.remaining.toFixed(2)), 1518);
-  assert.equal(first.status, "Partial");
-  assert.equal(Number(next.credit_note_settled.toFixed(2)), 1518);
-  assert.equal(Number(next.paid_amount.toFixed(2)), 1518);
-  assert.equal(Number(next.remaining.toFixed(2)), 782);
-  assert.deepEqual(next.fifo_credit_notes.map((row) => row.voucher_number), ["56"]);
-  assert.deepEqual(next.credit_notes.map((row) => row.voucher_number), ["56"]);
+  assert.equal(Number(first.paid_amount.toFixed(2)), 11753);
+  assert.equal(Number(first.remaining.toFixed(2)), 0);
+  assert.equal(first.status, "Paid");
+  assert.deepEqual(first.fifo_credit_notes.map((row) => row.voucher_number), ["56"]);
+  assert.equal(Number(next.credit_note_settled.toFixed(2)), 0);
+  assert.equal(Number(next.paid_amount.toFixed(2)), 0);
+  assert.equal(Number(next.remaining.toFixed(2)), 2300);
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 1518);
   assert.equal(Number(ledger.totals.credit_note_excl_vat.toFixed(2)), 1320);
 });
 
-test("referenced credit note skips named bill and settles later vouchers first", () => {
+test("referenced credit note fills the named bill before any leftover", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "2395", sales_amount: 1000, category: "Paper" },
@@ -1041,7 +1040,7 @@ test("referenced credit note skips named bill and settles later vouchers first",
         voucher_number: "56",
         voucher_type: "Credit Note",
         reference: "2395",
-        // Larger than 2749. Later voucher takes what it can; leftover settles the named bill.
+        // Larger than the named bill. Named bill takes its full amount; leftover hits the next open bill.
         sales_amount: -1500,
         category: "Paper",
       },
@@ -1056,15 +1055,15 @@ test("referenced credit note skips named bill and settles later vouchers first",
   assert.ok(first);
   assert.ok(next);
   assert.equal(Number(first.amount_incl_vat.toFixed(2)), 1150);
-  // 1725 CN − 1150 on the next voucher = 575 back on the still-open named bill.
-  assert.equal(Number(first.credit_note_settled.toFixed(2)), 575);
-  assert.equal(Number(first.remaining.toFixed(2)), 575);
-  assert.equal(Number(next.credit_note_settled.toFixed(2)), 1150);
-  assert.equal(Number(next.paid_amount.toFixed(2)), 1150);
-  assert.equal(Number(next.remaining.toFixed(2)), 0);
+  // 1725 CN fills named 2395 (1150) and the leftover 575 settles 2749.
+  assert.equal(Number(first.credit_note_settled.toFixed(2)), 1150);
+  assert.equal(Number(first.remaining.toFixed(2)), 0);
+  assert.equal(Number(next.credit_note_settled.toFixed(2)), 575);
+  assert.equal(Number(next.paid_amount.toFixed(2)), 575);
+  assert.equal(Number(next.remaining.toFixed(2)), 575);
 });
 
-test("referenced credit notes settle the next voucher, not the named Ref. No.", () => {
+test("referenced credit notes settle their own Ref. No., not the other bill", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-03-07", voucher_number: "NFD/211", sales_amount: 3765, item_code: "ITEM-A", quantity: 10, category: "Paper" },
@@ -1097,11 +1096,11 @@ test("referenced credit notes settle the next voucher, not the named Ref. No.", 
 
   const invoice211 = ledger.invoices.find((row) => row.voucher_number === "NFD/211");
   const invoice212 = ledger.invoices.find((row) => row.voucher_number === "NFD/212");
-  // Receipt 1500 → 211 first; CN 429 (ref 211) → 212; CN 430 fills 211 then the rest returns to 212.
-  assert.deepEqual(invoice211.fifo_credit_notes.map((row) => row.voucher_number), ["430"]);
-  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["429", "430"]);
-  assert.equal(Number(invoice211.remaining.toFixed(2)), 0);
-  assert.equal(Number(invoice212.remaining.toFixed(2)), 4025.91);
+  // Receipt 1500 → 211. CN 429 stays on 211. CN 430 stays on 212.
+  assert.deepEqual(invoice211.fifo_credit_notes.map((row) => row.voucher_number), ["429"]);
+  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["430"]);
+  assert.equal(Number(invoice211.remaining.toFixed(2)), 1587.75);
+  assert.equal(Number(invoice212.remaining.toFixed(2)), 2438.16);
 });
 
 test("Outstanding Compare uses FIFO open when CN display attachment differs", () => {
@@ -1293,11 +1292,41 @@ test("named partial credit note does not void the same-day reissue", () => {
   const reissue = ledger.invoices.find((row) => row.voucher_number === "RNFD/537");
   assert.ok(named);
   assert.ok(reissue);
-  assert.equal(Number(reissue.credit_note_settled.toFixed(2)), Number((5539 * 1.15).toFixed(2)));
-  assert.equal(Number(reissue.remaining.toFixed(2)), 0);
-  assert.equal(Number(named.credit_note_settled.toFixed(2)), 0);
-  assert.equal(Number(named.remaining.toFixed(2)), Number((12198 * 1.15).toFixed(2)));
-  assert.deepEqual(reissue.fifo_credit_notes.map((row) => row.voucher_number), ["614"]);
+  assert.equal(Number(reissue.credit_note_settled.toFixed(2)), 0);
+  assert.equal(Number(reissue.remaining.toFixed(2)), Number((5539 * 1.15).toFixed(2)));
+  assert.equal(Number(named.credit_note_settled.toFixed(2)), Number((5539 * 1.15).toFixed(2)));
+  assert.equal(Number(named.remaining.toFixed(2)), Number(((12198 - 5539) * 1.15).toFixed(2)));
+  assert.deepEqual(named.fifo_credit_notes.map((row) => row.voucher_number), ["614"]);
+  assert.equal(reissue.fifo_credit_notes.length, 0);
+});
+
+test("customer 1177 partial credit notes stay on the named invoices", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-03-14", voucher_number: "NFD/261", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 2478.5, category: "Personal Care" },
+      { transaction_date: "2026-05-02", voucher_number: "NFD/616", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 13085.04, category: "Personal Care" },
+      { transaction_date: "2026-07-07", voucher_number: "RNFD/084", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 565.73, category: "Personal Care" },
+      { transaction_date: "2026-07-15", voucher_number: "NFD/1139", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 2250, category: "Personal Care" },
+      { transaction_date: "2026-07-22", voucher_number: "401", voucher_type: "Credit Note", reference: "RNFD/084", sales_amount: -371.33, category: "Personal Care" },
+      { transaction_date: "2026-08-23", voucher_number: "NFD/1497", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 852.23, category: "Personal Care" },
+      { transaction_date: "2026-08-29", voucher_number: "510", voucher_type: "Credit Note", reference: "NFD/1497", sales_amount: -657.83, category: "Personal Care" },
+    ],
+    receipts: [],
+    todayIso: "2026-10-22",
+  });
+
+  const named084 = ledger.invoices.find((row) => row.voucher_number === "RNFD/084");
+  const named1497 = ledger.invoices.find((row) => row.voucher_number === "NFD/1497");
+  const later = ledger.invoices.find((row) => row.voucher_number === "NFD/1139");
+  const older = ledger.invoices.find((row) => row.voucher_number === "NFD/261");
+  assert.deepEqual(named084.fifo_credit_notes.map((row) => row.voucher_number), ["401"]);
+  assert.equal(Number(named084.credit_note_settled.toFixed(2)), Number((371.33 * 1.15).toFixed(2)));
+  assert.deepEqual(named1497.fifo_credit_notes.map((row) => row.voucher_number), ["510"]);
+  assert.equal(Number(named1497.credit_note_settled.toFixed(2)), Number((657.83 * 1.15).toFixed(2)));
+  assert.equal(later.credit_note_settled, 0);
+  assert.equal(older.credit_note_settled, 0);
+  assert.equal(ledger.creditNotes.find((row) => row.voucher_number === "401").applied_to_voucher, "RNFD/084");
+  assert.equal(ledger.creditNotes.find((row) => row.voucher_number === "510").applied_to_voucher, "NFD/1497");
 });
 
 test("next-day matching credit note still counts as immediate reversal", () => {
@@ -1522,18 +1551,17 @@ test("Tally vs computed outstanding follows FIFO credit-note allocation", () => 
   assert.ok(ledger.outstandingCompareTotals);
   assert.equal(ledger.outstandingCompareTotals.has_outstanding_rows, true);
 
-  // CN 427 refs 1691 → settles next voucher 2106 like a receipt (not 1691).
+  // CN 427 refs 1691 and settles that bill, not the later voucher 2106.
   const row2106 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "2106");
   assert.ok(row2106);
-  assert.equal(Number(row2106.credit_note_settled.toFixed(2)), 2587.5);
-  assert.equal(Number(row2106.computed_open.toFixed(2)), 0);
+  assert.equal(Number(row2106.credit_note_settled.toFixed(2)), 0);
+  assert.equal(Number(row2106.computed_open.toFixed(2)), 2587.5);
   assert.equal(Number(row2106.tally_open.toFixed(2)), 0);
-  assert.equal(row2106.has_gap, false);
 
   const row1691 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "1691");
   assert.ok(row1691);
-  assert.equal(Number(row1691.credit_note_settled.toFixed(2)), 0);
-  assert.equal(Number(row1691.computed_open.toFixed(2)), 2626.02);
+  assert.equal(Number(row1691.credit_note_settled.toFixed(2)), 2587.5);
+  assert.equal(Number(row1691.computed_open.toFixed(2)), 38.52);
   assert.equal(Number(row1691.tally_open.toFixed(2)), 2626.02);
   assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 2626.02);
   assert.equal(Number(ledger.outstandingCompareTotals.tally_open.toFixed(2)), 2626.02);

@@ -327,7 +327,7 @@ export default function InvoiceSettlement({
           <div>
             <h3>Invoices & Settlement</h3>
             <p className="auditSectionNote">
-              Referenced credit notes settle the next voucher after the named Ref like a receipt and count
+              Referenced credit notes settle the named Ref. No. and count
               in Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN from
               day-1 history. Tally Open is the outstanding upload. A reversed voucher is not a sale;
               if Tally still has it pending it stays as a Tally line so this column matches the file.

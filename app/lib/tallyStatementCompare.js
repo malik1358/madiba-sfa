@@ -429,6 +429,11 @@ function signedAmount(side, amount) {
   return side === "credit" ? -value : value;
 }
 
+function isPurchaseType(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  return text === "purchase" || text.startsWith("purchase ") || text.includes("purchase voucher");
+}
+
 export function buildSfaStatementEntries({
   invoices = [],
   reversedInvoices = [],
@@ -494,6 +499,7 @@ export function buildSfaStatementEntries({
   });
 
   (Array.isArray(receipts) ? receipts : []).forEach((receipt) => {
+    if (isPurchaseType(receipt?.vch_type)) return;
     const signed = toNumber(receipt?.amount);
     const date = String(receipt?.receipt_date || "").slice(0, 10);
     if (!date || !signed) return;

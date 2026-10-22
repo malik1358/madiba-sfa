@@ -353,6 +353,31 @@ test("the same discount lines stay when credit note 48 does not reverse invoice 
   assert.equal(result.rows.find((row) => row.voucher === "DG-48").status, "sfa_only");
 });
 
+test("Tally purchase 221 matches SFA P-221 once when the receipt register also has it", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["10-08-2026", "Local Purchase Non Food Division", "Purchase", "221", "", 520.72],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    receipts: [
+      { receipt_date: "2026-08-10", vch_no: "P-221", amount: 520.72, vch_type: "Purchase" },
+      { receipt_date: "2026-08-13", vch_no: "1444", amount: 345, vch_type: "Receipt" },
+    ],
+    purchases: [
+      { purchase_date: "2026-08-10", vch_no: "P-221", amount: 520.72, vch_type: "Purchase" },
+    ],
+  });
+
+  const result = compareTallyStatement(tally, sfa);
+  const purchaseRows = result.rows.filter((row) => /221/.test(row.voucher));
+  assert.equal(purchaseRows.length, 1);
+  assert.equal(purchaseRows[0].status, "matched");
+  assert.equal(purchaseRows[0].tallyCredit, 520.72);
+  assert.equal(purchaseRows[0].sfaCredit, 520.72);
+  assert.equal(result.totals.agrees, true);
+  assert.equal(result.lead, null);
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

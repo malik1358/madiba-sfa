@@ -39,6 +39,7 @@ test("sales incl VAT total matches the sum of each invoice rounded to halalas", 
 
   assert.equal(shownCents, 5911949);
   assert.equal(Math.round(ledger.totals.invoice_sales_incl_vat * 100), shownCents);
+  assert.equal(Math.round(ledger.totals.open_sales_amount * 100), shownCents);
   assert.equal(
     Number(ledger.totals.invoice_sales_incl_vat.toLocaleString("en-US", {
       maximumFractionDigits: 2,

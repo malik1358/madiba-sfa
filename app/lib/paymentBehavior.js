@@ -62,17 +62,16 @@ const AMOUNT_TOLERANCE = 0.02;
 const SETTLEMENT_DUST = 0.0000005;
 
 /**
- * Same halala rounding the settlement screen uses when it prints a money cell.
- * Invoice VAT is excl × 1.15, so the raw sum can be a halala away from the
- * sum of the rounded invoice amounts (customer 1073: 59,119.48 vs 59,119.49).
+ * Half-up to the halala. Invoice VAT is excl × 1.15, so a raw total can be a
+ * halala away from the sum of voucher amounts rounded first (customer 1073:
+ * 59,119.48 vs 59,119.49). The nudge keeps 86,362.50 × 1.15 at 99,316.88
+ * instead of the binary value 99,316.874999 falling to 99,316.87.
  */
 function roundMoney(value) {
   const number = toNumber(value);
   if (!Number.isFinite(number)) return 0;
-  return Number(number.toLocaleString("en-US", {
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }));
+  const sign = number < 0 ? -1 : 1;
+  return Math.round((number * sign + 1e-8) * 100) / 100 * sign;
 }
 
 function sumMoney(values) {
@@ -312,7 +311,7 @@ export function buildSalesInvoices(transactions = []) {
     map.set(key, current);
   });
 
-  return sortVoucherRows([...map.values()]);
+  return sortVoucherRows([...map.values()].map(roundVoucherMoney));
 }
 
 /**
@@ -360,7 +359,12 @@ export function buildCreditNotes(transactions = []) {
     map.set(key, current);
   });
 
-  return sortVoucherRows([...map.values()]);
+  return sortVoucherRows([...map.values()].map(roundVoucherMoney));
+}
+
+function roundVoucherMoney(voucher) {
+  const amount = roundMoney(voucher.amount);
+  return { ...voucher, amount, remaining: amount };
 }
 
 export function classifyCreditNoteKind(voucherType = "", voucherNumber = "") {
@@ -2371,7 +2375,7 @@ export function buildPaymentSettlementLedger({
       };
     });
 
-  const openSalesAmount = invoiceRows.reduce((total, row) => total + toNumber(row.remaining), 0);
+  const openSalesAmount = sumMoney(invoiceRows.map((row) => row.remaining));
   const reversedRows = [...reversedInvoices].sort((left, right) => {
     if (left.invoice_date !== right.invoice_date) {
       return String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));

@@ -196,7 +196,8 @@ export function parseTallyStatementMatrix(sheetRows) {
   return { entries, opening, closing, error: "" };
 }
 
-const MONEY_TEXT = /^\d{1,3}(?:,\d{3})*\.\d{2}$/;
+const MONEY_TEXT = /^(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}$/;
+const LEDGER_SIDE_MARKER = /^(?:to|by|dr|cr)\.?$/i;
 
 function positionedBox(item) {
   const x = Number(item?.x ?? item?.transform?.[4] ?? 0);
@@ -271,7 +272,7 @@ function joinColumn(items) {
 }
 
 function datedText(value) {
-  return String(value || "").replace(/\s+(dr|cr)\.?$/i, "").trim();
+  return String(value || "").replace(/(?:\s+(?:dr|cr|to|by)\.?)+$/i, "").trim();
 }
 
 function closingSide(text) {
@@ -283,8 +284,8 @@ function closingSide(text) {
 
 /**
  * Read a Tally ledger PDF after text items have positions.
- * Amount column decides debit vs credit. The Dr/Cr printed beside the date
- * is the other ledger, so it is not the customer's side.
+ * Amount column decides debit vs credit. To/By and Dr/Cr printed beside the
+ * date name the other side, so they are not the customer's side.
  */
 export function parseTallyStatementPositionedPages(pages) {
   const entries = [];
@@ -314,6 +315,7 @@ export function parseTallyStatementPositionedPages(pages) {
         credit: [],
       };
       row.items.forEach((item) => {
+        if (LEDGER_SIDE_MARKER.test(item.text)) return;
         if (MONEY_TEXT.test(item.text)) {
           buckets[amountColumn(item, headers)].push(item);
           return;

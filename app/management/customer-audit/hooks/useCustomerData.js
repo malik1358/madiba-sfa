@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionWithTimeout, withTimeout } from '../../../lib/authSession';
 import { getSupabaseClient } from '../../../lib/supabase';
+import { mergeCustomerHistoryState } from '../../../lib/customerHistoryReceipts.js';
 import {
   fetchCustomerHistoryCached,
   fetchItemsMasterCached,
@@ -17,6 +18,8 @@ export function useCustomerData({ setError, setMessage }) {
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [receipts, setReceipts] = useState([]);
+  const [receiptsPending, setReceiptsPending] = useState(false);
+  const historyStateRef = useRef({ receipts: [], receiptsSettled: false });
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(false);
   const [itemMaster, setItemMaster] = useState([]);
@@ -96,6 +99,8 @@ export function useCustomerData({ setError, setMessage }) {
     setTransactions([]);
     setPeerTransactions([]);
     setReceipts([]);
+    setReceiptsPending(false);
+    historyStateRef.current = { receipts: [], receiptsSettled: false };
     setVisits([]);
     setLoadingCustomer(true);
     setLoadingVisits(true);
@@ -124,9 +129,12 @@ export function useCustomerData({ setError, setMessage }) {
             customerName: customer.customer_name || "",
             onUpdate: (freshHistory) => {
               if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
-              setTransactions(freshHistory.transactions || []);
-              setPeerTransactions(freshHistory.peerTransactions || []);
-              setReceipts(freshHistory.receipts || []);
+              const next = mergeCustomerHistoryState(historyStateRef.current, freshHistory);
+              historyStateRef.current = next;
+              setTransactions(next.transactions);
+              setPeerTransactions(next.peerTransactions);
+              setReceipts(next.receipts);
+              setReceiptsPending(next.receiptsPending);
             },
           },
         ),
@@ -169,9 +177,12 @@ export function useCustomerData({ setError, setMessage }) {
         itemsPromise,
       ]);
 
-      setTransactions(historyResult.data.transactions || []);
-      setPeerTransactions(historyResult.data.peerTransactions || []);
-      setReceipts(historyResult.data.receipts || []);
+      const next = mergeCustomerHistoryState(historyStateRef.current, historyResult.data);
+      historyStateRef.current = next;
+      setTransactions(next.transactions);
+      setPeerTransactions(next.peerTransactions);
+      setReceipts(next.receipts);
+      setReceiptsPending(next.receiptsPending);
       setVisits(visitRows);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
@@ -210,9 +221,12 @@ export function useCustomerData({ setError, setMessage }) {
       );
 
       if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
-      setTransactions(historyResult.data.transactions || []);
-      setPeerTransactions(historyResult.data.peerTransactions || []);
-      setReceipts(historyResult.data.receipts || []);
+      const next = mergeCustomerHistoryState(historyStateRef.current, historyResult.data);
+      historyStateRef.current = next;
+      setTransactions(next.transactions);
+      setPeerTransactions(next.peerTransactions);
+      setReceipts(next.receipts);
+      setReceiptsPending(next.receiptsPending);
     } catch {
       // Keep showing the previous data if the background recalculation fails.
     }
@@ -227,6 +241,8 @@ export function useCustomerData({ setError, setMessage }) {
     setTransactions([]);
     setPeerTransactions([]);
     setReceipts([]);
+    setReceiptsPending(false);
+    historyStateRef.current = { receipts: [], receiptsSettled: false };
     setVisits([]);
     setLoadingVisits(false);
     setExpandedCategories({});
@@ -245,6 +261,7 @@ export function useCustomerData({ setError, setMessage }) {
     transactions,
     peerTransactions,
     receipts,
+    receiptsPending,
     visits,
     loadingVisits,
     itemMaster,

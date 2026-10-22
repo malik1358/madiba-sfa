@@ -126,6 +126,7 @@ function CustomerAuditPageContent() {
     transactions,
     peerTransactions,
     receipts,
+    receiptsPending,
     visits,
     loadingVisits,
     itemMaster,
@@ -149,13 +150,14 @@ function CustomerAuditPageContent() {
   });
   const displayedOrderBlock = useMemo(
     () => resolveDisplayedOrderBlock({
-      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
-      avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
+      avgDaysToPay: receiptsPending ? null : (analytics?.paymentBehavior?.avgDaysToPay ?? null),
+      avgDaysToPay6m: receiptsPending ? null : (analytics?.paymentBehavior?.avgDaysToPay6m ?? null),
       payload: orderBlock,
     }),
-    [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
+    [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock, receiptsPending],
   );
   const paymentSettlement = useMemo(() => {
+    if (receiptsPending) return null;
     if (analytics?.paymentSettlement) return analytics.paymentSettlement;
     // Outstanding bills are already listed above. Do not paint them as the
     // invoice book when sales history has not loaded — that hides every other invoice.
@@ -171,6 +173,7 @@ function CustomerAuditPageContent() {
     outstandingInfo.customer,
     outstandingInfo.customerInvoices,
     receipts,
+    receiptsPending,
     transactions,
   ]);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
@@ -590,6 +593,7 @@ function CustomerAuditPageContent() {
         <CustomerHeader
           customer={selectedCustomer}
           analytics={analytics}
+          receiptsPending={receiptsPending}
           outstandingSalesman={outstandingSalesman}
           orderBlock={displayedOrderBlock}
           canManageOrderBlock={isAdmin}
@@ -618,7 +622,13 @@ function CustomerAuditPageContent() {
 
           {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
 
-          {!outstandingLoading && analytics?.paymentBehavior ? (
+          {!outstandingLoading && receiptsPending ? (
+            <div className="auditSectionNote" style={{ marginTop: "8px" }}>
+              <strong>Payment behavior:</strong> Loading receipts…
+            </div>
+          ) : null}
+
+          {!outstandingLoading && !receiptsPending && analytics?.paymentBehavior ? (
             <div className="auditSectionNote" style={{ marginTop: "8px" }}>
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
@@ -736,7 +746,18 @@ function CustomerAuditPageContent() {
           )}
         </section>
 
-        {!outstandingLoading && paymentSettlement ? (
+        {receiptsPending ? (
+          <section className="auditSection">
+            <div className="auditTransactionHeader">
+              <div>
+                <h3>Invoices & Settlement</h3>
+                <p className="auditSectionNote">Loading receipts…</p>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {!receiptsPending && !outstandingLoading && paymentSettlement ? (
           <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
         ) : null}
 

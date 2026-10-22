@@ -147,9 +147,9 @@ function CustomerAuditPageContent() {
   });
   const paymentSettlement = useMemo(() => {
     if (analytics?.paymentSettlement) return analytics.paymentSettlement;
-    if (!transactions?.length && !receipts?.length && !(outstandingInfo.customerInvoices || []).length) {
-      return null;
-    }
+    // Outstanding bills are already listed above. Do not paint them as the
+    // invoice book when sales history has not loaded — that hides every other invoice.
+    if (!transactions?.length) return null;
     return buildPaymentSettlementLedger({
       transactions: transactions || [],
       receipts: receipts || [],

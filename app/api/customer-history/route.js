@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -27,12 +27,13 @@ import {
 } from "../../lib/customerHistoryLookup.js";
 import {
   RECEIPT_DATASET_KEY,
+  RECEIPT_DATASET_STAMP_KEY,
   findReceiptsForCustomer,
   normalizeReceiptDataset,
 } from "../../lib/receiptRegister.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -185,12 +186,52 @@ async function loadReceiptDatasetCached(admin) {
   return dataset;
 }
 
-async function loadCustomerReceipts(admin, customerCode, customerName = "") {
+function receiptDatasetIsWarm() {
+  return Boolean(
+    receiptDatasetMemory.dataset
+    && (Date.now() - receiptDatasetMemory.loadedAt) < RECEIPT_DATASET_MEMORY_TTL_MS
+  );
+}
+
+async function loadReceiptDatasetStamp(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", RECEIPT_DATASET_STAMP_KEY)
+    .maybeSingle();
+  if (error) return "";
+  return String(data?.setting_value || "");
+}
+
+async function loadCustomerReceiptBundle(admin, customerCode, customerName = "") {
   try {
     const dataset = await loadReceiptDatasetCached(admin);
-    return findReceiptsForCustomer(dataset, customerCode, customerName);
+    return {
+      receipts: findReceiptsForCustomer(dataset, customerCode, customerName),
+      uploadedAt: String(dataset?.uploadedAt || ""),
+    };
   } catch {
-    return [];
+    return { receipts: [], uploadedAt: "" };
+  }
+}
+
+async function saveCachedReceipts(admin, cacheKey, receipts, uploadedAt) {
+  let cached = await loadCached(admin, cacheKey);
+  if (!cached) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    cached = await loadCached(admin, cacheKey);
+  }
+  if (!cached || !Array.isArray(cached.transactions)) return;
+  await writeCached(admin, cacheKey, {
+    ...cached,
+    receipts,
+    receiptDatasetUploadedAt: uploadedAt || cached.receiptDatasetUploadedAt || "",
+  });
+  if (uploadedAt) {
+    await admin.from("system_settings").upsert({
+      setting_key: RECEIPT_DATASET_STAMP_KEY,
+      setting_value: uploadedAt,
+    }, { onConflict: "setting_key" });
   }
 }
 
@@ -900,10 +941,37 @@ export async function GET(request) {
     await ensureCustomerVisible(admin, customerCode, customerName, scope);
 
     const key = cacheKeyFor(customerCode, scope, { fullHistory });
-    const [cached, receipts] = await Promise.all([
+    const [cached, receiptStamp] = await Promise.all([
       loadCached(admin, key),
-      loadCustomerReceipts(admin, customerCode, customerName),
+      loadReceiptDatasetStamp(admin),
     ]);
+    const cachedReceipts = Array.isArray(cached?.receipts) ? cached.receipts : null;
+    const receiptsAreCurrent = Boolean(
+      receiptStamp
+      && cached?.receiptDatasetUploadedAt === receiptStamp
+      && cachedReceipts
+    );
+    let receipts = receiptsAreCurrent ? cachedReceipts : [];
+    let receiptsPending = false;
+    if (!receiptsAreCurrent) {
+      if (receiptDatasetIsWarm()) {
+        const bundle = await loadCustomerReceiptBundle(admin, customerCode, customerName);
+        receipts = bundle.receipts;
+        void saveCachedReceipts(admin, key, bundle.receipts, bundle.uploadedAt).catch(() => {});
+      } else {
+        // The receipt register is several MB. Waiting for it here drops the sales
+        // response, and the audit screen then shows only the outstanding bill.
+        receiptsPending = true;
+        after(async () => {
+          try {
+            const bundle = await loadCustomerReceiptBundle(admin, customerCode, customerName);
+            await saveCachedReceipts(admin, key, bundle.receipts, bundle.uploadedAt);
+          } catch {
+            // Sales invoices were already returned. Receipts stay empty until the next open.
+          }
+        });
+      }
+    }
 
     const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;
 
@@ -925,6 +993,7 @@ export async function GET(request) {
         transactions,
         peerTransactions: [],
         receipts,
+        receiptsPending,
       });
     }
 
@@ -959,6 +1028,7 @@ export async function GET(request) {
           transactions: payload.transactions,
           peerTransactions: payload.peerTransactions,
           receipts,
+          receiptsPending,
         });
       }
 
@@ -984,6 +1054,7 @@ export async function GET(request) {
         transactions,
         peerTransactions: wantPeers && Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
         receipts,
+        receiptsPending,
       });
     }
 
@@ -1013,6 +1084,7 @@ export async function GET(request) {
       transactions: payload.transactions,
       peerTransactions: payload.peerTransactions,
       receipts,
+      receiptsPending,
     });
   } catch (error) {
     const message = error.message || "Unable to load customer history.";

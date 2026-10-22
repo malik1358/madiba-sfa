@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import {
   RECEIPT_DATASET_KEY,
+  RECEIPT_DATASET_STAMP_KEY,
   buildCustomerLookup,
   emptyReceiptDataset,
   findReceiptHeaderRow,
@@ -249,10 +250,16 @@ export async function POST(request) {
 
     const { error: upsertError } = await admin
       .from("system_settings")
-      .upsert({
-        setting_key: RECEIPT_DATASET_KEY,
-        setting_value: JSON.stringify(payload),
-      }, { onConflict: "setting_key" });
+      .upsert([
+        {
+          setting_key: RECEIPT_DATASET_KEY,
+          setting_value: JSON.stringify(payload),
+        },
+        {
+          setting_key: RECEIPT_DATASET_STAMP_KEY,
+          setting_value: nowIso,
+        },
+      ], { onConflict: "setting_key" });
 
     if (upsertError) throw upsertError;
 

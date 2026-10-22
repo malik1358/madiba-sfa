@@ -12,6 +12,52 @@ import {
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 
+test("sales incl VAT total matches the sum of each invoice rounded to halalas", () => {
+  // Customer 1073. Raw VAT is 59,119.476, which prints as 59,119.48.
+  // The invoice column rounds each bill first and those bills add to 59,119.49.
+  const excl = [
+    939.13, 1173.91, 2043, 4086, 4130, 9938, 1900, 1440,
+    2087, 1512.9, 1240, 5043, 2641.5, 2773.8, 4988, 5472,
+  ];
+  const ledger = buildPaymentSettlementLedger({
+    transactions: excl.map((sales_amount, index) => ({
+      transaction_date: `2026-01-${String((index % 27) + 1).padStart(2, "0")}`,
+      voucher_number: `V${index + 1}`,
+      sales_amount,
+      category: "Paper",
+    })),
+    receipts: [],
+  });
+
+  const shownCents = ledger.invoices.reduce((total, row) => {
+    const shown = Number(Number(row.amount_incl_vat).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+      useGrouping: false,
+    }));
+    return total + Math.round(shown * 100);
+  }, 0);
+
+  assert.equal(shownCents, 5911949);
+  assert.equal(Math.round(ledger.totals.invoice_sales_incl_vat * 100), shownCents);
+  assert.equal(
+    Number(ledger.totals.invoice_sales_incl_vat.toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+      useGrouping: false,
+    })),
+    59119.49,
+  );
+
+  const sameDay = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-08-20", voucher_number: "A", sales_amount: 2641.5, category: "Paper" },
+      { transaction_date: "2026-08-20", voucher_number: "B", sales_amount: 1512.9, category: "Paper" },
+    ],
+    receipts: [],
+  });
+  assert.equal(Math.round(sameDay.datewise[0].sales_incl_vat * 100), 477757);
+  assert.equal(Math.round(sameDay.totals.invoice_sales_incl_vat * 100), 477757);
+});
+
 test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () => {
   const invoices = buildSalesInvoices([
     { transaction_date: "2026-01-01", voucher_number: "A1", sales_amount: 100, category: "Paper" },

@@ -321,6 +321,12 @@ async function fetchItemCategoryLookup(supabase, scope, { maxPages = 5 } = {}) {
   return lookup;
 }
 
+function customerRowsFromCache(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.customers)) return value.customers;
+  return [];
+}
+
 function mergeOrderWorkspaceCustomers(loadedCustomers, openProspects, prefilledCustomer, editOrderId) {
   const visibleCustomers = dedupeCustomerMasterRows(
     (loadedCustomers || []).filter((customer) => customer?.is_prospect || !isExcludedNewOrderCustomer(customer)),
@@ -1475,8 +1481,9 @@ export default function NewOrderPage() {
   }, [lastSavedOrder, shareText]);
 
   useEffect(() => {
-    const LOAD_TIMEOUT_MS = 20000;
     const SESSION_TIMEOUT_MS = 10000;
+    const NETWORK_TIMEOUT_MS = 60000;
+    let cancelled = false;
 
     const params = typeof window === "undefined"
       ? new URLSearchParams()
@@ -1504,47 +1511,67 @@ export default function NewOrderPage() {
       }
 
       setError("");
-      let shownFromCache = false;
+      let paintedFromCache = false;
+      let openProspects = [];
+      let latestCustomers = [];
+
+      const applyCustomers = (rows) => {
+        if (cancelled) return;
+        latestCustomers = customerRowsFromCache(rows);
+        setCustomers(mergeOrderWorkspaceCustomers(
+          latestCustomers,
+          openProspects,
+          nextPrefilled,
+          orderId,
+        ));
+      };
+      const applyItems = (rows) => {
+        if (cancelled) return;
+        setItemsMaster((rows || []).filter((item) => !isBuildingMaterialItem(item)));
+      };
 
       try {
-        await withTimeout((async () => {
-          const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
-          if (!session?.access_token) {
-            throw new Error("Please login again.");
+        const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
+        if (cancelled) return;
+        if (!session?.access_token) {
+          throw new Error("Please login again.");
+        }
+
+        const hydrated = await hydrateFoundationFromCache(session.user.id);
+        if (cancelled) return;
+
+        if (hydrated?.scope) {
+          setAccessScope(hydrated.scope);
+        }
+        if (hydrated) {
+          const cachedCustomers = customerRowsFromCache(hydrated.customers);
+          applyCustomers(cachedCustomers);
+          applyItems(hydrated.itemsMaster);
+          if (cachedCustomers.length > 0 || (hydrated.itemsMaster || []).length > 0) {
+            paintedFromCache = true;
+            setLoading(false);
           }
+        }
 
-          const [hydrated, openProspects] = await Promise.all([
-            hydrateFoundationFromCache(session.user.id),
-            loadOpenProspectCustomers(session.access_token).catch(() => []),
-          ]);
-
-          const applyCustomers = (rows) => {
-            setCustomers(mergeOrderWorkspaceCustomers(
-              rows,
-              openProspects,
-              nextPrefilled,
-              orderId,
-            ));
-          };
-          const applyItems = (rows) => {
-            setItemsMaster((rows || []).filter((item) => !isBuildingMaterialItem(item)));
-          };
-
-          if (hydrated?.scope) {
-            setAccessScope(hydrated.scope);
-          }
-          if (hydrated) {
-            applyCustomers(hydrated.customers);
-            applyItems(hydrated.itemsMaster);
-            if ((hydrated.customers || []).length > 0 || (hydrated.itemsMaster || []).length > 0) {
-              shownFromCache = true;
-              setLoading(false);
-            }
-          }
-
-          const scopeResult = await fetchSalesScopeCached({
-            onUpdate: (freshScope) => setAccessScope(freshScope),
+        // Prospects are optional on this screen. Waiting for them used to block
+        // the saved customer list and trip the workspace timeout.
+        const prospectsTask = loadOpenProspectCustomers(session.access_token)
+          .catch(() => [])
+          .then((rows) => {
+            if (cancelled) return;
+            openProspects = Array.isArray(rows) ? rows : [];
+            applyCustomers(latestCustomers);
           });
+
+        const refreshWorkspace = async () => {
+          const scopeResult = await fetchSalesScopeCached({
+            accessToken: session.access_token,
+            userId: session.user.id,
+            onUpdate: (freshScope) => {
+              if (!cancelled) setAccessScope(freshScope);
+            },
+          });
+          if (cancelled) return;
           const scope = scopeResult.scope;
           setAccessScope(scope);
 
@@ -1556,20 +1583,34 @@ export default function NewOrderPage() {
               onUpdate: (freshItems) => applyItems(freshItems?.rows || []),
             }),
           ]);
+          if (cancelled) return;
 
           applyCustomers(customersResult.data);
           applyItems(itemsResult.data?.rows || []);
 
           fetchItemCategoryLookup(supabase, scope)
-            .then((categories) => setHistoryCategoryLookup(categories || new Map()))
-            .catch(() => setHistoryCategoryLookup(new Map()));
-        })(), LOAD_TIMEOUT_MS, "Order workspace load timed out. Please refresh the page or login again.");
+            .then((categories) => {
+              if (!cancelled) setHistoryCategoryLookup(categories || new Map());
+            })
+            .catch(() => {
+              if (!cancelled) setHistoryCategoryLookup(new Map());
+            });
+        };
+
+        const refreshPromise = refreshWorkspace().catch((err) => {
+          if (cancelled || paintedFromCache) return;
+          const message = String(err?.message || "");
+          setError(message === "SESSION_TIMEOUT" ? "Please login again." : (message || "Unable to load new order data."));
+        });
+        void prospectsTask;
+        await withTimeout(refreshPromise, NETWORK_TIMEOUT_MS, "NETWORK_TIMEOUT");
       } catch (err) {
-        if (!shownFromCache) {
-          setError(err.message || "Unable to load new order data.");
-        }
+        if (cancelled || paintedFromCache) return;
+        const message = String(err?.message || "");
+        if (message === "NETWORK_TIMEOUT") return;
+        setError(message === "SESSION_TIMEOUT" ? "Please login again." : (message || "Unable to load new order data."));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
@@ -1592,6 +1633,9 @@ export default function NewOrderPage() {
 
     loadFoundation();
     loadPrices();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

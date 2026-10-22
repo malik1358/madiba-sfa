@@ -9,12 +9,20 @@ import {
 export async function fetchServerProspects(accessToken) {
   if (!accessToken) return [];
 
-  const response = await fetch("/api/prospects", {
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch("/api/prospects", {
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) {
     throw new Error(payload.error || "Unable to load prospects.");

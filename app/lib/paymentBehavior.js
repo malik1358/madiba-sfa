@@ -61,6 +61,28 @@ const AMOUNT_TOLERANCE = 0.02;
 /** Float noise only. A posted halala (0.01) is real money and must still settle. */
 const SETTLEMENT_DUST = 0.0000005;
 
+/**
+ * Same halala rounding the settlement screen uses when it prints a money cell.
+ * Invoice VAT is excl × 1.15, so the raw sum can be a halala away from the
+ * sum of the rounded invoice amounts (customer 1073: 59,119.48 vs 59,119.49).
+ */
+function roundMoney(value) {
+  const number = toNumber(value);
+  if (!Number.isFinite(number)) return 0;
+  return Number(number.toLocaleString("en-US", {
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  }));
+}
+
+function sumMoney(values) {
+  const cents = (Array.isArray(values) ? values : []).reduce(
+    (total, value) => total + Math.round(roundMoney(value) * 100),
+    0,
+  );
+  return cents / 100;
+}
+
 function hasSettlementAmount(amount) {
   return Math.abs(toNumber(amount)) > SETTLEMENT_DUST;
 }
@@ -2128,7 +2150,7 @@ export function buildPaymentSettlementLedger({
     };
     current.invoice_count += 1;
     current.sales_excl_vat += row.amount_excl_vat;
-    current.sales_incl_vat += row.amount_incl_vat;
+    current.sales_incl_vat += roundMoney(row.amount_incl_vat);
     current.paid_amount += row.paid_amount;
     current.open_amount += row.remaining;
     current.invoices.push({
@@ -2361,15 +2383,14 @@ export function buildPaymentSettlementLedger({
     (total, row) => total + toNumber(row.gross_amount_excl_vat ?? row.amount_excl_vat),
     0,
   );
-  const invoiceSalesInclVat = invoiceRows.reduce(
-    (total, row) => total + toNumber(row.gross_amount_incl_vat ?? row.amount_incl_vat),
-    0,
+  const invoiceSalesInclVat = sumMoney(
+    invoiceRows.map((row) => row.gross_amount_incl_vat ?? row.amount_incl_vat),
   );
   const reversedSalesExclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_excl_vat), 0);
-  const reversedSalesInclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_incl_vat), 0);
+  const reversedSalesInclVat = sumMoney(reversedRows.map((row) => row.amount_incl_vat));
   // KPI Sales includes reversed invoices (still excluded from FIFO / avg days).
   const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
-  const salesInclVat = invoiceSalesInclVat + reversedSalesInclVat;
+  const salesInclVat = sumMoney([invoiceSalesInclVat, reversedSalesInclVat]);
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
   // AR collected = positive collection receipts + Payment leftovers that settled sales.
   // Purchase-side Payments stay on AP and do not reduce AR collected.
@@ -2433,11 +2454,11 @@ export function buildPaymentSettlementLedger({
     }
   });
 
-  const creditNoteAmount = creditNotes.reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
+  const creditNoteAmount = sumMoney(creditNotes.map((note) => note.amount_incl_vat));
   const unmatchedCreditNoteAmount = creditNotes
     .filter((note) => !String(note.applied_to_voucher || "").trim())
     .reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
-  const netSalesInclVat = salesInclVat - creditNoteAmount;
+  const netSalesInclVat = sumMoney([salesInclVat, -creditNoteAmount]);
   const purchaseAppliedToSales = purchaseSalesAllocations.reduce(
     (total, row) => total + toNumber(row.amount),
     0,

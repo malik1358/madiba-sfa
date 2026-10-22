@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildTallyOrderExportRows,
+  chooseTallyLedgerName,
+  ledgerNamesFromSalesRows,
   withTallyCatalogRates,
   resolveTallySalesRouting,
   resolveTallyVoucherSetup,
@@ -118,4 +120,30 @@ test("catalog list rate is the item rate and discount is the per-unit gap", () =
   assert.equal(rows[0]["SALES TEAM"], "SM13");
   assert.equal(rows.at(-1).Amount, 837.15);
   assert.equal(rows.at(-1)["Charge.Ledgers VAT/Freight"], "Output VAT 15% - Non Food Division");
+});
+
+test("customer name uses the imported Tally ledger, including its spacing", () => {
+  const imported = [
+    { customer_name: "AL-IBTIKAR LIBRARY FOR TRADING EST." },
+    { customer_name: "1037  AL-IBTIKAR LIBRARY FOR TRADING EST." },
+    { customer_name: "1037  AL-IBTIKAR LIBRARY FOR TRADING EST." },
+    { source_data: { "Party Name": "1037 AL-IBTIKAR LIBRARY FOR TRADING EST." } },
+  ];
+  const ledgerName = chooseTallyLedgerName("1037", ledgerNamesFromSalesRows(imported));
+  const rows = buildTallyOrderExportRows({
+    order: {
+      customer_code: "1037",
+      customer_name: "AL-IBTIKAR LIBRARY FOR TRADING EST.",
+      tally_ledger_name: ledgerName,
+      salesman_name: "PARVEZ",
+    },
+    lines: [{ item_code: "A005425", item_name: "PAPER", quantity: 1, rate: 10, category: "PAPER" }],
+    orderNumber: "PA95",
+    pricingRegion: "riyadh",
+    paymentType: "cash",
+  });
+
+  assert.equal(ledgerName, "1037  AL-IBTIKAR LIBRARY FOR TRADING EST.");
+  assert.equal(rows[0]["CUSTOMER NAME"], "1037  AL-IBTIKAR LIBRARY FOR TRADING EST.");
+  assert.equal(rows.at(-1)["CUSTOMER NAME"], "");
 });

@@ -41,7 +41,8 @@ function deltaClass(value) {
 function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
   const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
-  const detailCount = receiptCount + creditCount;
+  const purchaseCount = Array.isArray(invoice.purchase_settlements) ? invoice.purchase_settlements.length : 0;
+  const detailCount = receiptCount + creditCount + purchaseCount;
   const tallyOnly = Boolean(invoice.tally_only);
   const machineOpen = Number(invoice.remaining || 0);
   const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
@@ -87,6 +88,22 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           <td colSpan={3} />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
+          <td />
+        </tr>
+      ))}
+      {open && (invoice.purchase_settlements || []).map((purchase, index) => (
+        <tr key={`${invoice.invoice_date}-pur-${purchase.voucher_number}-${index}`} className="paymentSettleChildRow">
+          <td colSpan={2} style={{ paddingLeft: 18 }}>
+            Purchase
+            {purchase.voucher_number ? ` · ${purchase.voucher_number}` : ""}
+            {purchase.purchase_date ? ` · ${purchase.purchase_date}` : ""}
+            {" · settles this invoice"}
+          </td>
+          <td colSpan={2} />
+          <td>{formatMoney(purchase.amount)}</td>
+          <td colSpan={3} />
+          <td><span className={statusClass("Applied")}>Purchase</span></td>
+          <td>Not in avg days</td>
           <td />
         </tr>
       ))}

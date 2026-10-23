@@ -16,6 +16,8 @@ import {
 } from "../app/lib/outstandingReconcile.js";
 import { buildOutstandingReconcileEmail } from "../app/lib/outstandingReconcileEmail.js";
 import { outstandingReconcileSignature, runOutstandingReconcileCycle } from "../app/lib/outstandingReconcileEmailServer.js";
+import { outstandingInvoicesForAccount } from "../app/lib/outstandingReconcileServer.js";
+import { buildPaymentSettlementLedger } from "../app/lib/paymentBehavior.js";
 
 const EMAIL_ENV = {
   SMTP_HOST: "smtp.example.com",
@@ -246,4 +248,30 @@ test("normalizeOutstandingReconcileDataset keeps mismatch rows", () => {
   assert.equal(dataset.mismatchRows.length, 1);
   assert.equal(dataset.mismatchRows[0].pending_amount, 92126.5);
   assert.equal(dataset.mismatchSummary.count, 1);
+});
+
+test("1035C uses the bill refs stored under 1035, not the open balance", () => {
+  const invoicesByCode = new Map([
+    ["1035", [
+      { customer_code: "1035", ref_no: "NFD/1030", pending_amount: 20024.33 },
+      { customer_code: "1035", ref_no: "NFD/1086", pending_amount: 4600 },
+      { customer_code: "1035", ref_no: "NFD/2018", pending_amount: 64975 },
+    ]],
+    ["1035C", [{ customer_code: "1035C", ref_no: "", pending_amount: 89599.33 }]],
+  ]);
+  const bills = outstandingInvoicesForAccount(invoicesByCode, "1035C");
+  assert.deepEqual(bills.map((bill) => bill.ref_no), ["NFD/1030", "NFD/1086", "NFD/2018"]);
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-06-27", voucher_number: "NFD/1030", sales_amount: 17412.45, category: "Paper" },
+      { transaction_date: "2026-07-09", voucher_number: "NFD/1086", sales_amount: 4000, category: "Paper" },
+      { transaction_date: "2026-10-13", voucher_number: "NFD/2018", sales_amount: 56500, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-08-01", amount: 69000, vch_no: "R1" }],
+    outstandingInvoices: bills,
+    todayIso: "2026-10-23",
+  });
+  assert.equal(Number(ledger.outstandingCompareTotals.sales_compared.toFixed(2)), 89599.32);
+  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), -0.01);
 });

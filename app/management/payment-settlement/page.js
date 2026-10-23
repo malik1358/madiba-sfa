@@ -15,6 +15,12 @@ import {
   HISTORIC_PERFORMANCE_PERIOD_LABEL,
   HISTORIC_PERFORMANCE_SHORT_LABEL,
 } from "../../lib/paymentBehavior.js";
+import {
+  datewiseFilterValue,
+  flattenDatewiseLines,
+  formatOptionalMoney,
+  sumDatewise,
+} from "../../lib/datewiseLines.js";
 import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../lib/settlementOpenDelta.js";
 import {
   buildSfaStatementEntries,
@@ -134,6 +140,17 @@ const STATEMENT_FILTER_KEYS = [
   "sfaCredit",
   "difference",
   "cause",
+];
+
+const DATEWISE_FILTER_KEYS = [
+  "date",
+  "kind",
+  "voucher",
+  "excl",
+  "incl",
+  "collected",
+  "open",
+  "detail",
 ];
 
 function statementCauseKey(row) {
@@ -278,174 +295,6 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   );
 }
 
-function DatewiseDayRow({ row, open, onToggle }) {
-  const invoices = Array.isArray(row.invoices) ? row.invoices : [];
-  const receipts = Array.isArray(row.receipts) ? row.receipts : [];
-  const purchases = Array.isArray(row.purchases) ? row.purchases : [];
-  const detailCount = invoices.length + receipts.length + purchases.length;
-
-  return (
-    <>
-      <tr>
-        <td>
-          <div className="paymentSettleDateCell">
-            {detailCount ? (
-              <button
-                type="button"
-                className="moduleInlineButton"
-                aria-expanded={open}
-                onClick={onToggle}
-              >
-                {open ? "−" : "+"}
-              </button>
-            ) : null}
-            <span>{row.date}</span>
-          </div>
-        </td>
-        <td>{formatCount(row.invoice_count)}</td>
-        <td>{formatMoney(row.sales_excl_vat)}</td>
-        <td>{formatMoney(row.sales_incl_vat)}</td>
-        <td>{formatCount(row.receipt_count)}</td>
-        <td>{formatMoney(row.collected_amount)}</td>
-        <td>{formatMoney(row.open_sales_amount)}</td>
-      </tr>
-      {open && invoices.map((invoice, index) => (
-        <tr
-          key={`${row.date}-inv-${invoice.voucher_number || index}`}
-          className="paymentSettleChildRow"
-        >
-          <td style={{ paddingLeft: 28 }}>
-            Invoice · {invoice.voucher_number || "—"}
-            {invoice.status ? (
-              <>
-                {" · "}
-                <span className={statusClass(invoice.status)}>{invoice.status}</span>
-              </>
-            ) : null}
-          </td>
-          <td>1</td>
-          <td>{formatMoney(invoice.amount_excl_vat)}</td>
-          <td>{formatMoney(invoice.amount_incl_vat)}</td>
-          <td />
-          <td />
-          <td>{formatMoney(invoice.remaining)}</td>
-        </tr>
-      ))}
-      {open && purchases.map((purchase, index) => {
-        const applications = Array.isArray(purchase.applications) ? purchase.applications : [];
-        const applied = applications.reduce((total, application) => total + Number(application.amount || 0), 0);
-        const unapplied = Math.max(0, Number(purchase.amount || 0) - applied);
-        if (!applications.length) {
-          return (
-            <tr
-              key={`${row.date}-pur-${purchase.vch_no || index}`}
-              className="paymentSettleChildRow"
-            >
-              <td style={{ paddingLeft: 28 }}>
-                Purchase{purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
-              </td>
-              <td />
-              <td />
-              <td>{formatMoney(purchase.amount)}</td>
-              <td />
-              <td />
-              <td />
-            </tr>
-          );
-        }
-        return [
-          ...applications.map((application, applicationIndex) => (
-            <tr
-              key={`${row.date}-pur-${purchase.vch_no || index}-app-${applicationIndex}`}
-              className="paymentSettleChildRow"
-            >
-              <td style={{ paddingLeft: 28 }}>
-                Purchase
-                {purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
-                {" → Invoice"}
-                {application.voucher_number ? ` ${application.voucher_number}` : ""}
-              </td>
-              <td />
-              <td />
-              <td>{formatMoney(application.amount)}</td>
-              <td />
-              <td />
-              <td />
-            </tr>
-          )),
-          unapplied > 0.009 ? (
-            <tr
-              key={`${row.date}-pur-${purchase.vch_no || index}-open`}
-              className="paymentSettleChildRow"
-            >
-              <td style={{ paddingLeft: 28 }}>
-                Purchase
-                {purchase.vch_no ? ` · ${purchase.vch_no}` : ""}
-                {" · not adjusted against an invoice"}
-              </td>
-              <td />
-              <td />
-              <td>{formatMoney(unapplied)}</td>
-              <td />
-              <td />
-              <td />
-            </tr>
-          ) : null,
-        ];
-      })}
-      {open && receipts.map((receipt, index) => {
-        const applications = Array.isArray(receipt.applications) ? receipt.applications : [];
-        const isPayment = receipt.kind === "payment" || Number(receipt.amount) < 0;
-        if (isPayment && applications.length) {
-          return applications.map((application, applicationIndex) => (
-            <tr
-              key={`${row.date}-rcpt-${receipt.vch_no || index}-app-${applicationIndex}`}
-              className="paymentSettleChildRow"
-            >
-              <td style={{ paddingLeft: 28 }}>
-                Payment
-                {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
-                {" → "}
-                {application.target_kind === "purchase" ? "Purchase" : "Invoice"}
-                {application.voucher_number ? ` ${application.voucher_number}` : ""}
-              </td>
-              <td />
-              <td />
-              <td />
-              <td>{applicationIndex === 0 ? 1 : ""}</td>
-              <td>{formatMoney(application.amount)}</td>
-              <td />
-            </tr>
-          ));
-        }
-        return (
-          <tr
-            key={`${row.date}-rcpt-${receipt.vch_no || index}`}
-            className="paymentSettleChildRow"
-          >
-            <td style={{ paddingLeft: 28 }}>
-              {isPayment ? "Payment" : "Receipt"}
-              {receipt.vch_no ? ` · ${receipt.vch_no}` : ""}
-              {isPayment ? " · not adjusted against an invoice" : ""}
-            </td>
-            <td />
-            <td />
-            <td />
-            <td>1</td>
-            <td>{formatMoney(receipt.amount)}</td>
-            <td />
-          </tr>
-        );
-      })}
-      {open && !detailCount && (
-        <tr className="paymentSettleChildRow">
-          <td colSpan={7} style={{ paddingLeft: 28 }}>No transactions on this date.</td>
-        </tr>
-      )}
-    </>
-  );
-}
-
 export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -468,7 +317,6 @@ export default function PaymentSettlementPage() {
   const statementInputRef = useRef(null);
   const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
-  const [expandedDate, setExpandedDate] = useState("");
   const [autoCode, setAutoCode] = useState("");
   const autoLoadedRef = useRef("");
   const searchRequestRef = useRef(0);
@@ -531,7 +379,6 @@ export default function PaymentSettlementPage() {
     setShowMatchedStatement(false);
     setHistoryMeta(null);
     setExpandedInvoice("");
-    setExpandedDate("");
 
     try {
       const headers = await authHeaders();
@@ -802,6 +649,18 @@ export default function PaymentSettlementPage() {
     visibleRows: visibleBridgeRows,
     setFilter: setBridgeFilter,
   } = useBiExcelFilters(bridgeRows, STATEMENT_FILTER_KEYS, statementValueOf);
+
+  const datewiseLines = useMemo(
+    () => flattenDatewiseLines(ledger?.datewise || []),
+    [ledger],
+  );
+  const datewiseValueOf = useCallback((row, key) => datewiseFilterValue(row, key), []);
+  const {
+    filters: datewiseFilters,
+    options: datewiseOptions,
+    visibleRows: visibleDatewiseLines,
+    setFilter: setDatewiseFilter,
+  } = useBiExcelFilters(datewiseLines, DATEWISE_FILTER_KEYS, datewiseValueOf);
 
   const onStatementFile = useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -1771,48 +1630,59 @@ export default function PaymentSettlementPage() {
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
-                  Use + / − on a date to see that day’s invoices, receipts, and the purchase or sales bills a Payment was adjusted against. A Purchase no Payment covers is listed against the earlier sales invoice it settles. Collected is sales cash only.
+                  Each invoice, receipt, payment, and purchase is its own row. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
                     <thead>
                       <tr>
-                        <th>Date</th>
-                        <th>Invoices</th>
-                        <th>Sales excl VAT</th>
-                        <th>Sales incl VAT</th>
-                        <th>Receipts</th>
-                        <th>Collected</th>
-                        <th>Open Sales on Date</th>
+                        <BiExcelHead label="Date" filterKey="date" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Type" filterKey="kind" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Voucher" filterKey="voucher" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Sales excl VAT" filterKey="excl" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Sales incl VAT" filterKey="incl" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Collected" filterKey="collected" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
+                        <BiExcelHead label="Open" filterKey="open" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} className="moduleBiTotalCol" />
+                        <BiExcelHead label="Detail" filterKey="detail" options={datewiseOptions} filters={datewiseFilters} onChange={setDatewiseFilter} />
                       </tr>
                     </thead>
                     <tbody>
-                      {ledger.datewise.map((row) => {
-                        const open = expandedDate === row.date;
-                        return (
-                          <DatewiseDayRow
-                            key={row.date}
-                            row={row}
-                            open={open}
-                            onToggle={() => setExpandedDate(open ? "" : row.date)}
-                          />
-                        );
-                      })}
-                      {!ledger.datewise.length && (
+                      {visibleDatewiseLines.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.date || "—"}</td>
+                          <td>{row.kind}</td>
+                          <td>{row.voucher}</td>
+                          <td>{formatOptionalMoney(row.sales_excl_vat)}</td>
+                          <td>{formatOptionalMoney(row.sales_incl_vat)}</td>
+                          <td>{formatOptionalMoney(row.collected_amount)}</td>
+                          <td className="moduleBiTotalCol">{formatOptionalMoney(row.open_amount)}</td>
+                          <td>
+                            {row.kind === "Invoice" && row.detail
+                              ? <span className={statusClass(row.detail)}>{row.detail}</span>
+                              : (row.detail || "—")}
+                          </td>
+                        </tr>
+                      ))}
+                      {!visibleDatewiseLines.length && (
                         <tr>
-                          <td colSpan={7}>No dated sales or collections found.</td>
+                          <td colSpan={8}>
+                            {datewiseLines.length
+                              ? "No rows match these column filters."
+                              : "No dated sales or collections found."}
+                          </td>
                         </tr>
                       )}
                     </tbody>
                     <tfoot>
                       <tr>
                         <td><strong>Total</strong></td>
-                        <td><strong>{formatCount(ledger.totals.invoice_count)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.invoice_sales_excl_vat ?? ledger.totals.sales_excl_vat)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.invoice_sales_incl_vat ?? ledger.totals.sales_incl_vat)}</strong></td>
+                        <td><strong>{formatCount(visibleDatewiseLines.length)}</strong></td>
                         <td />
-                        <td><strong>{formatMoney(ledger.totals.collected_amount)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
+                        <td><strong>{formatMoney(sumDatewise(visibleDatewiseLines, "sales_excl_vat"))}</strong></td>
+                        <td><strong>{formatMoney(sumDatewise(visibleDatewiseLines, "sales_incl_vat"))}</strong></td>
+                        <td><strong>{formatMoney(sumDatewise(visibleDatewiseLines, "collected_amount"))}</strong></td>
+                        <td className="moduleBiTotalCol"><strong>{formatMoney(sumDatewise(visibleDatewiseLines, "open_amount"))}</strong></td>
+                        <td />
                       </tr>
                     </tfoot>
                   </table>

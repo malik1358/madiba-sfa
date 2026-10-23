@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { flattenDatewiseLines, sumDatewise } from "../app/lib/datewiseLines.js";
+
+test("datewise lines stay one row per voucher on the same date", () => {
+  const lines = flattenDatewiseLines([
+    {
+      date: "2025-10-02",
+      invoice_count: 2,
+      sales_excl_vat: 1500,
+      sales_incl_vat: 1575,
+      receipt_count: 1,
+      collected_amount: 400,
+      open_sales_amount: 1175,
+      invoices: [
+        {
+          voucher_number: "S1",
+          amount_excl_vat: 1000,
+          amount_incl_vat: 1050,
+          remaining: 650,
+          status: "Partial",
+        },
+        {
+          voucher_number: "S2",
+          amount_excl_vat: 500,
+          amount_incl_vat: 525,
+          remaining: 525,
+          status: "Open",
+        },
+      ],
+      purchases: [
+        {
+          vch_no: "P1",
+          amount: 200,
+          applications: [{ target_kind: "sales", voucher_number: "S1", amount: 200 }],
+        },
+      ],
+      receipts: [
+        {
+          vch_no: "R1",
+          amount: 400,
+          ar_amount: 400,
+          kind: "receipt",
+          applications: [],
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(lines.map((row) => `${row.kind} ${row.voucher}`), [
+    "Invoice S1",
+    "Invoice S2",
+    "Purchase P1",
+    "Receipt R1",
+  ]);
+  assert.equal(lines.filter((row) => row.date === "2025-10-02").length, 4);
+  assert.equal(sumDatewise(lines, "sales_incl_vat"), 1575);
+  assert.equal(sumDatewise(lines, "collected_amount"), 400);
+  assert.equal(sumDatewise(lines, "open_amount"), 1175);
+  assert.equal(lines[2].detail.includes("Invoice S1"), true);
+  assert.equal(lines.some((row) => row.kind === "Date"), false);
+});

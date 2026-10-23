@@ -867,8 +867,35 @@ function dropPlainCopyOfDiscountReceipt(receipts) {
   });
 }
 
+function receiptVoucherTail(value) {
+  const match = String(value || "").match(/(\d+)\s*$/);
+  if (!match) return null;
+  const number = Number(match[1]);
+  return Number.isFinite(number) ? number : null;
+}
+
+// Receipt 1880 is this customer's 40,000. Receipt 1879 is the same amount one number earlier.
+function dropAdjacentReceiptCopies(receipts) {
+  const grouped = new Map();
+  receipts.forEach((row) => {
+    const tail = receiptVoucherTail(row.vch_no);
+    if (tail == null) return;
+    const stamp = `${row.receipt_date}|${Math.round(Math.abs(row.amount) * 100)}`;
+    const list = grouped.get(stamp) || [];
+    list.push({ row, tail });
+    grouped.set(stamp, list);
+  });
+  const drop = new Set();
+  grouped.forEach((list) => {
+    list.forEach((left) => {
+      if (list.some((right) => right.tail === left.tail + 1)) drop.add(left.row);
+    });
+  });
+  return receipts.filter((row) => !drop.has(row));
+}
+
 export function buildSortedReceipts(receipts = []) {
-  const sorted = dropPlainCopyOfDiscountReceipt((Array.isArray(receipts) ? receipts : [])
+  const sorted = dropAdjacentReceiptCopies(dropPlainCopyOfDiscountReceipt((Array.isArray(receipts) ? receipts : [])
     // Purchases are AP bills, not cash collections / payments.
     // Credit notes are settled from sales history, not as cash.
     .filter((row) => !isPurchaseVoucherType(row?.vch_type) && !isCreditNoteReceiptType(row?.vch_type))
@@ -879,7 +906,7 @@ export function buildSortedReceipts(receipts = []) {
       vch_type: String(row?.vch_type || "").trim(),
     }))
     // Keep Payment vouchers stored as negative amounts so collected totals net correctly.
-    .filter((row) => row.receipt_date && Math.abs(row.amount) > 0));
+    .filter((row) => row.receipt_date && Math.abs(row.amount) > 0)));
   return sorted.sort((left, right) => {
       if (left.receipt_date !== right.receipt_date) {
         return left.receipt_date.localeCompare(right.receipt_date);

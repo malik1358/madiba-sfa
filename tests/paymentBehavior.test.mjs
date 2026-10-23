@@ -831,6 +831,21 @@ test("a plain receipt that copies a same-day DG receipt is left out of datewise"
   assert.equal(day.collected_amount, 1932);
 });
 
+test("receipt 1879 is left off the customer when 1880 is the same amount that day", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-10-04", voucher_number: "RC/124", sales_amount: 36693.16, category: "Paper" },
+    ],
+    receipts: [
+      { receipt_date: "2026-10-04", amount: 40000, vch_no: "1879", vch_type: "Receipt" },
+      { receipt_date: "2026-10-04", amount: 40000, vch_no: "1880", vch_type: "Receipt" },
+    ],
+    todayIso: "2026-10-23",
+  });
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "RC/124");
+  assert.deepEqual(invoice.settlements.map((row) => row.vch_no), ["1880"]);
+});
+
 test("buildPaymentSettlementLedger returns invoice settlement and datewise rows", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

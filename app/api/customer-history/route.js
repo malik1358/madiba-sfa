@@ -6,6 +6,11 @@ import {
   resolveOutstandingCustomerOwnership,
 } from "../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../lib/salesHistory";
+import {
+  customerHasMatchingSalesman,
+  exactSalesmanCodesFromPairs,
+  loadActiveSalesmanPairs,
+} from "../../lib/salesmanIdentityMatch.js";
 import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
 import {
   customerSalesmanAssignmentMatchesScope,
@@ -526,13 +531,13 @@ async function ensureCustomerVisible(admin, customerCode, customerName, scope) {
     }
 
     if (scope.identitySearchPatterns.length > 0) {
-      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
-        `salesman_code.ilike.%${pattern}%`,
-        `salesman_name.ilike.%${pattern}%`,
-      ]);
-      const { data: nameRows, error: nameError } = await baseQuery().or(identityFilters.join(","));
-      if (nameError) throw nameError;
-      if (Array.isArray(nameRows) && nameRows[0]?.id) return true;
+      const matched = await customerHasMatchingSalesman(
+        admin,
+        "sales_raw",
+        codeCandidate,
+        scope.identitySearchPatterns,
+      );
+      if (matched) return true;
     }
 
     const { data: rawRows, error: rawError } = await baseQuery();
@@ -557,16 +562,6 @@ async function ensureCustomerVisible(admin, customerCode, customerName, scope) {
       const { data: scopedRows, error: scopedError } = await baseQuery().in("salesman_code", scopedSalesmanCodes);
       if (scopedError) throw scopedError;
       if (Array.isArray(scopedRows) && scopedRows[0]?.id) return true;
-    }
-
-    if (scope.identitySearchPatterns.length > 0) {
-      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
-        `salesman_code.ilike.%${pattern}%`,
-        `salesman_name.ilike.%${pattern}%`,
-      ]);
-      const { data: nameRows, error: nameError } = await baseQuery().or(identityFilters.join(","));
-      if (nameError) throw nameError;
-      if (Array.isArray(nameRows) && nameRows[0]?.id) return true;
     }
 
     const { data: rawRows, error: rawError } = await baseQuery();
@@ -604,22 +599,13 @@ async function ensureCustomerVisible(admin, customerCode, customerName, scope) {
       }
 
       if (!hasHistoryAccess && scope.identitySearchPatterns.length > 0) {
-        const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
-          `salesman_code.ilike.%${pattern}%`,
-          `salesman_name.ilike.%${pattern}%`,
-        ]);
-        const { data: nameHistoryRow, error: nameHistoryError } = await admin
-          .from("active_sales")
-          .select("id")
-          .eq("customer_code", codeCandidate)
-          .or(identityFilters.join(","))
-          .limit(1);
-
-        if (nameHistoryError) throw nameHistoryError;
-        if (Array.isArray(nameHistoryRow) && nameHistoryRow[0]?.id) {
-          hasHistoryAccess = true;
-          break;
-        }
+        hasHistoryAccess = await customerHasMatchingSalesman(
+          admin,
+          "active_sales",
+          codeCandidate,
+          scope.identitySearchPatterns,
+        );
+        if (hasHistoryAccess) break;
       }
     }
 
@@ -852,11 +838,18 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
       return [];
     }
 
-    const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
-      `salesman_code.ilike.%${pattern}%`,
-      `salesman_name.ilike.%${pattern}%`,
-    ]);
-    query = query.or(identityFilters.join(","));
+    const resolved = await loadActiveSalesmanPairs(admin);
+    if (resolved.missing) {
+      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+        `salesman_code.ilike.%${pattern}%`,
+        `salesman_name.ilike.%${pattern}%`,
+      ]);
+      query = query.or(identityFilters.join(","));
+    } else {
+      const matchedCodes = exactSalesmanCodesFromPairs(resolved.pairs, scope.identitySearchPatterns);
+      if (matchedCodes.length === 0) return [];
+      query = query.in("salesman_code", matchedCodes);
+    }
   }
 
   const { data, error } = await query;

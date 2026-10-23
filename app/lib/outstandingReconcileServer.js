@@ -30,6 +30,7 @@ import {
   summarizeOutstandingBillMismatches,
   summarizeOutstandingReconcileRows,
 } from "./outstandingReconcile.js";
+import { isMissingRpcError } from "./salesmanIdentityMatch.js";
 
 const SALES_PAGE_SIZE = 1000;
 const SALES_SELECT = "id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_name,category,item_code,item_name,quantity,sales_amount";
@@ -115,30 +116,54 @@ export function indexReceiptsByCustomer(dataset) {
   return byCode;
 }
 
+async function readHistoryPage(admin, { useOffset, from, cursor }) {
+  if (!useOffset && typeof admin?.rpc === "function") {
+    const { data, error } = await admin.rpc("active_sales_history_page", {
+      after_customer: cursor ? (cursor.customer_code ?? null) : null,
+      after_date: cursor ? (cursor.transaction_date ?? null) : null,
+      after_id: cursor ? (cursor.id ?? null) : null,
+      page_limit: SALES_PAGE_SIZE,
+    });
+    if (!error) return { rows: data || [], useOffset: false };
+    if (!isMissingRpcError(error)) {
+      if (isMissingTableError(error)) return { rows: [], done: true, useOffset: false };
+      throw error;
+    }
+  }
+
+  const { data, error } = await admin
+    .from("active_sales")
+    .select(SALES_SELECT)
+    .order("customer_code", { ascending: true })
+    .order("transaction_date", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, from + SALES_PAGE_SIZE - 1);
+  if (error) {
+    if (isMissingTableError(error)) return { rows: [], done: true, useOffset: true };
+    throw error;
+  }
+  return { rows: data || [], useOffset: true };
+}
+
 /**
  * Streams the active sales snapshot ordered by customer so each customer's history is handed
  * over once and released before the next one. Keeps memory flat over the whole view.
+ * Prefers a keyset page so each call stops after one page. Falls back to offset pages when
+ * active_sales_history_page is not deployed yet.
  */
 export async function forEachCustomerSalesHistory(admin, onCustomer) {
   let from = 0;
+  let cursor = null;
+  let useOffset = false;
   let currentCode = "";
   let buffer = [];
 
   while (true) {
-    const { data, error } = await admin
-      .from("active_sales")
-      .select(SALES_SELECT)
-      .order("customer_code", { ascending: true })
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + SALES_PAGE_SIZE - 1);
+    const page = await readHistoryPage(admin, { useOffset, from, cursor });
+    useOffset = page.useOffset;
+    if (page.done) return;
 
-    if (error) {
-      if (isMissingTableError(error)) return;
-      throw error;
-    }
-
-    const rows = data || [];
+    const rows = page.rows || [];
     for (const row of rows) {
       const code = normalizeCode(row.customer_code);
       if (code !== currentCode) {
@@ -150,7 +175,8 @@ export async function forEachCustomerSalesHistory(admin, onCustomer) {
     }
 
     if (rows.length < SALES_PAGE_SIZE) break;
-    from += SALES_PAGE_SIZE;
+    if (useOffset) from += SALES_PAGE_SIZE;
+    else cursor = rows[rows.length - 1];
   }
 
   if (currentCode && buffer.length) await onCustomer(currentCode, buffer);

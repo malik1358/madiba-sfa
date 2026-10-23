@@ -8,6 +8,7 @@ import {
 } from "../../lib/salesHierarchy.js";
 import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
+import { customerHasMatchingSalesman } from "../../lib/salesmanIdentityMatch.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -202,19 +203,14 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
       }
 
       if (!hasHistoryAccess && scope.identitySearchPattern) {
-        const { data: nameHistoryRow, error: nameHistoryError } = await admin
-          .from("active_sales")
-          .select("id")
-          .eq("customer_code", codeCandidate)
-          .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
-          .limit(1)
-          .maybeSingle();
-
-        if (nameHistoryError) throw nameHistoryError;
-        if (nameHistoryRow?.id) {
-          hasHistoryAccess = true;
-          break;
-        }
+        hasHistoryAccess = await customerHasMatchingSalesman(
+          admin,
+          "active_sales",
+          codeCandidate,
+          [scope.identitySearchPattern],
+          { nameOnly: true },
+        );
+        if (hasHistoryAccess) break;
       }
     }
 

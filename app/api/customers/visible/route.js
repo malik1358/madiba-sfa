@@ -12,8 +12,11 @@ import {
   resolveOutstandingCustomerOwnership,
   summarizeOutstandingBucketsForVisitStatus,
 } from "../../../lib/outstanding";
-import { mergeSalesSnapshots } from "../../../lib/salesHistory";
-import { monthKeyFromDate, summarizeMonthlySales } from "../../../management/my-day/visitPriority";
+import { attachRecentSalesValues } from "../../../lib/recentSalesAggregate.js";
+import {
+  exactSalesmanCodesFromPairs,
+  loadActiveSalesmanPairs,
+} from "../../../lib/salesmanIdentityMatch.js";
 import {
   buildSalesmanScopeMatchers,
   expandMutualGroupScopeIdentities,
@@ -291,30 +294,55 @@ async function fetchVisibleCustomers(admin, scope) {
   }
 
   if (!scope.hasAllAccess && scope.identitySearchPatterns.length > 0) {
-    const salesPageSize = 2000;
-    let salesFrom = 0;
-    const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
-      `salesman_code.ilike.%${pattern}%`,
-      `salesman_name.ilike.%${pattern}%`,
-    ]);
+    const resolved = await loadActiveSalesmanPairs(admin);
+    if (resolved.missing) {
+      const salesPageSize = 2000;
+      let salesFrom = 0;
+      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+        `salesman_code.ilike.%${pattern}%`,
+        `salesman_name.ilike.%${pattern}%`,
+      ]);
 
-    while (true) {
-      const { data: salesRows, error: salesError } = await admin
-        .from("active_sales")
-        .select("customer_code,salesman_code,salesman_name")
-        .or(identityFilters.join(","))
-        .range(salesFrom, salesFrom + salesPageSize - 1);
+      while (true) {
+        const { data: salesRows, error: salesError } = await admin
+          .from("active_sales")
+          .select("customer_code,salesman_code,salesman_name")
+          .or(identityFilters.join(","))
+          .range(salesFrom, salesFrom + salesPageSize - 1);
 
-      if (salesError) throw salesError;
+        if (salesError) throw salesError;
 
-      const chunk = salesRows || [];
-      chunk.forEach((row) => {
-        const code = normalizeCode(row.customer_code);
-        if (code) historyVisibleCustomerCodes.add(code);
-      });
+        const chunk = salesRows || [];
+        chunk.forEach((row) => {
+          const code = normalizeCode(row.customer_code);
+          if (code) historyVisibleCustomerCodes.add(code);
+        });
 
-      if (chunk.length < salesPageSize) break;
-      salesFrom += salesPageSize;
+        if (chunk.length < salesPageSize) break;
+        salesFrom += salesPageSize;
+      }
+    } else {
+      const matchedCodes = exactSalesmanCodesFromPairs(resolved.pairs, scope.identitySearchPatterns);
+      const salesPageSize = 2000;
+      let salesFrom = 0;
+      while (matchedCodes.length > 0) {
+        const { data: salesRows, error: salesError } = await admin
+          .from("active_sales")
+          .select("customer_code,salesman_code")
+          .in("salesman_code", matchedCodes)
+          .range(salesFrom, salesFrom + salesPageSize - 1);
+
+        if (salesError) throw salesError;
+
+        const chunk = salesRows || [];
+        chunk.forEach((row) => {
+          const code = normalizeCode(row.customer_code);
+          if (code) historyVisibleCustomerCodes.add(code);
+        });
+
+        if (chunk.length < salesPageSize) break;
+        salesFrom += salesPageSize;
+      }
     }
   }
 
@@ -557,93 +585,6 @@ async function fetchInactiveCustomers(admin, scope) {
     ...row,
     inactive_marked_at: markedAtMap.get(normalizeCode(row.customer_code)) || row.updated_at || null,
   }));
-}
-
-async function attachRecentSalesValues(admin, customers) {
-  const canonicalCodeByCandidate = new Map();
-  const salesValueByCustomer = new Map();
-  const sales30dByCustomer = new Map();
-  const monthlySalesByCustomer = new Map();
-  const latestSalesDateByCustomer = new Map();
-
-  customers.forEach((customer) => {
-    const canonicalCode = normalizeCode(customer.customer_code);
-    customerCodeCandidates(customer.customer_code).forEach((candidate) => {
-      canonicalCodeByCandidate.set(normalizeCode(candidate), canonicalCode);
-    });
-  });
-
-  const candidateCodes = [...canonicalCodeByCandidate.keys()];
-  const fromDate = new Date();
-  fromDate.setUTCMonth(fromDate.getUTCMonth() - 6);
-  const from30Date = new Date();
-  from30Date.setUTCDate(from30Date.getUTCDate() - 30);
-  const from30Iso = from30Date.toISOString().slice(0, 10);
-
-  for (let start = 0; start < candidateCodes.length; start += 200) {
-    const codeChunk = candidateCodes.slice(start, start + 200);
-    const pageSize = 1000;
-    let from = 0;
-    const salesRows = [];
-
-    while (true) {
-      const { data, error } = await admin
-        .from("sales_raw")
-        .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,item_code,quantity,sales_amount,rate")
-        .gte("transaction_date", fromDate.toISOString().slice(0, 10))
-        .in("customer_code", codeChunk)
-        .order("id", { ascending: true })
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-
-      const rows = data || [];
-      salesRows.push(...rows);
-
-      if (rows.length < pageSize) break;
-      from += pageSize;
-    }
-
-    mergeSalesSnapshots(salesRows).forEach((row) => {
-      const canonicalCode = customerCodeCandidates(row.customer_code)
-        .map((candidate) => canonicalCodeByCandidate.get(normalizeCode(candidate)))
-        .find(Boolean);
-      if (!canonicalCode) return;
-      const amount = Math.max(Number(row.sales_amount || 0), 0);
-      const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
-      salesValueByCustomer.set(canonicalCode, currentValue + amount);
-      const saleDate = laterDateOnly(row.transaction_date);
-      if (saleDate && saleDate >= from30Iso) {
-        sales30dByCustomer.set(canonicalCode, (sales30dByCustomer.get(canonicalCode) || 0) + amount);
-      }
-      const monthKey = monthKeyFromDate(row.transaction_date);
-      if (monthKey && amount > 0) {
-        const months = monthlySalesByCustomer.get(canonicalCode) || new Map();
-        months.set(monthKey, (months.get(monthKey) || 0) + amount);
-        monthlySalesByCustomer.set(canonicalCode, months);
-      }
-      const currentDate = latestSalesDateByCustomer.get(canonicalCode) || "";
-      if (saleDate && saleDate > currentDate) {
-        latestSalesDateByCustomer.set(canonicalCode, saleDate);
-      }
-    });
-  }
-
-  return customers.map((customer) => {
-    const code = normalizeCode(customer.customer_code);
-    const latestSalesDate = latestSalesDateByCustomer.get(code) || "";
-    const monthlyStats = summarizeMonthlySales(monthlySalesByCustomer.get(code) || new Map());
-    return {
-      ...customer,
-      recent_sales_value: salesValueByCustomer.get(code) || 0,
-      recent_30d_sales_value: sales30dByCustomer.get(code) || 0,
-      average_monthly_purchase: monthlyStats.averageMonthlyPurchase,
-      highest_monthly_sales: monthlyStats.highestMonthlySales,
-      operational_months: monthlyStats.operationalMonths,
-      latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestSalesDate)
-        || customer.latest_transaction_date,
-    };
-  });
 }
 
 async function attachOutstandingValues(admin, customers) {

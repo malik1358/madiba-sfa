@@ -553,14 +553,15 @@ export function buildSfaStatementEntries({
       const voucher = String(invoice?.voucher_number || "").trim();
       const date = String(invoice?.invoice_date || "").slice(0, 10);
       if (!voucher || !date) return;
-      if (invoice.remaining == null && invoice.fifo_remaining == null) return;
+      const amount = toNumber(invoice.gross_amount_incl_vat ?? invoice.amount_incl_vat);
+      if (amount <= 0) return;
       entries.push({
         date,
         voucher,
-        particulars: "Open invoice",
-        vchType: "Pending bill",
+        particulars: "Sales",
+        vchType: "Sales",
         side: "debit",
-        amount: Math.max(0, toNumber(invoice.remaining ?? invoice.fifo_remaining)),
+        amount,
       });
     });
     return entries;
@@ -869,8 +870,9 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
   const dated = tallyEntries.map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
   const from = dated[0] || "";
   const to = dated[dated.length - 1] || "";
+  const pendingBills = tallyParsed?.report === "pending_bills";
   const windowedSfa = (Array.isArray(sfaEntries) ? sfaEntries : []).filter((row) => {
-    if (!from || !to || !row?.date) return true;
+    if (pendingBills || !from || !to || !row?.date) return true;
     return row.date >= from && row.date <= to;
   });
 
@@ -910,7 +912,7 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return { tally, sfa };
   });
 
-  if (tallyParsed?.report !== "pending_bills") {
+  if (!pendingBills) {
     pool.filter((row) => !row.used).forEach((sfa) => {
       pairs.push({ tally: null, sfa });
     });

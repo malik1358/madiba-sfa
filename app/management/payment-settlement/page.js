@@ -54,8 +54,8 @@ const TEXT = {
     ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يبقى الكشف على هذا العميل لكل المستخدمين. عند فتح العميل تُقارن السطور من جديد مع دفتر SFA الحالي.",
   },
   statementPendingHint: {
-    en: "These are Tally pending bills. Each one is compared with the SFA open amount for the same voucher.",
-    ar: "هذه فواتير تالي المعلقة. تُقارن كل فاتورة مع المبلغ المفتوح في SFA لنفس القسيمة.",
+    en: "These are Tally bill amounts. Each one is compared with the SFA sales amount for the same voucher.",
+    ar: "هذه مبالغ فواتير تالي. تُقارن كل فاتورة مع مبلغ المبيعات في SFA لنفس القسيمة.",
   },
   statementUpload: { en: "Upload Tally statement", ar: "رفع كشف تالي" },
   statementClear: { en: "Clear", ar: "مسح" },

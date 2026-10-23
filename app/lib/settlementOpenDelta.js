@@ -22,11 +22,12 @@ function roundMoney(value) {
  * SFA sales minus the Tally figure on the same voucher.
  * A Tally amount of 0 means that voucher is not on the outstanding file.
  * A Tally amount within 1 SAR of the sale is still that bill.
- * A much smaller Tally amount is only the unpaid remainder. The fils between
- * Machine Open and that remainder stays here. A larger collection gap is a
- * different transaction and is left to the statement, not painted on this sale.
+ * A much smaller Tally amount is only the unpaid remainder. A fils of 0.05 or
+ * less between Machine Open and that remainder stays here. Anything larger is
+ * a different transaction and is left to the statement, not painted on this sale.
  */
 const BILL_AMOUNT_SPAN = 1;
+const REMAINDER_FILS = 0.05;
 
 export function settlementTransactionDelta(invoice) {
   if (invoice?.outstanding_pending == null) return null;
@@ -37,6 +38,6 @@ export function settlementTransactionDelta(invoice) {
   if (Math.abs(sales - tally) <= BILL_AMOUNT_SPAN) return roundMoney(sales - tally);
   const machine = Number(invoice.remaining || 0);
   const remainderGap = roundMoney(machine - tally);
-  if (Math.abs(remainderGap) <= BILL_AMOUNT_SPAN) return remainderGap;
+  if (Math.abs(remainderGap) <= REMAINDER_FILS) return remainderGap;
   return 0;
 }

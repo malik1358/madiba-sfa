@@ -435,7 +435,7 @@ test("removeUnanchoredDuplicateReceipts keeps two real receipts of the same amou
   assert.equal(cleaned.rows.filter((row) => row.customer_code === "1008").length, 2);
 });
 
-test("removeUnanchoredDuplicateReceipts leaves receipts on or before 10 Oct 2026 in place", () => {
+test("removeUnanchoredDuplicateReceipts drops an early-October copy when the next voucher has the bank", () => {
   const cleaned = removeUnanchoredDuplicateReceipts([
     {
       receipt_date: "2026-10-01",
@@ -464,12 +464,140 @@ test("removeUnanchoredDuplicateReceipts leaves receipts on or before 10 Oct 2026
       amount: 69000,
       matched: false,
     },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1109C",
+      particulars: "1109C Dhajja Al Tawfeer Trading Company",
+      vch_type: "Receipt",
+      vch_no: "1872",
+      amount: 7000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1142",
+      particulars: "1142 Hawaseeb information technology",
+      vch_type: "Receipt",
+      vch_no: "1872",
+      amount: 1000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1872",
+      amount: 1000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "1109C",
+      particulars: "1109C Dhajja Al Tawfeer Trading Company",
+      vch_type: "Receipt",
+      vch_no: "1873",
+      amount: 7000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-03",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1873",
+      amount: 7000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-04",
+      customer_code: "1110C",
+      particulars: "1110C Dhawi Salem Walid Al-Mahri Trading Est.",
+      vch_type: "Receipt",
+      vch_no: "1879",
+      amount: 40000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-04",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1879",
+      amount: 40000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-04",
+      customer_code: "1110C",
+      particulars: "1110C Dhawi Salem Walid Al-Mahri Trading Est.",
+      vch_type: "Receipt",
+      vch_no: "1880",
+      amount: 40000,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-04",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1880",
+      amount: 40000,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-05",
+      customer_code: "1110C",
+      particulars: "1110C Dhawi Salem Walid Al-Mahri Trading Est.",
+      vch_type: "Receipt",
+      vch_no: "1895",
+      amount: 2500,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-05",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1895",
+      amount: 7550,
+      matched: false,
+    },
+    {
+      receipt_date: "2026-10-05",
+      customer_code: "1110C",
+      particulars: "1110C Dhawi Salem Walid Al-Mahri Trading Est.",
+      vch_type: "Receipt",
+      vch_no: "1896",
+      amount: 2500,
+      matched: true,
+    },
+    {
+      receipt_date: "2026-10-05",
+      customer_code: "",
+      particulars: "Alrajhi Bank",
+      vch_type: "Receipt",
+      vch_no: "1896",
+      amount: 2500,
+      matched: false,
+    },
   ]);
 
-  assert.equal(cleaned.removed, 0);
   assert.deepEqual(
     cleaned.rows.filter((row) => row.customer_code === "1035C").map((row) => row.vch_no),
-    ["1865", "1866"],
+    ["1866"],
+  );
+  assert.deepEqual(
+    cleaned.rows.filter((row) => row.customer_code === "1109C").map((row) => row.vch_no),
+    ["1873"],
+  );
+  assert.deepEqual(
+    cleaned.rows.filter((row) => row.customer_code === "1142").map((row) => row.vch_no),
+    ["1872"],
+  );
+  assert.deepEqual(
+    cleaned.rows.filter((row) => row.customer_code === "1110C").map((row) => row.vch_no),
+    ["1879", "1880", "1896"],
   );
 });
 

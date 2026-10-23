@@ -522,10 +522,15 @@ function voucherHasAnotherCustomer(rows, index) {
  * voucher number. Keep the copy that sits on the voucher whose bank/cash
  * total matches that receipt, and drop the copies that do not.
  * Same-amount receipts that each have their own matching bank line stay.
- * From 8 Oct 2026, a repeated line on the next voucher is kept on the later number.
+ * From 1 Oct 2026, drop the earlier voucher when the next one is the bank match
+ * (1109C 7,000 on 1872, bank on 1873). Two receipts the bank explains equally
+ * both stay (1110C 40,000 on 1879 and 1880). From 8 Oct, a repeated line is
+ * kept on the later number unless the earlier voucher's own bank matches it
+ * and no other customer shares that voucher.
  */
 const RECEIPT_VOUCHER_ANCHOR_FROM = "2026-10-11";
-const RECEIPT_CONSECUTIVE_COPY_FROM = "2026-10-08";
+const RECEIPT_CONSECUTIVE_COPY_FROM = "2026-10-01";
+const RECEIPT_EQUAL_SCORE_COPY_FROM = "2026-10-08";
 
 export function removeUnanchoredDuplicateReceipts(rows = []) {
   const list = (Array.isArray(rows) ? rows : []).map(buildReceiptRow);
@@ -587,8 +592,9 @@ export function removeUnanchoredDuplicateReceipts(rows = []) {
     const surviving = group.filter((entry) => !drop.has(entry.index));
     surviving.forEach((entry) => {
       const voucherNo = Number(entry.vch);
-      const copiedForward = surviving.some((other) => Number(other.vch) === voucherNo + 1);
-      if (!copiedForward) return;
+      const next = surviving.find((other) => Number(other.vch) === voucherNo + 1);
+      if (!next) return;
+      if (receiptDate < RECEIPT_EQUAL_SCORE_COPY_FROM && next.score <= entry.score) return;
       if (entry.score >= 2 && !voucherHasAnotherCustomer(list, entry.index)) return;
       drop.add(entry.index);
     });

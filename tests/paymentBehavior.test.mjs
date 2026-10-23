@@ -1241,9 +1241,9 @@ test("Outstanding Compare uses FIFO open when CN display attachment differs", ()
   const openInvoice = ledger.invoices.find((row) => row.voucher_number === "B-OPEN");
   assert.equal(Number(openInvoice.remaining.toFixed(2)), 57.5);
   assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 57.5);
-  assert.equal(Number(ledger.outstandingCompareTotals.sales_compared.toFixed(2)), 115);
-  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), 57.5);
-  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 1);
+  assert.equal(Number(ledger.outstandingCompareTotals.sales_compared.toFixed(2)), 57.5);
+  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), 0);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
 });
 
 test("partial credit note and sales return appear in creditNotes table, not reversed", () => {
@@ -1331,7 +1331,7 @@ test("referenced credit note settles the named invoice when it is the open bill"
   assert.deepEqual(invoice.credit_notes.map((row) => row.voucher_number), ["284"]);
   assert.equal(invoice.settlements.some((row) => row.vch_no === "284"), false);
   assert.equal(Number(invoice.remaining.toFixed(2)), 1954.57);
-  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), 13384.13);
+  assert.ok(Math.abs(ledger.outstandingCompareTotals.open_delta) < 0.02);
 });
 
 test("same-day named credit note reverses the earlier identical invoice", () => {

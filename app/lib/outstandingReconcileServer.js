@@ -1,6 +1,7 @@
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
+  customerAccountCodesMatch,
   hydrateOutstandingInvoices,
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
@@ -89,6 +90,19 @@ export function indexOutstandingByCustomer(dataset) {
   return { invoicesByCode, customersByCode };
 }
 
+/** Bill lines for a sales account, including 1035 bills stored on 1035C. Skip the empty synthetic total when real refs exist. */
+export function outstandingInvoicesForAccount(invoicesByCode, code) {
+  const target = normalizeCode(code);
+  const gathered = [];
+  invoicesByCode.forEach((invoices, key) => {
+    if (key === target || customerAccountCodesMatch(key, target)) {
+      gathered.push(...(Array.isArray(invoices) ? invoices : []));
+    }
+  });
+  const withRefs = gathered.filter((invoice) => String(invoice?.ref_no || "").trim());
+  return withRefs.length ? withRefs : gathered;
+}
+
 /** Receipt register grouped by customer code (unmatched rows are keyed by their parsed code). */
 export function indexReceiptsByCustomer(dataset) {
   const byCode = new Map();
@@ -165,7 +179,7 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
 
   function evaluate(code, transactions) {
     const outstandingCustomer = customersByCode.get(code) || null;
-    const outstandingInvoices = invoicesByCode.get(code) || [];
+    const outstandingInvoices = outstandingInvoicesForAccount(invoicesByCode, code);
     const receipts = receiptsByCode.get(code) || [];
 
     transactions.forEach((entry) => {

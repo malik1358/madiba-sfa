@@ -637,6 +637,20 @@ test("statement difference uses the invoice Open Δ when the voucher lines do no
   const aligned = alignStatementToInvoiceOpen({
     rows: [
       {
+        id: "rnfd",
+        status: "matched",
+        date: "2026-09-10",
+        voucher: "RNFD/411",
+        vchType: "Sales",
+        particulars: "Sales",
+        tallyDebit: 39926.85,
+        tallyCredit: 0,
+        sfaDebit: 39926.85,
+        sfaCredit: 0,
+        difference: 0,
+        leadsGap: false,
+      },
+      {
         id: "119",
         status: "amount",
         date: "2025-12-31",
@@ -685,9 +699,9 @@ test("statement difference uses the invoice Open Δ when the voucher lines do no
 
   assert.equal(aligned.reconciledToOpenDelta, true);
   assert.equal(aligned.totals.difference, -33101.03);
-  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.difference]), [
-    ["RNFD/411", -33102.03],
-    ["RC/124", 1],
+  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.tallyDebit, row.sfaDebit, row.difference]), [
+    ["RNFD/411", 39926.85, 39926.85, -33102.03],
+    ["RC/124", 0, 42197.13, 1],
   ]);
   assert.deepEqual(aligned.bridgeRows.map((row) => row.voucher), ["119", "VAT-DG-JV/MAY/00001"]);
 });

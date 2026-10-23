@@ -1164,8 +1164,18 @@ export function reconcileStatementToOpenDelta(result, { machineOpen, tallyOpen }
   };
 }
 
+function tallyTransactionForVoucher(rows, voucher) {
+  const key = voucherKey(voucher);
+  if (!key) return null;
+  return (Array.isArray(rows) ? rows : []).find((row) => (
+    voucherKey(row.voucher) === key
+    && (Number(row.tallyDebit) > 0 || Number(row.tallyCredit) > 0)
+  )) || null;
+}
+
 /**
  * The statement difference is the same total as invoice Open Δ.
+ * The debit columns show the Tally transaction and the SFA sales amount.
  * Voucher lines that do not add up to that total stay in the bridge.
  */
 export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen, tallyOpen } = {}) {
@@ -1184,16 +1194,18 @@ export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen
     if (delta == null || Math.abs(delta) <= TALLY_STATEMENT_TOLERANCE) return;
     const tallyAmount = roundMoney(invoice.outstanding_pending);
     const machineAmount = roundMoney(invoice.remaining);
+    const sales = roundMoney(invoice.gross_amount_incl_vat ?? invoice.amount_incl_vat ?? 0);
+    const tallyLine = tallyTransactionForVoucher(result.rows, invoice.voucher_number);
     openRows.push({
       id: `open-${index}-${invoice.voucher_number || ""}`,
       date: String(invoice.invoice_date || "").slice(0, 10),
       voucher: String(invoice.voucher_number || ""),
-      vchType: "Outstanding",
-      particulars: "Machine Open vs Tally Open",
+      vchType: tallyLine?.vchType || "Sales",
+      particulars: "SFA sales",
       status: "amount",
-      tallyDebit: tallyAmount > 0 ? tallyAmount : 0,
-      tallyCredit: 0,
-      sfaDebit: machineAmount > 0 ? machineAmount : 0,
+      tallyDebit: tallyLine ? roundMoney(tallyLine.tallyDebit) : (tallyAmount > 0 ? tallyAmount : 0),
+      tallyCredit: tallyLine ? roundMoney(tallyLine.tallyCredit) : 0,
+      sfaDebit: sales > 0 ? sales : (machineAmount > 0 ? machineAmount : 0),
       sfaCredit: 0,
       difference: delta,
       runningGap: 0,

@@ -1,10 +1,9 @@
 export function withTimeout(promise, timeoutMs, timeoutMessage = "REQUEST_TIMEOUT") {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-    }),
-  ]);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 export async function getSessionWithTimeout(supabase, timeoutMs = 10000) {

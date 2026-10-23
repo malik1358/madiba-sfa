@@ -349,19 +349,25 @@ export async function fetchSalesScopeCached(options = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase is not configured.");
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token || !session?.user?.id) {
+  let accessToken = String(options.accessToken || "").trim();
+  let userId = String(options.userId || "").trim();
+  if (!accessToken || !userId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    accessToken = String(session?.access_token || "").trim();
+    userId = String(session?.user?.id || "").trim();
+  }
+  if (!accessToken || !userId) {
     throw new Error("Please login again.");
   }
 
   if (options.forceRefresh) {
-    await invalidateSalesScopeCache(session.user.id);
+    await invalidateSalesScopeCache(userId);
   }
 
   const result = await fetchWithLocalCache(
-    scopeCacheKey(session.user.id),
+    scopeCacheKey(userId),
     CACHE_TTL.scopeMs,
-    () => fetchSalesScopeNetwork(session.access_token),
+    () => fetchSalesScopeNetwork(accessToken),
     { onUpdate: options.onUpdate },
   );
 

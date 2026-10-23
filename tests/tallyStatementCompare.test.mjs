@@ -6,6 +6,7 @@ import {
   findTallyStatementHeader,
   parseTallyStatementMatrix,
   parseTallyStatementPositionedPages,
+  alignStatementToInvoiceOpen,
   reconcileStatementToOpenDelta,
 } from "../app/lib/tallyStatementCompare.js";
 
@@ -630,4 +631,63 @@ test("customer 1009 statement difference matches Open Δ and keeps ledger-only l
     Math.round(reconciled.rows.reduce((total, line) => total + line.difference, 0) * 100) / 100,
     -4486.83,
   );
+});
+
+test("statement difference uses the invoice Open Δ when the voucher lines do not", () => {
+  const aligned = alignStatementToInvoiceOpen({
+    rows: [
+      {
+        id: "119",
+        status: "amount",
+        date: "2025-12-31",
+        voucher: "119",
+        vchType: "Credit Note",
+        particulars: "Sales",
+        tallyDebit: 0,
+        tallyCredit: 10073,
+        sfaDebit: 0,
+        sfaCredit: 11753,
+        difference: 1680,
+        leadsGap: true,
+      },
+      {
+        id: "vat",
+        status: "sfa_only",
+        date: "2026-05-05",
+        voucher: "VAT-DG-JV/MAY/00001",
+        vchType: "Discount Given",
+        particulars: "Receipt",
+        tallyDebit: 0,
+        tallyCredit: 0,
+        sfaDebit: 0,
+        sfaCredit: 252,
+        difference: 252,
+        leadsGap: false,
+      },
+    ],
+    totals: { tallyNet: 33102.03, sfaNet: 31161.48, difference: 1940.55 },
+  }, [
+    {
+      invoice_date: "2026-09-10",
+      voucher_number: "RNFD/411",
+      amount_incl_vat: 39926.85,
+      outstanding_pending: 33102.03,
+      remaining: 0,
+    },
+    {
+      invoice_date: "2026-10-04",
+      voucher_number: "RC/124",
+      amount_incl_vat: 42197.13,
+      outstanding_pending: 0,
+      remaining: 1,
+    },
+  ], { machineOpen: 1, tallyOpen: 33102.03 });
+
+  assert.equal(aligned.reconciledToOpenDelta, true);
+  assert.equal(aligned.totals.difference, -33101.03);
+  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.difference]), [
+    ["RNFD/411", -33102.03],
+    ["RC/124", 1],
+  ]);
+  assert.deepEqual(aligned.bridgeRows.map((row) => row.voucher), ["119", "VAT-DG-JV/MAY/00001"]);
 });

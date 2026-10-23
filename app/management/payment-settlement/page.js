@@ -18,6 +18,7 @@ import {
 import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../lib/settlementOpenDelta.js";
 import {
   buildSfaStatementEntries,
+  alignStatementToInvoiceOpen,
   compareTallyStatement,
   parseTallyStatementWorkbook,
   reconcileStatementToOpenDelta,
@@ -761,13 +762,16 @@ export default function PaymentSettlementPage() {
     const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
     const hasTallyOpen = invoices.some((row) => row.outstanding_pending != null);
     if (storedStatement.report === "pending_bills" || !hasTallyOpen) return compared;
-    return reconcileStatementToOpenDelta(compared, {
-      machineOpen: Number(ledger.totals?.open_sales_amount || 0),
-      tallyOpen: invoices.reduce(
-        (total, row) => total + (row.outstanding_pending == null ? 0 : Number(row.outstanding_pending || 0)),
-        0,
-      ),
-    });
+    const machineOpen = Number(ledger.totals?.open_sales_amount || 0);
+    const tallyOpen = invoices.reduce(
+      (total, row) => total + (row.outstanding_pending == null ? 0 : Number(row.outstanding_pending || 0)),
+      0,
+    );
+    return alignStatementToInvoiceOpen(
+      reconcileStatementToOpenDelta(compared, { machineOpen, tallyOpen }),
+      invoices,
+      { machineOpen, tallyOpen },
+    );
   }, [ledger, statementReceipts, storedStatement]);
 
   const statementRows = useMemo(() => {

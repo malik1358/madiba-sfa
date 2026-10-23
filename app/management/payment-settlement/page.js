@@ -69,8 +69,8 @@ const TEXT = {
   statementSameOpen: { en: "Same as Customer Audit Open Δ", ar: "نفس فرق الرصيد المفتوح في تدقيق العميل" },
   statementOutsideTitle: { en: "On the Tally ledger, not in outstanding", ar: "في دفتر تالي وليس في المعلق" },
   statementOutsideHint: {
-    en: "These lines are on the uploaded ledger and not in Tally outstanding. They are not added up. The difference total is the invoice Open Δ.",
-    ar: "هذه القيود في الكشف المرفوع وليست في ملف تالي المعلق. لا تُجمع. إجمالي الفرق هو فرق الرصيد المفتوح للفواتير.",
+    en: "These lines are on the uploaded ledger and not in Tally outstanding. The total is the sum of their voucher differences, separate from the invoice Open Δ above.",
+    ar: "هذه القيود في الكشف المرفوع وليست في ملف تالي المعلق. الإجمالي هو مجموع فروق قسائمها، وهو منفصل عن فرق الرصيد المفتوح للفواتير أعلاه.",
   },
   statementIssues: { en: "Entries that differ", ar: "قيود مختلفة" },
   statementAgree: {
@@ -1249,7 +1249,7 @@ export default function PaymentSettlementPage() {
                                   <td>{formatMoney(row.tallyCredit)}</td>
                                   <td>{formatMoney(row.sfaDebit)}</td>
                                   <td>{formatMoney(row.sfaCredit)}</td>
-                                  <td>—</td>
+                                  <td className={deltaClass(row.difference)}>{formatDelta(row.difference)}</td>
                                   <td>{t(statementCauseKey(row))}</td>
                                 </tr>
                               ))}
@@ -1261,8 +1261,8 @@ export default function PaymentSettlementPage() {
                                 <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.tallyCredit, 0))}</strong></td>
                                 <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.sfaDebit, 0))}</strong></td>
                                 <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.sfaCredit, 0))}</strong></td>
-                                <td className={deltaClass(statementResult.totals.difference)}><strong>{formatDelta(statementResult.totals.difference)}</strong></td>
-                                <td><strong>{t("statementSameOpen")}</strong></td>
+                                <td className={deltaClass(visibleBridgeRows.reduce((total, row) => total + row.difference, 0))}><strong>{formatDelta(visibleBridgeRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
+                                <td />
                               </tr>
                             </tfoot>
                           </table>

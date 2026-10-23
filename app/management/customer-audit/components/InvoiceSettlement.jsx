@@ -3,7 +3,7 @@
 import { useState } from "react";
 import ExportableTable from "../../../components/ExportableTable";
 import { HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
-import { formatSettlementOpenDelta, isSettlementOpenDeltaDust } from "../../../lib/settlementOpenDelta.js";
+import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../../lib/settlementOpenDelta.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -43,7 +43,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const tallyOnly = Boolean(invoice.tally_only);
   const machineOpen = Number(invoice.remaining || 0);
   const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
-  const openDelta = tallyOpen == null ? null : machineOpen - tallyOpen;
+  const openDelta = settlementTransactionDelta(invoice);
 
   return (
     <>
@@ -343,8 +343,8 @@ export default function InvoiceSettlement({
             <p className="auditSectionNote">
               Referenced credit notes settle the named Ref. No. and count
               in Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN from
-              day-1 history. Tally Open is the outstanding upload. A reversed voucher is not a sale;
-              if Tally still has it pending it stays as a Tally line so this column matches the file.
+              day-1 history. Tally Open is the outstanding upload. Open Δ is the SFA sales amount
+              minus that Tally bill. A voucher Tally does not list has no bill to compare.
               Gloves stay excl. VAT; other lines gross up at 15%.
             </p>
           </div>
@@ -399,8 +399,8 @@ export default function InvoiceSettlement({
                 <td><strong>{formatMoney(invoicePaidTotal)}</strong></td>
                 <td><strong>{formatMoney(totals.open_sales_amount)}</strong></td>
                 <td><strong>{formatMoney(tallyOpenTotal)}</strong></td>
-                <td className={deltaClass(Number(totals.open_sales_amount || 0) - tallyOpenTotal)}>
-                  <strong>{formatDelta(Number(totals.open_sales_amount || 0) - tallyOpenTotal)}</strong>
+                <td className={deltaClass(invoices.reduce((total, row) => total + (settlementTransactionDelta(row) || 0), 0))}>
+                  <strong>{formatDelta(invoices.reduce((total, row) => total + (settlementTransactionDelta(row) || 0), 0))}</strong>
                 </td>
                 <td colSpan={3} />
               </tr>

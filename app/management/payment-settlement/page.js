@@ -15,12 +15,13 @@ import {
   HISTORIC_PERFORMANCE_PERIOD_LABEL,
   HISTORIC_PERFORMANCE_SHORT_LABEL,
 } from "../../lib/paymentBehavior.js";
-import { formatSettlementOpenDelta } from "../../lib/settlementOpenDelta.js";
+import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../lib/settlementOpenDelta.js";
 import {
   buildSfaStatementEntries,
   compareTallyStatement,
   parseTallyStatementWorkbook,
   reconcileStatementToOpenDelta,
+  TALLY_STATEMENT_TOLERANCE,
 } from "../../lib/tallyStatementCompare.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -169,10 +170,8 @@ function formatDelta(value) {
 }
 
 function deltaClass(value) {
-  const number = Number(value || 0);
-  if (number > 0.02) return "moduleBiMonthCell--up";
-  if (number < -0.02) return "moduleBiMonthCell--down";
-  return "";
+  if (isSettlementOpenDeltaDust(value)) return "";
+  return Number(value || 0) > 0 ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
 }
 
 function statusClass(status) {
@@ -196,7 +195,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const tallyOnly = Boolean(invoice.tally_only);
   const machineOpen = Number(invoice.remaining || 0);
   const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
-  const openDelta = tallyOpen == null ? null : machineOpen - tallyOpen;
+  const openDelta = settlementTransactionDelta(invoice);
 
   return (
     <>
@@ -1125,7 +1124,7 @@ export default function PaymentSettlementPage() {
                         <span>{t("statementDiff")}</span>
                         <strong className={statementResult.reconciledToOpenDelta
                           ? deltaClass(statementResult.totals.difference)
-                          : (Math.abs(statementResult.totals.difference) > 0.05 ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
+                          : (Math.abs(statementResult.totals.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
                           {statementResult.reconciledToOpenDelta
                             ? formatDelta(statementResult.totals.difference)
                             : formatMoney(statementResult.totals.difference)}
@@ -1185,7 +1184,7 @@ export default function PaymentSettlementPage() {
                               <td>{formatMoney(row.tallyCredit)}</td>
                               <td>{formatMoney(row.sfaDebit)}</td>
                               <td>{formatMoney(row.sfaCredit)}</td>
-                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (statementResult.reconciledToOpenDelta ? deltaClass(row.difference) : (Math.abs(row.difference) > 0.05 ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up"))}>
+                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (statementResult.reconciledToOpenDelta ? deltaClass(row.difference) : (Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up"))}>
                                 {statementResult.reconciledToOpenDelta ? formatDelta(row.difference) : formatMoney(row.difference)}
                               </td>
                               <td>
@@ -1343,8 +1342,8 @@ export default function PaymentSettlementPage() {
                 <p className="moduleHint">
                   Referenced credit notes settle the named Ref. No. and count in
                   Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
-                  is the outstanding upload, including a reversed voucher Tally still has pending. Open Δ — use{" "}
-                  <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below.
+                  is the outstanding upload. Open Δ is the SFA sales amount minus that Tally bill.
+                  A voucher Tally does not list has no bill to compare.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable paymentSettleInvoiceTable">
@@ -1393,10 +1392,16 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(unpaidSummary?.machineOpenTotal ?? ledger.totals.open_sales_amount)}</strong></td>
                         <td><strong>{formatMoney(unpaidSummary?.tallyOpenTotal || 0)}</strong></td>
                         <td className={deltaClass(
-                          Number(unpaidSummary?.machineOpenTotal || 0) - Number(unpaidSummary?.tallyOpenTotal || 0),
+                          (Array.isArray(ledger.invoices) ? ledger.invoices : []).reduce(
+                            (total, row) => total + (settlementTransactionDelta(row) || 0),
+                            0,
+                          ),
                         )}>
                           <strong>{formatDelta(
-                            Number(unpaidSummary?.machineOpenTotal || 0) - Number(unpaidSummary?.tallyOpenTotal || 0),
+                            (Array.isArray(ledger.invoices) ? ledger.invoices : []).reduce(
+                              (total, row) => total + (settlementTransactionDelta(row) || 0),
+                              0,
+                            ),
                           )}</strong>
                         </td>
                         <td colSpan={3} />

@@ -264,6 +264,30 @@ test("a Tally pending bill is compared with the SFA sales amount, not the open b
   assert.equal(result.rows.some((row) => row.voucher === "900"), false);
 });
 
+test("a one-halala gap stays on its voucher for every statement", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["27-06-2026", "Sales", "Sales", "NFD/1030", 20024.33, ""],
+    ["09-07-2026", "Sales", "Sales", "NFD/1086", 4600, ""],
+    ["13-10-2026", "Sales", "Sales", "NFD/2018", 64975, ""],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2026-06-27", voucher_number: "NFD/1030", amount_incl_vat: 20024.32 },
+      { invoice_date: "2026-07-09", voucher_number: "NFD/1086", amount_incl_vat: 4600 },
+      { invoice_date: "2026-10-13", voucher_number: "NFD/2018", amount_incl_vat: 64975 },
+    ],
+  });
+  const result = compareTallyStatement(tally, sfa);
+  const gap = result.rows.find((row) => row.voucher === "NFD/1030");
+  assert.equal(gap.status, "amount");
+  assert.equal(gap.difference, 0.01);
+  assert.equal(result.lead.voucher, "NFD/1030");
+  assert.equal(result.totals.issueCount, 1);
+  assert.equal(result.totals.difference, 0.01);
+  assert.equal(result.rows.filter((row) => row.status === "matched").length, 2);
+});
+
 test("a supplier payment is a debit and a purchase is a credit", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

@@ -2,7 +2,8 @@ import * as XLSX from "xlsx";
 import { excelDateToIso } from "./receiptRegister.js";
 import { toNumber } from "./outstanding.js";
 
-export const TALLY_STATEMENT_TOLERANCE = 0.05;
+/** Float noise only. A posted halala (0.01) is a real difference and stays on its voucher. */
+export const TALLY_STATEMENT_TOLERANCE = 0.005;
 const VAT_RATIO = 1.15;
 const VAT_RATIO_SLACK = 0.03;
 

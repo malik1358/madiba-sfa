@@ -520,6 +520,16 @@ function amountsClose(left, right, tolerance = TALLY_STATEMENT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
 }
 
+function amountsNear(left, right) {
+  const a = toNumber(left);
+  const b = toNumber(right);
+  if (Math.abs(a - b) <= 1) return true;
+  if (a <= 0 || b <= 0) return false;
+  const ratio = a / b;
+  return Math.abs(ratio - VAT_RATIO) <= VAT_RATIO_SLACK
+    || Math.abs(ratio - (1 / VAT_RATIO)) <= VAT_RATIO_SLACK;
+}
+
 function dayGap(left, right) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(left) || !/^\d{4}-\d{2}-\d{2}$/.test(right)) return 99;
   const from = Date.parse(`${left}T00:00:00Z`);
@@ -885,32 +895,52 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return sidePenalty + amountPenalty + (dayGap(row.date, tally.date) * 0.01);
   }
 
-  const pairs = tallyEntries.map((tally) => {
+  function claim(tally, predicate) {
+    const hits = pool.filter((row) => !row.used && predicate(row));
+    hits.forEach((row) => { row.rank = rankAgainst(row, tally); });
+    return takeMatch(pool, (row) => hits.includes(row));
+  }
+
+  const pairs = [];
+  const unmatchedTally = [];
+  tallyEntries.forEach((tally) => {
     const key = voucherKey(tally.voucher);
-    let sfa = null;
-    if (key) {
-      const exact = pool.filter((row) => !row.used && voucherKey(row.voucher) === key);
-      exact.forEach((row) => { row.rank = rankAgainst(row, tally); });
-      sfa = takeMatch(pool, (row) => exact.includes(row));
-      if (!sfa) {
-        const fuzzy = pool.filter((row) => !row.used && vouchersMatch(voucherKey(row.voucher), key));
-        fuzzy.forEach((row) => { row.rank = rankAgainst(row, tally); });
-        sfa = takeMatch(pool, (row) => fuzzy.includes(row));
-      }
-    }
-    if (!sfa) {
+    const sfa = key ? claim(tally, (row) => voucherKey(row.voucher) === key) : null;
+    if (sfa) pairs.push({ tally, sfa });
+    else unmatchedTally.push(tally);
+  });
+
+  // The same receipt is often stored under a different voucher number.
+  // Pair it once, by date, side, and amount, before a short number can grab another document.
+  const afterAmount = [];
+  unmatchedTally.forEach((tally) => {
+    const sfa = claim(tally, (row) => (
+      row.date === tally.date
+      && row.side === tally.side
+      && amountsClose(row.amount, tally.amount)
+    ));
+    if (sfa) pairs.push({ tally, sfa });
+    else afterAmount.push(tally);
+  });
+
+  afterAmount.forEach((tally) => {
+    const key = voucherKey(tally.voucher);
+    let sfa = key
+      ? claim(tally, (row) => vouchersMatch(voucherKey(row.voucher), key) && amountsNear(row.amount, tally.amount))
+      : null;
+    if (!sfa && !key) {
       const loose = pool.filter((row) => (
         !row.used
         && row.date === tally.date
         && row.side === tally.side
         && amountsClose(row.amount, tally.amount)
       ));
-      if (loose.length === 1 && !key) {
+      if (loose.length === 1) {
         loose[0].used = true;
         sfa = loose[0];
       }
     }
-    return { tally, sfa };
+    pairs.push({ tally, sfa });
   });
 
   if (!pendingBills) {

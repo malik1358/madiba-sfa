@@ -13,6 +13,7 @@ import {
 import { getKsaDateString } from "./workdayActivity.js";
 import { isPaymentVoucherType } from "./receiptRegister.js";
 import { OUTSTANDING_RECONCILE_TOLERANCE } from "./outstandingReconcile.js";
+import { settlementTransactionDelta } from "./settlementOpenDelta.js";
 
 export const HISTORIC_PERFORMANCE_SHORT_LABEL = `${HISTORIC_PERFORMANCE_MONTHS}m`;
 export const HISTORIC_PERFORMANCE_PERIOD_LABEL = `Last ${HISTORIC_PERFORMANCE_MONTHS} months`;
@@ -1836,8 +1837,12 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
     const tallyOpen = tallyKnown ? toNumber(row.outstanding_pending) : computedOpen;
     const hasTallyBill = tallyKnown && Math.abs(tallyOpen) > OUTSTANDING_RECONCILE_TOLERANCE
       && Math.abs(salesIncl - tallyOpen) <= 1;
-    const sfaCompared = hasTallyBill ? salesIncl : computedOpen;
-    const openDelta = roundMoney(sfaCompared - tallyOpen);
+    const openDelta = settlementTransactionDelta({
+      outstanding_pending: tallyKnown ? tallyOpen : null,
+      gross_amount_incl_vat: salesIncl,
+      remaining: computedOpen,
+    }) ?? 0;
+    const sfaCompared = roundMoney(tallyOpen + openDelta);
     const receiptChunks = (Array.isArray(row.settlements) ? row.settlements : []).map((chunk) => ({
       receipt_date: chunk.receipt_date,
       vch_no: chunk.vch_no || "",

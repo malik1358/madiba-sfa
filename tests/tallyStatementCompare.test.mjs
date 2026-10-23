@@ -503,6 +503,49 @@ test("Tally purchase 221 matches SFA P-221 once when the receipt register also h
   assert.equal(result.lead, null);
 });
 
+test("a receipt with a different voucher number still matches the same amount on that date", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["25-09-2026", "Alrajhi Bank", "Receipt", "1819", "", 10000],
+    ["04-10-2026", "Alrajhi Bank", "Receipt", "1880", "", 40000],
+    ["05-10-2026", "Alrajhi Bank", "Receipt", "1896", "", 2500],
+    ["10-09-2026", "Sales", "Sales", "RNFD/411", 39926.85, ""],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2026-09-10", voucher_number: "RNFD/411", amount_incl_vat: 39926.85 },
+    ],
+    receipts: [
+      { receipt_date: "2026-09-25", vch_no: "BANK-1", amount: 10000, vch_type: "Receipt" },
+      { receipt_date: "2026-10-04", vch_no: "BANK-2", amount: 40000, vch_type: "Receipt" },
+      { receipt_date: "2026-10-05", vch_no: "BANK-3", amount: 2500, vch_type: "Receipt" },
+    ],
+  });
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.totals.agrees, true);
+  assert.equal(result.totals.issueCount, 0);
+  assert.equal(result.lead, null);
+});
+
+test("a short receipt number does not take a sales voucher of a different amount", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["10-09-2026", "Sales", "Sales", "RNFD/411", 39926.85, ""],
+    ["10-09-2026", "Alrajhi Bank", "Receipt", "411", "", 2500],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    invoices: [
+      { invoice_date: "2026-09-10", voucher_number: "RNFD/411", amount_incl_vat: 39926.85 },
+    ],
+    receipts: [
+      { receipt_date: "2026-09-10", vch_no: "BANK-9", amount: 2500, vch_type: "Receipt" },
+    ],
+  });
+  const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.totals.agrees, true);
+  assert.equal(result.rows.find((row) => row.voucher === "RNFD/411").status, "matched");
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

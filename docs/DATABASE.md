@@ -40,7 +40,7 @@ Helper functions in the baseline migration:
 | `import_batches` | One upload. Status `UPLOADING`, `VALIDATING`, `PROCESSING`, `ACTIVE`, `FAILED`, `ARCHIVED`. |
 | `sales_raw` | Every imported line, keyed by `import_batch_id`. |
 | `system_settings.active_sales_batch_id` | Which batch is live. |
-| `active_sales` | View: `sales_raw` joined to that setting. |
+| `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 
 `sales_raw` columns in the baseline: `reference`, `voucher_number`, `voucher_type`, `transaction_date`, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `item_code`, `item_name`, `category`, `local_import`, `quantity`, `rate`, `sales_amount`, `first_purchase_date`, `abc_class`, `source_data` jsonb.
 

@@ -401,7 +401,7 @@ export default function OutstandingComparePage() {
         [code]: {
           status: "ready",
           open_delta: Number(totals.open_delta || 0),
-          computed_open: Number(totals.sales_compared ?? totals.computed_open || 0),
+          computed_open: Number(totals.sales_compared ?? totals.computed_open ?? 0),
           tally_open: Number(totals.tally_open || 0),
           gap_count: Number(totals.discrepancy_count || 0),
         },

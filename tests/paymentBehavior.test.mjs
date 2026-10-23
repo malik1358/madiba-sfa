@@ -816,6 +816,21 @@ test("settlement Sales total keeps gloves without VAT and paper with 15%", () =>
   assert.equal(ledger.reversedInvoices.length, 1);
 });
 
+test("a plain receipt that copies a same-day DG receipt is left out of datewise", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [],
+    receipts: [
+      { receipt_date: "2026-05-05", amount: 1680, vch_no: "DG-JV/MAY/00001", vch_type: "Discount Given" },
+      { receipt_date: "2026-05-05", amount: 1680, vch_no: "JV/MAY/00001", vch_type: "Receipt" },
+      { receipt_date: "2026-05-05", amount: 252, vch_no: "VAT-DG-JV/MAY/00001", vch_type: "Discount Given" },
+    ],
+    todayIso: "2026-05-06",
+  });
+  const day = ledger.datewise.find((row) => row.date === "2026-05-05");
+  assert.deepEqual(day.receipts.map((row) => row.vch_no), ["DG-JV/MAY/00001", "VAT-DG-JV/MAY/00001"]);
+  assert.equal(day.collected_amount, 1932);
+});
+
 test("buildPaymentSettlementLedger returns invoice settlement and datewise rows", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

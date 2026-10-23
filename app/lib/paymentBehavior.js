@@ -847,8 +847,28 @@ export function receiptSettlementKind(row) {
   return "receipt_reversal";
 }
 
+function receiptVoucherKey(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// DG-JV/MAY/00001 and JV/MAY/00001 are the same 1,680. Keep the DG- receipt.
+// VAT-DG- stays, because 252 is not the same amount.
+function dropPlainCopyOfDiscountReceipt(receipts) {
+  const discountCopies = new Set();
+  receipts.forEach((row) => {
+    const key = receiptVoucherKey(row.vch_no);
+    if (!key.startsWith("DG") || key.startsWith("VAT")) return;
+    discountCopies.add(`${row.receipt_date}|${key.slice(2)}|${Math.round(Math.abs(row.amount) * 100)}`);
+  });
+  return receipts.filter((row) => {
+    const key = receiptVoucherKey(row.vch_no);
+    if (!key || key.startsWith("DG") || key.startsWith("VAT")) return true;
+    return !discountCopies.has(`${row.receipt_date}|${key}|${Math.round(Math.abs(row.amount) * 100)}`);
+  });
+}
+
 export function buildSortedReceipts(receipts = []) {
-  return (Array.isArray(receipts) ? receipts : [])
+  const sorted = dropPlainCopyOfDiscountReceipt((Array.isArray(receipts) ? receipts : [])
     // Purchases are AP bills, not cash collections / payments.
     // Credit notes are settled from sales history, not as cash.
     .filter((row) => !isPurchaseVoucherType(row?.vch_type) && !isCreditNoteReceiptType(row?.vch_type))
@@ -859,8 +879,8 @@ export function buildSortedReceipts(receipts = []) {
       vch_type: String(row?.vch_type || "").trim(),
     }))
     // Keep Payment vouchers stored as negative amounts so collected totals net correctly.
-    .filter((row) => row.receipt_date && Math.abs(row.amount) > 0)
-    .sort((left, right) => {
+    .filter((row) => row.receipt_date && Math.abs(row.amount) > 0));
+  return sorted.sort((left, right) => {
       if (left.receipt_date !== right.receipt_date) {
         return left.receipt_date.localeCompare(right.receipt_date);
       }

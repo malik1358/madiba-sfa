@@ -1174,9 +1174,9 @@ function tallyTransactionForVoucher(rows, voucher) {
 }
 
 /**
- * The statement difference is the same total as invoice Open Δ.
- * The debit columns show the Tally transaction and the SFA sales amount.
- * Voucher lines that do not add up to that total stay in the bridge.
+ * Statement rows show the Tally transaction beside the SFA sales amount.
+ * The difference is those two amounts. Equal debits differ by zero.
+ * Voucher lines that are not invoices stay in the bridge.
  */
 export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen, tallyOpen } = {}) {
   const machine = Number(machineOpen);
@@ -1196,18 +1196,23 @@ export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen
     const machineAmount = roundMoney(invoice.remaining);
     const sales = roundMoney(invoice.gross_amount_incl_vat ?? invoice.amount_incl_vat ?? 0);
     const tallyLine = tallyTransactionForVoucher(result.rows, invoice.voucher_number);
+    const tallyDebit = tallyLine ? roundMoney(tallyLine.tallyDebit) : (tallyAmount > 0 ? tallyAmount : 0);
+    const tallyCredit = tallyLine ? roundMoney(tallyLine.tallyCredit) : 0;
+    const sfaDebit = sales > 0 ? sales : (machineAmount > 0 ? machineAmount : 0);
+    const sfaCredit = 0;
+    const difference = roundMoney((tallyDebit - tallyCredit) - (sfaDebit - sfaCredit));
     openRows.push({
       id: `open-${index}-${invoice.voucher_number || ""}`,
       date: String(invoice.invoice_date || "").slice(0, 10),
       voucher: String(invoice.voucher_number || ""),
       vchType: tallyLine?.vchType || "Sales",
       particulars: "SFA sales",
-      status: "amount",
-      tallyDebit: tallyLine ? roundMoney(tallyLine.tallyDebit) : (tallyAmount > 0 ? tallyAmount : 0),
-      tallyCredit: tallyLine ? roundMoney(tallyLine.tallyCredit) : 0,
-      sfaDebit: sales > 0 ? sales : (machineAmount > 0 ? machineAmount : 0),
-      sfaCredit: 0,
-      difference: delta,
+      status: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE ? "matched" : "amount",
+      tallyDebit,
+      tallyCredit,
+      sfaDebit,
+      sfaCredit,
+      difference,
       runningGap: 0,
       leadsGap: false,
     });
@@ -1235,18 +1240,19 @@ export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen
     })),
   ];
   const difference = roundMoney(openRows.reduce((total, row) => total + row.difference, 0));
+  const sameAsOpenDelta = Math.abs(difference - openDelta) <= TALLY_STATEMENT_TOLERANCE;
 
   return {
     ...result,
     rows: openRows,
     bridgeRows,
     lead: leadIndex >= 0 ? openRows[leadIndex] : null,
-    reconciledToOpenDelta: true,
+    reconciledToOpenDelta: sameAsOpenDelta,
     totals: {
       ...result.totals,
       difference,
-      openDelta: difference,
-      issueCount: openRows.length,
+      openDelta: sameAsOpenDelta ? difference : openDelta,
+      issueCount: openRows.filter((row) => row.status !== "matched").length,
       agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
     },
   };

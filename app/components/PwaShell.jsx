@@ -13,6 +13,8 @@ import { WORKDAY_GATE_READY_EVENT } from "../lib/morningAttendance";
 
 const BACKGROUND_DATA_START_DELAY_MS = 2500;
 const CATALOGUE_SYNC_DELAY_MS = 45000;
+// Realtime on system_settings is the immediate path. This poll only covers a dropped channel.
+const OFFLINE_VERSION_POLL_MS = 120 * 1000;
 
 async function hydrateMobileSnapshotIfMissing() {
   try {
@@ -181,12 +183,18 @@ export default function PwaShell() {
       }
     }
 
+    function pollVersionIfVisible() {
+      if (typeof document !== "undefined" && document.hidden) return;
+      pollVersion();
+    }
+
     function startVersionPolling() {
       if (started) return;
       started = true;
       window.clearTimeout(fallbackTimer);
-      pollVersion();
-      timer = window.setInterval(pollVersion, 30 * 1000);
+      pollVersionIfVisible();
+      timer = window.setInterval(pollVersionIfVisible, OFFLINE_VERSION_POLL_MS);
+      document.addEventListener("visibilitychange", pollVersionIfVisible);
     }
 
     window.addEventListener(WORKDAY_GATE_READY_EVENT, startVersionPolling);
@@ -220,6 +228,7 @@ export default function PwaShell() {
       started = true;
       window.clearTimeout(fallbackTimer);
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", pollVersionIfVisible);
       window.removeEventListener(OFFLINE_DATA_REFRESH_EVENT, onRefresh);
       window.removeEventListener(WORKDAY_GATE_READY_EVENT, startVersionPolling);
       if (channel) supabase.removeChannel(channel);

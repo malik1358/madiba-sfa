@@ -54,13 +54,7 @@ export default function BuildUpdateWatcher() {
 
     async function checkForUpdate() {
       try {
-        const response = await fetch(`/api/build-info?ts=${Date.now()}`, {
-          cache: "no-store",
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
-        });
+        const response = await fetch("/api/build-info");
         const payload = await response.json().catch(() => ({}));
         const serverBuild = String(payload.buildId || "").trim();
         if (!serverBuild || serverBuild === "local") return;

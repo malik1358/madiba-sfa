@@ -344,8 +344,8 @@ export default function InvoiceSettlement({
               Referenced credit notes settle the named Ref. No. and count
               in Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN from
               day-1 history. Tally Open is the outstanding upload. Open Δ is the sales amount
-              minus the Tally bill when Tally still shows that bill. When Tally shows only the
-              unpaid remainder, Open Δ keeps the fils between Machine Open and that remainder.
+              minus the Tally bill when Tally still shows that bill. Otherwise it is Machine Open
+              minus Tally Open.
               A voucher Tally does not list has no bill to compare.
               Gloves stay excl. VAT; other lines gross up at 15%.
             </p>

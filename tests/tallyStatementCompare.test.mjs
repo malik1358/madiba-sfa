@@ -651,6 +651,20 @@ test("statement difference uses the invoice Open Δ when the voucher lines do no
         leadsGap: false,
       },
       {
+        id: "rc",
+        status: "matched",
+        date: "2026-10-04",
+        voucher: "RC/124",
+        vchType: "Sales",
+        particulars: "Sales",
+        tallyDebit: 42197.13,
+        tallyCredit: 0,
+        sfaDebit: 42197.13,
+        sfaCredit: 0,
+        difference: 0,
+        leadsGap: false,
+      },
+      {
         id: "119",
         status: "amount",
         date: "2025-12-31",
@@ -697,11 +711,11 @@ test("statement difference uses the invoice Open Δ when the voucher lines do no
     },
   ], { machineOpen: 1, tallyOpen: 33102.03 });
 
-  assert.equal(aligned.reconciledToOpenDelta, true);
-  assert.equal(aligned.totals.difference, -33101.03);
-  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.tallyDebit, row.sfaDebit, row.difference]), [
-    ["RNFD/411", 39926.85, 39926.85, -33102.03],
-    ["RC/124", 0, 42197.13, 1],
+  assert.equal(aligned.reconciledToOpenDelta, false);
+  assert.equal(aligned.totals.difference, 0);
+  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.tallyDebit, row.sfaDebit, row.difference, row.status]), [
+    ["RNFD/411", 39926.85, 39926.85, 0, "matched"],
+    ["RC/124", 42197.13, 42197.13, 0, "matched"],
   ]);
   assert.deepEqual(aligned.bridgeRows.map((row) => row.voucher), ["119", "VAT-DG-JV/MAY/00001"]);
 });

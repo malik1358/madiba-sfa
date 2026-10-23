@@ -205,7 +205,7 @@ test("a Tally PDF with plain amounts and To/By markers still reads each line", (
   assert.equal(parsed.closing.amount, 84180);
 });
 
-test("a Tally pending-bills PDF is compared with the SFA open amount", () => {
+test("a Tally pending bill is compared with the SFA sales amount, not the open balance", () => {
   const page = [
     { x: 266.8, y: 713.5, width: 91, text: "Bills Receivable" },
     { x: 281, y: 674.6, width: 63, text: "Pending Bills" },
@@ -247,8 +247,8 @@ test("a Tally pending-bills PDF is compared with the SFA open amount", () => {
   const sfa = buildSfaStatementEntries({
     openOnly: true,
     invoices: [
-      { invoice_date: "2026-06-27", voucher_number: "NFD/1030", amount_incl_vat: 25000, remaining: 20024.33 },
-      { invoice_date: "2026-10-13", voucher_number: "NFD/2018", amount_incl_vat: 64975, remaining: 1000 },
+      { invoice_date: "2026-06-27", voucher_number: "NFD/1030", amount_incl_vat: 20024.33, remaining: 0 },
+      { invoice_date: "2026-10-13", voucher_number: "NFD/2018", amount_incl_vat: 64975, remaining: 20599.33 },
       { invoice_date: "2026-01-02", voucher_number: "NFD/1", amount_incl_vat: 500, remaining: 500 },
     ],
     receipts: [{ receipt_date: "2026-08-01", vch_no: "900", amount: 5000 }],
@@ -257,7 +257,9 @@ test("a Tally pending-bills PDF is compared with the SFA open amount", () => {
   const result = compareTallyStatement(parsed, sfa);
   assert.equal(result.rows.length, 2);
   assert.equal(result.rows.find((row) => row.voucher === "NFD/1030").status, "matched");
-  assert.equal(result.rows.find((row) => row.voucher === "NFD/2018").status, "amount");
+  assert.equal(result.rows.find((row) => row.voucher === "NFD/1030").sfaDebit, 20024.33);
+  assert.equal(result.rows.find((row) => row.voucher === "NFD/2018").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "NFD/2018").sfaDebit, 64975);
   assert.equal(result.rows.some((row) => row.voucher === "NFD/1"), false);
   assert.equal(result.rows.some((row) => row.voucher === "900"), false);
 });

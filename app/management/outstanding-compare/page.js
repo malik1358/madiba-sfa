@@ -29,22 +29,22 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 const TEXT = {
   title: { en: "Tally vs Computed Outstanding", ar: "المستحقات: تالي مقابل المحسوب" },
   subtitle: {
-    en: "Compare Tally outstanding to open after cash FIFO plus credit notes. Remaining gaps are real differences.",
-    ar: "قارن مستحقات تالي بالمفتوح بعد التحصيل النقدي وإشعارات الدائن. الفجوات المتبقية فروق حقيقية.",
+    en: "Compare each Tally bill with the SFA sales amount for the same voucher. A difference is a bill that does not match.",
+    ar: "قارن كل فاتورة تالي مع مبلغ المبيعات في SFA لنفس القسيمة. الفرق يعني أن الفاتورة غير متطابقة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   settlement: { en: "Full Payment Settlement", ar: "تسوية المدفوعات كاملة" },
   search: { en: "Search customer, code, or salesman", ar: "بحث بالعميل أو الكود أو المندوب" },
   loading: { en: "Loading comparison...", ar: "جاري تحميل المقارنة..." },
   selectCustomer: {
-    en: "Select a customer to compare Tally outstanding with computed open (cash + credit notes).",
-    ar: "اختر عميلاً لمقارنة مستحقات تالي بالمفتوح المحسوب (نقد + إشعارات دائن).",
+    en: "Select a customer to compare each Tally bill with the SFA sales amount.",
+    ar: "اختر عميلاً لمقارنة كل فاتورة تالي مع مبلغ المبيعات في SFA.",
   },
   code: { en: "Code", ar: "الكود" },
   customer: { en: "Customer", ar: "العميل" },
   salesman: { en: "Salesman", ar: "المندوب" },
   totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
-  computedOutstanding: { en: "Computed outstanding", ar: "المستحق المحسوب" },
+  computedOutstanding: { en: "SFA sales", ar: "مبيعات SFA" },
   difference: { en: "Difference", ar: "الفرق" },
   branchIssue: { en: "Branch issue", ar: "مشكلة تخصيص الفاتورة" },
   branchIssueTitle: {
@@ -401,7 +401,7 @@ export default function OutstandingComparePage() {
         [code]: {
           status: "ready",
           open_delta: Number(totals.open_delta || 0),
-          computed_open: Number(totals.computed_open || 0),
+          computed_open: Number(totals.sales_compared ?? totals.computed_open ?? 0),
           tally_open: Number(totals.tally_open || 0),
           gap_count: Number(totals.discrepancy_count || 0),
         },
@@ -985,20 +985,15 @@ export default function OutstandingComparePage() {
                     <strong>{formatMoney(compareTotals.tally_open || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Computed outstanding</span>
-                    <strong>{formatMoney(compareTotals.computed_open || 0)}</strong>
-                    <em className="auditSummaryCardMeta">
-                      Cash {formatMoney(compareTotals.cash_settled || 0)}
-                      {" + CN "}
-                      {formatMoney(compareTotals.credit_note_settled || 0)}
-                    </em>
+                    <span>SFA sales</span>
+                    <strong>{formatMoney(compareTotals.sales_compared ?? compareTotals.computed_open ?? 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Open gap</span>
+                    <span>Difference</span>
                     <strong className={deltaClass(compareTotals.open_delta || 0)}>
                       {formatDelta(compareTotals.open_delta || 0)}
                     </strong>
-                    <em className="auditSummaryCardMeta">computed − Tally</em>
+                    <em className="auditSummaryCardMeta">SFA sales − Tally bill</em>
                   </div>
                 </div>
               </section>
@@ -1013,7 +1008,7 @@ export default function OutstandingComparePage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Computed open = sales − cash FIFO − credit notes on that invoice. Export Excel for review.
+                  Open Δ is the SFA sales amount minus the Tally bill. A voucher Tally does not list contributes nothing.
                 </p>
                 <ExportableTable filename="outstanding-compare" sheetName="OutstandingCompare" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

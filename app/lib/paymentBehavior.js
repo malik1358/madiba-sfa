@@ -12,6 +12,7 @@ import {
 } from "./monthlyPerformanceMonths.js";
 import { getKsaDateString } from "./workdayActivity.js";
 import { isPaymentVoucherType } from "./receiptRegister.js";
+import { OUTSTANDING_RECONCILE_TOLERANCE } from "./outstandingReconcile.js";
 
 export const HISTORIC_PERFORMANCE_SHORT_LABEL = `${HISTORIC_PERFORMANCE_MONTHS}m`;
 export const HISTORIC_PERFORMANCE_PERIOD_LABEL = `Last ${HISTORIC_PERFORMANCE_MONTHS} months`;
@@ -1805,6 +1806,7 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
     credit_note_settled: 0,
     computed_settled: 0,
     computed_open: 0,
+    sales_compared: 0,
     tally_open: 0,
     open_delta: 0,
     computed_higher: 0,
@@ -1830,10 +1832,11 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
     const computedOpen = row.fifo_remaining == null
       ? Math.max(0, salesIncl - computedSettled)
       : Math.max(0, toNumber(row.fifo_remaining));
-    const tallyOpen = hasOutstandingRows && row.outstanding_pending != null
-      ? toNumber(row.outstanding_pending)
-      : computedOpen;
-    const openDelta = computedOpen - tallyOpen;
+    const tallyKnown = hasOutstandingRows && row.outstanding_pending != null;
+    const tallyOpen = tallyKnown ? toNumber(row.outstanding_pending) : computedOpen;
+    const hasTallyBill = tallyKnown && Math.abs(tallyOpen) > OUTSTANDING_RECONCILE_TOLERANCE;
+    const sfaCompared = hasTallyBill ? salesIncl : computedOpen;
+    const openDelta = roundMoney(sfaCompared - tallyOpen);
     const receiptChunks = (Array.isArray(row.settlements) ? row.settlements : []).map((chunk) => ({
       receipt_date: chunk.receipt_date,
       vch_no: chunk.vch_no || "",
@@ -1842,16 +1845,22 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
     }));
 
     let status = "Match";
-    let note = "Computed open (cash + CN) matches Tally outstanding";
+    let note = hasTallyBill
+      ? "SFA sales amount matches the Tally bill"
+      : "Computed open (cash + CN) matches Tally outstanding";
     if (!hasOutstandingRows) {
       status = "Computed only";
       note = "No outstanding upload rows — showing computed open only";
-    } else if (openDelta > 0.02) {
+    } else if (openDelta > OUTSTANDING_RECONCILE_TOLERANCE) {
       status = "Computed higher";
-      note = "Computed open is higher than Tally — missing cash/CN in history, or Tally settled this bill differently";
-    } else if (openDelta < -0.02) {
+      note = hasTallyBill
+        ? "SFA sales amount is higher than the Tally bill"
+        : "Computed open is higher than Tally — missing cash/CN in history, or Tally settled this bill differently";
+    } else if (openDelta < -OUTSTANDING_RECONCILE_TOLERANCE) {
       status = "Computed lower";
-      note = "Computed open is lower than Tally — extra cash/CN applied here, or Tally still shows pending";
+      note = hasTallyBill
+        ? "SFA sales amount is lower than the Tally bill"
+        : "Computed open is lower than Tally — extra cash/CN applied here, or Tally still shows pending";
     } else if (creditNoteSettled > 0.02 && Math.abs(toNumber(row.fifo_remaining ?? (salesIncl - cashSettled)) - tallyOpen) > 0.02) {
       note = "Cash FIFO alone would differ; credit notes close the gap to Tally";
     }
@@ -1864,13 +1873,14 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       credit_note_settled: creditNoteSettled,
       computed_settled: computedSettled,
       computed_open: computedOpen,
+      sfa_compared: sfaCompared,
       tally_open: tallyOpen,
       open_delta: openDelta,
       status,
       note,
       receipt_chunks: receiptChunks,
       credit_chunks: creditChunks,
-      has_gap: Math.abs(openDelta) > 0.02,
+      has_gap: Math.abs(openDelta) > OUTSTANDING_RECONCILE_TOLERANCE,
     };
   });
 
@@ -1886,10 +1896,10 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       || String(left.voucher_number || "").localeCompare(String(right.voucher_number || "")));
 
   const computedHigher = gapRows
-    .filter((row) => row.open_delta > 0.02)
+    .filter((row) => row.open_delta > OUTSTANDING_RECONCILE_TOLERANCE)
     .reduce((total, row) => total + row.open_delta, 0);
   const computedLower = gapRows
-    .filter((row) => row.open_delta < -0.02)
+    .filter((row) => row.open_delta < -OUTSTANDING_RECONCILE_TOLERANCE)
     .reduce((total, row) => total + row.open_delta, 0);
 
   return {
@@ -1901,6 +1911,7 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       credit_note_settled: rowsForTotals.reduce((total, row) => total + row.credit_note_settled, 0),
       computed_settled: rowsForTotals.reduce((total, row) => total + row.computed_settled, 0),
       computed_open: rowsForTotals.reduce((total, row) => total + row.computed_open, 0),
+      sales_compared: rowsForTotals.reduce((total, row) => total + row.sfa_compared, 0),
       tally_open: rowsForTotals.reduce((total, row) => total + row.tally_open, 0),
       open_delta: rowsForTotals.reduce((total, row) => total + row.open_delta, 0),
       computed_higher: computedHigher,

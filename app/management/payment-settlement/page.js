@@ -1343,8 +1343,7 @@ export default function PaymentSettlementPage() {
                   Referenced credit notes settle the named Ref. No. and count in
                   Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
                   is the outstanding upload. Open Δ is the sales amount minus the Tally bill
-                  when Tally still shows that bill. When Tally shows only the unpaid remainder,
-                  Open Δ keeps a fils of 0.05 or less between Machine Open and that remainder.
+                  when Tally still shows that bill. Otherwise it is Machine Open minus Tally Open.
                   A voucher Tally does not list has no bill to compare.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">

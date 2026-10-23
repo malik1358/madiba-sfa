@@ -740,6 +740,51 @@ function settleRoundOffRows(rows) {
   return rows.filter((row) => !consumed.has(row));
 }
 
+function numericVoucherTail(value) {
+  const match = String(value || "").match(/(\d+)\s*$/);
+  if (!match) return null;
+  const number = Number(match[1]);
+  return Number.isFinite(number) ? number : null;
+}
+
+function entryAmount(row) {
+  return roundMoney(Math.max(
+    toNumber(row?.tallyDebit),
+    toNumber(row?.tallyCredit),
+    toNumber(row?.sfaDebit),
+    toNumber(row?.sfaCredit),
+  ));
+}
+
+function entryIsCredit(row) {
+  const credit = toNumber(row?.tallyCredit) + toNumber(row?.sfaCredit);
+  const debit = toNumber(row?.tallyDebit) + toNumber(row?.sfaDebit);
+  return credit > debit;
+}
+
+// JV/MAY/00001 is already matched, so DG-JV/MAY/00001 on the same day and amount
+// is a second copy. Receipt 1880 likewise already covers receipt 1879.
+function dropMatchedSfaCopies(rows) {
+  const matched = rows.filter((row) => row.status === "matched");
+  return rows.filter((row) => {
+    if (row.status !== "sfa_only") return true;
+    const amount = entryAmount(row);
+    const credit = entryIsCredit(row);
+    return !matched.some((other) => {
+      if (other.date !== row.date || entryIsCredit(other) !== credit) return false;
+      if (Math.abs(entryAmount(other) - amount) > TALLY_STATEMENT_TOLERANCE) return false;
+      const copyKey = voucherKey(row.voucher);
+      const baseKey = voucherKey(other.voucher);
+      if (baseKey && copyKey !== baseKey && (copyKey === `DG${baseKey}` || copyKey === `VATDG${baseKey}` || copyKey.endsWith(baseKey))) {
+        return true;
+      }
+      const copyNo = numericVoucherTail(row.voucher);
+      const baseNo = numericVoucherTail(other.voucher);
+      return copyNo != null && baseNo != null && Math.abs(copyNo - baseNo) === 1;
+    });
+  });
+}
+
 function sameVoucher(left, right) {
   const a = voucherKey(left);
   const b = voucherKey(right);
@@ -972,9 +1017,9 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
-  const settledRows = settleNetZeroVoucherGroups(
+  const settledRows = dropMatchedSfaCopies(settleNetZeroVoucherGroups(
     settleReversedFamilies(settleCrossedReversals(settleRoundOffRows(rows))),
-  );
+  ));
 
   let running = 0;
   let leadIndex = -1;

@@ -546,6 +546,30 @@ test("a short receipt number does not take a sales voucher of a different amount
   assert.equal(result.rows.find((row) => row.voucher === "RNFD/411").status, "matched");
 });
 
+test("a second SFA copy of a matched receipt is not a new difference", () => {
+  const tally = parseTallyStatementMatrix([
+    HEADER,
+    ["04-10-2026", "Alrajhi Bank", "Receipt", "1880", "", 40000],
+    ["05-10-2026", "Alrajhi Bank", "Receipt", "1896", "", 2500],
+    ["05-05-2026", "DISCOUNT GIVEN", "NSTC JV", "JV/MAY/00001", "", 1680],
+  ]);
+  const sfa = buildSfaStatementEntries({
+    receipts: [
+      { receipt_date: "2026-10-04", vch_no: "1880", amount: 40000, vch_type: "Receipt" },
+      { receipt_date: "2026-10-04", vch_no: "1879", amount: 40000, vch_type: "Receipt" },
+      { receipt_date: "2026-10-05", vch_no: "1896", amount: 2500, vch_type: "Receipt" },
+      { receipt_date: "2026-10-05", vch_no: "1895", amount: 2500, vch_type: "Receipt" },
+      { receipt_date: "2026-05-05", vch_no: "JV/MAY/00001", amount: 1680, vch_type: "NSTC JV" },
+      { receipt_date: "2026-05-05", vch_no: "DG-JV/MAY/00001", amount: 1680, vch_type: "Discount Given" },
+      { receipt_date: "2026-05-05", vch_no: "VAT-DG-JV/MAY/00001", amount: 252, vch_type: "Discount Given" },
+    ],
+  });
+  const result = compareTallyStatement(tally, sfa);
+  const vouchers = result.rows.filter((row) => row.status !== "matched").map((row) => row.voucher);
+  assert.deepEqual(vouchers, ["VAT-DG-JV/MAY/00001"]);
+  assert.equal(result.totals.difference, 252);
+});
+
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,

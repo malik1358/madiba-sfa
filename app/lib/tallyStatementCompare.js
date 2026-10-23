@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { excelDateToIso } from "./receiptRegister.js";
 import { toNumber } from "./outstanding.js";
+import { settlementTransactionDelta } from "./settlementOpenDelta.js";
 
 /** Float noise only. A posted halala (0.01) is a real difference and stays on its voucher. */
 export const TALLY_STATEMENT_TOLERANCE = 0.005;
@@ -1158,6 +1159,82 @@ export function reconcileStatementToOpenDelta(result, { machineOpen, tallyOpen }
       difference,
       openDelta: difference,
       issueCount: kept.filter((row) => row.status !== "matched").length,
+      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
+    },
+  };
+}
+
+/**
+ * The statement difference is the same total as invoice Open Δ.
+ * Voucher lines that do not add up to that total stay in the bridge.
+ */
+export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen, tallyOpen } = {}) {
+  const machine = Number(machineOpen);
+  const tally = Number(tallyOpen);
+  if (!result?.rows || !Number.isFinite(machine) || !Number.isFinite(tally)) return result;
+
+  const openDelta = roundMoney(machine - tally);
+  if (result.reconciledToOpenDelta && Math.abs(Number(result.totals?.difference) - openDelta) <= TALLY_STATEMENT_TOLERANCE) {
+    return result;
+  }
+
+  const openRows = [];
+  (Array.isArray(invoices) ? invoices : []).forEach((invoice, index) => {
+    const delta = settlementTransactionDelta(invoice);
+    if (delta == null || Math.abs(delta) <= TALLY_STATEMENT_TOLERANCE) return;
+    const tallyAmount = roundMoney(invoice.outstanding_pending);
+    const machineAmount = roundMoney(invoice.remaining);
+    openRows.push({
+      id: `open-${index}-${invoice.voucher_number || ""}`,
+      date: String(invoice.invoice_date || "").slice(0, 10),
+      voucher: String(invoice.voucher_number || ""),
+      vchType: "Outstanding",
+      particulars: "Machine Open vs Tally Open",
+      status: "amount",
+      tallyDebit: tallyAmount > 0 ? tallyAmount : 0,
+      tallyCredit: 0,
+      sfaDebit: machineAmount > 0 ? machineAmount : 0,
+      sfaCredit: 0,
+      difference: delta,
+      runningGap: 0,
+      leadsGap: false,
+    });
+  });
+  openRows.sort((left, right) => String(left.date).localeCompare(String(right.date))
+    || String(left.voucher).localeCompare(String(right.voucher)));
+
+  let running = 0;
+  let leadIndex = -1;
+  openRows.forEach((row, index) => {
+    running = roundMoney(running + row.difference);
+    row.runningGap = running;
+    if (leadIndex < 0 && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
+      leadIndex = index;
+      row.leadsGap = true;
+    }
+  });
+
+  const bridgeRows = [
+    ...(Array.isArray(result.bridgeRows) ? result.bridgeRows : []),
+    ...result.rows.filter((row) => row.status !== "matched").map((row) => ({
+      ...row,
+      leadsGap: false,
+      difference: roundMoney(result.reconciledToOpenDelta ? Number(row.difference) : -Number(row.difference || 0)),
+    })),
+  ];
+  const difference = roundMoney(openRows.reduce((total, row) => total + row.difference, 0));
+
+  return {
+    ...result,
+    rows: openRows,
+    bridgeRows,
+    lead: leadIndex >= 0 ? openRows[leadIndex] : null,
+    reconciledToOpenDelta: true,
+    totals: {
+      ...result.totals,
+      difference,
+      openDelta: difference,
+      issueCount: openRows.length,
       agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
     },
   };

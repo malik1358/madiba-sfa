@@ -1834,7 +1834,8 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       : Math.max(0, toNumber(row.fifo_remaining));
     const tallyKnown = hasOutstandingRows && row.outstanding_pending != null;
     const tallyOpen = tallyKnown ? toNumber(row.outstanding_pending) : computedOpen;
-    const hasTallyBill = tallyKnown && Math.abs(tallyOpen) > OUTSTANDING_RECONCILE_TOLERANCE;
+    const hasTallyBill = tallyKnown && Math.abs(tallyOpen) > OUTSTANDING_RECONCILE_TOLERANCE
+      && Math.abs(salesIncl - tallyOpen) <= 1;
     const sfaCompared = hasTallyBill ? salesIncl : computedOpen;
     const openDelta = roundMoney(sfaCompared - tallyOpen);
     const receiptChunks = (Array.isArray(row.settlements) ? row.settlements : []).map((chunk) => ({

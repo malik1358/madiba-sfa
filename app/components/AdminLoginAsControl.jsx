@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
-import { ADMIN_LOGIN_AS_SESSION_KEY } from "../lib/adminLoginAs";
+import { ADMIN_LOGIN_AS_SESSION_KEY, canStartAdminLoginAs } from "../lib/adminLoginAs";
 import { useAppLanguage } from "../lib/appLanguage";
+import { useModuleAccess } from "../hooks/useModuleAccess";
 
 const COPY = {
   loginAs: { en: "Login as", ar: "تسجيل الدخول كمستخدم" },
@@ -53,10 +54,11 @@ async function loadTargets(accessToken) {
 
 export default function AdminLoginAsControl() {
   const { language, dir } = useAppLanguage();
+  const { access } = useModuleAccess();
   const ar = language === "ar";
   const [session, setSession] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [returnContext, setReturnContext] = useState(null);
+  const isAdmin = canStartAdminLoginAs(access.role);
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState([]);
   const [targetId, setTargetId] = useState("");
@@ -70,22 +72,10 @@ export default function AdminLoginAsControl() {
     if (!supabase) return undefined;
 
     let mounted = true;
-    const syncSession = async (nextSession) => {
+    const syncSession = (nextSession) => {
       if (!mounted) return;
       setSession(nextSession || null);
-      const saved = readSavedSession();
-      setReturnContext(saved);
-      if (saved || !nextSession?.access_token) {
-        setIsAdmin(false);
-        return;
-      }
-
-      try {
-        const availableTargets = await loadTargets(nextSession.access_token);
-        if (mounted) setIsAdmin(availableTargets.length > 0);
-      } catch {
-        if (mounted) setIsAdmin(false);
-      }
+      setReturnContext(readSavedSession());
     };
 
     supabase.auth.getSession().then(({ data }) => syncSession(data?.session));

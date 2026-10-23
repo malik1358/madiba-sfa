@@ -7,13 +7,32 @@ import { readCacheEntry, writeCacheEntry } from "../lib/localDataStore";
 import { getSupabaseClient } from "../lib/supabase";
 
 const ACCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const ACCESS_MEMORY_MS = 60 * 1000;
+const ACCESS_MEMORY_MS = 5 * 60 * 1000;
+const ACCESS_FRESH_KEY = "moduleAccessFresh:v1";
 
 let sharedAccessLoad = null;
 let sharedAccessMemory = { userId: "", context: null, at: 0 };
 
 function accessCacheKey(userId) {
   return `moduleAccess:v2:${String(userId || "").trim()}`;
+}
+
+function readFreshStamp(userId) {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(ACCESS_FRESH_KEY) || "null");
+    return parsed?.userId === userId && Date.now() - Number(parsed.at) < ACCESS_MEMORY_MS;
+  } catch {
+    return false;
+  }
+}
+
+function writeFreshStamp(userId) {
+  try {
+    sessionStorage.setItem(ACCESS_FRESH_KEY, JSON.stringify({ userId, at: Date.now() }));
+  } catch {
+    // Private browsing can block session storage. The in-memory window still applies.
+  }
 }
 
 async function fetchRoleModuleMatrix(accessToken) {
@@ -71,6 +90,18 @@ function loadSharedAccessContext(supabase, session) {
   if (sharedAccessLoad?.userId === userId) return sharedAccessLoad.promise;
 
   const promise = (async () => {
+    if (readFreshStamp(userId)) {
+      try {
+        const cached = await withTimeout(readCacheEntry(accessCacheKey(userId)), 2000, "ACCESS_CACHE_TIMEOUT");
+        if (cached?.value) {
+          sharedAccessMemory = { userId, context: cached.value, at: Date.now() };
+          return cached.value;
+        }
+      } catch {
+        // The saved copy is missing. Load the profile and role matrix below.
+      }
+    }
+
     const profile = await fetchProfileRow(supabase, userId);
     const roleModuleMatrix = await fetchRoleModuleMatrix(session.access_token);
     const context = {
@@ -81,6 +112,7 @@ function loadSharedAccessContext(supabase, session) {
       roleModuleMatrix,
     };
     sharedAccessMemory = { userId, context, at: Date.now() };
+    writeFreshStamp(userId);
     writeCacheEntry(accessCacheKey(userId), context, { ttlMs: ACCESS_TTL_MS }).catch(() => {});
     return context;
   })().finally(() => {

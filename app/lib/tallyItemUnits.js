@@ -47,6 +47,7 @@ export const TALLY_EXPORT_COLUMNS = [
   "SALES TEAM",
   "COST CENTER",
   "Narration",
+  "VAT PERC",
 ];
 
 const KNOWN_UNITS = [
@@ -362,6 +363,13 @@ function round2(value) {
   return Math.round(number * 100) / 100;
 }
 
+export function tallyVatPercentCell(vatRate) {
+  const rate = Number(vatRate);
+  if (!(rate > 0)) return "";
+  const percent = rate <= 1 ? Math.round(rate * 100) : Math.round(rate);
+  return percent > 0 ? percent : "";
+}
+
 export function discountPercentFromRates(wholesaleRate, netRate) {
   const wholesale = Number(wholesaleRate || 0);
   const net = Number(netRate || 0);
@@ -501,6 +509,7 @@ export function buildTallyOrderExportRows({
   const orderNo = String(orderNumber || order?.order_number || order?.id || "").trim();
 
   let vatTotal = 0;
+  let vatPercent = "";
   const itemRows = (Array.isArray(lines) ? lines : []).map((line) => {
     const qty = Number(line.quantity || 0);
     const rate = Number(line.rate || 0);
@@ -527,6 +536,8 @@ export function buildTallyOrderExportRows({
         ? round2(explicitVat)
         : round2(amount * vatRate);
     vatTotal += lineVat;
+    const vatPerc = tallyVatPercentCell(vatRate);
+    if (vatPerc !== "" && vatPercent === "") vatPercent = vatPerc;
 
     return {
       "Voucher Date": voucherDate,
@@ -555,6 +566,7 @@ export function buildTallyOrderExportRows({
       "SALES TEAM": resolveTallySalesTeamName(order) || routing.salesTeam,
       "COST CENTER": routing.costCenter,
       Narration: "",
+      "VAT PERC": vatPerc,
     };
   });
 
@@ -568,6 +580,7 @@ export function buildTallyOrderExportRows({
   vatRow["Ref.Date"] = orderDateText;
   vatRow["Charge.Ledgers VAT/Freight"] = TALLY_VAT_LEDGER;
   vatRow.Amount = vatTotal;
+  vatRow["VAT PERC"] = vatPercent;
   return [...itemRows, vatRow];
 }
 

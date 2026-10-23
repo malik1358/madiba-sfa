@@ -95,6 +95,27 @@ test("export rows use the Tally voucher columns", () => {
   assert.equal(rows[0]["COST CENTER"], "OTHER");
   assert.equal(rows[0]["Tracking No."], "");
   assert.equal(rows[0].Amount, 180);
+  assert.equal(rows[0]["VAT PERC"], 15);
+  assert.equal(rows[1]["VAT PERC"], 15);
+});
+
+test("VAT PERC stays blank when the line has no VAT", () => {
+  const rows = buildTallyOrderExportRows({
+    order: { customer_name: "GLOVE CUST", salesman_name: "ALI" },
+    lines: [{
+      item_code: "G1",
+      item_name: "MADIBA GLOVES",
+      quantity: 2,
+      rate: 10,
+      category: "GLOVES",
+    }],
+    orderNumber: "SO-G",
+    pricingRegion: "riyadh",
+    paymentType: "cash",
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]["VAT PERC"], "");
 });
 
 test("catalog list rate is the item rate and discount is the per-unit gap", () => {

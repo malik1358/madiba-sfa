@@ -1416,14 +1416,13 @@ export default function PaymentSettlementPage() {
                   <h2>Tally vs Computed Outstanding</h2>
                   <span>
                     {formatCount(ledger.outstandingCompareTotals?.discrepancy_count || 0)} gaps ·{" "}
-                    computed {formatMoney(ledger.outstandingCompareTotals?.computed_open || 0)} ·{" "}
+                    SFA sales {formatMoney(ledger.outstandingCompareTotals?.sales_compared || 0)} ·{" "}
                     Tally {formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Computed open = sales − cash receipts (FIFO) − credit notes allocated to that invoice.
-                  Compare that to Tally outstanding. Gaps that remain after credit notes are real
-                  differences between the books and our calculation.
+                  The gap is the SFA sales amount minus the Tally bill on the same voucher.
+                  Computed open underneath is still sales minus cash and credit notes.
                 </p>
                 <div className="auditSummaryGrid" style={{ marginBottom: 12 }}>
                   <div className="auditSummaryCard">
@@ -1431,19 +1430,15 @@ export default function PaymentSettlementPage() {
                     <strong>{formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Computed outstanding</span>
-                    <strong>{formatMoney(ledger.outstandingCompareTotals?.computed_open || 0)}</strong>
-                    <em className="auditSummaryCardMeta">
-                      Cash {formatMoney(ledger.outstandingCompareTotals?.cash_settled || 0)}
-                      {" + CN "}
-                      {formatMoney(ledger.outstandingCompareTotals?.credit_note_settled || 0)}
-                    </em>
+                    <span>SFA sales</span>
+                    <strong>{formatMoney(ledger.outstandingCompareTotals?.sales_compared || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Open gap (computed − Tally)</span>
+                    <span>Difference</span>
                     <strong className={deltaClass(ledger.outstandingCompareTotals?.open_delta || 0)}>
                       {formatDelta(ledger.outstandingCompareTotals?.open_delta || 0)}
                     </strong>
+                    <em className="auditSummaryCardMeta">SFA sales − Tally bill</em>
                     <em className="auditSummaryCardMeta">
                       Higher {formatMoney(ledger.outstandingCompareTotals?.computed_higher || 0)}
                       {" · Lower "}

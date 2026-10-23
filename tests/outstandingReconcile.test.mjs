@@ -35,10 +35,19 @@ test("buildOutstandingReconcileRow flags SFA vs Tally customer differences", () 
 
   const withinTolerance = buildOutstandingReconcileRow({
     customer: { customer_code: "C02" },
-    totals: { computed_open: 500.01, discrepancy_count: 0 },
+    totals: { computed_open: 500.004, discrepancy_count: 0 },
     tallyOutstanding: 500,
   });
   assert.equal(withinTolerance.has_difference, false);
+
+  const oneHalala = buildOutstandingReconcileRow({
+    customer: { customer_code: "C02B" },
+    totals: { sales_compared: 89599.32, computed_open: 20599.33, discrepancy_count: 1 },
+    tallyOutstanding: 89599.33,
+  });
+  assert.equal(oneHalala.difference, -0.01);
+  assert.equal(oneHalala.sfa_outstanding, 89599.32);
+  assert.equal(oneHalala.has_difference, true);
 
   // Invoice-level gaps that net to zero at customer level still count as a difference.
   const nettedGaps = buildOutstandingReconcileRow({
@@ -51,12 +60,13 @@ test("buildOutstandingReconcileRow flags SFA vs Tally customer differences", () 
 
 test("Show differences only uses money gaps, not invoice-only branch issues", () => {
   assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 150, gap_count: 0 }), true);
-  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 0.01, gap_count: 0 }), false);
+  assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 0.01, gap_count: 0 }), true);
   assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: 0, gap_count: 2 }), false);
   assert.equal(hasOutstandingCompareMoneyDifference({ difference: -25, invoice_gap_count: 0 }), true);
   assert.equal(hasOutstandingCompareMoneyDifference({ open_delta: null }), false);
 
-  assert.equal(formatOutstandingCompareDelta(0.01), "0");
+  assert.equal(formatOutstandingCompareDelta(0.01), "+0.01");
+  assert.equal(formatOutstandingCompareDelta(0.004), "0");
   assert.equal(formatOutstandingCompareDelta(0), "0");
   assert.equal(formatOutstandingCompareDelta(12.5), "+12.5");
   assert.equal(formatOutstandingCompareDelta(-3.25), "-3.25");

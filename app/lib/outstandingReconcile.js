@@ -2,7 +2,8 @@ import { toNumber } from "./outstanding.js";
 import { summarizeSalesCoverageGaps } from "./salesCoverage.js";
 
 export const OUTSTANDING_RECONCILE_KEY = "outstanding_reconcile_dataset_v1";
-export const OUTSTANDING_RECONCILE_TOLERANCE = 0.02;
+/** A posted halala (0.01) is a real difference. Only float dust is hidden. */
+export const OUTSTANDING_RECONCILE_TOLERANCE = 0.005;
 
 /**
  * True when the customer-level money gap is above tolerance.
@@ -97,8 +98,9 @@ export function classifyOutstandingBillMismatch({
 }
 
 /**
- * Customer-level Tally vs SFA outstanding row for the precomputed difference report.
- * Tally = customer total on the outstanding upload; SFA = computed open (cash FIFO + credit notes).
+ * Customer-level Tally vs SFA row for the precomputed difference report.
+ * Tally = customer total on the outstanding upload.
+ * SFA = sales amount of those bills when sales_compared is present.
  */
 export function buildOutstandingReconcileRow({
   customer = {},
@@ -106,8 +108,10 @@ export function buildOutstandingReconcileRow({
   tallyOutstanding = 0,
 } = {}) {
   const tally = toNumber(tallyOutstanding);
-  const sfa = toNumber(totals.computed_open);
-  const difference = sfa - tally;
+  const sfa = totals.sales_compared == null
+    ? toNumber(totals.computed_open)
+    : toNumber(totals.sales_compared);
+  const difference = Math.round((sfa - tally) * 100) / 100;
   const invoiceGapCount = Number(totals.discrepancy_count || 0);
 
   return {

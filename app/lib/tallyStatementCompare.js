@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { omitPlainDiscountReceiptCopies } from "./paymentBehavior.js";
 import { excelDateToIso } from "./receiptRegister.js";
 import { toNumber } from "./outstanding.js";
 
@@ -507,7 +508,9 @@ function voucherKey(value) {
 
 function plainVoucherNumber(value) {
   const key = voucherKey(value);
-  const stripped = key.replace(/^(?:SI|INV|BILL|P)(?=\d+$)/, "");
+  // DG-JV/MAY/00001 is the same discount as Tally JV/MAY/00001. VAT-DG- is the VAT on it.
+  const withoutDiscount = key.replace(/^(?:VATDG|DG)(?=[A-Z0-9])/, "");
+  const stripped = withoutDiscount.replace(/^(?:SI|INV|BILL|P)(?=\d+$)/, "");
   return stripped || key;
 }
 
@@ -611,7 +614,7 @@ export function buildSfaStatementEntries({
     });
   });
 
-  (Array.isArray(receipts) ? receipts : []).forEach((receipt) => {
+  omitPlainDiscountReceiptCopies(Array.isArray(receipts) ? receipts : []).forEach((receipt) => {
     if (isPurchaseType(receipt?.vch_type)) return;
     const signed = toNumber(receipt?.amount);
     const date = String(receipt?.receipt_date || "").slice(0, 10);
@@ -686,7 +689,11 @@ function claimSfaLine(pool, tally) {
     const leftSide = left.side === tally.side ? 0 : 1;
     const rightSide = right.side === tally.side ? 0 : 1;
     if (leftSide !== rightSide) return leftSide - rightSide;
-    return Math.abs(toNumber(left.amount) - toNumber(tally.amount)) - Math.abs(toNumber(right.amount) - toNumber(tally.amount));
+    const amountGap = Math.abs(toNumber(left.amount) - toNumber(tally.amount)) - Math.abs(toNumber(right.amount) - toNumber(tally.amount));
+    if (amountGap) return amountGap;
+    const leftDiscount = voucherKey(left.voucher).startsWith("DG") ? 0 : 1;
+    const rightDiscount = voucherKey(right.voucher).startsWith("DG") ? 0 : 1;
+    return leftDiscount - rightDiscount;
   });
   hits[0].used = true;
   return hits[0];

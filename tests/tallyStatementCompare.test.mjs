@@ -564,9 +564,12 @@ test("a second SFA voucher stays on its own line when the Tally number is differ
   });
   const result = compareTallyStatement(tally, sfa);
   const vouchers = result.rows.filter((row) => row.status !== "matched").map((row) => row.voucher).sort();
-  assert.deepEqual(vouchers, ["1879", "1895", "DG-JV/MAY/00001", "VAT-DG-JV/MAY/00001"]);
+  assert.deepEqual(vouchers, ["1879", "1895", "VAT-DG-JV/MAY/00001"]);
   assert.equal(result.rows.find((row) => row.voucher === "1880").status, "matched");
-  assert.equal(result.rows.find((row) => row.voucher === "JV/MAY/00001").status, "matched");
+  const discount = result.rows.find((row) => row.voucher === "JV/MAY/00001");
+  assert.equal(discount.status, "matched");
+  assert.equal(discount.tallyCredit, 1680);
+  assert.equal(discount.sfaCredit, 1680);
 });
 
 test("SI-101 in Tally matches voucher 101 in SFA", () => {

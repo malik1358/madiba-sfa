@@ -1,12 +1,9 @@
 import * as XLSX from "xlsx";
 import { excelDateToIso } from "./receiptRegister.js";
 import { toNumber } from "./outstanding.js";
-import { settlementTransactionDelta } from "./settlementOpenDelta.js";
 
 /** Float noise only. A posted halala (0.01) is a real difference and stays on its voucher. */
 export const TALLY_STATEMENT_TOLERANCE = 0.005;
-const VAT_RATIO = 1.15;
-const VAT_RATIO_SLACK = 0.03;
 
 const HEADER_ALIASES = {
   date: ["date", "voucher date", "vch date", "transaction date", "txn date"],
@@ -508,40 +505,20 @@ function voucherKey(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function vouchersMatch(left, right) {
-  if (!left || !right) return false;
-  if (left === right) return true;
-  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
-  if (shorter.length < 3 || !longer.endsWith(shorter)) return false;
-  const prefix = longer.slice(0, longer.length - shorter.length);
-  return /[A-Z]/.test(prefix);
+function plainVoucherNumber(value) {
+  const key = voucherKey(value);
+  const stripped = key.replace(/^(?:SI|INV|BILL|P)(?=\d+$)/, "");
+  return stripped || key;
+}
+
+function sameVoucherNumber(left, right) {
+  const a = plainVoucherNumber(left);
+  const b = plainVoucherNumber(right);
+  return Boolean(a && b && a === b);
 }
 
 function amountsClose(left, right, tolerance = TALLY_STATEMENT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
-}
-
-function amountsNear(left, right) {
-  const a = toNumber(left);
-  const b = toNumber(right);
-  if (Math.abs(a - b) <= 1) return true;
-  if (a <= 0 || b <= 0) return false;
-  const ratio = a / b;
-  return Math.abs(ratio - VAT_RATIO) <= VAT_RATIO_SLACK
-    || Math.abs(ratio - (1 / VAT_RATIO)) <= VAT_RATIO_SLACK;
-}
-
-function dayGap(left, right) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(left) || !/^\d{4}-\d{2}-\d{2}$/.test(right)) return 99;
-  const from = Date.parse(`${left}T00:00:00Z`);
-  const to = Date.parse(`${right}T00:00:00Z`);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return 99;
-  return Math.abs(Math.round((to - from) / 86400000));
-}
-
-function signedAmount(side, amount) {
-  const value = toNumber(amount);
-  return side === "credit" ? -value : value;
 }
 
 function isPurchaseType(value) {
@@ -667,226 +644,6 @@ export function buildSfaStatementEntries({
   return entries;
 }
 
-function takeMatch(pool, predicate) {
-  const hits = pool.filter((row) => !row.used && predicate(row));
-  if (!hits.length) return null;
-  hits.sort((left, right) => left.rank - right.rank);
-  hits[0].used = true;
-  return hits[0];
-}
-
-function detectVatScale(pairs) {
-  const ratios = pairs
-    .filter((pair) => pair.tallyAmount > 1 && pair.sfaAmount > 1 && pair.sameSide)
-    .map((pair) => pair.tallyAmount / pair.sfaAmount);
-  if (ratios.length < 3) return "";
-  const sorted = [...ratios].sort((left, right) => left - right);
-  const median = sorted[Math.floor(sorted.length / 2)];
-  const near = (target) => ratios.filter((ratio) => Math.abs(ratio - target) <= VAT_RATIO_SLACK).length;
-  if (Math.abs(median - VAT_RATIO) <= VAT_RATIO_SLACK && near(VAT_RATIO) >= Math.ceil(ratios.length * 0.6)) {
-    return "tally_gross";
-  }
-  if (Math.abs(median - (1 / VAT_RATIO)) <= VAT_RATIO_SLACK && near(1 / VAT_RATIO) >= Math.ceil(ratios.length * 0.6)) {
-    return "sfa_gross";
-  }
-  return "";
-}
-
-function isRoundOffRow(row) {
-  const type = `${row?.vchType || ""} ${row?.particulars || ""}`.toLowerCase();
-  const voucher = String(row?.voucher || "");
-  return type.includes("round off") || type.includes("roundoff") || /^RO[\s/-]*\d/i.test(voucher);
-}
-
-function roundOffBaseKey(row) {
-  return voucherKey(row?.voucher).replace(/^RO/, "");
-}
-
-function roundOffAmount(row) {
-  return roundMoney(Math.max(
-    toNumber(row?.tallyDebit),
-    toNumber(row?.tallyCredit),
-    toNumber(row?.sfaDebit),
-    toNumber(row?.sfaCredit),
-  ));
-}
-
-// RO-1076 is the fils rounding of voucher 1076. When that fils equals the
-// invoice gap, the two lines are one rounding and leave the mismatch list.
-function settleRoundOffRows(rows) {
-  const consumed = new Set();
-  rows.forEach((roundOff) => {
-    if (consumed.has(roundOff) || !isRoundOffRow(roundOff)) return;
-    const baseKey = roundOffBaseKey(roundOff);
-    const amount = roundOffAmount(roundOff);
-    if (!baseKey || amount <= TALLY_STATEMENT_TOLERANCE) return;
-    const base = rows.find((row) => (
-      row !== roundOff
-      && !consumed.has(row)
-      && !isRoundOffRow(row)
-      && voucherKey(row.voucher) === baseKey
-      && Math.abs(Math.abs(row.difference) - amount) <= TALLY_STATEMENT_TOLERANCE
-    ));
-    if (!base) return;
-    if (base.difference > 0) {
-      base.sfaDebit = roundMoney(base.sfaDebit + base.difference);
-    } else if (base.difference < 0) {
-      base.sfaCredit = roundMoney(base.sfaCredit + Math.abs(base.difference));
-    }
-    base.difference = roundMoney((base.tallyDebit - base.tallyCredit) - (base.sfaDebit - base.sfaCredit));
-    base.status = "matched";
-    base.leadsGap = false;
-    consumed.add(roundOff);
-  });
-  return rows.filter((row) => !consumed.has(row));
-}
-
-function numericVoucherTail(value) {
-  const match = String(value || "").match(/(\d+)\s*$/);
-  if (!match) return null;
-  const number = Number(match[1]);
-  return Number.isFinite(number) ? number : null;
-}
-
-function entryAmount(row) {
-  return roundMoney(Math.max(
-    toNumber(row?.tallyDebit),
-    toNumber(row?.tallyCredit),
-    toNumber(row?.sfaDebit),
-    toNumber(row?.sfaCredit),
-  ));
-}
-
-function entryIsCredit(row) {
-  const credit = toNumber(row?.tallyCredit) + toNumber(row?.sfaCredit);
-  const debit = toNumber(row?.tallyDebit) + toNumber(row?.sfaDebit);
-  return credit > debit;
-}
-
-// JV/MAY/00001 is already matched, so DG-JV/MAY/00001 on the same day and amount
-// is a second copy. Receipt 1880 likewise already covers receipt 1879.
-function dropMatchedSfaCopies(rows) {
-  const matched = rows.filter((row) => row.status === "matched");
-  return rows.filter((row) => {
-    if (row.status !== "sfa_only") return true;
-    const amount = entryAmount(row);
-    const credit = entryIsCredit(row);
-    return !matched.some((other) => {
-      if (other.date !== row.date || entryIsCredit(other) !== credit) return false;
-      if (Math.abs(entryAmount(other) - amount) > TALLY_STATEMENT_TOLERANCE) return false;
-      const copyKey = voucherKey(row.voucher);
-      const baseKey = voucherKey(other.voucher);
-      if (baseKey && copyKey !== baseKey && (copyKey === `DG${baseKey}` || copyKey === `VATDG${baseKey}` || copyKey.endsWith(baseKey))) {
-        return true;
-      }
-      const copyNo = numericVoucherTail(row.voucher);
-      const baseNo = numericVoucherTail(other.voucher);
-      return copyNo != null && baseNo != null && Math.abs(copyNo - baseNo) === 1;
-    });
-  });
-}
-
-function sameVoucher(left, right) {
-  const a = voucherKey(left);
-  const b = voucherKey(right);
-  return Boolean(a && b && (a === b || vouchersMatch(a, b)));
-}
-
-// Credit note 33 reverses sales 1583. A +0.10 fils on the sale and −0.10 on
-// the note are the same rounding and leave the mismatch list together.
-function settleCrossedReversals(rows) {
-  rows.forEach((credit) => {
-    const target = credit.reversesVoucher;
-    if (!target || Math.abs(credit.difference) <= TALLY_STATEMENT_TOLERANCE) return;
-    const sale = rows.find((row) => (
-      row !== credit
-      && sameVoucher(row.voucher, target)
-      && (row.tallyDebit > 0 || row.sfaDebit > 0)
-      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
-      && Math.abs(row.difference + credit.difference) <= TALLY_STATEMENT_TOLERANCE
-    ));
-    if (!sale) return;
-    sale.status = "matched";
-    credit.status = "matched";
-    sale.difference = 0;
-    credit.difference = 0;
-    sale.leadsGap = false;
-    credit.leadsGap = false;
-  });
-  return rows;
-}
-
-function voucherTail(value) {
-  const match = String(value || "").trim().match(/(\d+)\s*$/);
-  if (!match) return "";
-  return match[1].replace(/^0+(?=\d)/, "");
-}
-
-function clearCrossedRow(row) {
-  row.status = "matched";
-  row.difference = 0;
-  row.leadsGap = false;
-}
-
-// Invoice 1769 is reversed by credit note 48, so DG-1769 and VAT-DG-1769
-// cross DG-48 and VAT-DG-48 when the amounts are equal and opposite.
-function settleReversedFamilies(rows) {
-  const pairs = [];
-  rows.forEach((row) => {
-    const invoiceTail = voucherTail(row.reversesVoucher);
-    const creditTail = voucherTail(row.voucher);
-    if (!invoiceTail || !creditTail || invoiceTail === creditTail) return;
-    if (pairs.some((pair) => pair.invoiceTail === invoiceTail && pair.creditTail === creditTail)) return;
-    pairs.push({ invoiceTail, creditTail });
-  });
-
-  pairs.forEach(({ invoiceTail, creditTail }) => {
-    const invoiceRows = rows.filter((row) => (
-      voucherTail(row.voucher) === invoiceTail
-      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
-    ));
-    const creditRows = rows.filter((row) => (
-      voucherTail(row.voucher) === creditTail
-      && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE
-    ));
-    invoiceRows.forEach((invoiceRow) => {
-      if (Math.abs(invoiceRow.difference) <= TALLY_STATEMENT_TOLERANCE) return;
-      const match = creditRows.find((creditRow) => (
-        Math.abs(creditRow.difference) > TALLY_STATEMENT_TOLERANCE
-        && Math.abs(invoiceRow.difference + creditRow.difference) <= TALLY_STATEMENT_TOLERANCE
-      ));
-      if (!match) return;
-      clearCrossedRow(invoiceRow);
-      clearCrossedRow(match);
-    });
-  });
-  return rows;
-}
-
-// Sales 1825, discount 1825, and VAT-DG-1825 are one voucher. When their
-// differences add up to zero they leave the mismatch list together.
-function settleNetZeroVoucherGroups(rows) {
-  const groups = [];
-  rows.forEach((row) => {
-    if (!voucherKey(row.voucher)) return;
-    const group = groups.find((items) => items.some((other) => sameVoucher(other.voucher, row.voucher)));
-    if (group) group.push(row);
-    else groups.push([row]);
-  });
-  groups.forEach((group) => {
-    const open = group.filter((row) => Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE);
-    if (open.length < 2) return;
-    const net = roundMoney(open.reduce((total, row) => total + row.difference, 0));
-    if (Math.abs(net) > TALLY_STATEMENT_TOLERANCE) return;
-    open.forEach((row) => {
-      row.status = "matched";
-      row.difference = 0;
-      row.leadsGap = false;
-    });
-  });
-  return rows;
-}
-
 function lineFromPair(tally, sfa, index) {
   const tallyDebit = tally?.side === "debit" ? roundMoney(tally.amount) : 0;
   const tallyCredit = tally?.side === "credit" ? roundMoney(tally.amount) : 0;
@@ -922,6 +679,19 @@ function lineFromPair(tally, sfa, index) {
   };
 }
 
+function claimSfaLine(pool, tally) {
+  const hits = pool.filter((row) => !row.used && sameVoucherNumber(row.voucher, tally.voucher));
+  if (!hits.length) return null;
+  hits.sort((left, right) => {
+    const leftSide = left.side === tally.side ? 0 : 1;
+    const rightSide = right.side === tally.side ? 0 : 1;
+    if (leftSide !== rightSide) return leftSide - rightSide;
+    return Math.abs(toNumber(left.amount) - toNumber(tally.amount)) - Math.abs(toNumber(right.amount) - toNumber(tally.amount));
+  });
+  hits[0].used = true;
+  return hits[0];
+}
+
 export function compareTallyStatement(tallyParsed, sfaEntries = []) {
   const tallyEntries = Array.isArray(tallyParsed?.entries) ? tallyParsed.entries : [];
   const dated = tallyEntries.map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
@@ -932,85 +702,19 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     if (pendingBills || !from || !to || !row?.date) return true;
     return row.date >= from && row.date <= to;
   });
-
   const pool = windowedSfa.map((row, index) => ({ ...row, used: false, index }));
 
-  function rankAgainst(row, tally) {
-    const sidePenalty = row.side === tally.side ? 0 : 1000;
-    const amountPenalty = Math.abs(toNumber(row.amount) - toNumber(tally.amount));
-    return sidePenalty + amountPenalty + (dayGap(row.date, tally.date) * 0.01);
-  }
-
-  function claim(tally, predicate) {
-    const hits = pool.filter((row) => !row.used && predicate(row));
-    hits.forEach((row) => { row.rank = rankAgainst(row, tally); });
-    return takeMatch(pool, (row) => hits.includes(row));
-  }
-
-  const pairs = [];
-  const unmatchedTally = [];
-  tallyEntries.forEach((tally) => {
-    const key = voucherKey(tally.voucher);
-    const sfa = key ? claim(tally, (row) => voucherKey(row.voucher) === key) : null;
-    if (sfa) pairs.push({ tally, sfa });
-    else unmatchedTally.push(tally);
-  });
-
-  // The same receipt is often stored under a different voucher number.
-  // Pair it once, by date, side, and amount, before a short number can grab another document.
-  const afterAmount = [];
-  unmatchedTally.forEach((tally) => {
-    const sfa = claim(tally, (row) => (
-      row.date === tally.date
-      && row.side === tally.side
-      && amountsClose(row.amount, tally.amount)
-    ));
-    if (sfa) pairs.push({ tally, sfa });
-    else afterAmount.push(tally);
-  });
-
-  afterAmount.forEach((tally) => {
-    const key = voucherKey(tally.voucher);
-    let sfa = key
-      ? claim(tally, (row) => vouchersMatch(voucherKey(row.voucher), key) && amountsNear(row.amount, tally.amount))
-      : null;
-    if (!sfa && !key) {
-      const loose = pool.filter((row) => (
-        !row.used
-        && row.date === tally.date
-        && row.side === tally.side
-        && amountsClose(row.amount, tally.amount)
-      ));
-      if (loose.length === 1) {
-        loose[0].used = true;
-        sfa = loose[0];
-      }
-    }
-    pairs.push({ tally, sfa });
-  });
-
+  const pairs = tallyEntries.map((tally) => ({
+    tally,
+    sfa: String(tally?.voucher || "").trim() ? claimSfaLine(pool, tally) : null,
+  }));
   if (!pendingBills) {
     pool.filter((row) => !row.used).forEach((sfa) => {
       pairs.push({ tally: null, sfa });
     });
   }
 
-  const vatScale = detectVatScale(pairs.map((pair) => ({
-    tallyAmount: toNumber(pair.tally?.amount),
-    sfaAmount: toNumber(pair.sfa?.amount),
-    sameSide: Boolean(pair.tally && pair.sfa && pair.tally.side === pair.sfa.side),
-  })));
-
-  const rows = pairs.map((pair, index) => {
-    const line = lineFromPair(pair.tally, pair.sfa, index);
-    if (vatScale && line.status === "amount" && pair.tally && pair.sfa && pair.tally.side === pair.sfa.side) {
-      const ratio = toNumber(pair.tally.amount) / toNumber(pair.sfa.amount);
-      const target = vatScale === "tally_gross" ? VAT_RATIO : 1 / VAT_RATIO;
-      if (Math.abs(ratio - target) <= VAT_RATIO_SLACK) line.status = "vat";
-    }
-    return line;
-  });
-
+  const rows = pairs.map((pair, index) => lineFromPair(pair.tally, pair.sfa, index));
   rows.sort((left, right) => {
     const leftDate = left.date || "9999-99-99";
     const rightDate = right.date || "9999-99-99";
@@ -1018,28 +722,24 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     return String(left.voucher).localeCompare(String(right.voucher));
   });
 
-  const settledRows = dropMatchedSfaCopies(settleNetZeroVoucherGroups(
-    settleReversedFamilies(settleCrossedReversals(settleRoundOffRows(rows))),
-  ));
-
   let running = 0;
   let leadIndex = -1;
-  settledRows.forEach((row, index) => {
+  rows.forEach((row, index) => {
     running = roundMoney(running + row.difference);
     row.runningGap = running;
-    if (leadIndex < 0 && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
+    if (leadIndex < 0 && row.status !== "matched" && Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE) {
       leadIndex = index;
       row.leadsGap = true;
     }
   });
 
-  const sum = (pick) => roundMoney(settledRows.reduce((total, row) => total + pick(row), 0));
+  const sum = (pick) => roundMoney(rows.reduce((total, row) => total + pick(row), 0));
   const tallyDebit = sum((row) => row.tallyDebit);
   const tallyCredit = sum((row) => row.tallyCredit);
   const sfaDebit = sum((row) => row.sfaDebit);
   const sfaCredit = sum((row) => row.sfaCredit);
   const difference = roundMoney((tallyDebit - tallyCredit) - (sfaDebit - sfaCredit));
-  const issueCount = settledRows.filter((row) => row.status !== "matched").length;
+  const issueCount = rows.filter((row) => row.status !== "matched").length;
 
   return {
     from,
@@ -1047,9 +747,8 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
     opening: tallyParsed?.opening || null,
     closing: tallyParsed?.closing || null,
     sheetName: tallyParsed?.sheetName || "",
-    vatScale,
-    rows: settledRows,
-    lead: leadIndex >= 0 ? settledRows[leadIndex] : null,
+    rows,
+    lead: leadIndex >= 0 ? rows[leadIndex] : null,
     totals: {
       tallyDebit,
       tallyCredit,
@@ -1058,202 +757,10 @@ export function compareTallyStatement(tallyParsed, sfaEntries = []) {
       tallyNet: roundMoney(tallyDebit - tallyCredit),
       sfaNet: roundMoney(sfaDebit - sfaCredit),
       difference,
-      matchedCount: settledRows.length - issueCount,
+      matchedCount: rows.length - issueCount,
       issueCount,
-      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
+      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE && issueCount === 0,
     },
   };
 }
-
-function subsetSumIndexes(items, targetCents) {
-  const limit = items.length > 18 ? 18 : items.length;
-  const pool = items
-    .slice()
-    .sort((left, right) => Math.abs(right.cents) - Math.abs(left.cents))
-    .slice(0, limit);
-  let best = null;
-  const chosen = [];
-
-  function walk(start, sum) {
-    if (Math.abs(sum - targetCents) <= 5) {
-      if (!best || chosen.length < best.length) best = chosen.slice();
-      return;
-    }
-    if (best && chosen.length >= best.length) return;
-    for (let index = start; index < pool.length; index += 1) {
-      if (best && chosen.length + 1 >= best.length) break;
-      chosen.push(pool[index].index);
-      walk(index + 1, sum + pool[index].cents);
-      chosen.pop();
-    }
-  }
-
-  walk(0, 0);
-  return best;
-}
-
-/**
- * Customer Audit Open Δ is Machine Open minus the outstanding-file total.
- * The statement movement also includes ledger lines that are not in that file
- * (a later sale, an unallocated receipt, a purchase). Those lines are returned
- * separately so the statement difference equals Open Δ.
- * Difference is SFA minus Tally, the same sign as Open Δ.
- */
-export function reconcileStatementToOpenDelta(result, { machineOpen, tallyOpen } = {}) {
-  const machine = Number(machineOpen);
-  const tally = Number(tallyOpen);
-  if (!result?.rows || !Number.isFinite(machine) || !Number.isFinite(tally)) return result;
-
-  const openDelta = roundMoney(machine - tally);
-  const tallyNet = Number(result.totals?.tallyNet || 0);
-  const sfaNet = Number(result.totals?.sfaNet || 0);
-  const bridgeTarget = roundMoney((tallyNet - tally) - (sfaNet - machine));
-  const rows = result.rows.map((row) => ({ ...row, leadsGap: false }));
-
-  let bridgeIndexes = [];
-  if (Math.abs(bridgeTarget) > TALLY_STATEMENT_TOLERANCE) {
-    const candidates = [];
-    rows.forEach((row, index) => {
-      const tallyAmount = Math.abs(row.tallyDebit) + Math.abs(row.tallyCredit);
-      const sfaAmount = Math.abs(row.sfaDebit) + Math.abs(row.sfaCredit);
-      const oneSided = tallyAmount <= TALLY_STATEMENT_TOLERANCE || sfaAmount <= TALLY_STATEMENT_TOLERANCE;
-      if (!oneSided || Math.abs(row.difference) <= TALLY_STATEMENT_TOLERANCE) return;
-      candidates.push({ index, cents: Math.round(Number(row.difference) * 100) });
-    });
-    const picked = subsetSumIndexes(candidates, Math.round(bridgeTarget * 100));
-    if (!picked) return result;
-    bridgeIndexes = picked;
-  }
-
-  const bridgeSet = new Set(bridgeIndexes);
-  const bridgeRows = [];
-  const kept = [];
-  rows.forEach((row, index) => {
-    const next = { ...row, difference: roundMoney(-Number(row.difference || 0)) };
-    if (bridgeSet.has(index)) bridgeRows.push(next);
-    else kept.push(next);
-  });
-
-  let running = 0;
-  let leadIndex = -1;
-  kept.forEach((row, index) => {
-    running = roundMoney(running + row.difference);
-    row.runningGap = running;
-    if (leadIndex < 0 && row.status !== "matched" && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
-      leadIndex = index;
-      row.leadsGap = true;
-    }
-  });
-
-  const difference = roundMoney(kept.reduce((total, row) => total + row.difference, 0));
-  if (Math.abs(difference - openDelta) > TALLY_STATEMENT_TOLERANCE) return result;
-
-  return {
-    ...result,
-    rows: kept,
-    bridgeRows,
-    lead: leadIndex >= 0 ? kept[leadIndex] : null,
-    reconciledToOpenDelta: true,
-    totals: {
-      ...result.totals,
-      difference,
-      openDelta: difference,
-      issueCount: kept.filter((row) => row.status !== "matched").length,
-      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
-    },
-  };
-}
-
-function tallyTransactionForVoucher(rows, voucher) {
-  const key = voucherKey(voucher);
-  if (!key) return null;
-  return (Array.isArray(rows) ? rows : []).find((row) => (
-    voucherKey(row.voucher) === key
-    && (Number(row.tallyDebit) > 0 || Number(row.tallyCredit) > 0)
-  )) || null;
-}
-
-/**
- * Statement rows show the Tally transaction beside the SFA sales amount.
- * The difference is those two amounts. Equal debits differ by zero.
- * Voucher lines that are not invoices stay in the bridge.
- */
-export function alignStatementToInvoiceOpen(result, invoices = [], { machineOpen, tallyOpen } = {}) {
-  const machine = Number(machineOpen);
-  const tally = Number(tallyOpen);
-  if (!result?.rows || !Number.isFinite(machine) || !Number.isFinite(tally)) return result;
-
-  const openDelta = roundMoney(machine - tally);
-  if (result.reconciledToOpenDelta && Math.abs(Number(result.totals?.difference) - openDelta) <= TALLY_STATEMENT_TOLERANCE) {
-    return result;
-  }
-
-  const openRows = [];
-  (Array.isArray(invoices) ? invoices : []).forEach((invoice, index) => {
-    const delta = settlementTransactionDelta(invoice);
-    if (delta == null || Math.abs(delta) <= TALLY_STATEMENT_TOLERANCE) return;
-    const tallyAmount = roundMoney(invoice.outstanding_pending);
-    const machineAmount = roundMoney(invoice.remaining);
-    const sales = roundMoney(invoice.gross_amount_incl_vat ?? invoice.amount_incl_vat ?? 0);
-    const tallyLine = tallyTransactionForVoucher(result.rows, invoice.voucher_number);
-    const tallyDebit = tallyLine ? roundMoney(tallyLine.tallyDebit) : (tallyAmount > 0 ? tallyAmount : 0);
-    const tallyCredit = tallyLine ? roundMoney(tallyLine.tallyCredit) : 0;
-    const sfaDebit = sales > 0 ? sales : (machineAmount > 0 ? machineAmount : 0);
-    const sfaCredit = 0;
-    const difference = roundMoney((tallyDebit - tallyCredit) - (sfaDebit - sfaCredit));
-    openRows.push({
-      id: `open-${index}-${invoice.voucher_number || ""}`,
-      date: String(invoice.invoice_date || "").slice(0, 10),
-      voucher: String(invoice.voucher_number || ""),
-      vchType: tallyLine?.vchType || "Sales",
-      particulars: "SFA sales",
-      status: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE ? "matched" : "amount",
-      tallyDebit,
-      tallyCredit,
-      sfaDebit,
-      sfaCredit,
-      difference,
-      runningGap: 0,
-      leadsGap: false,
-    });
-  });
-  openRows.sort((left, right) => String(left.date).localeCompare(String(right.date))
-    || String(left.voucher).localeCompare(String(right.voucher)));
-
-  let running = 0;
-  let leadIndex = -1;
-  openRows.forEach((row, index) => {
-    running = roundMoney(running + row.difference);
-    row.runningGap = running;
-    if (leadIndex < 0 && Math.abs(running) > TALLY_STATEMENT_TOLERANCE) {
-      leadIndex = index;
-      row.leadsGap = true;
-    }
-  });
-
-  const bridgeRows = [
-    ...(Array.isArray(result.bridgeRows) ? result.bridgeRows : []),
-    ...result.rows.filter((row) => row.status !== "matched").map((row) => ({
-      ...row,
-      leadsGap: false,
-      difference: roundMoney(result.reconciledToOpenDelta ? Number(row.difference) : -Number(row.difference || 0)),
-    })),
-  ];
-  const difference = roundMoney(openRows.reduce((total, row) => total + row.difference, 0));
-  const sameAsOpenDelta = Math.abs(difference - openDelta) <= TALLY_STATEMENT_TOLERANCE;
-
-  return {
-    ...result,
-    rows: openRows,
-    bridgeRows,
-    lead: leadIndex >= 0 ? openRows[leadIndex] : null,
-    reconciledToOpenDelta: sameAsOpenDelta,
-    totals: {
-      ...result.totals,
-      difference,
-      openDelta: sameAsOpenDelta ? difference : openDelta,
-      issueCount: openRows.filter((row) => row.status !== "matched").length,
-      agrees: Math.abs(difference) <= TALLY_STATEMENT_TOLERANCE,
-    },
-  };
-}
+

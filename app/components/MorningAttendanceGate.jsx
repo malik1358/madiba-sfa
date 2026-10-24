@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useModuleAccess } from "../hooks/useModuleAccess";
-import { shouldEnableBackgroundGps, shouldRequireGpsAccessGate } from "../lib/moduleAccess";
+import { shouldEnableBackgroundGps, shouldRequireGpsAccessGate, shouldShowWorkdayInactivityDialog } from "../lib/moduleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
@@ -982,7 +982,11 @@ export default function MorningAttendanceGate({
   if (accessGateReady) {
     return (
       <>
-        {attendanceRequired && attendanceComplete ? <WorkdayInactivityPrompt /> : null}
+        {shouldShowWorkdayInactivityDialog(access.role, { collectionOnly: access.collectionOnly })
+          && attendanceRequired
+          && attendanceComplete
+          ? <WorkdayInactivityPrompt />
+          : null}
         <LunchPunchNoonPrompt />
         <LunchInSuggestionPrompt />
         <LoginAtFirstCustomerPrompt />

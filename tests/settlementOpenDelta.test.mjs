@@ -26,6 +26,11 @@ test("Open Δ compares the sales amount with the Tally bill", () => {
     remaining: 0,
   }), -0.01);
   assert.equal(settlementTransactionDelta({
+    amount_incl_vat: 24150,
+    outstanding_pending: 24149.19,
+    remaining: 0,
+  }), -24149.19);
+  assert.equal(settlementTransactionDelta({
     amount_incl_vat: 4600,
     outstanding_pending: 4600,
     remaining: 0,

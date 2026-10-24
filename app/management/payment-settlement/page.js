@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -28,6 +28,7 @@ import {
   parseTallyStatementWorkbook,
   TALLY_STATEMENT_TOLERANCE,
 } from "../../lib/tallyStatementCompare.js";
+import { groupStatementRowsByDate } from "../../lib/statementDateGroups.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -56,8 +57,8 @@ const TEXT = {
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   statementTitle: { en: "Tally statement check", ar: "مطابقة كشف تالي" },
   statementHint: {
-    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). Each Tally line is matched to the SFA line with the same voucher number, and the debit and credit are compared.",
-    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يُطابق كل سطر في تالي سطر SFA بنفس رقم القسيمة، وتُقارن مبالغ المدين والدائن.",
+    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). Lines are grouped by date. Use + to open a date and check each voucher. A line matches when the voucher number and its debit or credit agree.",
+    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). السطور مجمّعة حسب التاريخ. استخدم + لفتح التاريخ ومراجعة كل قسيمة. يطابق السطر عندما يتفق رقم القسيمة ومبلغ المدين أو الدائن.",
   },
   statementPendingHint: {
     en: "These are Tally bill amounts. Each one is compared with the SFA sales amount for the same voucher.",
@@ -174,6 +175,7 @@ function formatMoney(value) {
 function formatCount(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
+
 
 function formatDelta(value) {
   return formatSettlementOpenDelta(value);
@@ -309,6 +311,7 @@ export default function PaymentSettlementPage() {
   const statementInputRef = useRef(null);
   const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
+  const [expandedStatementDates, setExpandedStatementDates] = useState({});
   const [autoCode, setAutoCode] = useState("");
   const autoLoadedRef = useRef("");
   const searchRequestRef = useRef(0);
@@ -371,6 +374,7 @@ export default function PaymentSettlementPage() {
     setShowMatchedStatement(false);
     setHistoryMeta(null);
     setExpandedInvoice("");
+    setExpandedStatementDates({});
 
     try {
       const headers = await authHeaders();
@@ -620,6 +624,11 @@ export default function PaymentSettlementPage() {
     visibleRows: visibleStatementRows,
     setFilter: setStatementFilter,
   } = useBiExcelFilters(statementRows, STATEMENT_FILTER_KEYS, statementValueOf);
+
+  const statementDateGroups = useMemo(
+    () => groupStatementRowsByDate(visibleStatementRows),
+    [visibleStatementRows],
+  );
 
   const datewiseLines = useMemo(
     () => flattenDatewiseLines(ledger?.datewise || []),
@@ -1001,25 +1010,66 @@ export default function PaymentSettlementPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {visibleStatementRows.map((row) => (
-                            <tr key={row.id} className={row.leadsGap ? "paymentSettleStatementLead" : undefined}>
-                              <td>{row.date || "—"}</td>
-                              <td>{row.voucher || "—"}</td>
-                              <td>{row.vchType || "—"}</td>
-                              <td>{row.particulars || "—"}</td>
-                              <td>{formatMoney(row.tallyDebit)}</td>
-                              <td>{formatMoney(row.tallyCredit)}</td>
-                              <td>{formatMoney(row.sfaDebit)}</td>
-                              <td>{formatMoney(row.sfaCredit)}</td>
-                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
-                                {formatMoney(row.difference)}
-                              </td>
-                              <td>
-                                {row.leadsGap ? `${t("causeLeads")} · ` : ""}
-                                {t(statementCauseKey(row))}
-                              </td>
-                            </tr>
-                          ))}
+                          {statementDateGroups.map((group) => {
+                            const open = Boolean(expandedStatementDates[group.date || ""]);
+                            const diffClass = group.leadsGap
+                              ? "moduleBiMonthCell--current"
+                              : (Math.abs(group.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up");
+                            return (
+                              <Fragment key={group.date || "none"}>
+                                <tr className={group.leadsGap ? "paymentSettleStatementLead" : undefined}>
+                                  <td>
+                                    <div className="paymentSettleDateCell">
+                                      <button
+                                        type="button"
+                                        className="moduleInlineButton"
+                                        aria-expanded={open}
+                                        onClick={() => setExpandedStatementDates((current) => ({
+                                          ...current,
+                                          [group.date || ""]: !current[group.date || ""],
+                                        }))}
+                                      >
+                                        {open ? "−" : "+"}
+                                      </button>
+                                      <span>{group.date || "—"}</span>
+                                    </div>
+                                  </td>
+                                  <td>{formatCount(group.rows.length)}</td>
+                                  <td>—</td>
+                                  <td>{language === "ar" ? `${formatCount(group.rows.length)} سطور` : `${formatCount(group.rows.length)} lines`}</td>
+                                  <td>{formatMoney(group.tallyDebit)}</td>
+                                  <td>{formatMoney(group.tallyCredit)}</td>
+                                  <td>{formatMoney(group.sfaDebit)}</td>
+                                  <td>{formatMoney(group.sfaCredit)}</td>
+                                  <td className={`moduleBiTotalCol ${diffClass}`}>{formatMoney(group.difference)}</td>
+                                  <td>
+                                    {group.issueCount
+                                      ? `${formatCount(group.issueCount)} ${t("statementIssues")}`
+                                      : t("causeMatched")}
+                                  </td>
+                                </tr>
+                                {open && group.rows.map((row) => (
+                                  <tr key={row.id} className={`paymentSettleChildRow${row.leadsGap ? " paymentSettleStatementLead" : ""}`}>
+                                    <td />
+                                    <td>{row.voucher || "—"}</td>
+                                    <td>{row.vchType || "—"}</td>
+                                    <td>{row.particulars || "—"}</td>
+                                    <td>{formatMoney(row.tallyDebit)}</td>
+                                    <td>{formatMoney(row.tallyCredit)}</td>
+                                    <td>{formatMoney(row.sfaDebit)}</td>
+                                    <td>{formatMoney(row.sfaCredit)}</td>
+                                    <td className={row.leadsGap ? "moduleBiMonthCell--current" : (Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
+                                      {formatMoney(row.difference)}
+                                    </td>
+                                    <td>
+                                      {row.leadsGap ? `${t("causeLeads")} · ` : ""}
+                                      {t(statementCauseKey(row))}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </Fragment>
+                            );
+                          })}
                           {!visibleStatementRows.length && (
                             <tr>
                               <td colSpan={10}>{t("statementAgree")}</td>
@@ -1117,7 +1167,7 @@ export default function PaymentSettlementPage() {
                   Referenced credit notes settle the named Ref. No. and count in
                   Paid — they do not cut that invoice&apos;s sales. Machine Open is sales − cash − CN. Tally Open
                   is the outstanding upload. Open Δ is the sales amount minus the Tally bill
-                  when Tally still shows that bill. Otherwise it is Machine Open minus Tally Open.
+                  when those two match within one fil. Otherwise it is Machine Open minus Tally Open.
                   A voucher Tally does not list has no bill to compare.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">

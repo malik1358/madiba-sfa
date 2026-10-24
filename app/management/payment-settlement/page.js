@@ -24,10 +24,8 @@ import {
 import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../lib/settlementOpenDelta.js";
 import {
   buildSfaStatementEntries,
-  alignStatementToInvoiceOpen,
   compareTallyStatement,
   parseTallyStatementWorkbook,
-  reconcileStatementToOpenDelta,
   TALLY_STATEMENT_TOLERANCE,
 } from "../../lib/tallyStatementCompare.js";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -58,8 +56,8 @@ const TEXT = {
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   statementTitle: { en: "Tally statement check", ar: "مطابقة كشف تالي" },
   statementHint: {
-    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). It stays on this customer for every user. Each time the customer is opened, the lines are compared again with the current SFA ledger.",
-    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يبقى الكشف على هذا العميل لكل المستخدمين. عند فتح العميل تُقارن السطور من جديد مع دفتر SFA الحالي.",
+    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). Each Tally line is matched to the SFA line with the same voucher number, and the debit and credit are compared.",
+    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). يُطابق كل سطر في تالي سطر SFA بنفس رقم القسيمة، وتُقارن مبالغ المدين والدائن.",
   },
   statementPendingHint: {
     en: "These are Tally bill amounts. Each one is compared with the SFA sales amount for the same voucher.",
@@ -72,12 +70,6 @@ const TEXT = {
   statementTallyNet: { en: "Tally movement", ar: "حركة تالي" },
   statementSfaNet: { en: "SFA movement", ar: "حركة SFA" },
   statementDiff: { en: "Difference", ar: "الفرق" },
-  statementSameOpen: { en: "Same as Customer Audit Open Δ", ar: "نفس فرق الرصيد المفتوح في تدقيق العميل" },
-  statementOutsideTitle: { en: "On the Tally ledger, not in outstanding", ar: "في دفتر تالي وليس في المعلق" },
-  statementOutsideHint: {
-    en: "These lines are on the uploaded ledger and not in Tally outstanding. The total is the sum of their voucher differences, separate from the invoice Open Δ above.",
-    ar: "هذه القيود في الكشف المرفوع وليست في ملف تالي المعلق. الإجمالي هو مجموع فروق قسائمها، وهو منفصل عن فرق الرصيد المفتوح للفواتير أعلاه.",
-  },
   statementIssues: { en: "Entries that differ", ar: "قيود مختلفة" },
   statementAgree: {
     en: "Every voucher in this statement matches SFA. No single entry is opening a gap.",
@@ -598,7 +590,7 @@ export default function PaymentSettlementPage() {
         purchase_date: row.purchase_date || day.date,
       }))
     ));
-    const compared = compareTallyStatement(storedStatement, buildSfaStatementEntries({
+    return compareTallyStatement(storedStatement, buildSfaStatementEntries({
       invoices: ledger.invoices,
       reversedInvoices: ledger.reversedInvoices,
       creditNotes: ledger.creditNotes,
@@ -606,19 +598,6 @@ export default function PaymentSettlementPage() {
       purchases,
       openOnly: storedStatement.report === "pending_bills",
     }));
-    const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
-    const hasTallyOpen = invoices.some((row) => row.outstanding_pending != null);
-    if (storedStatement.report === "pending_bills" || !hasTallyOpen) return compared;
-    const machineOpen = Number(ledger.totals?.open_sales_amount || 0);
-    const tallyOpen = invoices.reduce(
-      (total, row) => total + (row.outstanding_pending == null ? 0 : Number(row.outstanding_pending || 0)),
-      0,
-    );
-    return alignStatementToInvoiceOpen(
-      reconcileStatementToOpenDelta(compared, { machineOpen, tallyOpen }),
-      invoices,
-      { machineOpen, tallyOpen },
-    );
   }, [ledger, statementReceipts, storedStatement]);
 
   const statementRows = useMemo(() => {
@@ -641,14 +620,6 @@ export default function PaymentSettlementPage() {
     visibleRows: visibleStatementRows,
     setFilter: setStatementFilter,
   } = useBiExcelFilters(statementRows, STATEMENT_FILTER_KEYS, statementValueOf);
-
-  const bridgeRows = Array.isArray(statementResult?.bridgeRows) ? statementResult.bridgeRows : [];
-  const {
-    filters: bridgeFilters,
-    options: bridgeOptions,
-    visibleRows: visibleBridgeRows,
-    setFilter: setBridgeFilter,
-  } = useBiExcelFilters(bridgeRows, STATEMENT_FILTER_KEYS, statementValueOf);
 
   const datewiseLines = useMemo(
     () => flattenDatewiseLines(ledger?.datewise || []),
@@ -985,16 +956,9 @@ export default function PaymentSettlementPage() {
                       </div>
                       <div className="auditSummaryCard">
                         <span>{t("statementDiff")}</span>
-                        <strong className={statementResult.reconciledToOpenDelta
-                          ? deltaClass(statementResult.totals.difference)
-                          : (Math.abs(statementResult.totals.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
-                          {statementResult.reconciledToOpenDelta
-                            ? formatDelta(statementResult.totals.difference)
-                            : formatMoney(statementResult.totals.difference)}
+                        <strong className={Math.abs(statementResult.totals.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up"}>
+                          {formatMoney(statementResult.totals.difference)}
                         </strong>
-                        {statementResult.reconciledToOpenDelta ? (
-                          <em className="auditSummaryCardMeta">{t("statementSameOpen")}</em>
-                        ) : null}
                         <em className="auditSummaryCardMeta">
                           {statementResult.totals.issueCount}
                           {" "}
@@ -1047,8 +1011,8 @@ export default function PaymentSettlementPage() {
                               <td>{formatMoney(row.tallyCredit)}</td>
                               <td>{formatMoney(row.sfaDebit)}</td>
                               <td>{formatMoney(row.sfaCredit)}</td>
-                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (statementResult.reconciledToOpenDelta ? deltaClass(row.difference) : (Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up"))}>
-                                {statementResult.reconciledToOpenDelta ? formatDelta(row.difference) : formatMoney(row.difference)}
+                              <td className={row.leadsGap ? "moduleBiMonthCell--current" : (Math.abs(row.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up")}>
+                                {formatMoney(row.difference)}
                               </td>
                               <td>
                                 {row.leadsGap ? `${t("causeLeads")} · ` : ""}
@@ -1069,65 +1033,12 @@ export default function PaymentSettlementPage() {
                             <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.tallyCredit, 0))}</strong></td>
                             <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaDebit, 0))}</strong></td>
                             <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaCredit, 0))}</strong></td>
-                            <td className="moduleBiTotalCol"><strong>{statementResult.reconciledToOpenDelta
-                              ? formatDelta(visibleStatementRows.reduce((total, row) => total + row.difference, 0))
-                              : formatMoney(visibleStatementRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
+                            <td className="moduleBiTotalCol"><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
                             <td />
                           </tr>
                         </tfoot>
                       </table>
                     </ExportableTable>
-                    {visibleBridgeRows.length ? (
-                      <>
-                        <h3>{t("statementOutsideTitle")}</h3>
-                        <p className="moduleHint">{t("statementOutsideHint")}</p>
-                        <ExportableTable filename="tally-statement-outside-outstanding" sheetName="OutsideOutstanding" className="moduleTableWrap">
-                          <table className="moduleTable moduleBiTable paymentSettleTable">
-                            <thead>
-                              <tr>
-                                <BiExcelHead label={t("statementDate")} filterKey="date" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementVoucher")} filterKey="voucher" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementType")} filterKey="type" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementParticulars")} filterKey="particulars" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementTallyDr")} filterKey="tallyDebit" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementTallyCr")} filterKey="tallyCredit" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementSfaDr")} filterKey="sfaDebit" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementSfaCr")} filterKey="sfaCredit" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                                <BiExcelHead label={t("statementDiff")} filterKey="difference" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} className="moduleBiTotalCol" />
-                                <BiExcelHead label={t("statementCause")} filterKey="cause" options={bridgeOptions} filters={bridgeFilters} onChange={setBridgeFilter} />
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {visibleBridgeRows.map((row) => (
-                                <tr key={row.id}>
-                                  <td>{row.date || "—"}</td>
-                                  <td>{row.voucher || "—"}</td>
-                                  <td>{row.vchType || "—"}</td>
-                                  <td>{row.particulars || "—"}</td>
-                                  <td>{formatMoney(row.tallyDebit)}</td>
-                                  <td>{formatMoney(row.tallyCredit)}</td>
-                                  <td>{formatMoney(row.sfaDebit)}</td>
-                                  <td>{formatMoney(row.sfaCredit)}</td>
-                                  <td className={deltaClass(row.difference)}>{formatDelta(row.difference)}</td>
-                                  <td>{t(statementCauseKey(row))}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr>
-                                <td colSpan={4}><strong>{t("statementTotal")}</strong></td>
-                                <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.tallyDebit, 0))}</strong></td>
-                                <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.tallyCredit, 0))}</strong></td>
-                                <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.sfaDebit, 0))}</strong></td>
-                                <td><strong>{formatMoney(visibleBridgeRows.reduce((total, row) => total + row.sfaCredit, 0))}</strong></td>
-                                <td className={deltaClass(visibleBridgeRows.reduce((total, row) => total + row.difference, 0))}><strong>{formatDelta(visibleBridgeRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
-                                <td />
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </ExportableTable>
-                      </>
-                    ) : null}
                   </>
                 ) : null}
               </section>

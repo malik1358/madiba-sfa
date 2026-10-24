@@ -6,8 +6,6 @@ import {
   findTallyStatementHeader,
   parseTallyStatementMatrix,
   parseTallyStatementPositionedPages,
-  alignStatementToInvoiceOpen,
-  reconcileStatementToOpenDelta,
 } from "../app/lib/tallyStatementCompare.js";
 
 const HEADER = ["Date", "Particulars", "Vch Type", "Vch No.", "Debit", "Credit"];
@@ -109,7 +107,7 @@ test("SFA vouchers outside the statement dates are not treated as mismatches", (
   assert.equal(result.rows.length, 1);
 });
 
-test("a 15% scale across vouchers is reported as VAT, not a missing entry", () => {
+test("the same voucher keeps its own debit even when every bill differs by 15%", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["01-04-2026", "Sales", "Sales", "1", 115, ""],
@@ -125,9 +123,9 @@ test("a 15% scale across vouchers is reported as VAT, not a missing entry", () =
   });
 
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.vatScale, "tally_gross");
-  assert.equal(result.lead.status, "vat");
-  assert.equal(result.rows.every((row) => row.status === "vat"), true);
+  assert.equal(result.rows.length, 3);
+  assert.equal(result.rows.every((row) => row.status === "amount"), true);
+  assert.deepEqual(result.rows.map((row) => row.difference), [15, 30, 45]);
 });
 
 test("a Tally PDF ledger treats the amount column as the customer side", () => {
@@ -304,7 +302,7 @@ test("a supplier payment is a debit and a purchase is a credit", () => {
   assert.equal(result.rows.every((row) => row.status === "matched"), true);
 });
 
-test("RO-1076 is the fils rounding of voucher 1076 and both leave the mismatch list", () => {
+test("a round-off voucher stays on its own line beside the invoice it rounds", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["27-08-2025", "Sales Non Food Division", "Sales", "1076", 1080, ""],
@@ -321,12 +319,10 @@ test("RO-1076 is the fils rounding of voucher 1076 and both leave the mismatch l
   });
 
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.rows.some((row) => row.voucher === "RO-1076"), false);
-  assert.equal(result.rows.find((row) => row.voucher === "1076").status, "matched");
-  assert.equal(result.rows.find((row) => row.voucher === "1076").difference, 0);
-  assert.equal(result.lead, null);
-  assert.equal(result.totals.issueCount, 0);
-  assert.equal(result.totals.agrees, true);
+  assert.equal(result.rows.find((row) => row.voucher === "1076").status, "amount");
+  assert.equal(result.rows.find((row) => row.voucher === "1076").difference, 0.15);
+  assert.equal(result.rows.find((row) => row.voucher === "RO-1076").status, "sfa_only");
+  assert.equal(result.rows.find((row) => row.voucher === "1077").status, "matched");
 });
 
 test("a round-off that is not the fils on that voucher stays in the mismatch list", () => {
@@ -349,7 +345,7 @@ test("a round-off that is not the fils on that voucher stays in the mismatch lis
   assert.equal(result.totals.agrees, false);
 });
 
-test("credit note 33 reversing sales 1583 drops both fils when they cross", () => {
+test("credit note 33 and sales 1583 each keep their own fils difference", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["02-11-2025", "Sales", "Sales", "1583", 1111, ""],
@@ -371,16 +367,15 @@ test("credit note 33 reversing sales 1583 drops both fils when they cross", () =
   });
 
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.rows.find((row) => row.voucher === "1583").status, "matched");
-  assert.equal(result.rows.find((row) => row.voucher === "33").status, "matched");
-  assert.equal(result.rows.find((row) => row.voucher === "1583").difference, 0);
-  assert.equal(result.rows.find((row) => row.voucher === "33").difference, 0);
+  assert.equal(result.rows.find((row) => row.voucher === "1583").status, "amount");
+  assert.equal(result.rows.find((row) => row.voucher === "1583").difference, 0.1);
+  assert.equal(result.rows.find((row) => row.voucher === "33").status, "amount");
+  assert.equal(result.rows.find((row) => row.voucher === "33").difference, -0.1);
   assert.equal(result.rows.find((row) => row.voucher === "1584").status, "amount");
   assert.equal(result.rows.find((row) => row.voucher === "1584").difference, -0.2);
-  assert.equal(result.lead.voucher, "1584");
 });
 
-test("sales 1825, its discount, and VAT-DG-1825 leave together when they net to zero", () => {
+test("sales 1825, its discount, and VAT-DG-1825 stay on separate lines", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["19-11-2025", "Sales Non Food Division - Stationery", "Sales", "1825", 18595.5, ""],
@@ -398,13 +393,13 @@ test("sales 1825, its discount, and VAT-DG-1825 leave together when they net to 
   });
 
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.rows.find((row) => row.voucher === "1825" && row.vchType === "Sales").status, "matched");
-  assert.equal(result.rows.some((row) => row.voucher === "VAT-DG-1825" && row.status !== "matched"), false);
-  assert.equal(result.rows.filter((row) => String(row.voucher).includes("1825") && row.status !== "matched").length, 0);
+  const sale = result.rows.find((row) => row.voucher === "1825" && row.tallyDebit > 0);
+  assert.equal(sale.status, "amount");
+  assert.equal(sale.tallyDebit, 18595.5);
+  assert.equal(sale.sfaDebit, 18975);
+  assert.equal(result.rows.find((row) => row.voucher === "1825" && row.sfaCredit === 330).status, "sfa_only");
+  assert.equal(result.rows.find((row) => row.voucher === "VAT-DG-1825").status, "sfa_only");
   assert.equal(result.rows.find((row) => row.voucher === "1900").status, "matched");
-  assert.equal(result.lead, null);
-  assert.equal(result.totals.agrees, true);
-  assert.equal(result.totals.difference, 0);
 });
 
 test("a same-number discount that does not net to zero stays in the mismatch list", () => {
@@ -426,7 +421,7 @@ test("a same-number discount that does not net to zero stays in the mismatch lis
   assert.equal(result.totals.agrees, false);
 });
 
-test("discount and VAT on invoice 1769 cross the same lines on credit note 48", () => {
+test("discount lines stay separate from invoice 1769 and credit note 48", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["17-11-2025", "Sales", "Sales", "1769", 1000, ""],
@@ -450,11 +445,11 @@ test("discount and VAT on invoice 1769 cross the same lines on credit note 48", 
   });
 
   const result = compareTallyStatement(tally, sfa);
+  assert.equal(result.rows.find((row) => row.voucher === "1769").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "48").status, "matched");
   for (const voucher of ["DG-1769", "VAT-DG-1769", "DG-48", "VAT-DG-48"]) {
-    assert.equal(result.rows.find((row) => row.voucher === voucher).status, "matched", voucher);
+    assert.equal(result.rows.find((row) => row.voucher === voucher).status, "sfa_only", voucher);
   }
-  assert.equal(result.lead, null);
-  assert.equal(result.totals.agrees, true);
 });
 
 test("the same discount lines stay when credit note 48 does not reverse invoice 1769", () => {
@@ -504,12 +499,11 @@ test("Tally purchase 221 matches SFA P-221 once when the receipt register also h
   assert.equal(result.lead, null);
 });
 
-test("a receipt with a different voucher number still matches the same amount on that date", () => {
+test("a receipt with a different voucher number stays unmatched even when the amount and date agree", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["25-09-2026", "Alrajhi Bank", "Receipt", "1819", "", 10000],
     ["04-10-2026", "Alrajhi Bank", "Receipt", "1880", "", 40000],
-    ["05-10-2026", "Alrajhi Bank", "Receipt", "1896", "", 2500],
     ["10-09-2026", "Sales", "Sales", "RNFD/411", 39926.85, ""],
   ]);
   const sfa = buildSfaStatementEntries({
@@ -518,14 +512,16 @@ test("a receipt with a different voucher number still matches the same amount on
     ],
     receipts: [
       { receipt_date: "2026-09-25", vch_no: "BANK-1", amount: 10000, vch_type: "Receipt" },
-      { receipt_date: "2026-10-04", vch_no: "BANK-2", amount: 40000, vch_type: "Receipt" },
-      { receipt_date: "2026-10-05", vch_no: "BANK-3", amount: 2500, vch_type: "Receipt" },
+      { receipt_date: "2026-10-04", vch_no: "1880", amount: 40000, vch_type: "Receipt" },
     ],
   });
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.totals.agrees, true);
-  assert.equal(result.totals.issueCount, 0);
-  assert.equal(result.lead, null);
+  assert.equal(result.rows.find((row) => row.voucher === "RNFD/411").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "1880").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "1819").status, "tally_only");
+  assert.equal(result.rows.find((row) => row.voucher === "BANK-1").status, "sfa_only");
+  assert.equal(result.rows.find((row) => row.voucher === "1819").tallyCredit, 10000);
+  assert.equal(result.rows.find((row) => row.voucher === "BANK-1").sfaCredit, 10000);
 });
 
 test("a short receipt number does not take a sales voucher of a different amount", () => {
@@ -543,11 +539,12 @@ test("a short receipt number does not take a sales voucher of a different amount
     ],
   });
   const result = compareTallyStatement(tally, sfa);
-  assert.equal(result.totals.agrees, true);
   assert.equal(result.rows.find((row) => row.voucher === "RNFD/411").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "411").status, "tally_only");
+  assert.equal(result.rows.find((row) => row.voucher === "BANK-9").status, "sfa_only");
 });
 
-test("a second SFA copy of a matched receipt is not a new difference", () => {
+test("a second SFA voucher stays on its own line when the Tally number is different", () => {
   const tally = parseTallyStatementMatrix([
     HEADER,
     ["04-10-2026", "Alrajhi Bank", "Receipt", "1880", "", 40000],
@@ -566,9 +563,10 @@ test("a second SFA copy of a matched receipt is not a new difference", () => {
     ],
   });
   const result = compareTallyStatement(tally, sfa);
-  const vouchers = result.rows.filter((row) => row.status !== "matched").map((row) => row.voucher);
-  assert.deepEqual(vouchers, ["VAT-DG-JV/MAY/00001"]);
-  assert.equal(result.totals.difference, 252);
+  const vouchers = result.rows.filter((row) => row.status !== "matched").map((row) => row.voucher).sort();
+  assert.deepEqual(vouchers, ["1879", "1895", "DG-JV/MAY/00001", "VAT-DG-JV/MAY/00001"]);
+  assert.equal(result.rows.find((row) => row.voucher === "1880").status, "matched");
+  assert.equal(result.rows.find((row) => row.voucher === "JV/MAY/00001").status, "matched");
 });
 
 test("SI-101 in Tally matches voucher 101 in SFA", () => {
@@ -584,138 +582,4 @@ test("SI-101 in Tally matches voucher 101 in SFA", () => {
   const result = compareTallyStatement(tally, sfa);
   assert.equal(result.totals.agrees, true);
   assert.equal(result.rows[0].status, "matched");
-});
-
-test("customer 1009 statement difference matches Open Δ and keeps ledger-only lines aside", () => {
-  const row = (fields) => ({
-    id: fields.voucher || fields.particulars,
-    status: fields.status || "tally_only",
-    date: fields.date || "2026-10-01",
-    voucher: fields.voucher || "",
-    vchType: fields.vchType || "",
-    particulars: fields.particulars || "",
-    tallyDebit: fields.tallyDebit || 0,
-    tallyCredit: fields.tallyCredit || 0,
-    sfaDebit: fields.sfaDebit || 0,
-    sfaCredit: fields.sfaCredit || 0,
-    difference: (fields.tallyDebit || 0) - (fields.tallyCredit || 0) - ((fields.sfaDebit || 0) - (fields.sfaCredit || 0)),
-    leadsGap: false,
-  });
-  const rows = [
-    row({ voucher: "1358", status: "amount", tallyDebit: 2349, sfaDebit: 2349.45, date: "2025-10-08" }),
-    row({ voucher: "127", status: "sfa_only", sfaCredit: 2415, date: "2025-12-31" }),
-    row({ voucher: "2446", status: "sfa_only", sfaDebit: 2415, date: "2026-01-04" }),
-    row({ voucher: "", particulars: "Cr ROUND OFF", vchType: "Journal", tallyDebit: 1, date: "2026-02-10" }),
-    row({ voucher: "NFD/980", tallyDebit: 4485, date: "2026-06-11" }),
-    row({ voucher: "271", vchType: "Purchase", tallyCredit: 270, date: "2026-10-01" }),
-    row({ voucher: "", particulars: "Receipt", status: "sfa_only", sfaCredit: 1.28, date: "2026-10-09" }),
-    row({ voucher: "JV/Coll/2026/1108", vchType: "JV-Collection", tallyCredit: 1000, date: "2026-10-21" }),
-    row({ voucher: "RNFD/603", tallyDebit: 3220, date: "2026-10-22" }),
-  ];
-  const reconciled = reconcileStatementToOpenDelta({
-    rows,
-    totals: { tallyNet: 10829.28, sfaNet: 4392.45, difference: 6436.83 },
-  }, { machineOpen: 4392.45, tallyOpen: 8879.28 });
-
-  assert.equal(reconciled.reconciledToOpenDelta, true);
-  assert.equal(reconciled.totals.difference, -4486.83);
-  assert.deepEqual(
-    reconciled.bridgeRows.map((line) => line.voucher).sort(),
-    ["271", "JV/Coll/2026/1108", "RNFD/603"],
-  );
-  assert.equal(
-    reconciled.rows.some((line) => line.voucher === "NFD/980"),
-    true,
-  );
-  assert.equal(
-    Math.round(reconciled.rows.reduce((total, line) => total + line.difference, 0) * 100) / 100,
-    -4486.83,
-  );
-});
-
-test("statement difference uses the invoice Open Δ when the voucher lines do not", () => {
-  const aligned = alignStatementToInvoiceOpen({
-    rows: [
-      {
-        id: "rnfd",
-        status: "matched",
-        date: "2026-09-10",
-        voucher: "RNFD/411",
-        vchType: "Sales",
-        particulars: "Sales",
-        tallyDebit: 39926.85,
-        tallyCredit: 0,
-        sfaDebit: 39926.85,
-        sfaCredit: 0,
-        difference: 0,
-        leadsGap: false,
-      },
-      {
-        id: "rc",
-        status: "matched",
-        date: "2026-10-04",
-        voucher: "RC/124",
-        vchType: "Sales",
-        particulars: "Sales",
-        tallyDebit: 42197.13,
-        tallyCredit: 0,
-        sfaDebit: 42197.13,
-        sfaCredit: 0,
-        difference: 0,
-        leadsGap: false,
-      },
-      {
-        id: "119",
-        status: "amount",
-        date: "2025-12-31",
-        voucher: "119",
-        vchType: "Credit Note",
-        particulars: "Sales",
-        tallyDebit: 0,
-        tallyCredit: 10073,
-        sfaDebit: 0,
-        sfaCredit: 11753,
-        difference: 1680,
-        leadsGap: true,
-      },
-      {
-        id: "vat",
-        status: "sfa_only",
-        date: "2026-05-05",
-        voucher: "VAT-DG-JV/MAY/00001",
-        vchType: "Discount Given",
-        particulars: "Receipt",
-        tallyDebit: 0,
-        tallyCredit: 0,
-        sfaDebit: 0,
-        sfaCredit: 252,
-        difference: 252,
-        leadsGap: false,
-      },
-    ],
-    totals: { tallyNet: 33102.03, sfaNet: 31161.48, difference: 1940.55 },
-  }, [
-    {
-      invoice_date: "2026-09-10",
-      voucher_number: "RNFD/411",
-      amount_incl_vat: 39926.85,
-      outstanding_pending: 33102.03,
-      remaining: 0,
-    },
-    {
-      invoice_date: "2026-10-04",
-      voucher_number: "RC/124",
-      amount_incl_vat: 42197.13,
-      outstanding_pending: 0,
-      remaining: 1,
-    },
-  ], { machineOpen: 1, tallyOpen: 33102.03 });
-
-  assert.equal(aligned.reconciledToOpenDelta, false);
-  assert.equal(aligned.totals.difference, 0);
-  assert.deepEqual(aligned.rows.map((row) => [row.voucher, row.tallyDebit, row.sfaDebit, row.difference, row.status]), [
-    ["RNFD/411", 39926.85, 39926.85, 0, "matched"],
-    ["RC/124", 42197.13, 42197.13, 0, "matched"],
-  ]);
-  assert.deepEqual(aligned.bridgeRows.map((row) => row.voucher), ["119", "VAT-DG-JV/MAY/00001"]);
 });

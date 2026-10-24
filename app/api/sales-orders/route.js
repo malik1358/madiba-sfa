@@ -861,6 +861,7 @@ export async function POST(request) {
       const blockStatus = resolveOrderSubmissionBlockStatus({
         ...avgDays,
         override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
+        paymentType: requestedPaymentType,
       });
       if (blockStatus.blocked) {
         return NextResponse.json({

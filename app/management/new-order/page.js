@@ -65,7 +65,7 @@ import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber, formatSalesOrderNumberForDisplay } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
-import { blockedByAvgDaysMessage, resolveDisplayedOrderBlock, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
+import { blockedByAvgDaysMessage, cashOrderAllowedDespiteBlockMessage, isSalesOrderSubmissionBlocked, resolveDisplayedOrderBlock, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
@@ -1058,11 +1058,17 @@ export default function NewOrderPage() {
     }),
     [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
   );
+  const orderSubmissionBlocked = isSalesOrderSubmissionBlocked(orderBlockFromAnalytics, paymentType);
   const orderBlockedMessage = orderBlockFromAnalytics.blocked
-    ? blockedByAvgDaysMessage({
-      threshold: orderBlockFromAnalytics.threshold,
-      avgDaysToPay: orderBlockFromAnalytics.avgDaysToPay,
-    })
+    ? (orderSubmissionBlocked
+      ? blockedByAvgDaysMessage({
+        threshold: orderBlockFromAnalytics.threshold,
+        avgDaysToPay: orderBlockFromAnalytics.avgDaysToPay,
+      })
+      : cashOrderAllowedDespiteBlockMessage({
+        threshold: orderBlockFromAnalytics.threshold,
+        avgDaysToPay: orderBlockFromAnalytics.avgDaysToPay,
+      }))
     : "";
 
   const buildOrderSnapshot = useCallback(
@@ -2271,7 +2277,7 @@ export default function NewOrderPage() {
                       <button
                         type="button"
                         onClick={handleSubmitOrder}
-                        disabled={savingOrder || submittingOrder || downloadingPdf || orderBlockFromAnalytics.blocked}
+                        disabled={savingOrder || submittingOrder || downloadingPdf || orderSubmissionBlocked}
                       >
                         {submittingOrder ? "Submitting..." : "Submit Order"}
                       </button>
@@ -2284,7 +2290,7 @@ export default function NewOrderPage() {
                     style={{
                       marginTop: "10px",
                       fontWeight: 700,
-                      color: (creditApproval.required || orderBlockFromAnalytics.blocked) ? "#9b1c1c" : undefined,
+                      color: (creditApproval.required || orderSubmissionBlocked) ? "#9b1c1c" : undefined,
                     }}
                   >
                     {creditApproval.remark}

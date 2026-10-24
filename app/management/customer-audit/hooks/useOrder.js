@@ -23,7 +23,7 @@ import { priceOrderLines } from '../../../lib/orderPricing';
 import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
 import { friendlyErrorMessage } from '../../../lib/abortError';
-import { blockedByAvgDaysMessage } from '../../../lib/customerOrderBlock';
+import { blockedByAvgDaysMessage, isSalesOrderSubmissionBlocked } from '../../../lib/customerOrderBlock';
 import {
   assertLocalOrderQuantityControls,
   recordConfirmedOrderQuantityUsage,
@@ -568,7 +568,7 @@ export function useOrder({
     setMessage('');
 
     try {
-      if (orderBlock?.blocked) {
+      if (isSalesOrderSubmissionBlocked(orderBlock, paymentType)) {
         throw new Error(blockedByAvgDaysMessage({
           threshold: orderBlock.threshold,
           avgDaysToPay: orderBlock.avgDaysToPay,

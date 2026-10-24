@@ -53,17 +53,35 @@ export function resolveOrderBlockStatus({
   };
 }
 
+export function isCashOrderPaymentType(paymentType) {
+  return String(paymentType || "").trim().toLowerCase() === "cash";
+}
+
+/** Customer stays blocked for credit. A cash order is allowed without an admin override. */
+export function isSalesOrderSubmissionBlocked(blockStatus, paymentType = "credit") {
+  if (!blockStatus?.blocked) return false;
+  return !isCashOrderPaymentType(paymentType);
+}
+
 export function resolveOrderSubmissionBlockStatus({
   avgDaysToPay,
   avgDaysToPay6m = null,
   override = null,
+  paymentType = "credit",
 } = {}) {
-  return resolveOrderBlockStatus({
+  const status = resolveOrderBlockStatus({
     avgDaysToPay,
     avgDaysToPay6m,
     override,
     threshold: ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   });
+  const cashOrder = isCashOrderPaymentType(paymentType);
+  return {
+    ...status,
+    paymentType: cashOrder ? "cash" : "credit",
+    cashOrderAllowed: cashOrder && status.blocked,
+    blocked: status.blocked && !cashOrder,
+  };
 }
 
 export function orderBlockOverrideFromPayload(payload) {
@@ -103,13 +121,27 @@ export function resolveDisplayedOrderBlock({
   };
 }
 
-export function blockedByAvgDaysMessage({
+function avgDaysBlockClause({
   threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   avgDaysToPay = null,
 } = {}) {
   const avg = toNumber(avgDaysToPay);
-  if (avg == null) {
-    return `Sales order is blocked because this customer average days to pay reached ${threshold}.`;
-  }
-  return `Sales order is blocked because this customer average days to pay is ${Math.round(avg)} (threshold ${threshold}).`;
+  if (avg == null) return `reached ${threshold}`;
+  return `is ${Math.round(avg)} (threshold ${threshold})`;
+}
+
+export function blockedByAvgDaysMessage({
+  threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
+  avgDaysToPay = null,
+} = {}) {
+  const clause = avgDaysBlockClause({ threshold, avgDaysToPay });
+  return `Sales order is blocked because this customer average days to pay ${clause}. Cash orders are still allowed.`;
+}
+
+export function cashOrderAllowedDespiteBlockMessage({
+  threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
+  avgDaysToPay = null,
+} = {}) {
+  const clause = avgDaysBlockClause({ threshold, avgDaysToPay });
+  return `Cash order is allowed. Credit orders stay blocked because this customer average days to pay ${clause}.`;
 }

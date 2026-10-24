@@ -853,6 +853,10 @@ function receiptVoucherKey(value) {
 
 // DG-JV/MAY/00001 and JV/MAY/00001 are the same 1,680. Keep the DG- receipt.
 // VAT-DG- stays, because 252 is not the same amount.
+export function omitPlainDiscountReceiptCopies(receipts = []) {
+  return dropPlainCopyOfDiscountReceipt(receipts);
+}
+
 function dropPlainCopyOfDiscountReceipt(receipts) {
   const discountCopies = new Set();
   receipts.forEach((row) => {

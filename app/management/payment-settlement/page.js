@@ -28,7 +28,7 @@ import {
   parseTallyStatementWorkbook,
   TALLY_STATEMENT_TOLERANCE,
 } from "../../lib/tallyStatementCompare.js";
-import { groupStatementRowsByDate } from "../../lib/statementDateGroups.js";
+import { groupStatementRowsByDate, statementDayDifference } from "../../lib/statementDateGroups.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -1012,9 +1012,12 @@ export default function PaymentSettlementPage() {
                         <tbody>
                           {statementDateGroups.map((group) => {
                             const open = Boolean(expandedStatementDates[group.date || ""]);
-                            const diffClass = group.leadsGap
-                              ? "moduleBiMonthCell--current"
-                              : (Math.abs(group.difference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up");
+                            const dayDifference = statementDayDifference(group.difference);
+                            const diffClass = dayDifference == null
+                              ? ""
+                              : group.leadsGap
+                                ? "moduleBiMonthCell--current"
+                                : (Math.abs(dayDifference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up");
                             return (
                               <Fragment key={group.date || "none"}>
                                 <tr className={group.leadsGap ? "paymentSettleStatementLead" : undefined}>
@@ -1041,7 +1044,7 @@ export default function PaymentSettlementPage() {
                                   <td>{formatMoney(group.tallyCredit)}</td>
                                   <td>{formatMoney(group.sfaDebit)}</td>
                                   <td>{formatMoney(group.sfaCredit)}</td>
-                                  <td className={`moduleBiTotalCol ${diffClass}`}>{formatMoney(group.difference)}</td>
+                                  <td className={diffClass ? `moduleBiTotalCol ${diffClass}` : "moduleBiTotalCol"}>{dayDifference == null ? "" : formatMoney(dayDifference)}</td>
                                   <td>
                                     {group.issueCount
                                       ? `${formatCount(group.issueCount)} ${t("statementIssues")}`

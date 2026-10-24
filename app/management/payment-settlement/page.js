@@ -28,7 +28,7 @@ import {
   parseTallyStatementWorkbook,
   TALLY_STATEMENT_TOLERANCE,
 } from "../../lib/tallyStatementCompare.js";
-import { groupStatementRowsByDate, statementDayDifference } from "../../lib/statementDateGroups.js";
+import { groupStatementRowsByDate, statementDatesWithDifference, statementDayDifference } from "../../lib/statementDateGroups.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -57,8 +57,8 @@ const TEXT = {
   noMatch: { en: "No customer found.", ar: "لم يتم العثور على العميل." },
   statementTitle: { en: "Tally statement check", ar: "مطابقة كشف تالي" },
   statementHint: {
-    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). Lines are grouped by date. Use + to open a date and check each voucher. A line matches when the voucher number and its debit or credit agree.",
-    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). السطور مجمّعة حسب التاريخ. استخدم + لفتح التاريخ ومراجعة كل قسيمة. يطابق السطر عندما يتفق رقم القسيمة ومبلغ المدين أو الدائن.",
+    en: "Upload this customer's Tally ledger (PDF, Excel, or CSV). Lines are grouped by date. A date whose difference is zero is left out. Use + to open a date and check each voucher. A line matches when the voucher number and its debit or credit agree.",
+    ar: "ارفع دفتر هذا العميل من تالي (PDF أو إكسل أو CSV). السطور مجمّعة حسب التاريخ. التاريخ الذي فرقُه صفر لا يظهر. استخدم + لفتح التاريخ ومراجعة كل قسيمة. يطابق السطر عندما يتفق رقم القسيمة ومبلغ المدين أو الدائن.",
   },
   statementPendingHint: {
     en: "These are Tally bill amounts. Each one is compared with the SFA sales amount for the same voucher.",
@@ -626,7 +626,7 @@ export default function PaymentSettlementPage() {
   } = useBiExcelFilters(statementRows, STATEMENT_FILTER_KEYS, statementValueOf);
 
   const statementDateGroups = useMemo(
-    () => groupStatementRowsByDate(visibleStatementRows),
+    () => statementDatesWithDifference(groupStatementRowsByDate(visibleStatementRows)),
     [visibleStatementRows],
   );
 
@@ -1013,11 +1013,9 @@ export default function PaymentSettlementPage() {
                           {statementDateGroups.map((group) => {
                             const open = Boolean(expandedStatementDates[group.date || ""]);
                             const dayDifference = statementDayDifference(group.difference);
-                            const diffClass = dayDifference == null
-                              ? ""
-                              : group.leadsGap
-                                ? "moduleBiMonthCell--current"
-                                : (Math.abs(dayDifference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up");
+                            const diffClass = group.leadsGap
+                              ? "moduleBiMonthCell--current"
+                              : (Math.abs(dayDifference) > TALLY_STATEMENT_TOLERANCE ? "moduleBiMonthCell--down" : "moduleBiMonthCell--up");
                             return (
                               <Fragment key={group.date || "none"}>
                                 <tr className={group.leadsGap ? "paymentSettleStatementLead" : undefined}>
@@ -1044,7 +1042,7 @@ export default function PaymentSettlementPage() {
                                   <td>{formatMoney(group.tallyCredit)}</td>
                                   <td>{formatMoney(group.sfaDebit)}</td>
                                   <td>{formatMoney(group.sfaCredit)}</td>
-                                  <td className={diffClass ? `moduleBiTotalCol ${diffClass}` : "moduleBiTotalCol"}>{dayDifference == null ? "" : formatMoney(dayDifference)}</td>
+                                  <td className={`moduleBiTotalCol ${diffClass}`}>{formatMoney(dayDifference)}</td>
                                   <td>
                                     {group.issueCount
                                       ? `${formatCount(group.issueCount)} ${t("statementIssues")}`
@@ -1073,7 +1071,7 @@ export default function PaymentSettlementPage() {
                               </Fragment>
                             );
                           })}
-                          {!visibleStatementRows.length && (
+                          {!statementDateGroups.length && (
                             <tr>
                               <td colSpan={10}>{t("statementAgree")}</td>
                             </tr>
@@ -1082,11 +1080,11 @@ export default function PaymentSettlementPage() {
                         <tfoot>
                           <tr>
                             <td colSpan={4}><strong>{t("statementTotal")}</strong></td>
-                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.tallyDebit, 0))}</strong></td>
-                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.tallyCredit, 0))}</strong></td>
-                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaDebit, 0))}</strong></td>
-                            <td><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.sfaCredit, 0))}</strong></td>
-                            <td className="moduleBiTotalCol"><strong>{formatMoney(visibleStatementRows.reduce((total, row) => total + row.difference, 0))}</strong></td>
+                            <td><strong>{formatMoney(statementDateGroups.reduce((total, group) => total + group.tallyDebit, 0))}</strong></td>
+                            <td><strong>{formatMoney(statementDateGroups.reduce((total, group) => total + group.tallyCredit, 0))}</strong></td>
+                            <td><strong>{formatMoney(statementDateGroups.reduce((total, group) => total + group.sfaDebit, 0))}</strong></td>
+                            <td><strong>{formatMoney(statementDateGroups.reduce((total, group) => total + group.sfaCredit, 0))}</strong></td>
+                            <td className="moduleBiTotalCol"><strong>{formatMoney(statementDateGroups.reduce((total, group) => total + group.difference, 0))}</strong></td>
                             <td />
                           </tr>
                         </tfoot>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupStatementRowsByDate, statementDayDifference } from "../app/lib/statementDateGroups.js";
+import { groupStatementRowsByDate, statementDatesWithDifference, statementDayDifference } from "../app/lib/statementDateGroups.js";
 
 test("statement lines on the same date stay one group until opened", () => {
   const groups = groupStatementRowsByDate([
@@ -19,15 +19,16 @@ test("statement lines on the same date stay one group until opened", () => {
   assert.equal(groups[1].leadsGap, true);
 });
 
-test("a day total that rounds to zero is not shown", () => {
-  const groups = groupStatementRowsByDate([
-    { date: "2026-02-07", status: "amount", difference: 0.5, tallyDebit: 0, tallyCredit: 0, sfaDebit: 0, sfaCredit: 0 },
-    { date: "2026-02-07", status: "amount", difference: -0.504, tallyDebit: 0, tallyCredit: 0, sfaDebit: 0, sfaCredit: 0 },
-  ]);
-  assert.equal(groups[0].difference, 0);
-  assert.equal(statementDayDifference(groups[0].difference), null);
+test("a date whose difference is zero is left out of the table", () => {
+  const groups = statementDatesWithDifference(groupStatementRowsByDate([
+    { date: "2026-02-07", status: "amount", difference: 0.01, tallyDebit: 0, tallyCredit: 0, sfaDebit: 0, sfaCredit: 0 },
+    { date: "2026-02-08", status: "amount", difference: 0.5, tallyDebit: 10, tallyCredit: 0, sfaDebit: 0, sfaCredit: 0 },
+    { date: "2026-02-08", status: "amount", difference: -0.504, tallyDebit: 0, tallyCredit: 10, sfaDebit: 0, sfaCredit: 0 },
+    { date: "2026-02-09", status: "amount", difference: -1.5, tallyDebit: 0, tallyCredit: 0, sfaDebit: 0, sfaCredit: 0 },
+  ]));
+  assert.deepEqual(groups.map((group) => group.date), ["2026-02-07", "2026-02-09"]);
   assert.equal(statementDayDifference(-0.004), null);
   assert.equal(statementDayDifference(-0), null);
   assert.equal(statementDayDifference(-1.5), -1.5);
-  assert.equal(statementDayDifference(-0.01), -0.01);
+  assert.equal(statementDayDifference(0.01), 0.01);
 });

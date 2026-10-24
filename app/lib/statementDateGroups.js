@@ -9,10 +9,15 @@ function roundHalalas(value) {
   return rounded === 0 ? 0 : rounded;
 }
 
-/** Day difference to show. A total that rounds to zero, including −0, stays hidden. */
+/** Day difference to show. A total that rounds to zero, including −0, is omitted. */
 export function statementDayDifference(value) {
   const rounded = roundHalalas(value);
   return rounded === 0 ? null : rounded;
+}
+
+/** Date rows whose differences add up to zero are left out of the statement table. */
+export function statementDatesWithDifference(groups) {
+  return (Array.isArray(groups) ? groups : []).filter((group) => statementDayDifference(group.difference) != null);
 }
 
 export function groupStatementRowsByDate(rows) {

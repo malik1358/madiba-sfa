@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   ORDER_BLOCK_AVG_DAYS_THRESHOLD,
   blockedByAvgDaysMessage,
+  cashOrderAllowedDespiteBlockMessage,
+  isSalesOrderSubmissionBlocked,
   parseOrderBlockOverride,
   resolveDisplayedOrderBlock,
   resolveOrderBlockStatus,
@@ -74,4 +76,36 @@ test("screen block uses the average already loaded and the override from the API
 test("blocked message includes rounded average", () => {
   const message = blockedByAvgDaysMessage({ avgDaysToPay: 120.4, threshold: 120 });
   assert.match(message, /120/);
+  assert.match(message, /Cash orders are still allowed/);
+});
+
+test("cash orders are allowed when the customer is over the avg-days threshold", () => {
+  const credit = resolveOrderSubmissionBlockStatus({
+    avgDaysToPay: 140,
+    paymentType: "credit",
+  });
+  const cash = resolveOrderSubmissionBlockStatus({
+    avgDaysToPay: 140,
+    paymentType: " Cash ",
+  });
+  const customer = resolveOrderBlockStatus({ avgDaysToPay: 140 });
+
+  assert.equal(credit.blocked, true);
+  assert.equal(cash.blocked, false);
+  assert.equal(cash.cashOrderAllowed, true);
+  assert.equal(customer.blocked, true);
+  assert.equal(isSalesOrderSubmissionBlocked(customer, "cash"), false);
+  assert.equal(isSalesOrderSubmissionBlocked(customer, "credit"), true);
+  assert.equal(isSalesOrderSubmissionBlocked(customer, ""), true);
+  assert.match(cashOrderAllowedDespiteBlockMessage({ avgDaysToPay: 140.2, threshold: 120 }), /Cash order is allowed/);
+});
+
+test("admin override still allows a credit order", () => {
+  const status = resolveOrderSubmissionBlockStatus({
+    avgDaysToPay: 150,
+    override: { isUnblocked: true },
+    paymentType: "credit",
+  });
+  assert.equal(status.blocked, false);
+  assert.equal(status.cashOrderAllowed, false);
 });

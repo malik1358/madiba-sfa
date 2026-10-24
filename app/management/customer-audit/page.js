@@ -60,7 +60,7 @@ import { buildOrderCatalog } from "./lib/orderHelpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import { isAdminRole } from "../../lib/moduleAccess.js";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient.js";
-import { resolveDisplayedOrderBlock } from "../../lib/customerOrderBlock.js";
+import { blockedByAvgDaysMessage, cashOrderAllowedDespiteBlockMessage, isSalesOrderSubmissionBlocked, resolveDisplayedOrderBlock } from "../../lib/customerOrderBlock.js";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -801,6 +801,26 @@ function CustomerAuditPageContent() {
               </select>
             </label>
           </div>
+          {displayedOrderBlock?.blocked ? (
+            <div
+              className="moduleHint"
+              style={{
+                marginTop: "10px",
+                fontWeight: 700,
+                color: isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType) ? "#9b1c1c" : undefined,
+              }}
+            >
+              {isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType)
+                ? blockedByAvgDaysMessage({
+                  threshold: displayedOrderBlock.threshold,
+                  avgDaysToPay: displayedOrderBlock.avgDaysToPay,
+                })
+                : cashOrderAllowedDespiteBlockMessage({
+                  threshold: displayedOrderBlock.threshold,
+                  avgDaysToPay: displayedOrderBlock.avgDaysToPay,
+                })}
+            </div>
+          ) : null}
         </section>
 
         {analytics ? (

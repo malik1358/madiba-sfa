@@ -2,6 +2,19 @@ function sumStatementField(rows, key) {
   return rows.reduce((total, row) => total + Number(row[key] || 0), 0);
 }
 
+function roundHalalas(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  const rounded = Math.round(number * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
+}
+
+/** Day difference to show. A total that rounds to zero, including −0, stays hidden. */
+export function statementDayDifference(value) {
+  const rounded = roundHalalas(value);
+  return rounded === 0 ? null : rounded;
+}
+
 export function groupStatementRowsByDate(rows) {
   const groups = [];
   const byDate = new Map();
@@ -22,7 +35,7 @@ export function groupStatementRowsByDate(rows) {
     tallyCredit: sumStatementField(group.rows, "tallyCredit"),
     sfaDebit: sumStatementField(group.rows, "sfaDebit"),
     sfaCredit: sumStatementField(group.rows, "sfaCredit"),
-    difference: sumStatementField(group.rows, "difference"),
+    difference: roundHalalas(sumStatementField(group.rows, "difference")),
     issueCount: group.rows.filter((row) => row.status !== "matched").length,
     leadsGap: group.rows.some((row) => row.leadsGap),
   }));

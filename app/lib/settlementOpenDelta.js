@@ -19,15 +19,27 @@ function roundMoney(value) {
 }
 
 /**
- * When Tally still shows the bill, Open Δ is the sales amount minus that bill.
- * A one-fil gap still counts as that bill. A larger gap is the unpaid remainder,
- * so Open Δ is Machine Open minus Tally Open — including a paid invoice whose
- * Tally balance is only slightly under the sales amount.
+ * Open Δ on the invoice table is Machine Open minus Tally Open.
+ * A paid invoice whose Tally bill is one fil off the sales amount still
+ * shows the full open gap (machine 0 minus that bill), not the one fil.
  * A Tally amount of 0 is a listed bill with nothing pending, so Machine Open still counts.
+ */
+export function settlementTransactionDelta(invoice) {
+  if (invoice?.outstanding_pending == null) return null;
+  const tally = Number(invoice.outstanding_pending || 0);
+  if (!Number.isFinite(tally)) return null;
+  const machine = Number(invoice.remaining || 0);
+  if (!Number.isFinite(machine)) return null;
+  return roundMoney(machine - tally);
+}
+
+/**
+ * Outstanding Compare keeps the sales-versus-bill gap. A one-fil difference
+ * still counts as that bill. A larger gap is Machine Open minus Tally Open.
  */
 const BILL_AMOUNT_SPAN = 0.01;
 
-export function settlementTransactionDelta(invoice) {
+export function settlementSalesBillDelta(invoice) {
   if (invoice?.outstanding_pending == null) return null;
   const tally = Number(invoice.outstanding_pending || 0);
   if (!Number.isFinite(tally)) return null;

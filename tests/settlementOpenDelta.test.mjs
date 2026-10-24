@@ -19,12 +19,12 @@ test("a real fil or more still shows", () => {
   assert.equal(isSettlementOpenDeltaDust(-0.01), false);
 });
 
-test("Open Δ compares the sales amount with the Tally bill", () => {
+test("Open Δ is Machine Open minus Tally Open", () => {
   assert.equal(settlementTransactionDelta({
     amount_incl_vat: 20024.32,
     outstanding_pending: 20024.33,
     remaining: 0,
-  }), -0.01);
+  }), -20024.33);
   assert.equal(settlementTransactionDelta({
     amount_incl_vat: 24150,
     outstanding_pending: 24149.19,
@@ -34,12 +34,12 @@ test("Open Δ compares the sales amount with the Tally bill", () => {
     amount_incl_vat: 4600,
     outstanding_pending: 4600,
     remaining: 0,
-  }), 0);
+  }), -4600);
   assert.equal(settlementTransactionDelta({
     amount_incl_vat: 64975,
     outstanding_pending: 64975,
     remaining: 20599.33,
-  }), 0);
+  }), -44375.67);
   assert.equal(settlementTransactionDelta({
     amount_incl_vat: 55200,
     outstanding_pending: 0,

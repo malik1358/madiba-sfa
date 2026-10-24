@@ -28,7 +28,7 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 
 Constants in `app/lib/workdayActivity.js`:
 
-- Inactivity warning: 45 minutes without a transaction entry (`INACTIVITY_MS`).
+- Inactivity warning: 45 minutes without a transaction entry (`INACTIVITY_MS`). The on-screen “No activity recorded” dialog (`WorkdayInactivityPrompt`) is shown only for the `salesman` role, after morning attendance is complete, and only on screens whose attendance gate requires morning attendance. Collectors (including a salesman code matching `CL` plus digits), managers, invoice makers, product promoters, and admin-equivalent roles do not see it. Inactivity email and the Android lock-screen alert are unchanged.
 - Inactivity email: 100 minutes (`INACTIVITY_EMAIL_MS`). This was lengthened from 70 (earlier from 40). Do not set it back without an explicit request.
 - Inactivity push repeat: 15 minutes. Login reminder hour: 11:00 KSA, then every 30 minutes until login.
 - Lunch reminder: 3 hours after lunch out, and a noon punch reminder at 12:00 KSA.

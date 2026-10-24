@@ -21,6 +21,7 @@ import {
   shouldRequireTransactionGps,
   shouldRequireGpsAccessGate,
   shouldEnableBackgroundGps,
+  shouldShowWorkdayInactivityDialog,
 } from "../app/lib/moduleAccess.js";
 
 test("collector-only users only see collection modules", () => {
@@ -36,6 +37,15 @@ test("collector-only users only see collection modules", () => {
   assert.equal(access.canAccess("mySalesInvoices"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
+});
+
+test("the no-activity dialog is limited to field salesmen", () => {
+  assert.equal(shouldShowWorkdayInactivityDialog("salesman"), true);
+  assert.equal(shouldShowWorkdayInactivityDialog("Salesman"), true);
+  assert.equal(shouldShowWorkdayInactivityDialog("salesman", { collectionOnly: true }), false);
+  for (const role of ["admin", "report-user", "report_user", "manager", "collector", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", ""]) {
+    assert.equal(shouldShowWorkdayInactivityDialog(role), false, role || "(blank)");
+  }
 });
 
 test("salesmen see field modules and payment collections", () => {

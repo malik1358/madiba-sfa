@@ -185,6 +185,15 @@ export function isProductPromoterRole(role) {
   return normalized === "product-promoter";
 }
 
+export function isSalesmanRole(role) {
+  return normalizeAccessRole(role) === "salesman";
+}
+
+/** On-screen "No activity recorded" dialog. Field salesmen only. */
+export function shouldShowWorkdayInactivityDialog(role, { collectionOnly = false } = {}) {
+  return isSalesmanRole(role) && !collectionOnly;
+}
+
 export function isCollectionOnlyAccess({ role, salesmanCode, collectionOnlyMetadata = false }) {
   const normalizedRole = normalizeAccessRole(role);
   return Boolean(collectionOnlyMetadata)

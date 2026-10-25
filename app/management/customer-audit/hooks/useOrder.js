@@ -366,6 +366,13 @@ export function useOrder({
     setMessage('');
 
     try {
+      if (isSalesOrderSubmissionBlocked(orderBlock, paymentType)) {
+        throw new Error(blockedByAvgDaysMessage({
+          threshold: orderBlock.threshold,
+          avgDaysToPay: orderBlock.avgDaysToPay,
+        }));
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
@@ -539,7 +546,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (submitInFlight.current) return null;

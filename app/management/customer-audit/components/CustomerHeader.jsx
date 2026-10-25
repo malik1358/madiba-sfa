@@ -114,7 +114,11 @@ export default function CustomerHeader({
             {orderBlock?.blocked ? "Blocked" : "Allowed"}
           </strong>
           {orderBlock?.isAdminUnblocked ? (
-            <em className="auditSummaryCardMeta">Unblocked by admin override</em>
+            <em className="auditSummaryCardMeta">
+              Unblocked by admin for today (KSA)
+              {orderBlock?.unblockedOnKsaDate ? ` · ${orderBlock.unblockedOnKsaDate}` : ""}
+              . Block returns next day.
+            </em>
           ) : null}
           {blockMessage ? (
             <em className="auditSummaryCardMeta">{blockMessage}</em>
@@ -126,11 +130,11 @@ export default function CustomerHeader({
               style={{ marginTop: "8px", alignSelf: "flex-start" }}
               onClick={onToggleOrderBlock}
               disabled={updatingOrderBlock || !orderBlock?.isOverThreshold}
-              title={!orderBlock?.isOverThreshold ? "Average below threshold; unblock override is not needed." : ""}
+              title={!orderBlock?.isOverThreshold ? "Average below threshold; unblock override is not needed." : "Unblock lasts for the current KSA day only."}
             >
               {updatingOrderBlock
                 ? "Saving..."
-                : (orderBlock?.isAdminUnblocked ? "Re-enable block rule" : "Unblock for orders")}
+                : (orderBlock?.isAdminUnblocked ? "Re-enable block rule" : "Unblock for today")}
             </button>
           ) : null}
         </div>

@@ -2271,7 +2271,7 @@ export default function NewOrderPage() {
                       <strong>{formatMoneyAmount(orderTotals.amountInclVat)}</strong>
                     </div>
                     <div className="moduleOrderActions">
-                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf || orderSubmissionBlocked}>
                         {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
                       </button>
                       <button

@@ -1,7 +1,22 @@
 import { qtyFormat } from '../lib/format';
 import { calculateGrandTotal } from '../lib/orderHelpers';
 
-export default function OrderReview({ showOrderReview, orderItems, orderSummary, priceList, savingOrder, submittingOrder, saveDraft, submitOrder, setShowOrderReview, draftOrderId, decreaseOrderQty, increaseOrderQty, changeOrderQty }) {
+export default function OrderReview({
+  showOrderReview,
+  orderItems,
+  orderSummary,
+  priceList,
+  savingOrder,
+  submittingOrder,
+  saveDraft,
+  submitOrder,
+  setShowOrderReview,
+  draftOrderId,
+  decreaseOrderQty,
+  increaseOrderQty,
+  changeOrderQty,
+  orderWriteBlocked = false,
+}) {
   if (!showOrderReview || orderItems.length === 0) return null;
 
   return (
@@ -53,10 +68,10 @@ export default function OrderReview({ showOrderReview, orderItems, orderSummary,
         </div>
 
         <div className="auditOrderReviewActions">
-          <button type="button" className="auditSaveDraftButton" disabled={savingOrder || submittingOrder} onClick={saveDraft}>
+          <button type="button" className="auditSaveDraftButton" disabled={savingOrder || submittingOrder || orderWriteBlocked} onClick={saveDraft}>
             {savingOrder ? 'Saving...' : draftOrderId ? 'Update Draft' : 'Save Draft'}
           </button>
-          <button type="button" className="auditSubmitOrderButton" disabled={savingOrder || submittingOrder} onClick={submitOrder}>
+          <button type="button" className="auditSubmitOrderButton" disabled={savingOrder || submittingOrder || orderWriteBlocked} onClick={submitOrder}>
             {submittingOrder ? 'Submitting...' : 'Submit Final Order'}
           </button>
         </div>

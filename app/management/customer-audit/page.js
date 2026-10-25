@@ -387,7 +387,9 @@ function CustomerAuditPageContent() {
         throw new Error(payload.error || "Unable to update customer unblock override.");
       }
       setOrderBlock(payload);
-      setMessage(nextUnblocked ? "Customer unblocked for sales order by admin." : "Customer follows automatic block rule now.");
+      setMessage(nextUnblocked
+        ? "Customer unblocked for sales orders today (KSA). The block returns tomorrow."
+        : "Customer follows automatic block rule now.");
     } catch (err) {
       setError(err.message || "Unable to update customer unblock override.");
     } finally {
@@ -879,6 +881,7 @@ function CustomerAuditPageContent() {
               setShowOrderReview={setShowOrderReview}
               priceList={displayPriceList}
               draftOrderId={draftOrderId}
+              orderWriteBlocked={isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType)}
             />
 
             <OrderReview
@@ -895,6 +898,7 @@ function CustomerAuditPageContent() {
               decreaseOrderQty={decreaseQty}
               increaseOrderQty={increaseQty}
               changeOrderQty={updateQty}
+              orderWriteBlocked={isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType)}
             />
 
             {draftOrderId && (

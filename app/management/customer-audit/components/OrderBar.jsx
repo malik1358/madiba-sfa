@@ -1,6 +1,16 @@
 import { qtyFormat } from '../lib/format';
 
-export default function OrderBar({ orderItems, orderSummary, savingOrder, submittingOrder, saveDraft, setShowOrderReview, priceList, draftOrderId }) {
+export default function OrderBar({
+  orderItems,
+  orderSummary,
+  savingOrder,
+  submittingOrder,
+  saveDraft,
+  setShowOrderReview,
+  priceList,
+  draftOrderId,
+  orderWriteBlocked = false,
+}) {
   if (orderItems.length === 0) return null;
 
   const grandTotal = orderItems.reduce((sum, item) => sum + Number(priceList[String(item.item_code).trim().toUpperCase()] || 0) * Number(item.order_quantity), 0);
@@ -16,7 +26,7 @@ export default function OrderBar({ orderItems, orderSummary, savingOrder, submit
       </div>
 
       <div className="auditOrderBarActions">
-        <button type="button" className="auditDraftButton" disabled={savingOrder || submittingOrder} onClick={saveDraft}>
+        <button type="button" className="auditDraftButton" disabled={savingOrder || submittingOrder || orderWriteBlocked} onClick={saveDraft}>
           {savingOrder ? 'Saving...' : draftOrderId ? 'Update Draft' : 'Save Draft'}
         </button>
         <button type="button" className="auditViewOrderButton" onClick={() => setShowOrderReview(true)}>

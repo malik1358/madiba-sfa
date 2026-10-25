@@ -197,7 +197,7 @@ Schemes and quantity limits are settings, not tables:
 | `offline_data_version_v1` | Client cache busting |
 | `customer_meta:<code>` | Per-customer extra meta |
 | `tally_statement_v1:<code>` | Parsed Tally customer ledger lines for Payment Settlement. Shared by every user. The comparison is rebuilt from live SFA data; the PDF is not stored. |
-| `customer_order_block_override:<code>` | Admin override to allow orders when Avg Days to Pay auto-block is triggered |
+| `customer_order_block_override:<code>` | Admin same-day override to allow credit draft/submit when Avg Days to Pay auto-block is triggered. JSON includes `is_unblocked`, `unblocked_on_ksa_date` (KSA `YYYY-MM-DD`), `updated_at`, `updated_by`, optional `note`. Active only while `unblocked_on_ksa_date` equals today in Asia/Riyadh; next KSA day it is ignored. |
 | `customer_inactive_meta:<code>` | Inactive-with-outstanding flags |
 | `visit_report_latest:<code>` / `visit_report_history:<code>:` | Field visit reports |
 | `order_invoice_meta:<id>` | Invoice status and PDF metadata |

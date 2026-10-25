@@ -4,10 +4,12 @@ import { ensureCustomerVisibleToScope } from "../../lib/customerAccess.js";
 import { isAdminRole } from "../../lib/moduleAccess.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
+  buildOrderBlockOverrideSettingValue,
   normalizeOrderBlockCustomerCode,
   orderBlockOverrideKey,
   parseOrderBlockOverride,
 } from "../../lib/customerOrderBlock.js";
+import { getKsaDateString } from "../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -77,6 +79,8 @@ export async function GET(request) {
       customerCode,
       override,
       isAdminUnblocked: override.isUnblocked,
+      unblockedOnKsaDate: override.unblockedOnKsaDate || "",
+      expiresNextKsaDay: override.expiresNextKsaDay === true,
       canAdminOverride: isAdminRole(scope.role),
     });
   } catch (error) {
@@ -117,13 +121,13 @@ export async function POST(request) {
 
     const key = orderBlockOverrideKey(customerCode);
     if (isUnblocked) {
-      const value = {
-        customer_code: customerCode,
-        is_unblocked: true,
+      const value = buildOrderBlockOverrideSettingValue({
+        customerCode,
         note,
-        updated_at: new Date().toISOString(),
-        updated_by: user.id,
-      };
+        updatedBy: user.id,
+        updatedAt: new Date().toISOString(),
+        todayKsa: getKsaDateString(),
+      });
       const { error } = await admin
         .from("system_settings")
         .upsert(
@@ -145,6 +149,8 @@ export async function POST(request) {
       customerCode,
       override,
       isAdminUnblocked: override.isUnblocked,
+      unblockedOnKsaDate: override.unblockedOnKsaDate || "",
+      expiresNextKsaDay: override.expiresNextKsaDay === true,
       canAdminOverride: true,
     });
   } catch (error) {

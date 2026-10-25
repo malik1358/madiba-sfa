@@ -851,7 +851,7 @@ export async function POST(request) {
       .maybeSingle();
     if (blockOverrideError) throw blockOverrideError;
 
-    if (action === "submit") {
+    if (action === "submit" || action === "save_draft") {
       const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
         request,
         authHeader,

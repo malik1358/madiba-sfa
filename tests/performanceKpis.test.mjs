@@ -13,6 +13,7 @@ import {
   classifyBuyingCustomers,
   consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
+  isKpiCollectionReceipt,
   isOfficeSuppliesSale,
   isLocalItemSale,
   kpiStatus,
@@ -479,6 +480,56 @@ test("KPI collection counts the Tally customer receipt and skips bank and receiv
   assert.equal(details.rows[0].customerCode, "1084C");
 });
 
+test("a receipt dated the day before its invoice still counts as collection", () => {
+  const sales = [{
+    transaction_date: "2026-10-13",
+    voucher_number: "NFD/2010",
+    customer_code: "1648",
+    sales_amount: 7460.31,
+    quantity: 1,
+    rate: 7460.31,
+  }];
+  const rows = [{
+    receipt_date: "2026-10-12",
+    amount: 8580,
+    vch_no: "1955",
+    vch_type: "Receipt",
+    customer_code: "1648",
+    particulars: "1648 Nader Al Hayat Trading Establishment",
+    customer_name: "Nader Al Hayat Trading Establishment",
+  }];
+  const actuals = splitCollectionActualsByInvoice(sales, rows, {
+    fromDate: "2026-10-01",
+    toDate: "2026-10-31",
+    receiptRegister: true,
+  });
+  assert.equal(actuals.collection, 8580);
+  assert.equal(actuals.cashCollection, 0);
+
+  const details = buildKpiActualDetails({
+    kpiKey: "collection",
+    salesmanCode: "ASRAR AHMED",
+    collectionSalesRows: sales,
+    collectionReceipts: rows,
+    receiptRegister: true,
+    fromDate: "2026-10-01",
+    toDate: "2026-10-31",
+  });
+  assert.equal(details.actual, 8580);
+  assert.equal(details.rows.length, 1);
+  assert.equal(details.rows[0].reference, "1955");
+});
+
+test("a receipt-register credit note is not a collection", () => {
+  assert.equal(isKpiCollectionReceipt({
+    customer_code: "1084C",
+    vch_type: "Credit Note",
+    particulars: "1084C Bandar",
+    customer_name: "Bandar",
+    amount: 15814.57,
+  }), false);
+});
+
 test("KPI detail contributions reconcile net sales, buyers, and per-customer FIFO", () => {
   const salesRows = [
     { transaction_date: "2026-09-01", voucher_number: "INV-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", sales_amount: 100 },
@@ -515,7 +566,7 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 5,
+    version: 6,
     receiptStamp: "stamp-1",
     salesAsOfDate: "2026-09-08",
     batchId: "42",

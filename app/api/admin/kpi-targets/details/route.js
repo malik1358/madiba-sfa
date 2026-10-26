@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess, normalizeAccessRole } from "../../../../lib/moduleAccess.js";
 import { PERFORMANCE_DISPLAY_KPI_KEYS, normalizeSalesmanCode } from "../../../../lib/performanceKpis.js";
 import { isKpiTargetProfile } from "../../../../lib/kpiTargetsTable.js";
+import { loadReceiptRowsByCustomer } from "../../../../lib/collectionAvgDays.js";
 import { loadPerformanceKpiActualDetails } from "../../../../lib/performanceKpisServer.js";
 import { resolveSalesScopeForUserId } from "../../../user/sales-scope/route.js";
 import { getKsaDateString } from "../../../../lib/workdayActivity.js";
@@ -67,8 +68,11 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "One or more salesmen are outside your KPI scope." }, { status: 403 });
     }
 
+    const receiptsByCustomer = kpiKey === "collection" || kpiKey === "cashCollection"
+      ? await loadReceiptRowsByCustomer(admin)
+      : null;
     const reports = await Promise.all(codes.map((salesmanCode) => (
-      loadPerformanceKpiActualDetails(admin, { salesmanCode, reportDate, kpiKey })
+      loadPerformanceKpiActualDetails(admin, { salesmanCode, reportDate, kpiKey, receiptsByCustomer })
     )));
     const rows = reports.flatMap((report) => report.rows);
     const actual = Math.round(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0) * 100) / 100;

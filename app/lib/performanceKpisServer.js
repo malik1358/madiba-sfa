@@ -32,7 +32,7 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 5;
+const PERFORMANCE_KPI_CACHE_VERSION = 6;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
@@ -560,12 +560,22 @@ export async function rebuildPerformanceKpiCache(admin, {
   return cache;
 }
 
-export async function loadPerformanceKpiActualDetails(admin, { salesmanCode, reportDate, kpiKey }) {
+export async function loadPerformanceKpiActualDetails(admin, {
+  salesmanCode,
+  reportDate,
+  kpiKey,
+  receiptsByCustomer = null,
+} = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) return { rows: [], actual: 0 };
   const { from, to } = monthWindow(reportDate);
   if (["collection", "cashCollection"].includes(kpiKey)) {
-    const collectionData = await loadCollectionActual(admin, { salesmanCode: code, reportDate, includeDetails: true });
+    const collectionData = await loadCollectionActual(admin, {
+      salesmanCode: code,
+      reportDate,
+      includeDetails: true,
+      receiptsByCustomer,
+    });
     return buildKpiActualDetails({
       kpiKey,
       salesmanCode: code,

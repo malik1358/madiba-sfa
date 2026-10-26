@@ -27,11 +27,12 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { getKsaDateString } from "../../lib/workdayActivity";
+import { formatKsaDateOnly, getKsaDateString } from "../../lib/workdayActivity";
 import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
+  lastTransactionDate: { en: "Last transaction date", ar: "آخر تاريخ معاملة" },
   subtitle: {
     en: "Ach. % is actual vs the full month target. Expected pace is that salesman's own average share of monthly sales by this date over the last 6 months, or working days if he has no history.",
     ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. المسار المتوقع هو متوسط حصة المندوب نفسه من مبيعات الشهر حتى هذا التاريخ خلال آخر 6 أشهر، أو أيام العمل إن لم يوجد تاريخ.",
@@ -141,6 +142,7 @@ export default function KpiTargetsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState([]);
+  const [lastTransactionDate, setLastTransactionDate] = useState("");
   const [selectedSalesmen, setSelectedSalesmen] = useState([]);
   const [selectedBosses, setSelectedBosses] = useState([]);
 
@@ -167,6 +169,12 @@ export default function KpiTargetsPage() {
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || "Unable to load KPI targets.");
       }
+      const salesAsOfDate = String(
+        payload.salesAsOfDate
+        || (payload.rows || []).find((row) => row?.salesAsOfDate)?.salesAsOfDate
+        || "",
+      ).slice(0, 10);
+      setLastTransactionDate(/^\d{4}-\d{2}-\d{2}$/.test(salesAsOfDate) ? salesAsOfDate : "");
       const people = (payload.rows || []).map(emptyDraft);
       const teams = (payload.teamTargets || []).map((team) => emptyDraft({
         salesmanCode: team.salesmanCode,
@@ -350,7 +358,14 @@ export default function KpiTargetsPage() {
           <div className="moduleHeader">
             <div>
               <p className="moduleEyebrow">MADIBA SFA</p>
-              <h1>{t("title")}</h1>
+              <h1 className="moduleKpiTargetsTitle">
+                <span>{t("title")}</span>
+                {!loading ? (
+                  <span className="moduleKpiLastTransaction">
+                    {t("lastTransactionDate")}: {formatKsaDateOnly(lastTransactionDate)}
+                  </span>
+                ) : null}
+              </h1>
               <p className="moduleSubtitle">{t("subtitle")}</p>
             </div>
             <div className="moduleHeaderMeta">

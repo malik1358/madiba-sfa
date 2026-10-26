@@ -3,6 +3,7 @@ import {
   buyingCustomerCodesFromSales,
   collectionAccountKey,
   isKpiCollectionReceipt,
+  unappliedCollectionReceipts,
   isOfficeSuppliesSale,
   isLocalItemSale,
   netKpiSalesAmount,
@@ -92,7 +93,7 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
     const { allocations } = matchPaymentsFifo(salesByCustomer.get(customerCode) || [], receipts, {
       receiptOnOrAfterInvoice: Boolean(receiptRegister),
     });
-    return allocations.flatMap((allocation) => {
+    const applied = allocations.flatMap((allocation) => {
       const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);
       if ((fromDate && receiptDate < fromDate) || (toDate && receiptDate > toDate)) return [];
       const isCash = isCashSalesVoucher(allocation?.voucher_number);
@@ -112,6 +113,18 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
         amount: Number(allocation.amount || 0),
       }];
     });
+    if (kpiKey !== "collection" || !receiptRegister) return applied;
+    const unapplied = unappliedCollectionReceipts(receipts, allocations, { fromDate, toDate }).map((row) => ({
+      ...detailBase({
+        ...row.row,
+        saved_at: row.date,
+        customer_code: row.row?.customer_code || customerCode,
+      }, salesmanCode),
+      reference: row.voucher,
+      description: "Collected, not applied to an earlier invoice",
+      amount: row.amount,
+    }));
+    return [...applied, ...unapplied];
   });
 }
 

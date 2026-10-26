@@ -122,6 +122,11 @@ test("admins, managers, invoice-makers, and collectors can open working hours at
   assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("workingHours"), true);
   assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("workingHours"), true);
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("workingHours"), false);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("monthlyAttendance"), true);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("monthlyAttendance"), true);
+  assert.equal(buildModuleAccess({ role: "product-promoter" }).canAccess("monthlyAttendance"), false);
+  assert.equal(localizedModuleLabel("monthlyAttendance", "en"), "Monthly Attendance");
+  assert.equal(localizedModuleLabel("monthlyAttendance", "ar"), "الحضور الشهري");
   assert.equal(localizedModuleLabel("workingHours", "en"), "Working Hours");
   assert.equal(localizedModuleLabel("workingHours", "ar"), "ساعات العمل");
   assert.equal(moduleLabelForPath("/management/working-hours", "en"), "Working Hours");
@@ -243,6 +248,7 @@ test("invoice makers can view every management report without setup access", () 
       "dailyVisitReport",
       "userActivity",
       "workingHours",
+      "monthlyAttendance",
       "outstandingNoGps",
       "potentialBadDebts",
       "legalTransfers",
@@ -307,6 +313,7 @@ test("salesman shortcut buttons include payment collections", () => {
     "customerAudit",
     "newOrder",
     "paymentCollections",
+    "monthlyAttendance",
   ]);
 });
 

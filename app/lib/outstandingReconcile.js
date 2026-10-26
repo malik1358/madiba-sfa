@@ -4,6 +4,8 @@ import { summarizeSalesCoverageGaps } from "./salesCoverage.js";
 export const OUTSTANDING_RECONCILE_KEY = "outstanding_reconcile_dataset_v1";
 /** A posted halala (0.01) is a real difference. Only float dust is hidden. */
 export const OUTSTANDING_RECONCILE_TOLERANCE = 0.005;
+/** Outstanding Compare can hide a customer gap at or under this absolute amount. */
+export const OUTSTANDING_COMPARE_IGNORE_SAR = 1;
 
 /**
  * True when the customer-level money gap is above tolerance.
@@ -13,6 +15,14 @@ export function hasOutstandingCompareMoneyDifference(row = {}, tolerance = OUTST
   const delta = row.open_delta ?? row.difference;
   if (delta == null || Number.isNaN(Number(delta))) return false;
   return Math.abs(Number(delta)) > tolerance;
+}
+
+/** A checked customer whose Difference is above dust and at most 1 SAR. */
+export function isOutstandingCompareSmallDifference(row = {}, maximumAbs = OUTSTANDING_COMPARE_IGNORE_SAR) {
+  const delta = row.open_delta ?? row.difference;
+  if (delta == null || Number.isNaN(Number(delta))) return false;
+  const amount = Math.abs(Number(delta));
+  return amount > OUTSTANDING_RECONCILE_TOLERANCE && amount <= maximumAbs;
 }
 
 /** Format open Δ for Outstanding Compare; values within tolerance display as "0". */

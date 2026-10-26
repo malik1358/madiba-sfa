@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  averageMonthlyAttendance,
   buildMonthlyAttendanceDayRow,
   buildMonthlyAttendanceReport,
   canOpenMonthlyAttendance,
@@ -110,6 +111,26 @@ test("login without customer stops is zero working hours", () => {
   assert.equal(countCustomerVisits([]), 0);
   assert.equal(sumCollectionAmount([]), 0);
   assert.equal(sumOrderAmount([]), 0);
+});
+
+test("average is the total divided by every listed day, including zeros", () => {
+  assert.deepEqual(averageMonthlyAttendance({
+    minutes: 130,
+    visits: 5,
+    collection: 100,
+    orders: 50,
+  }, 2), {
+    workingMinutes: 65,
+    customerVisits: 2.5,
+    collectionAmount: 50,
+    orderAmount: 25,
+  });
+  assert.deepEqual(averageMonthlyAttendance({ minutes: 10 }, 0), {
+    workingMinutes: 0,
+    customerVisits: 0,
+    collectionAmount: 0,
+    orderAmount: 0,
+  });
 });
 
 test("salesmen and collectors can open monthly attendance; promoters cannot", () => {

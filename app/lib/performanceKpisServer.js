@@ -569,7 +569,7 @@ export async function loadPerformanceKpiActualDetails(admin, {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) return { rows: [], actual: 0 };
   const { from, to } = monthWindow(reportDate);
-  if (["collection", "cashCollection"].includes(kpiKey)) {
+  if (["collection", "cashCollection", "totalCashCollected"].includes(kpiKey)) {
     const collectionData = await loadCollectionActual(admin, {
       salesmanCode: code,
       reportDate,

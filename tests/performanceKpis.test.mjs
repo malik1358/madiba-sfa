@@ -557,10 +557,19 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
     kpiKey: "cashCollection", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
     fromDate: "2026-09-01", toDate: "2026-09-30",
   });
+  const totalCash = buildKpiActualDetails({
+    kpiKey: "totalCashCollected", salesmanCode: "SM01", collectionSalesRows, collectionVisits,
+    fromDate: "2026-09-01", toDate: "2026-09-30",
+  });
   assert.equal(credit.actual, 115);
   assert.equal(cash.actual, 115);
+  assert.equal(totalCash.actual, 230);
   assert.deepEqual(credit.rows.map((row) => row.invoiceReference), ["NFD/200"]);
   assert.deepEqual(cash.rows.map((row) => row.invoiceReference), ["RC/100"]);
+  assert.deepEqual(
+    totalCash.rows.map((row) => row.invoiceReference).sort(),
+    ["NFD/200", "RC/100"],
+  );
 });
 
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
@@ -614,6 +623,8 @@ test("performance snapshots reuse source actuals cached for the active batch", a
   assert.equal(snapshot.actuals.totalSales, 20);
   assert.equal(snapshot.actuals.localItemSales, 3);
   assert.equal(snapshot.actuals.collection, 5);
+  assert.equal(snapshot.actuals.cashCollection, 2);
+  assert.equal(snapshot.actuals.totalCashCollected, 7);
   assert.equal(queriedTables.includes("active_sales"), false);
   assert.equal(queriedTables.includes("customers"), false);
   assert.equal(queriedTables.includes("collection_visits"), false);
@@ -663,7 +674,7 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 8);
+  assert.equal(snapshot.kpis.length, 9);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
   assert.equal(snapshot.kpis[1].label, "Local item sales");
   assert.equal(snapshot.kpis[2].label, "Others");
@@ -674,6 +685,10 @@ test("updated status explains when admin last saved targets", () => {
   assert.equal(cashCollection.actual, 0);
   assert.equal(cashCollection.target, 0);
   assert.equal(cashCollection.achievement, null);
+  const totalCashCollected = snapshot.kpis.find((kpi) => kpi.key === "totalCashCollected");
+  assert.equal(totalCashCollected.actual, 10);
+  assert.equal(totalCashCollected.target, 0);
+  assert.equal(totalCashCollected.achievement, null);
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);

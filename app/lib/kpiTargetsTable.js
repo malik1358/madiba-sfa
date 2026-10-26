@@ -150,6 +150,7 @@ export function rowTargetValue(row, key) {
       || Number(row?.totalSales || 0)
       || 0;
   }
+  if (key === "cashCollection" || key === "totalCashCollected") return 0;
   return Number(row?.[key] || 0) || 0;
 }
 

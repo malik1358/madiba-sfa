@@ -1,6 +1,8 @@
 import { isCashSalesVoucher, matchPaymentsFifo } from "./paymentBehavior.js";
 import {
   buyingCustomerCodesFromSales,
+  collectionAccountKey,
+  isKpiCollectionReceipt,
   isOfficeSuppliesSale,
   isLocalItemSale,
   netKpiSalesAmount,
@@ -50,47 +52,60 @@ function salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode) {
   });
 }
 
-function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, { fromDate, toDate, salesmanCode }) {
+function pushByAccount(map, code, row) {
+  const key = collectionAccountKey(code);
+  if (!key) return;
+  const rows = map.get(key) || [];
+  rows.push(row);
+  map.set(key, rows);
+}
+
+function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
+  fromDate,
+  toDate,
+  salesmanCode,
+  receiptRegister = false,
+  collectionReceipts = [],
+}) {
   if (kpiKey !== "collection" && kpiKey !== "cashCollection") return [];
-  const visitsByCustomer = new Map();
-  (collectionVisits || []).forEach((visit) => {
-    const customerCode = normalizeSalesmanCode(visit?.customer_code);
-    if (!customerCode) return;
-    const rows = visitsByCustomer.get(customerCode) || [];
-    rows.push(visit);
-    visitsByCustomer.set(customerCode, rows);
+  const sourceRows = receiptRegister
+    ? (collectionReceipts || []).filter(isKpiCollectionReceipt)
+    : (collectionVisits || []);
+  const rowsByCustomer = new Map();
+  sourceRows.forEach((row) => {
+    pushByAccount(rowsByCustomer, row?.customer_code, row);
   });
   const salesByCustomer = new Map();
   (salesRows || []).forEach((row) => {
-    const customerCode = normalizeSalesmanCode(row?.customer_code);
-    if (!customerCode) return;
-    const rows = salesByCustomer.get(customerCode) || [];
-    rows.push(row);
-    salesByCustomer.set(customerCode, rows);
+    pushByAccount(salesByCustomer, row?.customer_code, row);
   });
 
-  return [...visitsByCustomer.entries()].flatMap(([customerCode, customerVisits]) => {
-    const receipts = customerVisits.map((visit) => ({
-      receipt_date: String(visit?.saved_at || "").slice(0, 10),
-      amount: Number(visit?.amount_received || 0),
-      vch_no: String(visit?.id || ""),
-    }));
-    const visitById = new Map(customerVisits.map((visit) => [String(visit.id), visit]));
-    const { allocations } = matchPaymentsFifo(salesByCustomer.get(customerCode) || [], receipts);
+  return [...rowsByCustomer.entries()].flatMap(([customerCode, customerRows]) => {
+    const receipts = receiptRegister
+      ? customerRows
+      : customerRows.map((visit) => ({
+        receipt_date: String(visit?.saved_at || "").slice(0, 10),
+        amount: Number(visit?.amount_received || 0),
+        vch_no: String(visit?.id || ""),
+      }));
+    const visitById = new Map(customerRows.map((visit) => [String(visit.id || visit.vch_no || ""), visit]));
+    const { allocations } = matchPaymentsFifo(salesByCustomer.get(customerCode) || [], receipts, {
+      receiptOnOrAfterInvoice: Boolean(receiptRegister),
+    });
     return allocations.flatMap((allocation) => {
       const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);
       if ((fromDate && receiptDate < fromDate) || (toDate && receiptDate > toDate)) return [];
       const isCash = isCashSalesVoucher(allocation?.voucher_number);
       if (kpiKey === "collection" && isCash) return [];
       if (kpiKey === "cashCollection" && !isCash) return [];
-      const visit = visitById.get(String(allocation.vch_no)) || {};
+      const visit = visitById.get(String(allocation.vch_no)) || customerRows[0] || {};
       return [{
         ...detailBase({
           ...visit,
           saved_at: allocation.receipt_date,
-          customer_code: visit.customer_code,
+          customer_code: visit.customer_code || customerCode,
         }, salesmanCode),
-        reference: String(visit.id || allocation.vch_no || ""),
+        reference: String(visit.vch_no || visit.id || allocation.vch_no || ""),
         description: `Applied to ${allocation.voucher_number || "invoice"} (${allocation.invoice_date || ""})`,
         invoiceReference: String(allocation.voucher_number || ""),
         invoiceDate: String(allocation.invoice_date || ""),
@@ -106,12 +121,20 @@ export function buildKpiActualDetails({
   salesRows = [],
   priorCustomerCodes = [],
   collectionVisits = [],
+  collectionReceipts = [],
+  receiptRegister = false,
   collectionSalesRows = [],
   fromDate = "",
   toDate = "",
 } = {}) {
   const rows = ["collection", "cashCollection"].includes(kpiKey)
-    ? collectionRowsForKpi(kpiKey, collectionSalesRows, collectionVisits, { fromDate, toDate, salesmanCode })
+    ? collectionRowsForKpi(kpiKey, collectionSalesRows, collectionVisits, {
+      fromDate,
+      toDate,
+      salesmanCode,
+      receiptRegister,
+      collectionReceipts,
+    })
     : salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode);
   return {
     rows,

@@ -10,6 +10,8 @@ import {
   normalizeSalesmanCode,
   averageCumulativeDayShares,
   pickSalesmanPaceShares,
+  collectionAccountKey,
+  isKpiCollectionReceipt,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
 } from "./performanceKpis.js";
@@ -20,6 +22,8 @@ import {
 } from "./salesmanReportIdentity.js";
 import { isKpiTargetProfile } from "./kpiTargetsTable.js";
 import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
+import { RECEIPT_DATASET_STAMP_KEY } from "./receiptRegister.js";
+import { loadReceiptRowsByCustomer, lookupByCustomerCode } from "./collectionAvgDays.js";
 
 const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
@@ -28,7 +32,7 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 4;
+const PERFORMANCE_KPI_CACHE_VERSION = 5;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
@@ -221,11 +225,39 @@ export function paceSharesForSalesman(pace, salesmanCode) {
   return pickSalesmanPaceShares(pace, salesmanCode);
 }
 
-export async function loadCollectionActual(admin, { salesmanCode, reportDate, includeDetails = false }) {
+function receiptIdentity(row) {
+  return [
+    String(row?.receipt_date || "").slice(0, 10),
+    String(row?.vch_type || "").trim().toUpperCase(),
+    String(row?.vch_no || "").trim().toUpperCase(),
+    String(row?.customer_code || "").trim().toUpperCase(),
+    Number(row?.amount || 0).toFixed(2),
+  ].join("|");
+}
+
+export async function readReceiptRegisterStamp(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", RECEIPT_DATASET_STAMP_KEY)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) return "";
+    throw error;
+  }
+  return String(data?.setting_value || "").trim();
+}
+
+export async function loadCollectionActual(admin, {
+  salesmanCode,
+  reportDate,
+  includeDetails = false,
+  receiptsByCustomer = null,
+} = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) return { collection: 0, cashCollection: 0 };
 
-  const { from, to, endIso } = monthWindow(reportDate);
+  const { from, to } = monthWindow(reportDate);
   const customers = await fetchPagedRows(
     admin,
     "customers",
@@ -236,63 +268,62 @@ export async function loadCollectionActual(admin, { salesmanCode, reportDate, in
     (customers || []).map((row) => normalizeSalesmanCode(row.customer_code)).filter(Boolean),
   )];
   if (!customerCodes.length) {
-    return { collection: 0, cashCollection: 0, ...(includeDetails ? { salesRows: [], collectionVisits: [] } : {}) };
+    return { collection: 0, cashCollection: 0, ...(includeDetails ? { salesRows: [], collectionReceipts: [] } : {}) };
   }
 
-  const visits = [];
-  for (const chunk of chunkList(customerCodes, 200)) {
-    const rows = await fetchPagedRows(
-      admin,
-      "collection_visits",
-      "id,amount_received,customer_code,saved_at",
-      (query) => query
-        .in("customer_code", chunk)
-        .lte("saved_at", endIso),
-    );
-    visits.push(...rows);
-  }
+  const receiptMap = receiptsByCustomer || await loadReceiptRowsByCustomer(admin);
+  const receiptsByAccount = new Map();
+  customerCodes.forEach((customerCode) => {
+    const accountKey = collectionAccountKey(customerCode);
+    if (!accountKey) return;
+    const bucket = receiptsByAccount.get(accountKey) || [];
+    const seen = new Set(bucket.map(receiptIdentity));
+    lookupByCustomerCode(receiptMap, customerCode).forEach((row) => {
+      if (!isKpiCollectionReceipt(row)) return;
+      const identity = receiptIdentity(row);
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      bucket.push(row);
+    });
+    receiptsByAccount.set(accountKey, bucket);
+  });
 
-  const salesByCustomer = new Map();
+  const salesByAccount = new Map();
   for (const chunk of chunkList(customerCodes, 200)) {
     const rows = await fetchPagedRows(
       admin,
       "active_sales",
-      "transaction_date,voucher_number,voucher_type,reference,customer_code,sales_amount,item_code,item_name,category,quantity,rate",
+      "transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,sales_amount,item_code,item_name,category,quantity,rate",
       (query) => query
         .in("customer_code", chunk)
         .lte("transaction_date", to),
     );
     rows.forEach((row) => {
-      const customerCode = normalizeSalesmanCode(row.customer_code);
-      const customerRows = salesByCustomer.get(customerCode) || [];
+      const accountKey = collectionAccountKey(row.customer_code);
+      if (!accountKey) return;
+      const customerRows = salesByAccount.get(accountKey) || [];
       customerRows.push(row);
-      salesByCustomer.set(customerCode, customerRows);
+      salesByAccount.set(accountKey, customerRows);
     });
   }
 
-  const visitsByCustomer = new Map();
-  visits.forEach((visit) => {
-    const customerCode = normalizeSalesmanCode(visit.customer_code);
-    const customerVisits = visitsByCustomer.get(customerCode) || [];
-    customerVisits.push(visit);
-    visitsByCustomer.set(customerCode, customerVisits);
-  });
-
-  const totals = customerCodes.reduce((result, customerCode) => {
+  const accountKeys = new Set([...receiptsByAccount.keys(), ...salesByAccount.keys()]);
+  const totals = [...accountKeys].reduce((result, accountKey) => {
     const split = splitCollectionActualsByInvoice(
-      salesByCustomer.get(customerCode) || [],
-      visitsByCustomer.get(customerCode) || [],
-      { fromDate: from, toDate: to },
+      salesByAccount.get(accountKey) || [],
+      receiptsByAccount.get(accountKey) || [],
+      { fromDate: from, toDate: to, receiptRegister: true },
     );
     result.collection += split.collection;
     result.cashCollection += split.cashCollection;
     return result;
   }, { collection: 0, cashCollection: 0 });
   return {
-    ...totals,
+    collection: Math.round(totals.collection * 100) / 100,
+    cashCollection: Math.round(totals.cashCollection * 100) / 100,
     ...(includeDetails ? {
-      salesRows: [...salesByCustomer.values()].flat(),
-      collectionVisits: visits,
+      salesRows: [...salesByAccount.values()].flat(),
+      collectionReceipts: [...receiptsByAccount.values()].flat(),
     } : {}),
   };
 }
@@ -428,7 +459,7 @@ async function activeSalesBatchId(admin) {
   return String(data?.setting_value || "").trim();
 }
 
-async function readPerformanceKpiCache(admin, reportDate, batchId) {
+async function readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp = "") {
   const { data, error } = await admin
     .from("system_settings")
     .select("setting_value")
@@ -444,6 +475,7 @@ async function readPerformanceKpiCache(admin, reportDate, batchId) {
     if (
       cache?.version !== PERFORMANCE_KPI_CACHE_VERSION
       || String(cache.batchId || "") !== batchId
+      || String(cache.receiptStamp || "") !== String(receiptStamp || "")
       || !cache.actualsBySalesman
       || typeof cache.actualsBySalesman !== "object"
       || !Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
@@ -480,16 +512,18 @@ function cacheActualsForSalesman(salesActuals, collectionActuals) {
 }
 
 async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, batchId }) {
-  const [pace, salesAsOfDate] = await Promise.all([
+  const [pace, salesAsOfDate, receiptsByCustomer, receiptStamp] = await Promise.all([
     loadSalesPaceShares(admin, { reportDate }),
     loadCurrentMonthLastSalesDate(admin, { reportDate }),
+    loadReceiptRowsByCustomer(admin),
+    readReceiptRegisterStamp(admin),
   ]);
   const entries = await Promise.all((salesmen || []).map(async (salesman) => {
     const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
     if (!code) return null;
     const [salesActuals, collectionActuals] = await Promise.all([
       loadSalesActuals(admin, { salesmanCode: code, reportDate }),
-      loadCollectionActual(admin, { salesmanCode: code, reportDate }),
+      loadCollectionActual(admin, { salesmanCode: code, reportDate, receiptsByCustomer }),
     ]);
     return [code, cacheActualsForSalesman(salesActuals, collectionActuals)];
   }));
@@ -497,6 +531,7 @@ async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, bat
     version: PERFORMANCE_KPI_CACHE_VERSION,
     reportMonth: monthWindow(reportDate).from,
     batchId,
+    receiptStamp,
     builtAt: new Date().toISOString(),
     actualsBySalesman: Object.fromEntries(entries.filter(Boolean)),
     paceBySalesman: Object.fromEntries([...pace.bySalesman.entries()]),
@@ -534,8 +569,9 @@ export async function loadPerformanceKpiActualDetails(admin, { salesmanCode, rep
     return buildKpiActualDetails({
       kpiKey,
       salesmanCode: code,
-      collectionVisits: collectionData.collectionVisits,
+      collectionReceipts: collectionData.collectionReceipts,
       collectionSalesRows: collectionData.salesRows,
+      receiptRegister: true,
       fromDate: from,
       toDate: to,
     });
@@ -557,11 +593,12 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
     (salesmen || []).map((row) => normalizeSalesmanCode(row.salesmanCode || row.salesman_code)).filter(Boolean),
   )];
   const todayIso = getKsaDateString();
-  const [targetsByCode, batchId] = await Promise.all([
+  const [targetsByCode, batchId, receiptStamp] = await Promise.all([
     loadKpiTargetsBySalesman(admin, { salesmanCodes: codes, reportDate }),
     activeSalesBatchId(admin),
+    readReceiptRegisterStamp(admin),
   ]);
-  let sourceCache = await readPerformanceKpiCache(admin, reportDate, batchId);
+  let sourceCache = await readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp);
   const missingSalesmen = !sourceCache
     ? salesmen
     : salesmen.filter((salesman) => {
@@ -585,6 +622,7 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
         ...refreshed.paceBySalesman,
       },
       salesAsOfDate: refreshed.salesAsOfDate ?? sourceCache?.salesAsOfDate ?? "",
+      receiptStamp,
     };
     await writePerformanceKpiCache(admin, reportDate, sourceCache);
   }

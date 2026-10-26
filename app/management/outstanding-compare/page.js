@@ -20,6 +20,7 @@ import {
   OUTSTANDING_RECONCILE_TOLERANCE,
   formatOutstandingCompareDelta,
   hasOutstandingCompareMoneyDifference,
+  isOutstandingCompareSmallDifference,
   summarizeOutstandingBillMismatches,
 } from "../../lib/outstandingReconcile.js";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -56,6 +57,7 @@ const TEXT = {
   deltaLoading: { en: "…", ar: "…" },
   deltaPending: { en: "—", ar: "—" },
   differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
+  ignoreWithinOneSar: { en: "Ignore differences of 1 SAR or less", ar: "تجاهل الفروق بمقدار 1 ريال أو أقل" },
   noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
   recalculate: { en: "Recalculate", ar: "إعادة الحساب" },
   recalculating: { en: "Recalculating…", ar: "جاري إعادة الحساب…" },
@@ -238,6 +240,7 @@ export default function OutstandingComparePage() {
   const [autoCode, setAutoCode] = useState("");
   const [deltaByCode, setDeltaByCode] = useState({});
   const [differencesOnly, setDifferencesOnly] = useState(true);
+  const [ignoreWithinOneSar, setIgnoreWithinOneSar] = useState(false);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
   const savedMetaRef = useRef(null);
@@ -271,6 +274,7 @@ export default function OutstandingComparePage() {
         };
       })
       .filter((row) => {
+        if (ignoreWithinOneSar && isOutstandingCompareSmallDifference(row)) return false;
         if (differencesOnly && !hasCompareDifference(row)) return false;
         if (!needle) return true;
         const code = String(row.customer_code || "").toLowerCase();
@@ -294,7 +298,7 @@ export default function OutstandingComparePage() {
         return String(a.customer_code || "").localeCompare(String(b.customer_code || ""));
       });
     return rows;
-  }, [customerSearch, customers, deltaByCode, differencesOnly]);
+  }, [customerSearch, customers, deltaByCode, differencesOnly, ignoreWithinOneSar]);
 
   const customerFilterValue = useCallback((row, key) => {
     if (key === "code") return String(row.customer_code || "—");
@@ -659,14 +663,24 @@ export default function OutstandingComparePage() {
                 onChange={(event) => setCustomerSearch(event.target.value)}
                 placeholder={t("search")}
               />
-              <label className="moduleCollectorCheckbox">
-                <input
-                  type="checkbox"
-                  checked={differencesOnly}
-                  onChange={(event) => setDifferencesOnly(event.target.checked)}
-                />
-                {t("differencesOnly")}
-              </label>
+              <div className="moduleFilterChecks">
+                <label className="moduleCollectorCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={differencesOnly}
+                    onChange={(event) => setDifferencesOnly(event.target.checked)}
+                  />
+                  {t("differencesOnly")}
+                </label>
+                <label className="moduleCollectorCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={ignoreWithinOneSar}
+                    onChange={(event) => setIgnoreWithinOneSar(event.target.checked)}
+                  />
+                  {t("ignoreWithinOneSar")}
+                </label>
+              </div>
             </div>
             <ExportableTable filename="outstanding-compare-customers" sheetName="Customers" className="moduleTableWrap moduleBiTableWrap">
               <table className="moduleTable moduleBiTable moduleStackedHeaderTable">

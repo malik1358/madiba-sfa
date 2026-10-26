@@ -68,7 +68,7 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
   receiptRegister = false,
   collectionReceipts = [],
 }) {
-  if (kpiKey !== "collection" && kpiKey !== "cashCollection") return [];
+  if (!["collection", "cashCollection", "totalCashCollected"].includes(kpiKey)) return [];
   const sourceRows = receiptRegister
     ? (collectionReceipts || []).filter(isKpiCollectionReceipt)
     : (collectionVisits || []);
@@ -80,6 +80,9 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
   (salesRows || []).forEach((row) => {
     pushByAccount(salesByCustomer, row?.customer_code, row);
   });
+  const includeCredit = kpiKey === "collection" || kpiKey === "totalCashCollected";
+  const includeCash = kpiKey === "cashCollection" || kpiKey === "totalCashCollected";
+  const includeUnapplied = includeCredit && receiptRegister;
 
   return [...rowsByCustomer.entries()].flatMap(([customerCode, customerRows]) => {
     const receipts = receiptRegister
@@ -97,8 +100,8 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
       const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);
       if ((fromDate && receiptDate < fromDate) || (toDate && receiptDate > toDate)) return [];
       const isCash = isCashSalesVoucher(allocation?.voucher_number);
-      if (kpiKey === "collection" && isCash) return [];
-      if (kpiKey === "cashCollection" && !isCash) return [];
+      if (isCash && !includeCash) return [];
+      if (!isCash && !includeCredit) return [];
       const visit = visitById.get(String(allocation.vch_no)) || customerRows[0] || {};
       return [{
         ...detailBase({
@@ -113,7 +116,7 @@ function collectionRowsForKpi(kpiKey, salesRows, collectionVisits, {
         amount: Number(allocation.amount || 0),
       }];
     });
-    if (kpiKey !== "collection" || !receiptRegister) return applied;
+    if (!includeUnapplied) return applied;
     const unapplied = unappliedCollectionReceipts(receipts, allocations, { fromDate, toDate }).map((row) => ({
       ...detailBase({
         ...row.row,
@@ -140,7 +143,7 @@ export function buildKpiActualDetails({
   fromDate = "",
   toDate = "",
 } = {}) {
-  const rows = ["collection", "cashCollection"].includes(kpiKey)
+  const rows = ["collection", "cashCollection", "totalCashCollected"].includes(kpiKey)
     ? collectionRowsForKpi(kpiKey, collectionSalesRows, collectionVisits, {
       fromDate,
       toDate,

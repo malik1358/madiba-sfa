@@ -9,6 +9,7 @@ import {
   formatPerformanceKpiValue,
   normalizeSalesmanCode,
   parseKpiTargetInput,
+  INFORMATION_ONLY_KPI_KEYS,
   PERFORMANCE_DISPLAY_KPI_KEYS,
 } from "../../lib/performanceKpis";
 import {
@@ -67,6 +68,7 @@ const TEXT = {
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
   cashCollection: { en: "Cash collection (info)", ar: "تحصيل النقد (معلومات)" },
+  totalCashCollected: { en: "Total cash collected", ar: "إجمالي النقد المحصل" },
   informationOnly: { en: "Information only", ar: "للمعلومات فقط" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
@@ -475,7 +477,7 @@ export default function KpiTargetsPage() {
                       {columns.map((key) => {
                         const kpi = (row.kpis || []).find((item) => item.key === key);
                         const isTotalSales = key === "totalSales";
-                        const isInformationOnly = key === "cashCollection";
+                        const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);
                         const targetValue = isTotalSales
                           ? String(
                             (Number(row.officeSupplies || 0) || 0)
@@ -548,7 +550,7 @@ export default function KpiTargetsPage() {
                           salesAsOfDate,
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
-                        const isInformationOnly = key === "cashCollection";
+                        const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);
                         const detailSalesmen = visibleRows
                           .filter((row) => !row.isTeam)
                           .map((row) => row.salesmanCode);
@@ -577,7 +579,7 @@ export default function KpiTargetsPage() {
                       <td className="moduleKpiBossCell"></td>
                       {columns.map((key) => {
                         const column = paceEstimates[key] || { estimate: null, target: 0, achievement: null };
-                        const isInformationOnly = key === "cashCollection";
+                        const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);
                         const hasEstimate = column.estimate != null;
                         const statusKey = isInformationOnly
                           ? "no_target"

@@ -34,9 +34,15 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "totalSales",
   "collection",
   "cashCollection",
+  "totalCashCollected",
   "newCustomers",
   "repeatCustomers",
 ];
+
+export const INFORMATION_ONLY_KPI_KEYS = new Set([
+  "cashCollection",
+  "totalCashCollected",
+]);
 
 const SALES_PACE_KPI_KEYS = new Set([
   "officeSupplies",
@@ -52,11 +58,21 @@ export const PERFORMANCE_KPI_LABELS = {
   totalSales: "Total sales",
   collection: "Collection",
   cashCollection: "Cash collection (info)",
+  totalCashCollected: "Total cash collected",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
 };
 
-const MONEY_KPI_KEYS = new Set(["officeSupplies", "localItemSales", "otherSales", "totalSales", "collection", "cashCollection", "sales"]);
+const MONEY_KPI_KEYS = new Set([
+  "officeSupplies",
+  "localItemSales",
+  "otherSales",
+  "totalSales",
+  "collection",
+  "cashCollection",
+  "totalCashCollected",
+  "sales",
+]);
 const TARGET_FIELD_ALIASES = {
   officeSupplies: ["officeSupplies", "office_supplies_sales_target", "office_supplies_target"],
   localItemSales: ["localItemSales", "local_item_sales_target"],
@@ -386,6 +402,7 @@ export function emptyPerformanceActuals() {
     totalSales: 0,
     collection: 0,
     cashCollection: 0,
+    totalCashCollected: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -399,6 +416,7 @@ export function emptyPerformanceTargets() {
     totalSales: 0,
     collection: 0,
     cashCollection: 0,
+    totalCashCollected: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -414,6 +432,16 @@ export function withTotalSales(values = {}) {
     localItemSales,
     otherSales,
     totalSales: officeSupplies + localItemSales + otherSales,
+  };
+}
+
+export function withDerivedKpiActuals(values = {}) {
+  const withSales = withTotalSales(values);
+  const collection = Number(withSales.collection || 0) || 0;
+  const cashCollection = Number(withSales.cashCollection || 0) || 0;
+  return {
+    ...withSales,
+    totalCashCollected: Math.round((collection + cashCollection) * 100) / 100,
   };
 }
 
@@ -676,19 +704,23 @@ export function buildPerformanceSnapshot({
   salesAsOfDate,
 } = {}) {
   const normalizedTargets = normalizePerformanceTargets(targets);
-  const normalizedActuals = withTotalSales({
+  const normalizedActuals = withDerivedKpiActuals({
     ...emptyPerformanceActuals(),
     ...actuals,
   });
   const kpis = PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => buildPerformanceKpi(key, {
     actual: normalizedActuals[key],
-    target: normalizedTargets[key],
+    target: INFORMATION_ONLY_KPI_KEYS.has(key) ? 0 : normalizedTargets[key],
     reportDate,
     todayIso,
     paceShares,
     salesAsOfDate,
   }));
-  const componentScored = kpis.filter((kpi) => kpi.key !== "totalSales" && kpi.achievement != null);
+  const componentScored = kpis.filter((kpi) => (
+    kpi.key !== "totalSales"
+    && kpi.key !== "totalCashCollected"
+    && kpi.achievement != null
+  ));
   const scored = componentScored.length
     ? componentScored
     : kpis.filter((kpi) => kpi.achievement != null);

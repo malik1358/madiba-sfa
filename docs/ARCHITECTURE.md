@@ -77,6 +77,7 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | paymentCollections | Y | Y | Y | Y | Y | |
 | collectionReport, receiptsNotInTally, userActivity, workingHours | Y | Y | | Y | Y | |
 | dailyVisitReport | Y | Y | Y | Y | Y | |
+| monthlyAttendance | Y | Y | Y | Y | Y | |
 | businessDashboard, outstandingNoGps, potentialBadDebts, legalTransfers | Y | Y | | | Y | |
 | customerGpsHistory | Y | Y | | | | |
 | customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
@@ -135,6 +136,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/mobile-snapshot`, `/api/offline-data-version`, `/api/push-tokens`
 - `/api/app-config`, `/api/build-info`, `/api/user-activity`
 - `/api/working-hours` — attendance columns plus daily salesman working hours from near-visit lunch segments; the daily salesman resume reuses this report calculation
+- `/api/monthly-attendance` — one salesman or collector for a KSA month (through today when the month is current). Salesmen and collectors see themselves. Admin, manager, invoice-maker, and report-user pick one salesman or collector. No migration.
 - `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)

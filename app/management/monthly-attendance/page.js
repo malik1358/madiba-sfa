@@ -10,7 +10,7 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { excelFilterCellText } from "../../lib/biExcelFilters";
-import { averageMonthlyAttendance } from "../../lib/monthlyAttendanceReport";
+import { averageMonthlyAttendanceRows, ksaWeekdayName } from "../../lib/monthlyAttendanceReport";
 import { formatWorkingHours, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -34,8 +34,8 @@ const TEXT = {
   },
   noUsers: { en: "No salesman or collector is available.", ar: "لا يوجد مندوب أو محصل." },
   note: {
-    en: "Working hours follow the Daily Visit Report: non-far customer stops from 08:00 KSA around lunch, excluding unlogged gaps longer than 2 hours. Customer visits are distinct customers with a visit, collection, or submitted order. Collection amount is money received. Order amount is submitted order value, once per order. A day with no login still appears.",
-    ar: "ساعات العمل تتبع تقرير الزيارات اليومي: التوقفات القريبة من العميل من 08:00 بتوقيت السعودية حول الغداء، مع استبعاد الفجوات غير المسجلة الأطول من ساعتين. زيارات العملاء هي العملاء المختلفون الذين لديهم زيارة أو تحصيل أو طلب مُرسل. مبلغ التحصيل هو المبلغ المستلم. مبلغ الطلب هو قيمة الطلب المُرسل، مرة واحدة لكل طلب. يظهر اليوم حتى بدون تسجيل دخول.",
+    en: "Working hours follow the Daily Visit Report: non-far customer stops from 08:00 KSA around lunch, excluding unlogged gaps longer than 2 hours. Customer visits are distinct customers with a visit, collection, or submitted order. Collection amount is money received. Order amount is submitted order value, once per order. A day with no login still appears. Average leaves out Fridays.",
+    ar: "ساعات العمل تتبع تقرير الزيارات اليومي: التوقفات القريبة من العميل من 08:00 بتوقيت السعودية حول الغداء، مع استبعاد الفجوات غير المسجلة الأطول من ساعتين. زيارات العملاء هي العملاء المختلفون الذين لديهم زيارة أو تحصيل أو طلب مُرسل. مبلغ التحصيل هو المبلغ المستلم. مبلغ الطلب هو قيمة الطلب المُرسل، مرة واحدة لكل طلب. يظهر اليوم حتى بدون تسجيل دخول. المتوسط لا يشمل أيام الجمعة.",
   },
   attendedDays: { en: "Days logged in", ar: "أيام تسجيل الدخول" },
   totalWorkingHours: { en: "Working hours", ar: "ساعات العمل" },
@@ -57,10 +57,13 @@ function currentMonth() {
   return getKsaDateString().slice(0, 7);
 }
 
-function formatReportDate(value) {
+function formatReportDate(value, language = "en") {
   const [year, month, day] = String(value || "").split("-");
   if (!year || !month || !day) return value || "-";
-  return `${day}/${month}/${year}`;
+  const date = `${year}-${month}-${day}`;
+  const weekday = ksaWeekdayName(date, language);
+  const label = `${day}/${month}/${year}`;
+  return weekday ? `${label} ${weekday}` : label;
 }
 
 function formatHours(minutes) {
@@ -84,8 +87,8 @@ function compareTone(current, previous) {
   return "";
 }
 
-function filterValue(row, key) {
-  if (key === "date") return formatReportDate(row.date);
+function filterValue(row, key, language) {
+  if (key === "date") return formatReportDate(row.date, language);
   if (key === "workingHours") return row.workingHoursLabel || formatHours(row.workingHoursMinutes);
   if (key === "customerVisits") return excelFilterCellText(row.customerVisits || 0);
   if (key === "collectionAmount") return formatAmount(row.collectionAmount);
@@ -118,7 +121,7 @@ export default function MonthlyAttendancePage() {
     options,
     visibleRows,
     setFilter,
-  } = useBiExcelFilters(rows, FILTER_KEYS, filterValue);
+  } = useBiExcelFilters(rows, FILTER_KEYS, (row, key) => filterValue(row, key, language));
 
   const previousByDate = useMemo(() => {
     const map = new Map();
@@ -135,12 +138,10 @@ export default function MonthlyAttendancePage() {
     orders: totals.orders + Number(row.orderAmount || 0),
   }), { minutes: 0, visits: 0, collection: 0, orders: 0 }), [visibleRows]);
 
-  const visibleAverage = useMemo(() => averageMonthlyAttendance({
-    minutes: visibleTotals.minutes,
-    visits: visibleTotals.visits,
-    collection: visibleTotals.collection,
-    orders: visibleTotals.orders,
-  }, visibleRows.length), [visibleRows.length, visibleTotals]);
+  const visibleAverage = useMemo(
+    () => averageMonthlyAttendanceRows(visibleRows),
+    [visibleRows],
+  );
 
   useEffect(() => {
     if (accessLoading || !allowed) {
@@ -314,7 +315,7 @@ export default function MonthlyAttendancePage() {
                         const dateClass = row.date === today ? "moduleBiMonthCell--current" : "";
                         return (
                           <tr key={row.date}>
-                            <td className={dateClass}>{formatReportDate(row.date)}</td>
+                            <td className={dateClass}>{formatReportDate(row.date, language)}</td>
                             <td className={`moduleBiTotalCol ${compareTone(row.workingHoursMinutes, previous?.workingHoursMinutes)}`.trim()}>
                               {row.workingHoursLabel || formatHours(row.workingHoursMinutes)}
                             </td>

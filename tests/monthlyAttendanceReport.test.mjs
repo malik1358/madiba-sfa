@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   averageMonthlyAttendance,
+  averageMonthlyAttendanceRows,
+  isKsaFriday,
+  ksaWeekdayName,
   buildMonthlyAttendanceDayRow,
   buildMonthlyAttendanceReport,
   canOpenMonthlyAttendance,
@@ -131,6 +134,22 @@ test("average is the total divided by every listed day, including zeros", () => 
     collectionAmount: 0,
     orderAmount: 0,
   });
+});
+
+test("average leaves out KSA Fridays and dates can show the weekday", () => {
+  assert.equal(isKsaFriday("2026-10-02"), true);
+  assert.equal(isKsaFriday("2026-10-08"), false);
+  assert.equal(ksaWeekdayName("2026-10-08", "en"), "Thursday");
+  assert.equal(ksaWeekdayName("2026-10-02", "en"), "Friday");
+  const average = averageMonthlyAttendanceRows([
+    { date: "2026-10-02", workingHoursMinutes: 600, customerVisits: 20, collectionAmount: 5000, orderAmount: 9000 },
+    { date: "2026-10-08", workingHoursMinutes: 120, customerVisits: 4, collectionAmount: 100, orderAmount: 50 },
+    { date: "2026-10-09", workingHoursMinutes: 0, customerVisits: 0, collectionAmount: 0, orderAmount: 0 },
+  ]);
+  assert.equal(average.workingMinutes, 120);
+  assert.equal(average.customerVisits, 4);
+  assert.equal(average.collectionAmount, 100);
+  assert.equal(average.orderAmount, 50);
 });
 
 test("salesmen and collectors can open monthly attendance; promoters cannot", () => {

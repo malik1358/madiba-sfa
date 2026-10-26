@@ -7,7 +7,7 @@ import {
   visitEntryType,
 } from "./dailyVisitReportStats.js";
 import { isCollectionOnlyAccess, isSalesmanRole, canViewManagementReports } from "./moduleAccess.js";
-import { getKsaDateString } from "./workdayActivity.js";
+import { getKsaDateString, ksaDayBounds, KSA_TIMEZONE } from "./workdayActivity.js";
 
 const CUSTOMER_VISIT_TYPES = new Set([
   "VISIT_REPORT",
@@ -163,6 +163,30 @@ export function buildMonthlyAttendanceDayRow({ date, entries = [] } = {}) {
   };
 }
 
+function ksaNoon(dateString) {
+  const { startIso } = ksaDayBounds(dateString);
+  return new Date(Date.parse(startIso) + 12 * 60 * 60 * 1000);
+}
+
+/** Friday is the KSA field holiday and is left out of the monthly average. */
+export function isKsaFriday(dateString) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateString || ""))) return false;
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: KSA_TIMEZONE,
+    weekday: "short",
+  }).format(ksaNoon(dateString));
+  return weekday === "Fri";
+}
+
+export function ksaWeekdayName(dateString, language = "en") {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateString || ""))) return "";
+  const locale = String(language || "").toLowerCase().startsWith("ar") ? "ar" : "en-GB";
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: KSA_TIMEZONE,
+    weekday: "long",
+  }).format(ksaNoon(dateString));
+}
+
 /** Daily mean of the rows already totaled. Zero days stay in the divisor. */
 export function averageMonthlyAttendance(totals = {}, dayCount = 0) {
   const days = Number(dayCount || 0);
@@ -180,6 +204,17 @@ export function averageMonthlyAttendance(totals = {}, dayCount = 0) {
     collectionAmount: roundMoney(Number(totals.totalCollectionAmount ?? totals.collection ?? 0) / days),
     orderAmount: roundMoney(Number(totals.totalOrderAmount ?? totals.orders ?? 0) / days),
   };
+}
+
+/** Average of the listed days except KSA Fridays. Friday hours are not in the mean. */
+export function averageMonthlyAttendanceRows(rows = []) {
+  const counted = (rows || []).filter((row) => !isKsaFriday(row?.date));
+  return averageMonthlyAttendance({
+    minutes: counted.reduce((sum, row) => sum + Number(row.workingHoursMinutes || 0), 0),
+    visits: counted.reduce((sum, row) => sum + Number(row.customerVisits || 0), 0),
+    collection: counted.reduce((sum, row) => sum + Number(row.collectionAmount || 0), 0),
+    orders: counted.reduce((sum, row) => sum + Number(row.orderAmount || 0), 0),
+  }, counted.length);
 }
 
 export function summarizeMonthlyAttendance(rows = []) {

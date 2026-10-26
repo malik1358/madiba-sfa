@@ -4643,6 +4643,7 @@ th:has(.moduleTableColumnFilterInput) {
   top: var(--module-stacked-header-row1);
 }
 
+/* Only the Salesman column stays fixed on horizontal scroll. Boss scrolls with KPIs. */
 .moduleKpiTargetsTable .moduleKpiSalesmanCell {
   position: sticky;
   left: 0;
@@ -4656,15 +4657,18 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .moduleKpiTargetsTable .moduleKpiBossCell {
-  position: sticky;
-  left: 12rem;
-  inset-inline-start: 12rem;
+  left: auto;
+  inset-inline-start: auto;
   min-width: 11rem;
   width: 11rem;
   max-width: 11rem;
   background: #ffffff;
-  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.08);
-  z-index: 5;
+}
+
+.moduleKpiTargetsTable tbody .moduleKpiBossCell {
+  position: static;
+  box-shadow: none;
+  z-index: auto;
 }
 
 .moduleKpiTargetsTable thead .moduleKpiSalesmanCell,
@@ -4672,13 +4676,15 @@ th:has(.moduleTableColumnFilterInput) {
   background: #edf4f5;
 }
 
-.moduleKpiTargetsTable thead tr:first-child .moduleKpiSalesmanCell,
-.moduleKpiTargetsTable thead tr:first-child .moduleKpiBossCell {
+.moduleKpiTargetsTable thead .moduleKpiBossCell {
+  box-shadow: none;
+}
+
+.moduleKpiTargetsTable thead tr:first-child .moduleKpiSalesmanCell {
   z-index: 11;
 }
 
-.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiSalesmanCell,
-.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiBossCell {
+.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiSalesmanCell {
   z-index: 10;
 }
 
@@ -4692,10 +4698,9 @@ th:has(.moduleTableColumnFilterInput) {
 
 [dir="rtl"] .moduleKpiTargetsTable .moduleKpiBossCell {
   left: auto;
-  right: 12rem;
+  right: auto;
   inset-inline-start: auto;
-  inset-inline-end: 12rem;
-  box-shadow: -2px 0 8px rgba(6, 47, 58, 0.08);
+  inset-inline-end: auto;
 }
 
 .moduleKpiTargetsTable .moduleKpiTargetInput {
@@ -4795,7 +4800,9 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiBossCell {
-  z-index: 7;
+  left: auto;
+  inset-inline-start: auto;
+  z-index: 4;
 }
 
 .moduleTable td {
@@ -6352,9 +6359,12 @@ th:has(.moduleTableColumnFilterInput) {
   }
 
   .moduleKpiTargetsTable.moduleTable thead th,
-  .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell,
-  .moduleKpiTargetsTable.moduleTable .moduleKpiBossCell {
+  .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell {
     position: sticky;
+  }
+
+  .moduleKpiTargetsTable.moduleTable tbody .moduleKpiBossCell {
+    position: static;
   }
 
   .moduleBiTableWrap {

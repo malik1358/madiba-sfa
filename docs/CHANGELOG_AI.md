@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-26** — KPI Targets shows the last sales transaction date of the selected month beside the page title. That date is the latest uploaded sale in the month, the same date used for sales pace. No migration. See `docs/BUSINESS_RULES.md`.
+- **2026-10-26** — Outstanding Compare can ignore differences of 1 SAR or less. The new checkbox sits beside “Show differences only” and starts off. A checked customer whose absolute Difference is at most 1.00 SAR leaves the list; 1.01 SAR stays. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — Monthly Attendance dates show the weekday, and the Average row leaves out Fridays. Total still includes every listed day. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — Monthly Attendance shows an Average row under Total. The average is the on-screen total divided by the days listed, including days with zero hours. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — Monthly Attendance (`/management/monthly-attendance`) lets each salesman and collector see the month’s working hours, customer visits, collection amount, and order amount. Management report roles can open one salesman or collector. Working hours match the Daily Visit Report near-visit formula. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`.

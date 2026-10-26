@@ -4103,6 +4103,13 @@ table.auditMatrix td.auditTrendSame {
   gap: 10px;
 }
 
+.moduleFilterChecks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 22px;
+}
+
 .moduleCustomerSearch {
   position: relative;
 }

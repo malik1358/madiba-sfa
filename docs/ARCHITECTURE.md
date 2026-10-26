@@ -124,7 +124,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
 - `/management/customer-gps-history` uses `.../gps-history?from=...&to=...` for paginated cross-customer audit reporting; the legacy `customerCode`-only API remains unchanged. `customerGpsReport.js` supplies KSA bounds, coordinate validation, displacement and explicit approval classification.
-- `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
+- `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets` — the KPI Targets response includes `salesAsOfDate`, the latest sales transaction date in the selected month, shown beside the page title.
 - `/api/admin/kpi-targets/details` — role- and sales-scope-protected transaction detail rows behind KPI actual links.
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`

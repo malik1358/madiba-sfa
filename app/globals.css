@@ -4584,6 +4584,22 @@ th:has(.moduleTableColumnFilterInput) {
   max-width: none;
 }
 
+.moduleKpiTargetsTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+}
+
+.moduleKpiLastTransaction {
+  color: #0d5a6b;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
 .moduleKpiTargetsFilters {
   display: grid;
   grid-template-columns: 200px minmax(220px, 1fr) minmax(220px, 1fr) auto;

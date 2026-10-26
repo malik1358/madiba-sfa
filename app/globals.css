@@ -7481,6 +7481,20 @@ button.moduleBiDashKpi:focus-visible {
   color: #ffffff;
 }
 
+.moduleBiTable.monthlyAttendanceTable tfoot tr.moduleBiTotalRow td {
+  bottom: 40px;
+}
+
+.moduleBiTable.monthlyAttendanceTable tfoot tr.moduleBiAverageRow td {
+  bottom: 0;
+}
+
+.moduleBiTable.monthlyAttendanceTable tfoot tr.moduleBiAverageRow td:first-child,
+.moduleBiTable.monthlyAttendanceTable tfoot tr.moduleBiAverageRow td.moduleBiTotalCol {
+  background: #1b6b7c;
+  color: #ffffff;
+}
+
 .moduleBiFilterGrid {
   margin-bottom: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));

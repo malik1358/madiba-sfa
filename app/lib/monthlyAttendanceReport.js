@@ -163,6 +163,25 @@ export function buildMonthlyAttendanceDayRow({ date, entries = [] } = {}) {
   };
 }
 
+/** Daily mean of the rows already totaled. Zero days stay in the divisor. */
+export function averageMonthlyAttendance(totals = {}, dayCount = 0) {
+  const days = Number(dayCount || 0);
+  if (!Number.isFinite(days) || days <= 0) {
+    return {
+      workingMinutes: 0,
+      customerVisits: 0,
+      collectionAmount: 0,
+      orderAmount: 0,
+    };
+  }
+  return {
+    workingMinutes: Math.round(Number(totals.totalWorkingMinutes ?? totals.minutes ?? 0) / days),
+    customerVisits: Math.round((Number(totals.totalCustomerVisits ?? totals.visits ?? 0) / days) * 10) / 10,
+    collectionAmount: roundMoney(Number(totals.totalCollectionAmount ?? totals.collection ?? 0) / days),
+    orderAmount: roundMoney(Number(totals.totalOrderAmount ?? totals.orders ?? 0) / days),
+  };
+}
+
 export function summarizeMonthlyAttendance(rows = []) {
   const list = Array.isArray(rows) ? rows : [];
   return {

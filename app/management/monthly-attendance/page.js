@@ -10,6 +10,7 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { excelFilterCellText } from "../../lib/biExcelFilters";
+import { averageMonthlyAttendance } from "../../lib/monthlyAttendanceReport";
 import { formatWorkingHours, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -47,6 +48,7 @@ const TEXT = {
   colCollection: { en: "Collection amount", ar: "مبلغ التحصيل" },
   colOrder: { en: "Order amount", ar: "مبلغ الطلبات" },
   totalFooter: { en: "Total", ar: "الإجمالي" },
+  averageFooter: { en: "Average", ar: "المتوسط" },
   all: { en: "All", ar: "الكل" },
   showing: { en: "Showing", ar: "يعرض" },
 };
@@ -132,6 +134,13 @@ export default function MonthlyAttendancePage() {
     collection: totals.collection + Number(row.collectionAmount || 0),
     orders: totals.orders + Number(row.orderAmount || 0),
   }), { minutes: 0, visits: 0, collection: 0, orders: 0 }), [visibleRows]);
+
+  const visibleAverage = useMemo(() => averageMonthlyAttendance({
+    minutes: visibleTotals.minutes,
+    visits: visibleTotals.visits,
+    collection: visibleTotals.collection,
+    orders: visibleTotals.orders,
+  }, visibleRows.length), [visibleRows.length, visibleTotals]);
 
   useEffect(() => {
     if (accessLoading || !allowed) {
@@ -289,7 +298,7 @@ export default function MonthlyAttendancePage() {
                   sheetName="Monthly Attendance"
                   className="moduleTableWrap moduleBiTableWrap"
                 >
-                  <table className="moduleTable moduleBiTable">
+                  <table className="moduleTable moduleBiTable monthlyAttendanceTable">
                     <thead>
                       <tr>
                         <BiExcelHead {...headProps} label={t("colDate")} filterKey="date" />
@@ -323,12 +332,19 @@ export default function MonthlyAttendancePage() {
                       })}
                     </tbody>
                     <tfoot>
-                      <tr>
+                      <tr className="moduleBiTotalRow">
                         <td><strong>{t("totalFooter")}</strong></td>
                         <td className="moduleBiTotalCol"><strong>{formatHours(visibleTotals.minutes)}</strong></td>
                         <td><strong>{visibleTotals.visits}</strong></td>
                         <td><strong>{formatAmount(visibleTotals.collection)}</strong></td>
                         <td><strong>{formatAmount(visibleTotals.orders)}</strong></td>
+                      </tr>
+                      <tr className="moduleBiAverageRow">
+                        <td><strong>{t("averageFooter")}</strong></td>
+                        <td className="moduleBiTotalCol"><strong>{formatHours(visibleAverage.workingMinutes)}</strong></td>
+                        <td><strong>{visibleAverage.customerVisits.toFixed(1)}</strong></td>
+                        <td><strong>{formatAmount(visibleAverage.collectionAmount)}</strong></td>
+                        <td><strong>{formatAmount(visibleAverage.orderAmount)}</strong></td>
                       </tr>
                     </tfoot>
                   </table>

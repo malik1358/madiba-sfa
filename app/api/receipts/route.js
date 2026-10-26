@@ -20,6 +20,7 @@ import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmai
 import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer.js";
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
+import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -288,6 +289,15 @@ export async function POST(request) {
         }), { trigger: "receipt-upload" });
       } catch (reconcileError) {
         console.error("Outstanding reconcile after receipt upload failed:", reconcileError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await rebuildPerformanceKpiCache(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }));
+      } catch (cacheError) {
+        console.error("Performance KPI cache rebuild after receipt upload failed:", cacheError);
       }
 
       try {

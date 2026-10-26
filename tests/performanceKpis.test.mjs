@@ -420,6 +420,65 @@ test("splits monthly collection visits between FIFO credit and cash invoices", (
   assert.deepEqual(actuals, { collection: 230, cashCollection: 115 });
 });
 
+test("KPI collection counts the Tally customer receipt and skips bank and receivable lines", () => {
+  const sales = [{
+    transaction_date: "2026-09-02",
+    voucher_number: "NFD/200",
+    customer_code: "1084C",
+    sales_amount: 2000,
+    quantity: 1,
+    rate: 2000,
+  }];
+  const rows = [
+    {
+      receipt_date: "2026-10-11",
+      amount: 1150,
+      vch_no: "900",
+      vch_type: "Receipt",
+      customer_code: "1084C",
+      particulars: "Alpha Trading",
+      customer_name: "Alpha Trading",
+    },
+    {
+      receipt_date: "2026-10-11",
+      amount: 1150,
+      vch_no: "900",
+      vch_type: "Receipt",
+      customer_code: "1084C",
+      particulars: "Bank Al Rajhi",
+      customer_name: "Bank Al Rajhi",
+    },
+    {
+      receipt_date: "2026-10-11",
+      amount: 500,
+      vch_no: "901",
+      vch_type: "Receipt",
+      customer_code: "ZIA",
+      particulars: "ZIA Receivable",
+      customer_name: "ZIA Receivable",
+    },
+  ];
+  const actuals = splitCollectionActualsByInvoice(sales, rows, {
+    fromDate: "2026-10-01",
+    toDate: "2026-10-31",
+    receiptRegister: true,
+  });
+  assert.deepEqual(actuals, { collection: 1150, cashCollection: 0 });
+
+  const details = buildKpiActualDetails({
+    kpiKey: "collection",
+    salesmanCode: "ZIA",
+    collectionSalesRows: sales,
+    collectionReceipts: rows,
+    receiptRegister: true,
+    fromDate: "2026-10-01",
+    toDate: "2026-10-31",
+  });
+  assert.equal(details.actual, 1150);
+  assert.equal(details.rows[0].reference, "900");
+  assert.equal(details.rows[0].customerCode, "1084C");
+});
+
 test("KPI detail contributions reconcile net sales, buyers, and per-customer FIFO", () => {
   const salesRows = [
     { transaction_date: "2026-09-01", voucher_number: "INV-1", customer_code: "A", customer_name: "Alpha", item_name: "Paper", category: "Office Supplies", sales_amount: 100 },
@@ -456,7 +515,8 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 4,
+    version: 5,
+    receiptStamp: "stamp-1",
     salesAsOfDate: "2026-09-08",
     batchId: "42",
     actualsBySalesman: {
@@ -482,7 +542,11 @@ test("performance snapshots reuse source actuals cached for the active batch", a
         in: () => query,
         maybeSingle: async () => ({
           data: {
-            setting_value: filters.setting_key === "active_sales_batch_id" ? "42" : JSON.stringify(cache),
+            setting_value: filters.setting_key === "active_sales_batch_id"
+              ? "42"
+              : filters.setting_key === "receipt_register_uploaded_at"
+                ? "stamp-1"
+                : JSON.stringify(cache),
           },
           error: null,
         }),

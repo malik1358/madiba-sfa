@@ -43,7 +43,7 @@ function pushByCustomerCode(map, customerCode, row) {
   map.set(key, list);
 }
 
-function lookupByCustomerCode(map, customerCode) {
+export function lookupByCustomerCode(map, customerCode) {
   const key = canonicalCustomerCode(customerCode);
   if (!key) return [];
   if (map.has(key)) return map.get(key) || [];

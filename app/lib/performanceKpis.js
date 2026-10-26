@@ -474,16 +474,41 @@ export function sumCollectionAmount(rows = []) {
   return (rows || []).reduce((sum, row) => sum + Number(row?.amount_received || 0), 0);
 }
 
+/** Same account: 1084 and 1084C. Leaves names and non-numeric codes unchanged. */
+export function collectionAccountKey(value) {
+  const raw = normalizeSalesmanCode(value);
+  if (!raw) return "";
+  const trailingLetter = raw.match(/^(\d{3,6})[A-Z]$/);
+  return trailingLetter ? trailingLetter[1] : raw;
+}
+
+/**
+ * Customer lines from the receipt register. Bank, cash, and charge lines are the
+ * other side of the same voucher. Collector "Receivable" accounts are not a customer.
+ */
+export function isKpiCollectionReceipt(row = {}) {
+  if (!normalizeSalesmanCode(row?.customer_code)) return false;
+  const text = `${row?.particulars || ""} ${row?.customer_name || ""}`;
+  if (/receivable/i.test(text)) return false;
+  if (/bank|cash|charge/i.test(text)) return false;
+  return true;
+}
+
 export function splitCollectionActualsByInvoice(transactions = [], collectionVisits = [], {
   fromDate = "",
   toDate = "",
+  receiptRegister = false,
 } = {}) {
-  const receipts = (collectionVisits || []).map((visit) => ({
-    receipt_date: String(visit?.saved_at || "").slice(0, 10),
-    amount: Number(visit?.amount_received || 0),
-    vch_no: String(visit?.id || ""),
-  }));
-  const { allocations } = matchPaymentsFifo(transactions, receipts);
+  const receipts = receiptRegister
+    ? (collectionVisits || []).filter(isKpiCollectionReceipt)
+    : (collectionVisits || []).map((visit) => ({
+      receipt_date: String(visit?.saved_at || "").slice(0, 10),
+      amount: Number(visit?.amount_received || 0),
+      vch_no: String(visit?.id || ""),
+    }));
+  const { allocations } = matchPaymentsFifo(transactions, receipts, {
+    receiptOnOrAfterInvoice: Boolean(receiptRegister),
+  });
 
   const totals = allocations.reduce((result, allocation) => {
     const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);

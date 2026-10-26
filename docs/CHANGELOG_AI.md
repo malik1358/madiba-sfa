@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-26** — KPI Targets keeps only the Salesman column sticky on horizontal scroll. Boss scrolls with the KPI columns so more metrics fit on a phone. Header/footer vertical stickiness is unchanged. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets shows the last sales transaction date of the selected month beside the page title. That date is the latest uploaded sale in the month, the same date used for sales pace. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — Outstanding Compare can ignore differences of 1 SAR or less. The new checkbox sits beside “Show differences only” and starts off. A checked customer whose absolute Difference is at most 1.00 SAR leaves the list; 1.01 SAR stays. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — Monthly Attendance dates show the weekday, and the Average row leaves out Fridays. Total still includes every listed day. No migration. See `docs/BUSINESS_RULES.md`.

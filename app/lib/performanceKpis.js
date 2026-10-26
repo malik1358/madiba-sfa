@@ -1,5 +1,10 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
-import { isCashSalesVoucher, isCreditNoteTransaction, matchPaymentsFifo } from "./paymentBehavior.js";
+import {
+  isCashSalesVoucher,
+  isCreditNoteReceiptType,
+  isCreditNoteTransaction,
+  matchPaymentsFifo,
+} from "./paymentBehavior.js";
 import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
@@ -488,10 +493,60 @@ export function collectionAccountKey(value) {
  */
 export function isKpiCollectionReceipt(row = {}) {
   if (!normalizeSalesmanCode(row?.customer_code)) return false;
+  if (isCreditNoteReceiptType(row?.vch_type)) return false;
   const text = `${row?.particulars || ""} ${row?.customer_name || ""}`;
   if (/receivable/i.test(text)) return false;
   if (/bank|cash|charge/i.test(text)) return false;
   return true;
+}
+
+function receiptInKpiWindow(date, fromDate, toDate) {
+  const day = String(date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  if (fromDate && day < fromDate) return false;
+  if (toDate && day > toDate) return false;
+  return true;
+}
+
+function receiptPlacementKey(date, voucher) {
+  return `${String(date || "").slice(0, 10)}|${String(voucher || "").trim()}`;
+}
+
+/**
+ * Customer receipt amount in the month that FIFO could not place on an invoice
+ * dated on or before that receipt. Asrar Ahmed receipt 1955 (8,580 on 12 Oct)
+ * is the day before invoice NFD/2010, so the allocation list is empty.
+ */
+export function unappliedCollectionReceipts(receipts = [], allocations = [], {
+  fromDate = "",
+  toDate = "",
+} = {}) {
+  const placed = new Map();
+  (allocations || []).forEach((allocation) => {
+    const day = String(allocation?.receipt_date || "").slice(0, 10);
+    if (!receiptInKpiWindow(day, fromDate, toDate)) return;
+    const key = receiptPlacementKey(day, allocation?.vch_no);
+    placed.set(key, (placed.get(key) || 0) + Number(allocation?.amount || 0));
+  });
+
+  const byReceipt = new Map();
+  (receipts || []).forEach((row) => {
+    const day = String(row?.receipt_date || "").slice(0, 10);
+    if (!receiptInKpiWindow(day, fromDate, toDate)) return;
+    const amount = Number(row?.amount || 0);
+    if (!(amount > 0)) return;
+    const key = receiptPlacementKey(day, row?.vch_no);
+    const current = byReceipt.get(key) || { date: day, voucher: String(row?.vch_no || "").trim(), amount: 0, row };
+    current.amount += amount;
+    byReceipt.set(key, current);
+  });
+
+  const leftovers = [];
+  byReceipt.forEach((entry, key) => {
+    const rest = Math.round((entry.amount - (placed.get(key) || 0)) * 100) / 100;
+    if (rest > 0.009) leftovers.push({ ...entry, amount: rest });
+  });
+  return leftovers;
 }
 
 export function splitCollectionActualsByInvoice(transactions = [], collectionVisits = [], {
@@ -517,6 +572,11 @@ export function splitCollectionActualsByInvoice(transactions = [], collectionVis
     else result.collection += Number(allocation.amount || 0);
     return result;
   }, { collection: 0, cashCollection: 0 });
+  if (receiptRegister) {
+    unappliedCollectionReceipts(receipts, allocations, { fromDate, toDate }).forEach((row) => {
+      totals.collection += row.amount;
+    });
+  }
   return {
     collection: Math.round(totals.collection * 100) / 100,
     cashCollection: Math.round(totals.cashCollection * 100) / 100,

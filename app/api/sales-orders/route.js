@@ -4,6 +4,11 @@ import { GPS_REQUIRED_ERROR, buildGpsActivityNote, hasGpsCoordinates, normalizeG
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { loadCachedPricingCatalog, priceOrderLines, resolveCatalogForOrder } from "../../lib/orderPricing.js";
+import {
+  canRefreshOrderPricing,
+  resolveRefreshPricingContext,
+  summarizePricingRefreshChanges,
+} from "../../lib/orderPricingRefresh.js";
 import { normalizePaymentType, normalizePricingRegion, normalizePricingType } from "../../lib/regionalPricing.js";
 import { loadRetailPriceMaps } from "../../lib/retailPricingServer.js";
 import {
@@ -15,7 +20,9 @@ import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
+  hasUploadedInvoice,
 } from "../../lib/orderApproval.js";
+import { canManageOrderInvoice } from "../../lib/moduleAccess.js";
 import { assertOrderQuantityControls } from "../../lib/orderQuantityControlsServer.js";
 import {
   blockedByAvgDaysMessage,
@@ -215,6 +222,30 @@ async function writeOrderPricingMeta(admin, orderId, meta) {
     setting_value: JSON.stringify(meta),
   }, { onConflict: "setting_key" });
   if (error) throw error;
+}
+
+async function readOrderPricingMeta(admin, orderId) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", `order_pricing_meta:${orderId}`)
+    .maybeSingle();
+  if (error) throw error;
+  const parsed = parseValue(data?.setting_value);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+}
+
+async function readOrderInvoiceMeta(admin, orderId) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", invoiceMetaKey(orderId))
+    .maybeSingle();
+  if (error) throw error;
+  const parsed = parseValue(data?.setting_value);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? { ...parsed, orderId: String(orderId) }
+    : { orderId: String(orderId) };
 }
 
 async function appendOrderHistory(admin, {
@@ -785,6 +816,186 @@ export async function POST(request) {
       }
 
       return NextResponse.json({ success: true, repaired });
+    }
+
+    if (action === "refresh_pricing") {
+      const admin = createClient(supabaseUrl, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+      const { data: profile, error: profileError } = await admin
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profileError) throw profileError;
+      if (!canManageOrderInvoice(profile?.role)) {
+        return NextResponse.json({
+          success: false,
+          error: "Only admin, manager, or invoice maker can update order prices and schemes.",
+        }, { status: 403 });
+      }
+
+      const orderId = Number(body?.orderId);
+      if (!Number.isFinite(orderId) || orderId <= 0) {
+        return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
+      }
+
+      const { data: order, error: orderError } = await admin
+        .from("sales_orders")
+        .select("id,order_number,customer_code,customer_name,salesman_code,created_by,status,total_value")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) {
+        return NextResponse.json({ success: false, error: "Order not found." }, { status: 404 });
+      }
+
+      const scope = await resolveSalesScopeForUserId(admin, user.id);
+      if (!canAccessOrder(order, scope, user.id)) {
+        return NextResponse.json({ success: false, error: "You do not have access to this order." }, { status: 403 });
+      }
+
+      const invoiceMeta = await readOrderInvoiceMeta(admin, orderId);
+      if (!canRefreshOrderPricing(order, invoiceMeta) || hasUploadedInvoice(invoiceMeta)) {
+        return NextResponse.json({
+          success: false,
+          error: "Prices and schemes can only be updated for orders that do not have an uploaded invoice.",
+        }, { status: 400 });
+      }
+
+      const { data: existingLines, error: linesError } = await admin
+        .from("sales_order_items")
+        .select("id,item_code,item_name,category,quantity,rate,line_value")
+        .eq("order_id", orderId)
+        .order("item_name");
+      if (linesError) throw linesError;
+      if (!existingLines?.length) {
+        return NextResponse.json({ success: false, error: "This order has no line items to reprice." }, { status: 400 });
+      }
+
+      const [pricingMeta, priorHistory] = await Promise.all([
+        readOrderPricingMeta(admin, orderId),
+        readHistory(admin, orderId),
+      ]);
+      const pricingContext = resolveRefreshPricingContext({ pricingMeta, history: priorHistory });
+
+      const catalog = await loadCachedPricingCatalog(admin);
+      if (pricingContext.pricingType === "retail"
+        && !Object.values(catalog.retailRegionPriceMaps || {}).some((map) => Object.keys(map).length > 0)) {
+        catalog.retailRegionPriceMaps = await loadRetailPriceMaps();
+      }
+      const pricedCatalog = resolveCatalogForOrder(catalog, {
+        selectedRegion: pricingContext.pricingRegion,
+        customerSalesmanCode: order.salesman_code,
+        paymentType: pricingContext.paymentType,
+        pricingType: pricingContext.pricingType,
+      });
+      const pricedLines = priceOrderLines(existingLines, pricedCatalog);
+
+      const quantityControlCheck = await assertOrderQuantityControls({
+        admin,
+        customerCode: order.customer_code,
+        lines: pricedLines,
+        excludeOrderId: orderId,
+      });
+      if (!quantityControlCheck.ok) {
+        return NextResponse.json({
+          success: false,
+          error: quantityControlCheck.error,
+          quantityControlViolations: quantityControlCheck.violations,
+        }, { status: 400 });
+      }
+
+      const nowIso = new Date().toISOString();
+      const { error: deleteError } = await admin
+        .from("sales_order_items")
+        .delete()
+        .eq("order_id", orderId);
+      if (deleteError) throw deleteError;
+
+      const normalizedLines = pricedLines.map((line) => ({
+        order_id: orderId,
+        item_code: String(line.item_code || "").trim(),
+        item_name: String(line.item_name || line.item_code || "").trim(),
+        category: String(line.category || "").trim(),
+        quantity: toNumber(line.quantity),
+        rate: toNumber(line.rate),
+        line_value: toNumber(line.line_value),
+      }));
+      if (normalizedLines.length > 0) {
+        const { error: lineError } = await admin.from("sales_order_items").insert(normalizedLines);
+        if (lineError) throw lineError;
+      }
+
+      const totalQuantity = normalizedLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+      const totalValue = normalizedLines.reduce((sum, line) => {
+        const lineValue = Number(line.line_value);
+        if (Number.isFinite(lineValue) && lineValue > 0) return sum + lineValue;
+        const fallback = Number(line.quantity || 0) * Number(line.rate || 0);
+        return sum + (Number.isFinite(fallback) ? fallback : 0);
+      }, 0);
+      const roundedTotal = Math.round(totalValue * 100) / 100;
+      const { error: totalsError } = await admin
+        .from("sales_orders")
+        .update({
+          total_items: normalizedLines.length,
+          total_quantity: totalQuantity,
+          total_value: roundedTotal,
+          updated_at: nowIso,
+        })
+        .eq("id", orderId);
+      if (totalsError) throw totalsError;
+
+      await writeOrderPricingMeta(admin, orderId, {
+        paymentType: pricingContext.paymentType,
+        pricingRegion: pricedCatalog.region,
+        pricingType: pricingContext.pricingType,
+        refreshedAt: nowIso,
+        refreshedBy: user.id,
+      });
+
+      const changeSet = buildChangeSet(
+        existingLines,
+        normalizedLines.map((line) => ({
+          item_code: line.item_code,
+          item_name: line.item_name,
+          quantity: line.quantity,
+          rate: line.rate,
+        })),
+      );
+      const updatedHistory = await appendOrderHistory(admin, {
+        orderId,
+        customerCode: order.customer_code,
+        userId: user.id,
+        action: "UPDATED_PRICING",
+        previousStatus: order.status,
+        nextStatus: order.status,
+        changes: changeSet,
+        changedAt: nowIso,
+        paymentType: pricingContext.paymentType,
+        pricingRegion: pricedCatalog.region,
+        pricingType: pricingContext.pricingType,
+      });
+      const summary = summarizePricingRefreshChanges(changeSet);
+
+      return NextResponse.json({
+        success: true,
+        action,
+        orderId,
+        orderNumber: order.order_number,
+        totalValue: roundedTotal,
+        previousTotalValue: Number(order.total_value || 0),
+        changedLineCount: summary.changedLineCount,
+        unchanged: summary.unchanged,
+        lines: normalizedLines,
+        history: updatedHistory,
+        pricing: {
+          paymentType: pricingContext.paymentType,
+          pricingRegion: pricedCatalog.region,
+          pricingType: pricingContext.pricingType,
+        },
+      });
     }
 
     const customerCode = String(body?.customerCode || "").trim();

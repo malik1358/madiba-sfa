@@ -203,7 +203,7 @@ Schemes and quantity limits are settings, not tables:
 | `visit_report_latest:<code>` / `visit_report_history:<code>:` | Field visit reports |
 | `order_invoice_meta:<id>` | Invoice status and PDF metadata |
 | `order_history_latest:<id>` / `order_history:<id>:` | Order edit history |
-| `order_pricing_meta:<id>` | Pricing snapshot on the order |
+| `order_pricing_meta:<id>` | Pricing snapshot on the order (`paymentType`, `pricingRegion`, `pricingType`; refresh adds `refreshedAt` / `refreshedBy`) |
 | `missing_invoice_email_last_sent_at` | Email dedupe JSON: `lastSentAt`, `lastMidnightKsaDate`, `lastDailySummaryIndiaDate` (India calendar date for Soyeb/Fazlur end-of-day summary) |
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |

@@ -183,8 +183,14 @@ export function sumFilteredKpiPaceEstimates(
 ) {
   const totals = sumFilteredKpiColumns(rows, columns);
   const estimates = {};
+  const keysToCompute = [...new Set(columns || [])];
+  if (keysToCompute.includes("totalCashCollected")) {
+    if (!keysToCompute.includes("collection")) keysToCompute.push("collection");
+    if (!keysToCompute.includes("cashCollection")) keysToCompute.push("cashCollection");
+  }
 
-  columns.forEach((key) => {
+  keysToCompute.forEach((key) => {
+    if (key === "totalCashCollected") return;
     let estimateSum = 0;
     let hasEstimate = false;
     (rows || []).forEach((row) => {
@@ -225,6 +231,21 @@ export function sumFilteredKpiPaceEstimates(
       achievement: hasEstimate ? achievementPercent(estimateSum, column.target) : null,
     };
   });
+
+  // Total cash collected is Collection + Cash collection (info) for actuals and for pace estimates.
+  if ((columns || []).includes("totalCashCollected")) {
+    const collectionEstimate = estimates.collection?.estimate;
+    const cashEstimate = estimates.cashCollection?.estimate;
+    const hasEstimate = collectionEstimate != null || cashEstimate != null;
+    const estimateSum = hasEstimate
+      ? (Number(collectionEstimate) || 0) + (Number(cashEstimate) || 0)
+      : null;
+    estimates.totalCashCollected = {
+      estimate: estimateSum,
+      target: 0,
+      achievement: null,
+    };
+  }
 
   return estimates;
 }

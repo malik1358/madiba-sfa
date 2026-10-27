@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildOrderedNotInSalesReport,
   clampOrderedNotInSalesDays,
+  ksaCalendarDaysBetween,
   resolveOrderedNotInSalesWindow,
 } from "../app/lib/orderedNotInSales.js";
 
@@ -69,6 +70,7 @@ test("report lists ordered items missing from sales and aggregates qty/value", (
       },
     ],
     soldItemCodes: ["c300", "Z999"],
+    lastSaleByCode: { A100: "2026-09-01", B200: "" },
     window: { fromDate: "2026-10-21", toDate: "2026-10-27", days: 7 },
   });
 
@@ -83,9 +85,19 @@ test("report lists ordered items missing from sales and aggregates qty/value", (
   assert.equal(report.rows[0].orderCount, 2);
   assert.equal(report.rows[0].orderValue, 30);
   assert.equal(report.rows[0].itemName, "Pen Blue");
+  assert.equal(report.rows[0].lastSaleDate, "2026-09-01");
+  assert.equal(report.rows[0].daysSinceLastSale, 56);
   assert.equal(report.rows[1].orderedQty, 3);
+  assert.equal(report.rows[1].lastSaleDate, "");
+  assert.equal(report.rows[1].daysSinceLastSale, null);
   assert.equal(report.summary.missingQty, 18);
   assert.equal(report.summary.missingValue, 60);
+});
+
+test("ksa calendar days between sale and as-of dates", () => {
+  assert.equal(ksaCalendarDaysBetween("2026-10-20", "2026-10-27"), 7);
+  assert.equal(ksaCalendarDaysBetween("2026-10-27", "2026-10-27"), 0);
+  assert.equal(ksaCalendarDaysBetween("", "2026-10-27"), null);
 });
 
 test("zero-quantity order lines are ignored", () => {

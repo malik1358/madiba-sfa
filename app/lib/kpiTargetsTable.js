@@ -2,9 +2,10 @@ import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
   achievementPercent,
   buildPerformanceKpi,
-  estimateFromPaceGap,
+  monthEndPaceEstimate,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
+  resolveExpectedPacePercent,
 } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
@@ -190,15 +191,29 @@ export function sumFilteredKpiPaceEstimates(
       if (row?.isTeam) return;
       const target = rowTargetValue(row, key);
       const kpi = (row.kpis || []).find((item) => item.key === key);
+      const actual = Number(kpi?.actual || 0) || 0;
       const liveKpi = buildPerformanceKpi(key, {
-        actual: Number(kpi?.actual || 0) || 0,
+        actual,
         target,
         reportDate,
         todayIso,
         paceShares: row?.paceShares || null,
         salesAsOfDate: row?.salesAsOfDate ?? salesAsOfDate,
       });
-      const estimate = estimateFromPaceGap(target, liveKpi.paceGap);
+      const expected = liveKpi.expected != null
+        ? liveKpi.expected
+        : resolveExpectedPacePercent(key, {
+          reportDate,
+          todayIso,
+          paceShares: row?.paceShares || null,
+          salesAsOfDate: row?.salesAsOfDate ?? salesAsOfDate,
+        });
+      const estimate = monthEndPaceEstimate({
+        actual,
+        target,
+        expected,
+        paceGap: liveKpi.paceGap,
+      });
       if (estimate == null) return;
       estimateSum += estimate;
       hasEstimate = true;

@@ -314,6 +314,30 @@ export function estimateFromPaceGap(target, paceGap) {
   return goal * ((100 + gap) / 100);
 }
 
+/**
+ * One salesman's month-end figure for the Estimate at current pace footer.
+ * Prefer the target gap when a target exists; otherwise scale actual by expected pace.
+ * Never returns below the current actual, and keeps untarged actuals in the sum.
+ */
+export function monthEndPaceEstimate({
+  actual = 0,
+  target = 0,
+  expected = null,
+  paceGap = null,
+} = {}) {
+  const value = Number(actual || 0) || 0;
+  const goal = Number(target || 0) || 0;
+  if (!(value > 0) && !(goal > 0)) return null;
+  let estimate = estimateFromPaceGap(goal, paceGap);
+  if (estimate == null) {
+    estimate = estimateAtCurrentPace(value, expected);
+  }
+  if (estimate == null) {
+    return value > 0 ? value : null;
+  }
+  return Math.max(value, Number(estimate) || 0);
+}
+
 export function formatKpiTargetInput(value) {
   const digits = String(value ?? "").replace(/[^\d]/g, "");
   if (!digits) return "";

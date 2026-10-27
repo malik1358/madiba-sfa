@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-27** — KPI Targets **Estimate at current pace** no longer drops salesmen who have actuals but no target, and each month-end figure is at least that salesman's current actual. The footer had shown 1,262,294 under an Actual of 1,277,176. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets, My Performance, and KPI detail links add **Total cash collected**: Collection plus Cash collection (info). Information-only, no target. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets keeps only the Salesman column sticky on horizontal scroll. Boss scrolls with the KPI columns so more metrics fit on a phone. Header/footer vertical stickiness is unchanged. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets shows the last sales transaction date of the selected month beside the page title. That date is the latest uploaded sale in the month, the same date used for sales pace. No migration. See `docs/BUSINESS_RULES.md`.

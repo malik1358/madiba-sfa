@@ -59,9 +59,12 @@ export function collectSalesmanIdentities(source = {}) {
     const comparable = comparableSalesmanIdentity(value);
     if (!comparable) return;
     identities.add(comparable);
-    comparable.split(/\s+/).forEach((token) => {
-      if (token.length >= 3) identities.add(token);
-    });
+    // Keep a single-token code as-is (e.g. PARVEZ). Do not split multi-word
+    // names into first-name tokens — AHMED NABIL must not match AHMED HADIA.
+    const tokens = comparable.split(/\s+/).filter(Boolean);
+    if (tokens.length === 1 && tokens[0].length >= 3) {
+      identities.add(tokens[0]);
+    }
     const parenthetical = String(value || "").match(/\(([^)]+)\)/);
     if (parenthetical) {
       const alias = comparableSalesmanIdentity(parenthetical[1]);

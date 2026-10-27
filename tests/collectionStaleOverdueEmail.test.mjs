@@ -516,6 +516,50 @@ test("filterCollectionStaleOverdueRowsForProfile keeps matching salesman custome
   assert.equal(matched[0].customer_code, "C1");
 });
 
+test("filterCollectionStaleOverdueRowsForProfile does not match shared first-name tokens", () => {
+  const rows = [
+    {
+      customer_code: "1020C",
+      salesman_name: "Ahmed Hadia",
+      salesman_code: "AHMED HADIA",
+      outstanding_above_120: 3038.3,
+      collection_history: [],
+      latest_collection: null,
+      legal_transfer: { is_transferred: true },
+    },
+    {
+      customer_code: "1258C",
+      salesman_name: "Ahmed Hadia",
+      salesman_code: "AHMED HADIA",
+      outstanding_above_120: 345844.7,
+      collection_history: [],
+      latest_collection: null,
+      legal_transfer: { is_transferred: true },
+    },
+    {
+      customer_code: "1162C",
+      salesman_name: "Ahmed Nabil",
+      salesman_code: "AHMED NABIL",
+      outstanding_above_120: 269.48,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      customer_code: "1224",
+      salesman_name: "AHMED NABIL",
+      salesman_code: "AHMED.NABIL",
+      outstanding_above_120: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+  ];
+  const matched = filterCollectionStaleOverdueRowsForProfile(rows, {
+    salesman_name: "AHMED NABIL",
+    salesman_code: "AHMED NABIL",
+  }, { todayKey: "2026-10-27" });
+  assert.deepEqual(matched.map((row) => row.customer_code), ["1162C", "1224"]);
+});
+
 test("buildUserVisitReportEmail embeds stale overdue section for salesman and bosses", () => {
   const section = buildCollectionStaleOverdueSalesmanSection({
     salesmanName: "Parvez",

@@ -203,26 +203,27 @@ test("total cash collected pace estimate is collection plus cash collection", ()
     ["collection", "cashCollection", "totalCashCollected"],
     { reportDate: "2026-10-01", todayIso: "2026-10-10" },
   );
+  const expected = resolveExpectedPacePercent("collection", {
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  assert.equal(
+    estimates.collection.estimate,
+    monthEndPaceEstimate({ actual: 1_277_176, target: 2_000_000, expected, paceGap: null }),
+  );
+  assert.equal(
+    estimates.cashCollection.estimate,
+    monthEndPaceEstimate({ actual: 262_557, target: 0, expected, paceGap: null }),
+  );
   assert.equal(
     estimates.totalCashCollected.estimate,
     (Number(estimates.collection.estimate) || 0) + (Number(estimates.cashCollection.estimate) || 0),
   );
-  assert.notEqual(
-    estimates.totalCashCollected.estimate,
-    monthEndPaceEstimate({
-      actual: 1_539_733,
-      target: 0,
-      expected: resolveExpectedPacePercent("totalCashCollected", {
-        reportDate: "2026-10-01",
-        todayIso: "2026-10-10",
-      }),
-      paceGap: null,
-    }),
-  );
 });
 
-test("month-end pace estimate keeps untarged actual and never falls below actual", () => {
-  assert.equal(monthEndPaceEstimate({ actual: 40, target: 100, expected: 50, paceGap: -10 }), 90);
+test("month-end pace estimate scales actual by expected pace, not target gap", () => {
+  // Gap method would be target × (100 − 10) / 100 = 90; leftover must follow history share.
+  assert.equal(monthEndPaceEstimate({ actual: 40, target: 100, expected: 50, paceGap: -10 }), 80);
   assert.equal(monthEndPaceEstimate({ actual: 14882, target: 0, expected: 50, paceGap: null }), 29764);
   assert.equal(monthEndPaceEstimate({ actual: 14882, target: 0, expected: null, paceGap: null }), 14882);
   assert.equal(monthEndPaceEstimate({ actual: 0, target: 0, expected: 50, paceGap: null }), null);
@@ -290,7 +291,7 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
   );
 });
 
-test("pace estimate footer sums each salesman's own pace gap", () => {
+test("pace estimate footer sums each salesman's own scaled pace estimate", () => {
   const rows = [
     { ...ahmed, paceShares: { 10: 0.5 } },
     { ...ali, paceShares: { 10: 0.8 } },

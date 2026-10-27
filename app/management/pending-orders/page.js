@@ -64,12 +64,14 @@ import {
   MAX_ORDER_INVOICE_UPLOAD_BYTES,
   canApprovePendingOrders,
   displayInvoiceStatus,
+  hasUploadedInvoice,
   isPendingForApprovalStatus,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
   shouldAutoRejectLegacyUninvoicedOrder,
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
+import { canRefreshOrderPricing } from "../../lib/orderPricingRefresh";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
 import { uniqueExcelFilterOptions } from "../../lib/biExcelFilters";
 import {
@@ -364,6 +366,7 @@ export default function PendingOrdersPage() {
   const [loadingLines, setLoadingLines] = useState(false);
   const [downloadingPdfOrderId, setDownloadingPdfOrderId] = useState("");
   const [downloadingTallyExcelOrderId, setDownloadingTallyExcelOrderId] = useState("");
+  const [refreshingPricingOrderId, setRefreshingPricingOrderId] = useState("");
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
   const [rejectReasonByOrder, setRejectReasonByOrder] = useState({});
@@ -1541,6 +1544,79 @@ export default function PendingOrdersPage() {
     }
   }
 
+  async function refreshOrderPricing(orderId) {
+    if (!orderId || refreshingPricingOrderId) return;
+    const order = (orders || []).find((entry) => String(entry.id) === String(orderId));
+    const meta = invoiceMetaByOrder?.[orderId] || null;
+    if (!canRefreshOrderPricing(order, meta) || hasUploadedInvoice(meta)) {
+      setError("Prices and schemes can only be updated when no invoice PDF is uploaded.");
+      return;
+    }
+
+    setRefreshingPricingOrderId(String(orderId));
+    setError("");
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/sales-orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "refresh_pricing",
+          orderId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to update prices and schemes.");
+      }
+
+      const nextTotal = Number(payload.totalValue);
+      const updatedAt = new Date().toISOString();
+      setOrders((current) => (current || []).map((entry) => (
+        String(entry.id) === String(orderId)
+          ? {
+            ...entry,
+            total_value: Number.isFinite(nextTotal) ? nextTotal : entry.total_value,
+            updated_at: updatedAt,
+          }
+          : entry
+      )));
+
+      if (String(activeOrderId) === String(orderId)) {
+        if (Array.isArray(payload.lines)) {
+          setOrderLines(payload.lines.map((line, index) => ({
+            id: line.id || `${orderId}-${index}`,
+            item_code: line.item_code,
+            item_name: line.item_name,
+            category: line.category,
+            quantity: line.quantity,
+            rate: line.rate,
+            line_value: line.line_value,
+          })));
+        }
+        if (Array.isArray(payload.history)) {
+          setOrderHistory(payload.history);
+        }
+      }
+
+      const changed = Number(payload.changedLineCount || 0);
+      await showPopup({
+        variant: "success",
+        message: changed > 0
+          ? `Updated ${changed} line rate(s) from the current catalogue and schemes.`
+          : "Catalogue prices and schemes already match this order.",
+      });
+    } catch (err) {
+      setError(err?.message || "Unable to update prices and schemes.");
+    } finally {
+      setRefreshingPricingOrderId("");
+    }
+  }
+
   async function exportQueueToExcel() {
     try {
       const XLSX = await import("xlsx");
@@ -1881,6 +1957,19 @@ export default function PendingOrdersPage() {
                                   ? "Preparing Excel..."
                                   : "Generate Excel"}
                               </button>
+                              {canManageInvoice && canRefreshOrderPricing(order, meta) && !hasUploadedInvoice(meta) ? (
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton"
+                                  onClick={() => refreshOrderPricing(order.id)}
+                                  disabled={Boolean(refreshingPricingOrderId) || busyApproval || isQueuedPendingOrderId(order.id)}
+                                  title="Reapply current catalogue prices and schemes. Only available before an invoice PDF is uploaded."
+                                >
+                                  {String(refreshingPricingOrderId) === String(order.id)
+                                    ? "Updating prices..."
+                                    : "Update prices & schemes"}
+                                </button>
+                              ) : null}
                               {canManageInvoice ? (
                                 <select
                                   className="moduleInput"
@@ -2164,6 +2253,19 @@ export default function PendingOrdersPage() {
                                       ? "Preparing Excel..."
                                       : "Generate Excel"}
                                   </button>
+                                  {canManageInvoice && canRefreshOrderPricing(order, meta) && !hasUploadedInvoice(meta) ? (
+                                    <button
+                                      type="button"
+                                      className="moduleInlineButton"
+                                      onClick={() => refreshOrderPricing(order.id)}
+                                      disabled={Boolean(refreshingPricingOrderId) || busyApproval || loadingLines || orderLines.length === 0}
+                                      title="Reapply current catalogue prices and schemes. Only available before an invoice PDF is uploaded."
+                                    >
+                                      {String(refreshingPricingOrderId) === String(order.id)
+                                        ? "Updating prices..."
+                                        : "Update prices & schemes"}
+                                    </button>
+                                  ) : null}
                                   <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
                                     Export Excel
                                   </button>

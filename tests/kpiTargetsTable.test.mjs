@@ -23,6 +23,7 @@ import {
   buildPerformanceSnapshot,
   estimateFromPaceGap,
   formatKpiTargetInput,
+  monthEndPaceEstimate,
   parseKpiTargetInput,
 } from "../app/lib/performanceKpis.js";
 import { isCollectionOnlyAccess } from "../app/lib/moduleAccess.js";
@@ -183,6 +184,75 @@ test("target inputs round-trip through thousand separators", () => {
   assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
 });
 
+test("month-end pace estimate keeps untarged actual and never falls below actual", () => {
+  assert.equal(monthEndPaceEstimate({ actual: 40, target: 100, expected: 50, paceGap: -10 }), 90);
+  assert.equal(monthEndPaceEstimate({ actual: 14882, target: 0, expected: 50, paceGap: null }), 29764);
+  assert.equal(monthEndPaceEstimate({ actual: 14882, target: 0, expected: null, paceGap: null }), 14882);
+  assert.equal(monthEndPaceEstimate({ actual: 0, target: 0, expected: 50, paceGap: null }), null);
+});
+
+test("pace estimate footer stays at or above the filtered actual total", () => {
+  // Pace share 100% by day 10 makes each targeted estimate equal that salesman's actual.
+  // Untarged sales with actual used to be dropped, so the footer (1,262,294) fell below Actual (1,277,176).
+  const rows = [
+    {
+      ...ahmed,
+      paceShares: { 10: 1 },
+      kpis: ahmed.kpis.map((kpi) => (
+        kpi.key === "officeSupplies" ? { ...kpi, actual: 1_262_294 } : kpi
+      )),
+    },
+    {
+      salesmanCode: "ZIAD",
+      salesmanName: "Ziad",
+      bossCode: "DIRECTOR",
+      bossName: "Director",
+      officeSupplies: "0",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "0",
+      collection: "0",
+      newCustomers: "0",
+      repeatCustomers: "0",
+      paceShares: { 10: 1 },
+      kpis: [
+        { key: "officeSupplies", actual: 14_882 },
+        { key: "localItemSales", actual: 0 },
+        { key: "otherSales", actual: 0 },
+        { key: "totalSales", actual: 14_882 },
+        { key: "collection", actual: 0 },
+        { key: "newCustomers", actual: 0 },
+        { key: "repeatCustomers", actual: 0 },
+      ],
+    },
+  ];
+  const estimates = sumFilteredKpiPaceEstimates(rows, ["officeSupplies"], {
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+  });
+  const actualTotal = sumFilteredKpiColumns(rows, ["officeSupplies"]).officeSupplies.actual;
+  assert.equal(actualTotal, 1_277_176);
+  assert.ok(estimates.officeSupplies.estimate >= actualTotal);
+  assert.equal(estimates.officeSupplies.estimate, 1_277_176);
+  const ahmedLive = buildPerformanceKpi("officeSupplies", {
+    actual: 1_262_294,
+    target: 100,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-10",
+    paceShares: { 10: 1 },
+  });
+  assert.equal(estimateFromPaceGap(100, ahmedLive.paceGap), 1_262_294);
+  assert.equal(
+    monthEndPaceEstimate({
+      actual: 14_882,
+      target: 0,
+      expected: 100,
+      paceGap: null,
+    }),
+    14_882,
+  );
+});
+
 test("pace estimate footer sums each salesman's own pace gap", () => {
   const rows = [
     { ...ahmed, paceShares: { 10: 0.5 } },
@@ -207,8 +277,17 @@ test("pace estimate footer sums each salesman's own pace gap", () => {
     todayIso: "2026-10-10",
     paceShares: { 10: 0.8 },
   });
-  const officeEstimate = estimateFromPaceGap(100, ahmedOffice.paceGap)
-    + estimateFromPaceGap(80, aliOffice.paceGap);
+  const officeEstimate = monthEndPaceEstimate({
+    actual: 40,
+    target: 100,
+    expected: ahmedOffice.expected,
+    paceGap: ahmedOffice.paceGap,
+  }) + monthEndPaceEstimate({
+    actual: 30,
+    target: 80,
+    expected: aliOffice.expected,
+    paceGap: aliOffice.paceGap,
+  });
   assert.equal(estimates.officeSupplies.estimate, officeEstimate);
   assert.notEqual(
     estimates.officeSupplies.estimate,
@@ -225,20 +304,42 @@ test("pace estimate footer sums each salesman's own pace gap", () => {
     achievementPercent(officeEstimate, 180),
   );
   assert.equal(estimates.totalSales.estimate, (
-    estimateFromPaceGap(190, buildPerformanceKpi("totalSales", {
+    monthEndPaceEstimate({
       actual: 50,
       target: 190,
-      reportDate: "2026-10-01",
-      todayIso: "2026-10-10",
-      paceShares: { 10: 0.5 },
-    }).paceGap)
-    + estimateFromPaceGap(120, buildPerformanceKpi("totalSales", {
+      expected: buildPerformanceKpi("totalSales", {
+        actual: 50,
+        target: 190,
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-10",
+        paceShares: { 10: 0.5 },
+      }).expected,
+      paceGap: buildPerformanceKpi("totalSales", {
+        actual: 50,
+        target: 190,
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-10",
+        paceShares: { 10: 0.5 },
+      }).paceGap,
+    })
+    + monthEndPaceEstimate({
       actual: 50,
       target: 120,
-      reportDate: "2026-10-01",
-      todayIso: "2026-10-10",
-      paceShares: { 10: 0.8 },
-    }).paceGap)
+      expected: buildPerformanceKpi("totalSales", {
+        actual: 50,
+        target: 120,
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-10",
+        paceShares: { 10: 0.8 },
+      }).expected,
+      paceGap: buildPerformanceKpi("totalSales", {
+        actual: 50,
+        target: 120,
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-10",
+        paceShares: { 10: 0.8 },
+      }).paceGap,
+    })
   ));
 });
 

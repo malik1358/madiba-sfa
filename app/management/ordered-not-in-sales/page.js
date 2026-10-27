@@ -28,6 +28,9 @@ const TEXT = {
   orderCount: { en: "Orders", ar: "الطلبات" },
   orderValue: { en: "Order value", ar: "قيمة الطلب" },
   lastOrdered: { en: "Last ordered", ar: "آخر طلب" },
+  lastSale: { en: "Last sale", ar: "آخر بيع" },
+  daysSinceSale: { en: "Days since sale", ar: "أيام منذ آخر بيع" },
+  neverSold: { en: "Never sold", ar: "لم يُبع" },
   total: { en: "Total", ar: "الإجمالي" },
   window: { en: "Window", ar: "الفترة" },
   orderedItems: { en: "Ordered items", ar: "أصناف مطلوبة" },
@@ -53,6 +56,8 @@ const FILTER_KEYS = [
   "orderCount",
   "orderValue",
   "lastOrderedAt",
+  "lastSaleDate",
+  "daysSinceLastSale",
 ];
 
 function formatQty(value) {
@@ -84,7 +89,27 @@ function formatDateTime(iso) {
   });
 }
 
-function cellValue(row, key) {
+function formatSaleDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "—";
+  const [year, month, day] = text.split("-");
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return parsed.toLocaleDateString("en-GB", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function formatDaysSinceSale(value, neverLabel) {
+  if (value == null || value === "") return neverLabel;
+  const days = Number(value);
+  if (!Number.isFinite(days)) return neverLabel;
+  return String(days);
+}
+
+function cellValue(row, key, neverLabel = "Never sold") {
   if (key === "itemCode") return row.itemCode || "";
   if (key === "itemName") return row.itemName || "";
   if (key === "category") return row.category || "";
@@ -92,6 +117,8 @@ function cellValue(row, key) {
   if (key === "orderCount") return String(row.orderCount ?? "");
   if (key === "orderValue") return formatAmount(row.orderValue);
   if (key === "lastOrderedAt") return formatDateTime(row.lastOrderedAt);
+  if (key === "lastSaleDate") return formatSaleDate(row.lastSaleDate);
+  if (key === "daysSinceLastSale") return formatDaysSinceSale(row.daysSinceLastSale, neverLabel);
   return "";
 }
 
@@ -145,7 +172,12 @@ export default function OrderedNotInSalesPage() {
   }, [loadReport]);
 
   const rows = useMemo(() => (Array.isArray(report?.rows) ? report.rows : []), [report]);
-  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, cellValue);
+  const neverSoldLabel = t("neverSold");
+  const filterValueOf = useMemo(
+    () => (row, key) => cellValue(row, key, neverSoldLabel),
+    [neverSoldLabel],
+  );
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, filterValueOf);
   const totals = useMemo(() => {
     let orderedQty = 0;
     let orderCount = 0;
@@ -230,6 +262,8 @@ export default function OrderedNotInSalesPage() {
                       <BiExcelHead label={t("orderCount")} filterKey="orderCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("orderValue")} filterKey="orderValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
                       <BiExcelHead label={t("lastOrdered")} filterKey="lastOrderedAt" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("lastSale")} filterKey="lastSaleDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("daysSinceSale")} filterKey="daysSinceLastSale" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                     </tr>
                   </thead>
                   <tbody>
@@ -242,6 +276,8 @@ export default function OrderedNotInSalesPage() {
                         <td>{row.orderCount}</td>
                         <td className="moduleBiTotalCol">{formatAmount(row.orderValue)}</td>
                         <td>{formatDateTime(row.lastOrderedAt)}</td>
+                        <td>{formatSaleDate(row.lastSaleDate)}</td>
+                        <td>{formatDaysSinceSale(row.daysSinceLastSale, t("neverSold"))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -253,6 +289,8 @@ export default function OrderedNotInSalesPage() {
                       <td>{formatQty(totals.orderedQty)}</td>
                       <td>{totals.orderCount}</td>
                       <td className="moduleBiTotalCol">{formatAmount(totals.orderValue)}</td>
+                      <td />
+                      <td />
                       <td />
                     </tr>
                   </tfoot>

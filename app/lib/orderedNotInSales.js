@@ -77,13 +77,56 @@ function lineValue(line) {
   return money(quantity(line?.quantity) * money(line?.rate));
 }
 
+export function normalizeSaleDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+/** Whole KSA calendar days from earlier date to later date (0 when same day). */
+export function ksaCalendarDaysBetween(earlierDate, laterDate) {
+  const earlier = normalizeSaleDate(earlierDate);
+  const later = normalizeSaleDate(laterDate);
+  if (!earlier || !later || earlier > later) return null;
+  const earlierUtc = Date.UTC(...earlier.split("-").map((part, index) => (index === 1 ? Number(part) - 1 : Number(part))));
+  const laterUtc = Date.UTC(...later.split("-").map((part, index) => (index === 1 ? Number(part) - 1 : Number(part))));
+  return Math.round((laterUtc - earlierUtc) / 86400000);
+}
+
+export function attachLastSaleFields(rows = [], lastSaleByCode = {}, asOfDate = "") {
+  const asOf = normalizeSaleDate(asOfDate) || getKsaDateString();
+  return (rows || []).map((row) => {
+    const code = normalizeOrderedItemCode(row?.itemCode || row?.item_code);
+    const lastSaleDate = normalizeSaleDate(
+      lastSaleByCode?.[code]
+      ?? lastSaleByCode?.[row?.itemCode]
+      ?? row?.lastSaleDate
+      ?? "",
+    );
+    const daysSinceLastSale = lastSaleDate == null || lastSaleDate === ""
+      ? null
+      : ksaCalendarDaysBetween(lastSaleDate, asOf);
+    return {
+      ...row,
+      lastSaleDate: lastSaleDate || "",
+      daysSinceLastSale,
+    };
+  });
+}
+
 /**
  * Aggregate submitted order lines by item, then keep items that never appear in sales codes.
- * @param {{ orderLines?: Array, soldItemCodes?: Iterable<string>, window?: object }} input
+ * @param {{ orderLines?: Array, soldItemCodes?: Iterable<string>, lastSaleByCode?: object, window?: object }} input
  */
 export function buildOrderedNotInSalesReport({
   orderLines = [],
   soldItemCodes = [],
+  lastSaleByCode = {},
   window = null,
 } = {}) {
   const sold = new Set(
@@ -149,22 +192,28 @@ export function buildOrderedNotInSalesReport({
     });
   }
 
-  rows.sort((left, right) => {
+  const enriched = attachLastSaleFields(
+    rows,
+    lastSaleByCode,
+    window?.toDate || "",
+  );
+
+  enriched.sort((left, right) => {
     if (right.orderedQty !== left.orderedQty) return right.orderedQty - left.orderedQty;
     return left.itemCode.localeCompare(right.itemCode);
   });
 
   return {
     window: window || null,
-    rows,
+    rows: enriched,
     summary: {
       orderedItems: orderedItemCount,
       soldItems: soldItemCount,
       missingItems: rows.length,
       orderedQty: Math.round(orderedQtyTotal * 1000) / 1000,
       orderedValue: money(orderedValueTotal),
-      missingQty: Math.round(rows.reduce((sum, row) => sum + Number(row.orderedQty || 0), 0) * 1000) / 1000,
-      missingValue: money(rows.reduce((sum, row) => sum + Number(row.orderValue || 0), 0)),
+      missingQty: Math.round(enriched.reduce((sum, row) => sum + Number(row.orderedQty || 0), 0) * 1000) / 1000,
+      missingValue: money(enriched.reduce((sum, row) => sum + Number(row.orderValue || 0), 0)),
     },
   };
 }

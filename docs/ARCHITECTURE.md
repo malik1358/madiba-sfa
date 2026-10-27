@@ -138,7 +138,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/app-config`, `/api/build-info`, `/api/user-activity`
 - `/api/working-hours` — attendance columns plus daily salesman working hours from near-visit lunch segments; the daily salesman resume reuses this report calculation
 - `/api/monthly-attendance` — one salesman or collector for a KSA month (through today when the month is current). Salesmen and collectors see themselves. Admin, manager, invoice-maker, and report-user pick one salesman or collector. No migration.
-- `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
+- `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log` — the email cycle also appends each salesman's open Potential Bad Debts table (legal transfers omitted) using `loadDebtReports`, carried into boss/company digests with that salesman's report.
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)
 

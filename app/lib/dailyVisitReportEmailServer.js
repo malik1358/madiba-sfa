@@ -30,6 +30,8 @@ import {
   enrichDueCustomersWithVisitWithoutOrder,
 } from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
+import { buildPotentialBadDebtsSection, filterBadDebtRowsForProfile } from "./badDebtReportEmail.js";
+import { loadDebtReports } from "./badDebtReportServer.js";
 import { buildPotentialSalesTargetsDigest, buildPotentialSalesTargetsSection, potentialSalesTargetMatchesSalesman } from "./potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
 import {
@@ -335,6 +337,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadTeamTargets = loadKpiTargetsBySalesman,
   loadDueCollectionCustomers = null,
   loadPotentialSalesTargets = loadPotentialSalesTargetCustomers,
+  loadBadDebts = loadDebtReports,
 } = {}) {
   const schedule = resolveDailyVisitReportEmailSchedule(date, now);
   const reportDate = schedule.date;
@@ -444,6 +447,22 @@ export async function runDailyVisitReportEmailCycle(admin, {
         provider: sent?.provider || null,
       }],
     };
+  }
+
+  let potentialBadDebts = [];
+  let potentialBadDebtsAsOf = staleAsOfKey;
+  try {
+    const debtReport = await loadBadDebts(admin, {
+      now,
+      fetchOutstandingAndCollectionRecords: collectionRecords !== null
+        ? async () => collectionRecords
+        : undefined,
+    });
+    potentialBadDebts = Array.isArray(debtReport?.badDebts) ? debtReport.badDebts : [];
+    potentialBadDebtsAsOf = String(debtReport?.asOf || staleAsOfKey).trim() || staleAsOfKey;
+  } catch (error) {
+    console.error("Unable to load potential bad debts for visit report emails:", error);
+    potentialBadDebts = [];
   }
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
@@ -638,6 +657,11 @@ export async function runDailyVisitReportEmailCycle(admin, {
         Boolean(profileCode) && potentialSalesTargetMatchesSalesman(row, profileCode)
       )),
     }) : null;
+    const potentialBadDebtsSection = buildPotentialBadDebtsSection({
+      salesmanName: userReport.userName || reportDisplayName(profile),
+      rows: filterBadDebtRowsForProfile(potentialBadDebts, profile),
+      asOf: potentialBadDebtsAsOf,
+    });
     const message = buildUserVisitReportEmail({
       date: reportDate,
       user: userReport,
@@ -647,6 +671,9 @@ export async function runDailyVisitReportEmailCycle(admin, {
       staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
       incentiveSection: resolveIncentiveSection(incentiveByCode, profile),
       potentialSalesTargetsSection,
+      potentialBadDebtsSection: potentialBadDebtsSection.customerCount
+        ? potentialBadDebtsSection
+        : null,
     });
     reportMessageByUserId.set(userReport.userId, {
       userId: userReport.userId,

@@ -285,6 +285,7 @@ export function buildUserVisitReportEmail({
   staleOverdueSection = null,
   incentiveSection = null,
   potentialSalesTargetsSection = null,
+  potentialBadDebtsSection = null,
 } = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
   const subject = `Daily Visit Report — ${userName} — ${date}`;
@@ -357,6 +358,7 @@ export function buildUserVisitReportEmail({
     ...(incentiveSection?.text ? [incentiveSection.text] : []),
     ...(staleOverdueSection?.text ? [staleOverdueSection.text] : []),
     ...(potentialSalesTargetsSection?.text ? [potentialSalesTargetsSection.text] : []),
+    ...(potentialBadDebtsSection?.text ? [potentialBadDebtsSection.text] : []),
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
         ? "-"
@@ -462,6 +464,7 @@ export function buildUserVisitReportEmail({
   ${incentiveSection?.html || ""}
   ${staleOverdueSection?.html || ""}
   ${potentialSalesTargetsSection?.html || ""}
+  ${potentialBadDebtsSection?.html || ""}
   ${routeHtml}
   ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

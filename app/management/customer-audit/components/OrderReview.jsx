@@ -8,16 +8,23 @@ export default function OrderReview({
   priceList,
   savingOrder,
   submittingOrder,
+  deletingDraft = false,
   saveDraft,
+  deleteDraft = null,
   submitOrder,
   setShowOrderReview,
   draftOrderId,
+  loadedOrderStatus = 'DRAFT',
   decreaseOrderQty,
   increaseOrderQty,
   changeOrderQty,
   orderWriteBlocked = false,
 }) {
   if (!showOrderReview || orderItems.length === 0) return null;
+
+  const canDeleteDraft = Boolean(draftOrderId)
+    && String(loadedOrderStatus || 'DRAFT').toUpperCase() === 'DRAFT'
+    && typeof deleteDraft === 'function';
 
   return (
     <div className="auditOrderOverlay">
@@ -68,10 +75,20 @@ export default function OrderReview({
         </div>
 
         <div className="auditOrderReviewActions">
-          <button type="button" className="auditSaveDraftButton" disabled={savingOrder || submittingOrder || orderWriteBlocked} onClick={saveDraft}>
+          <button type="button" className="auditSaveDraftButton" disabled={savingOrder || submittingOrder || deletingDraft || orderWriteBlocked} onClick={saveDraft}>
             {savingOrder ? 'Saving...' : draftOrderId ? 'Update Draft' : 'Save Draft'}
           </button>
-          <button type="button" className="auditSubmitOrderButton" disabled={savingOrder || submittingOrder || orderWriteBlocked} onClick={submitOrder}>
+          {canDeleteDraft ? (
+            <button
+              type="button"
+              className="auditDeleteDraftButton"
+              disabled={savingOrder || submittingOrder || deletingDraft}
+              onClick={deleteDraft}
+            >
+              {deletingDraft ? 'Deleting...' : 'Delete Draft'}
+            </button>
+          ) : null}
+          <button type="button" className="auditSubmitOrderButton" disabled={savingOrder || submittingOrder || deletingDraft || orderWriteBlocked} onClick={submitOrder}>
             {submittingOrder ? 'Submitting...' : 'Submit Final Order'}
           </button>
         </div>

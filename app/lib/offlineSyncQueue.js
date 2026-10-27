@@ -161,6 +161,23 @@ export async function countPendingOfflineQueue() {
   return rows.length;
 }
 
+export async function getOfflineQueueItem(queueId) {
+  const id = String(queueId || "").trim();
+  if (!id) return null;
+  return runTransaction(QUEUE_STORE, "readonly", (store, resolve, reject) => {
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function removeOfflineQueueItemById(queueId) {
+  const item = await getOfflineQueueItem(queueId);
+  if (!item) return false;
+  await removeQueueItem(item);
+  return true;
+}
+
 async function markQueueItem(item, patch) {
   const next = {
     ...item,

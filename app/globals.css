@@ -2956,9 +2956,32 @@ table.auditMatrix td.auditTrendSame {
 
 .auditSaveDraftButton:disabled,
 .auditViewOrderButton:disabled,
-.auditSubmitOrderButton:disabled {
+.auditSubmitOrderButton:disabled,
+.auditDeleteDraftButton:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.auditDeleteDraftButton {
+  min-height: 40px;
+  padding: 0 14px;
+  background: #9b1c1c;
+  color: #ffffff;
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auditDeleteDraftButton:hover:not(:disabled) {
+  background: #7f1d1d;
+}
+
+.auditDraftNotice .auditDeleteDraftButton {
+  margin-inline-start: auto;
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 
@@ -5063,6 +5086,18 @@ th:has(.moduleTableColumnFilterInput) {
 .modulePrimaryButton {
   background: #147347;
   border-color: #10623d;
+}
+
+.moduleOrderActions button.moduleDangerButton,
+.moduleDangerButton {
+  background: #9b1c1c;
+  border-color: #7f1d1d;
+  color: #ffffff;
+}
+
+.moduleOrderActions button.moduleDangerButton:hover:not(:disabled),
+.moduleDangerButton:hover:not(:disabled) {
+  background: #7f1d1d;
 }
 
 .moduleChipButton {

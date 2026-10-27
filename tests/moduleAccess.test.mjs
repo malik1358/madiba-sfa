@@ -78,6 +78,19 @@ test("potential sales targets is available to salesmen and report viewers, not c
   assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
 });
 
+test("end-of-day stock is open to import roles and listed in the warehouse group", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("eodStock"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("eodStock"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("eodStock"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("eodStock"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("eodStock"), false);
+  assert.equal(moduleLabelForPath("/management/eod-stock", "en"), "End-of-day Stock");
+  assert.equal(localizedModuleLabel("eodStock", "ar"), "مخزون نهاية اليوم");
+  const warehouse = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
+    .find((group) => group.key === "warehouse");
+  assert.equal(warehouse.items.some((item) => item.moduleKey === "eodStock"), true);
+});
+
 test("promoter coverage is available to all app roles", () => {
   const roles = ["admin", "report-user", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 

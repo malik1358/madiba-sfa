@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-27** — KPI Targets **Estimate at current pace** no longer drops salesmen who have actuals but no target, and each month-end figure is at least that salesman's current actual. The footer had shown 1,262,294 under an Actual of 1,277,176. No migration. See `docs/BUSINESS_RULES.md`.
+- **2026-10-26** — Imports can upload end-of-day stock by city (Riyadh, Dammam, Jeddah). The file is stored on `system_settings.eod_stock_citywise_v1` and shown at `/management/eod-stock`. A one-city file updates only that city. The report compares the snapshot with the previous stock date. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`.
 - **2026-10-26** — KPI Targets, My Performance, and KPI detail links add **Total cash collected**: Collection plus Cash collection (info). Information-only, no target. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets keeps only the Salesman column sticky on horizontal scroll. Boss scrolls with the KPI columns so more metrics fit on a phone. Header/footer vertical stickiness is unchanged. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-26** — KPI Targets shows the last sales transaction date of the selected month beside the page title. That date is the latest uploaded sale in the month, the same date used for sales pace. No migration. See `docs/BUSINESS_RULES.md`.

@@ -25,6 +25,7 @@ import {
   formatKpiTargetInput,
   monthEndPaceEstimate,
   parseKpiTargetInput,
+  resolveExpectedPacePercent,
 } from "../app/lib/performanceKpis.js";
 import { isCollectionOnlyAccess } from "../app/lib/moduleAccess.js";
 
@@ -182,6 +183,42 @@ test("target inputs round-trip through thousand separators", () => {
   assert.equal(parseKpiTargetInput("12a00"), "1200");
   assert.match(formatKpiTargetInput("1200000"), /1.?200.?000/);
   assert.equal(parseKpiTargetInput(formatKpiTargetInput("4550000")), "4550000");
+});
+
+test("total cash collected pace estimate is collection plus cash collection", () => {
+  const rows = [
+    {
+      ...ahmed,
+      collection: "2000000",
+      kpis: [
+        ...ahmed.kpis.filter((kpi) => !["collection", "cashCollection", "totalCashCollected"].includes(kpi.key)),
+        { key: "collection", actual: 1_277_176 },
+        { key: "cashCollection", actual: 262_557 },
+        { key: "totalCashCollected", actual: 1_539_733 },
+      ],
+    },
+  ];
+  const estimates = sumFilteredKpiPaceEstimates(
+    rows,
+    ["collection", "cashCollection", "totalCashCollected"],
+    { reportDate: "2026-10-01", todayIso: "2026-10-10" },
+  );
+  assert.equal(
+    estimates.totalCashCollected.estimate,
+    (Number(estimates.collection.estimate) || 0) + (Number(estimates.cashCollection.estimate) || 0),
+  );
+  assert.notEqual(
+    estimates.totalCashCollected.estimate,
+    monthEndPaceEstimate({
+      actual: 1_539_733,
+      target: 0,
+      expected: resolveExpectedPacePercent("totalCashCollected", {
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-10",
+      }),
+      paceGap: null,
+    }),
+  );
 });
 
 test("month-end pace estimate keeps untarged actual and never falls below actual", () => {

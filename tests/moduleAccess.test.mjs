@@ -91,6 +91,19 @@ test("end-of-day stock is open to import roles and listed in the warehouse group
   assert.equal(warehouse.items.some((item) => item.moduleKey === "eodStock"), true);
 });
 
+test("ordered not in sales is open to management report roles and listed in warehouse", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("orderedNotInSales"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("orderedNotInSales"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("orderedNotInSales"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("orderedNotInSales"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("orderedNotInSales"), false);
+  assert.equal(moduleLabelForPath("/management/ordered-not-in-sales", "en"), "Ordered Not in Sales");
+  assert.equal(localizedModuleLabel("orderedNotInSales", "ar"), "مطلوب وغير مباع");
+  const warehouse = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
+    .find((group) => group.key === "warehouse");
+  assert.equal(warehouse.items.some((item) => item.moduleKey === "orderedNotInSales"), true);
+});
+
 test("promoter coverage is available to all app roles", () => {
   const roles = ["admin", "report-user", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
@@ -266,6 +279,8 @@ test("invoice makers can view every management report without setup access", () 
       "potentialBadDebts",
       "legalTransfers",
       "missingCataloguePhotos",
+      "orderedNotInSales",
+      "eodStock",
       "gpsMap",
       "collectionReport",
       "receiptsNotInTally",

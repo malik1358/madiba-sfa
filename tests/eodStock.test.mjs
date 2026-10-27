@@ -7,8 +7,10 @@ import {
   eodQtyMovement,
   eodStockTemplateMatrix,
   formatEodDelta,
+  parseEodQtyCell,
   parseEodStockDate,
   parseEodStockSheets,
+  splitEodItemLabel,
 } from "../app/lib/eodStock.js";
 
 test("parseEodStockDate reads KSA day-first dates, month names, and Excel serials", () => {
@@ -83,6 +85,60 @@ test("long godown rows and one sheet per city keep the latest stock date", () =>
   assert.equal(paper.cities.jeddah.qty, 0);
   assert.equal(parsed.skippedUnknownCity, 1);
   assert.ok(parsed.skippedOtherDates >= 1);
+});
+
+test("Tally Location Summary reads Quantity from column B for one city", () => {
+  assert.deepEqual(splitEodItemLabel("A004426_MADIBA CIGARETTE LIGHTER"), {
+    code: "A004426",
+    name: "MADIBA CIGARETTE LIGHTER",
+  });
+  assert.deepEqual(parseEodQtyCell("14 TRAY"), { qty: 14, unit: "TRAY" });
+  assert.deepEqual(parseEodQtyCell(-72), { qty: -72, unit: "" });
+
+  const riyadh = parseEodStockSheets([{
+    name: "Riyadh-Region",
+    matrix: [
+      ["ABC LTD"],
+      ["Riyadh-Region"],
+      ["Location Summary"],
+      ["1-Jan-26 to 27-Oct-26"],
+      ["", "Riyadh-Region"],
+      ["Particulars", "1-Jan-26 to 27-Oct-26"],
+      ["", "Closing Balance"],
+      ["", "Quantity", "(Alt. Units)"],
+      ["A004426_MADIBA CIGARETTE LIGHTER 50 PCS", 14, 0.7],
+      ["A003468_MADIBA BABY TALCUM POWDER - WHITE", -72, -2],
+      ["A003622_GRADE-E2 5 MM", "13 PCS"],
+    ],
+  }]);
+  assert.equal(riyadh.ok, true);
+  assert.equal(riyadh.stockDate, "2026-10-27");
+  assert.deepEqual(riyadh.citiesPresent, ["riyadh"]);
+  assert.equal(riyadh.rows.length, 3);
+  assert.equal(riyadh.rows.find((row) => row.itemCode === "A004426").cities.riyadh.qty, 14);
+  assert.equal(riyadh.rows.find((row) => row.itemCode === "A003468").cities.riyadh.qty, -72);
+  assert.equal(riyadh.rows.find((row) => row.itemCode === "A003622").unit, "PCS");
+
+  const dammam = parseEodStockSheets([{
+    name: "NON FOOD DIVISION",
+    matrix: [
+      ["ABC LTD"],
+      ["NON FOOD DIVISION"],
+      ["Location Summary"],
+      ["1-Jan-26 to 27-Oct-26"],
+      ["", "Location : DAMMAM W/H 1"],
+      ["Particulars", "1-Jan-26 to 27-Oct-26"],
+      ["", "FIFO"],
+      ["", "Closing Balance"],
+      ["", "Quantity", "(Alt. Units)"],
+      ["A003234_PHOTOCOPY PAPER A4", 140, 700],
+      ["A003283_MADIBA TWIN TUB WASHING MACHINE", 6],
+    ],
+  }]);
+  assert.equal(dammam.ok, true);
+  assert.deepEqual(dammam.citiesPresent, ["dammam"]);
+  assert.equal(dammam.rows.find((row) => row.itemCode === "A003234").cities.dammam.qty, 140);
+  assert.equal(dammam.rows.find((row) => row.itemCode === "A003283").cities.dammam.qty, 6);
 });
 
 test("template, missing date, and snapshot comparison", () => {

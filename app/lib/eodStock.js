@@ -214,6 +214,17 @@ function findEodHeaderRow(matrix, sheetName = "") {
   return best.index;
 }
 
+function findTitleCity(matrix, beforeIndex) {
+  const limit = Math.min(Math.max(beforeIndex, 0), matrix.length);
+  for (let index = 0; index < limit; index += 1) {
+    for (const cell of matrix[index] || []) {
+      const city = normalizeEodCity(cell);
+      if (city) return city;
+    }
+  }
+  return "";
+}
+
 function titleDate(matrix, headerIndexValue) {
   let found = "";
   for (let index = 0; index < headerIndexValue; index += 1) {
@@ -223,6 +234,77 @@ function titleDate(matrix, headerIndexValue) {
     }
   }
   return found;
+}
+
+/** Tally Location Summary: Particulars in A, Quantity in B a few rows below, city in the title. */
+function findTallyLocationLayout(matrix, sheetName = "") {
+  const limit = Math.min(matrix.length, 30);
+  let particularsRow = -1;
+  let nameIndex = 0;
+  for (let index = 0; index < limit; index += 1) {
+    const row = matrix[index] || [];
+    for (let column = 0; column < row.length; column += 1) {
+      if (normalizeImportHeader(row[column]) === "particulars") {
+        particularsRow = index;
+        nameIndex = column;
+        break;
+      }
+    }
+    if (particularsRow >= 0) break;
+  }
+  if (particularsRow < 0) return null;
+
+  let qtyRow = -1;
+  let qtyIndex = -1;
+  const qtySearchEnd = Math.min(particularsRow + 8, matrix.length - 1);
+  for (let index = particularsRow; index <= qtySearchEnd; index += 1) {
+    const row = matrix[index] || [];
+    for (let column = 0; column < row.length; column += 1) {
+      const label = normalizeImportHeader(row[column]);
+      if (label !== "quantity" && label !== "qty") continue;
+      if (qtyIndex < 0 || column === 1) {
+        qtyRow = index;
+        qtyIndex = column;
+      }
+      if (column === 1) break;
+    }
+    if (qtyIndex === 1) break;
+  }
+  if (qtyIndex < 0) return null;
+
+  const city = normalizeEodCity(sheetName) || findTitleCity(matrix, particularsRow);
+  if (!city) return null;
+
+  return {
+    headerRow: qtyRow,
+    nameIndex,
+    qtyIndex,
+    city,
+    particularsRow,
+  };
+}
+
+export function splitEodItemLabel(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return { code: "", name: "" };
+  const match = text.match(/^([A-Za-z][A-Za-z0-9-]{2,30})_+\s*(.+)$/);
+  if (match) {
+    return {
+      code: match[1].toUpperCase(),
+      name: match[2].trim(),
+    };
+  }
+  return { code: "", name: text };
+}
+
+export function parseEodQtyCell(value) {
+  const qty = parseImportNumber(value);
+  let unit = "";
+  if (typeof value === "string") {
+    const parts = value.trim().match(/[A-Za-z][A-Za-z./]*/g);
+    if (parts?.length) unit = String(parts[parts.length - 1] || "").toUpperCase();
+  }
+  return { qty, unit };
 }
 
 function isTotalLabel(value) {
@@ -237,20 +319,29 @@ function addMeasure(target, measure, amount) {
 
 function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
   const rows = (Array.isArray(matrix) ? matrix : []).filter((row) => Array.isArray(row));
-  const headerRow = findEodHeaderRow(rows, sheetName);
-  if (headerRow < 0) return { ok: false };
+  let headerRow = findEodHeaderRow(rows, sheetName);
+  const tallyLayout = headerRow < 0 ? findTallyLocationLayout(rows, sheetName) : null;
+  if (headerRow < 0 && !tallyLayout) return { ok: false };
+  if (tallyLayout) headerRow = tallyLayout.headerRow;
+
   const headers = (rows[headerRow] || []).map((cell) => String(cell ?? ""));
-  const cityColumns = selectCityColumns(headers);
-  const codeIndex = headerIndex(headers, ITEM_CODE_HEADERS);
-  const nameIndex = headerIndex(headers, ITEM_NAME_HEADERS);
-  const unitIndex = headerIndex(headers, UNIT_HEADERS);
-  const cityIndex = headerIndex(headers, CITY_COLUMN_HEADERS);
-  const qtyIndex = headerIndex(headers, QTY_HEADERS);
-  const valueIndex = headerIndex(headers, VALUE_HEADERS);
-  const dateIndex = headerIndex(headers, DATE_HEADERS);
-  const sheetCity = cityColumns.some((column) => column.measure === "qty") ? "" : normalizeEodCity(sheetName);
+  const cityColumns = tallyLayout ? [] : selectCityColumns(headers);
+  const codeIndex = tallyLayout ? -1 : headerIndex(headers, ITEM_CODE_HEADERS);
+  const nameIndex = tallyLayout ? tallyLayout.nameIndex : headerIndex(headers, ITEM_NAME_HEADERS);
+  const unitIndex = tallyLayout ? -1 : headerIndex(headers, UNIT_HEADERS);
+  const cityIndex = tallyLayout ? -1 : headerIndex(headers, CITY_COLUMN_HEADERS);
+  const qtyIndex = tallyLayout ? tallyLayout.qtyIndex : headerIndex(headers, QTY_HEADERS);
+  const valueIndex = tallyLayout ? -1 : headerIndex(headers, VALUE_HEADERS);
+  const dateIndex = tallyLayout ? -1 : headerIndex(headers, DATE_HEADERS);
+  const sheetCity = tallyLayout
+    ? tallyLayout.city
+    : (cityColumns.some((column) => column.measure === "qty") ? "" : normalizeEodCity(sheetName));
   const wide = cityColumns.some((column) => column.measure === "qty");
-  const long = !wide && ((cityIndex >= 0 && (qtyIndex >= 0 || valueIndex >= 0)) || (sheetCity && qtyIndex >= 0));
+  const long = !wide && (
+    Boolean(tallyLayout)
+    || (cityIndex >= 0 && (qtyIndex >= 0 || valueIndex >= 0))
+    || (sheetCity && qtyIndex >= 0)
+  );
   if (!wide && !long) return { ok: false };
 
   const items = new Map();
@@ -265,7 +356,7 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
     const rowDate = dateIndex >= 0 ? parseEodStockDate(row[dateIndex]) : "";
     if (rowDate && (!maxDate || rowDate > maxDate)) maxDate = rowDate;
   });
-  const stockDate = maxDate || titleDate(rows, headerRow);
+  const stockDate = maxDate || titleDate(rows, Math.max(headerRow, tallyLayout?.particularsRow || 0));
 
   function ensureItem(code, name, unit) {
     const key = String(code || "").trim().toUpperCase() || String(name || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -285,9 +376,16 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
   }
 
   body.forEach((row) => {
-    const code = codeIndex >= 0 ? row[codeIndex] : "";
-    const name = nameIndex >= 0 ? row[nameIndex] : "";
-    const unit = unitIndex >= 0 ? row[unitIndex] : "";
+    let code = codeIndex >= 0 ? row[codeIndex] : "";
+    let name = nameIndex >= 0 ? row[nameIndex] : "";
+    let unit = unitIndex >= 0 ? row[unitIndex] : "";
+    if (tallyLayout || (codeIndex < 0 && nameIndex >= 0)) {
+      const split = splitEodItemLabel(name || code);
+      if (split.code) {
+        code = split.code;
+        name = split.name || name;
+      }
+    }
     const rowDate = dateIndex >= 0 ? parseEodStockDate(row[dateIndex]) : "";
     if (stockDate && rowDate && rowDate !== stockDate) {
       skippedOtherDates += 1;
@@ -308,9 +406,11 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
       return;
     }
     citiesPresent.add(city);
+    const qtyCell = qtyIndex >= 0 ? parseEodQtyCell(row[qtyIndex]) : { qty: 0, unit: "" };
+    if (!unit && qtyCell.unit) unit = qtyCell.unit;
     const item = ensureItem(code, name, unit);
     if (!item) return;
-    if (qtyIndex >= 0) addMeasure(item.cities[city], "qty", parseImportNumber(row[qtyIndex]));
+    if (qtyIndex >= 0) addMeasure(item.cities[city], "qty", qtyCell.qty);
     if (valueIndex >= 0) addMeasure(item.cities[city], "value", parseImportNumber(row[valueIndex]));
   });
 

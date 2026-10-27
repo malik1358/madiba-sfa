@@ -53,6 +53,7 @@ export const MODULES = {
   upload: { href: "/management/upload", label: "Imports" },
   stockTake: { href: "/management/stock-take", label: "Stock Take" },
   eodStock: { href: "/management/eod-stock", label: "End-of-day Stock" },
+  orderedNotInSales: { href: "/management/ordered-not-in-sales", label: "Ordered Not in Sales" },
   roleAccess: { href: "/management/role-access", label: "Role Access" },
 };
 
@@ -110,7 +111,7 @@ export const NAV_GROUPS = [
   {
     key: "warehouse",
     label: "Warehouse",
-    modules: ["stockTake", "eodStock"],
+    modules: ["stockTake", "eodStock", "orderedNotInSales"],
   },
   {
     key: "admin",
@@ -269,6 +270,7 @@ export function buildModuleAccess(context = {}) {
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
       eodStock: isAdmin || isManager || isInvoiceMaker,
+      orderedNotInSales: hasManagementReportAccess,
       stockTake: stockTakeAccess,
       roleAccess: isAdmin,
     },
@@ -471,6 +473,7 @@ export const MODULE_LABELS = {
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
   eodStock: { en: "End-of-day Stock", ar: "مخزون نهاية اليوم" },
+  orderedNotInSales: { en: "Ordered Not in Sales", ar: "مطلوب وغير مباع" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },
   roleAccess: { en: "Role Access", ar: "صلاحيات الأدوار" },
 };

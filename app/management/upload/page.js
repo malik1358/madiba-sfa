@@ -25,6 +25,20 @@ const TEXT = {
   downloadingFile: { en: "Downloading...", ar: "جاري التحميل..." },
   downloadReceiptTemplate: { en: "Download Receipt template", ar: "تنزيل قالب سندات القبض" },
   downloadPaymentTemplate: { en: "Download Payment template", ar: "تنزيل قالب سندات الصرف" },
+  lastStockUpload: { en: "Last end-of-day stock upload", ar: "آخر رفع لمخزون نهاية اليوم" },
+  noStockUploadYet: { en: "No end-of-day stock upload yet.", ar: "لا يوجد رفع لمخزون نهاية اليوم بعد." },
+  downloadStockTemplate: { en: "Download stock template", ar: "تنزيل قالب المخزون" },
+  viewStock: { en: "View city stock", ar: "عرض المخزون حسب المدينة" },
+  stockDateLabel: { en: "Stock date if the file has none", ar: "تاريخ المخزون إذا لم يوجد في الملف" },
+  stockTitle: { en: "End-of-day stock, city wise", ar: "مخزون نهاية اليوم حسب المدينة" },
+  stockBody: {
+    en: "Upload the closing stock for Riyadh, Dammam, and Jeddah. Use one row per item with a quantity column for each city, one row per godown, or one sheet named for each city. A file that includes all three cities replaces that stock date. A file for one city updates only that city and keeps the others. The next day is compared with this snapshot.",
+    ar: "ارفع مخزون الإغلاق للرياض والدمام وجدة. يمكن أن يكون الملف صفًا لكل صنف مع كمية لكل مدينة، أو صفًا لكل مستودع، أو ورقة باسم كل مدينة. ملف المدن الثلاث يستبدل تاريخ المخزون. ملف مدينة واحدة يحدّث تلك المدينة فقط ويبقي الباقي. اليوم التالي يُقارن بهذه اللقطة.",
+  },
+  chooseStockFile: { en: "Choose end-of-day stock Excel", ar: "اختر ملف مخزون نهاية اليوم" },
+  uploadStock: { en: "Upload end-of-day stock", ar: "رفع مخزون نهاية اليوم" },
+  uploadingStock: { en: "Uploading end-of-day stock...", ar: "جاري رفع مخزون نهاية اليوم..." },
+  stockProcessing: { en: "Reading city quantities and saving the end-of-day stock snapshot.", ar: "جاري قراءة كميات المدن وحفظ لقطة مخزون نهاية اليوم." },
 };
 
 function formatUploadTimestamp(value) {
@@ -59,6 +73,12 @@ export default function UploadSalesPage() {
   const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
   const [lastReceiptUpload, setLastReceiptUpload] = useState(null);
   const [lastItemUnitUpload, setLastItemUnitUpload] = useState(null);
+  const [stockFile, setStockFile] = useState(null);
+  const [stockDate, setStockDate] = useState("");
+  const [stockUploading, setStockUploading] = useState(false);
+  const [stockResult, setStockResult] = useState(null);
+  const [stockError, setStockError] = useState("");
+  const [lastStockUpload, setLastStockUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
   const [downloadingKind, setDownloadingKind] = useState("");
   const [templateDownloading, setTemplateDownloading] = useState("");
@@ -75,10 +95,13 @@ export default function UploadSalesPage() {
   const itemUnitSuccessMessage = itemUnitResult
     ? String(itemUnitResult.message || itemUnitResult.fileName || "Item master units updated successfully.").trim()
     : "";
+  const stockSuccessMessage = stockResult
+    ? String(stockResult.message || stockResult.fileName || "End-of-day stock updated successfully.").trim()
+    : "";
 
   usePopupMessages({
-    error: error || outstandingError || receiptError || itemUnitError,
-    message: uploadSuccessMessage || outstandingSuccessMessage || receiptSuccessMessage || itemUnitSuccessMessage,
+    error: error || outstandingError || receiptError || itemUnitError || stockError,
+    message: uploadSuccessMessage || outstandingSuccessMessage || receiptSuccessMessage || itemUnitSuccessMessage || stockSuccessMessage,
   });
 
   const supabaseClient = getSupabaseClient();
@@ -102,10 +125,11 @@ export default function UploadSalesPage() {
         setLastOutstandingUpload(null);
         setLastReceiptUpload(null);
         setLastItemUnitUpload(null);
+        setLastStockUpload(null);
         return;
       }
 
-      const [salesBatchResult, outstandingResponse, salesFileMetaResponse, receiptResponse, itemUnitResponse] = await Promise.all([
+      const [salesBatchResult, outstandingResponse, salesFileMetaResponse, receiptResponse, itemUnitResponse, stockResponse] = await Promise.all([
         supabase
           .from("import_batches")
           .select("file_name,completed_at,started_at,status,customer_count,total_rows")
@@ -129,6 +153,11 @@ export default function UploadSalesPage() {
           },
         }),
         fetch("/api/tally-item-units", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+        fetch("/api/eod-stock?summary=1", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -187,11 +216,27 @@ export default function UploadSalesPage() {
             }
           : null,
       );
+
+      const stockPayload = await stockResponse.json().catch(() => ({}));
+      setLastStockUpload(
+        stockResponse.ok
+        && stockPayload.success
+        && stockPayload.uploadedAt
+          ? {
+              fileName: stockPayload.fileName || "",
+              uploadedAt: stockPayload.uploadedAt,
+              stockDate: stockPayload.stockDate || "",
+              itemCount: stockPayload.itemCount || 0,
+              canDownload: Boolean(stockPayload.canDownload),
+            }
+          : null,
+      );
     } catch {
       setLastSalesUpload(null);
       setLastOutstandingUpload(null);
       setLastReceiptUpload(null);
       setLastItemUnitUpload(null);
+      setLastStockUpload(null);
     } finally {
       setLoadingLastUploads(false);
     }
@@ -203,12 +248,13 @@ export default function UploadSalesPage() {
 
   async function downloadUploadedFile(kind, fallbackName) {
     const normalizedKind = String(kind || "").trim().toLowerCase();
-    if (!["sales", "outstanding", "receipt"].includes(normalizedKind) || downloadingKind) return;
+    if (!["sales", "outstanding", "receipt", "eod-stock"].includes(normalizedKind) || downloadingKind) return;
 
     setDownloadingKind(normalizedKind);
     setError("");
     setOutstandingError("");
     setReceiptError("");
+    setStockError("");
 
     try {
       const supabase = getSupabaseClient();
@@ -250,6 +296,8 @@ export default function UploadSalesPage() {
         setOutstandingError(err.message || "Unable to download uploaded file.");
       } else if (normalizedKind === "receipt") {
         setReceiptError(err.message || "Unable to download uploaded file.");
+      } else if (normalizedKind === "eod-stock") {
+        setStockError(err.message || "Unable to download uploaded file.");
       } else {
         setError(err.message || "Unable to download uploaded file.");
       }
@@ -527,6 +575,71 @@ export default function UploadSalesPage() {
       setItemUnitError(err.message || "Item master unit upload failed.");
     } finally {
       setItemUnitUploading(false);
+    }
+  }
+
+  async function downloadStockTemplate() {
+    setStockError("");
+    setTemplateDownloading("eod-stock");
+    try {
+      const XLSX = await import("xlsx");
+      const { eodStockTemplateMatrix } = await import("../../lib/eodStock.js");
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet(eodStockTemplateMatrix());
+      XLSX.utils.book_append_sheet(workbook, sheet, "Stock");
+      XLSX.writeFile(workbook, "end-of-day-stock-citywise-template.xlsx");
+    } catch (err) {
+      setStockError(err.message || "Unable to download template.");
+    } finally {
+      setTemplateDownloading("");
+    }
+  }
+
+  async function uploadStockFile() {
+    if (!stockFile) {
+      setStockError("Please select an end-of-day stock Excel file first.");
+      return;
+    }
+
+    setStockUploading(true);
+    setStockError("");
+    setStockResult(null);
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) throw new Error("Supabase is not configured.");
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your login session has expired. Please login again.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", stockFile);
+      if (stockDate) formData.append("stockDate", stockDate);
+
+      const response = await fetch("/api/eod-stock", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "End-of-day stock upload failed.");
+      }
+
+      setStockResult(data);
+      await loadLastUploadInfo();
+    } catch (err) {
+      setStockError(err.message || "End-of-day stock upload failed.");
+    } finally {
+      setStockUploading(false);
     }
   }
 
@@ -1112,6 +1225,125 @@ export default function UploadSalesPage() {
               </div>
               <div className="snapshotActivated">
                 ✓ Item master units are ready for Tally Excel export
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="uploadCard" style={{ marginTop: "18px" }}>
+          <div className="uploadWarning">
+            <strong>{t("stockTitle")}</strong>
+            <p>{t("stockBody")}</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "10px" }}>
+              <button
+                type="button"
+                className="uploadDownloadButton"
+                onClick={downloadStockTemplate}
+                disabled={Boolean(templateDownloading)}
+              >
+                {templateDownloading === "eod-stock" ? t("downloadingFile") : t("downloadStockTemplate")}
+              </button>
+              <a className="uploadDownloadButton" href="/management/eod-stock" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>{t("viewStock")}</a>
+            </div>
+          </div>
+
+          <div className="uploadMeta">
+            {loadingLastUploads ? (
+              <p>{t("loadingLastUploads")}</p>
+            ) : lastStockUpload ? (
+              <div className="uploadMetaRow">
+                <p>
+                  <strong>{t("lastStockUpload")}:</strong>{" "}
+                  {formatUploadTimestamp(lastStockUpload.uploadedAt)}
+                  {lastStockUpload.stockDate ? ` | ${lastStockUpload.stockDate}` : ""}
+                  {lastStockUpload.fileName ? ` | ${lastStockUpload.fileName}` : ""}
+                  {lastStockUpload.itemCount ? ` | ${Number(lastStockUpload.itemCount).toLocaleString()} items` : ""}
+                </p>
+                {lastStockUpload.canDownload ? (
+                  <button
+                    type="button"
+                    className="uploadDownloadButton"
+                    onClick={() => downloadUploadedFile("eod-stock", lastStockUpload.fileName)}
+                    disabled={Boolean(downloadingKind)}
+                  >
+                    {downloadingKind === "eod-stock" ? t("downloadingFile") : t("downloadFile")}
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <p>{t("noStockUploadYet")}</p>
+            )}
+          </div>
+
+          <label className="fileDrop">
+            <div className="fileIcon">🏙️</div>
+            <strong>{stockFile ? stockFile.name : t("chooseStockFile")}</strong>
+            <span>{stockFile ? `${(stockFile.size / 1024 / 1024).toFixed(2)} MB` : ".xlsx or .xls"}</span>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                setStockFile(e.target.files?.[0] || null);
+                setStockResult(null);
+                setStockError("");
+              }}
+            />
+          </label>
+
+          <label style={{ display: "block", marginTop: "14px" }}>
+            <span>{t("stockDateLabel")}</span>
+            <input
+              type="date"
+              value={stockDate}
+              onChange={(e) => setStockDate(e.target.value)}
+              style={{ display: "block", marginTop: "6px" }}
+            />
+          </label>
+
+          <button
+            className="replaceButton"
+            onClick={uploadStockFile}
+            disabled={!stockFile || stockUploading}
+          >
+            {stockUploading ? t("uploadingStock") : t("uploadStock")}
+          </button>
+
+          {stockUploading && (
+            <div className="processingBox">
+              <div className="spinner"></div>
+              <div>
+                <strong>Please keep this page open</strong>
+                <p>{t("stockProcessing")}</p>
+              </div>
+            </div>
+          )}
+
+          {stockResult && (
+            <div className="uploadSuccess">
+              <div className="resultGrid">
+                <div>
+                  <span>Stock Date</span>
+                  <strong>{stockResult.stockDate || "-"}</strong>
+                </div>
+                <div>
+                  <span>Items</span>
+                  <strong>{Number(stockResult.itemCount || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Riyadh</span>
+                  <strong>{Number(stockResult.cities?.riyadh?.qty || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Dammam</span>
+                  <strong>{Number(stockResult.cities?.dammam?.qty || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Jeddah</span>
+                  <strong>{Number(stockResult.cities?.jeddah?.qty || 0).toLocaleString()}</strong>
+                </div>
+              </div>
+              <div className="snapshotActivated">
+                {stockResult.message || "End-of-day stock is saved."}
               </div>
             </div>
           )}

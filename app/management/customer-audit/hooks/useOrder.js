@@ -4,9 +4,10 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
-import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
+import { removeLocalPendingOrder, upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
 import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
-import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
+import { buildQueuedPendingOrderId, cancelQueuedSalesOrderDraft } from '../../../lib/queuedSalesOrders';
+import { removeOfflineQueueItemById } from '../../../lib/offlineSyncQueue';
 import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '../../../lib/offlineOrderNumber';
 import { resolveOrderMakerFromScope } from '../../../lib/orderSalesman';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
@@ -143,6 +144,7 @@ export function useOrder({
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [deletingDraft, setDeletingDraft] = useState(false);
   const submitInFlight = useRef(false);
   const orderRequestId = useRef(null);
   const completedOrderIds = useRef(new Set());
@@ -773,12 +775,129 @@ export function useOrder({
     }
   }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
+  const deleteDraft = useCallback(async (options = {}) => {
+    const requestContextKey = orderContextKey(selectedCustomer, editOrderId);
+    const contextMatches = draftContextKey === requestContextKey;
+    const currentDraftOrderId = contextMatches ? draftOrderId : null;
+    const currentStatus = String((contextMatches ? loadedOrderStatus : 'DRAFT') || 'DRAFT').toUpperCase();
+
+    if (!currentDraftOrderId) {
+      setError(language === 'ar' ? 'لا توجد مسودة لحذفها.' : 'There is no draft to delete.');
+      return null;
+    }
+    if (currentStatus !== 'DRAFT') {
+      setError(language === 'ar' ? 'يمكن حذف المسودات فقط.' : 'Only draft orders can be deleted.');
+      return null;
+    }
+
+    if (options.confirm !== false && typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        language === 'ar'
+          ? 'حذف مسودة الطلب؟ لا يمكن التراجع عن هذا الإجراء.'
+          : 'Delete this draft order? This cannot be undone.',
+      );
+      if (!confirmed) return null;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError('Supabase is not configured.');
+      return null;
+    }
+
+    setDeletingDraft(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Please login again.');
+
+      if (isPendingOrderId(currentDraftOrderId)) {
+        await cancelQueuedSalesOrderDraft(currentDraftOrderId);
+        if (accessScope) {
+          void removeLocalPendingOrder(session.user.id, accessScope, currentDraftOrderId);
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
+          window.dispatchEvent(new CustomEvent('madiba-offline-queue-changed'));
+        }
+        clearSubmittedOrder(requestContextKey, currentDraftOrderId);
+        if (!options.silent) {
+          setMessage(language === 'ar' ? 'تم حذف المسودة من الجهاز.' : 'Draft deleted from this device.');
+        }
+        return { orderId: currentDraftOrderId, status: 'CANCELLED', localOnly: true };
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        throw new Error(language === 'ar'
+          ? 'تعذر حذف المسودة دون اتصال. حاول مرة أخرى عند عودة الشبكة.'
+          : 'Unable to delete the draft while offline. Try again when you are back online.');
+      }
+
+      const deleteResult = await postJsonResilient({
+        url: '/api/sales-orders',
+        timeoutMs: 15000,
+        queueFirst: false,
+        jsonBody: {
+          action: 'delete_draft',
+          orderId: Number(currentDraftOrderId),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: 'sales_order',
+          action: 'delete_draft',
+          customerCode: selectedCustomer?.customer_code || '',
+        },
+      });
+
+      if (deleteResult.queued) {
+        if (deleteResult.queueId) {
+          await removeOfflineQueueItemById(deleteResult.queueId).catch(() => false);
+        }
+        throw new Error(language === 'ar'
+          ? 'تعذر حذف المسودة دون اتصال. حاول مرة أخرى عند عودة الشبكة.'
+          : 'Unable to delete the draft while offline. Try again when you are back online.');
+      }
+
+      const payload = deleteResult.payload || {};
+      if (!payload.orderId) {
+        throw new Error(payload.error || 'Unable to delete draft order.');
+      }
+
+      const deletedId = payload.orderId;
+      if (accessScope) {
+        void removeLocalPendingOrder(session.user.id, accessScope, deletedId);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
+      }
+      clearSubmittedOrder(requestContextKey, deletedId);
+      if (!options.silent) {
+        setMessage(language === 'ar' ? 'تم حذف مسودة الطلب.' : 'Draft order deleted.');
+      }
+      return {
+        orderId: deletedId,
+        orderNumber: payload.orderNumber || draftOrderNumber || '',
+        status: 'CANCELLED',
+      };
+    } catch (err) {
+      setError(friendlyErrorMessage(err, language === 'ar' ? 'تعذر حذف مسودة الطلب.' : 'Unable to delete draft order.'));
+      return null;
+    } finally {
+      setDeletingDraft(false);
+    }
+  }, [accessScope, clearSubmittedOrder, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, selectedCustomer, setError, setMessage]);
+
   return {
     draftOrderId,
     orderQuantities,
     setOrderQuantities,
     savingOrder,
     submittingOrder,
+    deletingDraft,
     showOrderReview,
     setShowOrderReview,
     orderItems,
@@ -790,5 +909,6 @@ export function useOrder({
     decreaseQty,
     saveDraft,
     submitOrder,
+    deleteDraft,
   };
 }

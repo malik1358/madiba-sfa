@@ -7,7 +7,8 @@ import { randomUUID } from "node:crypto";
 const source = fs.readFileSync(new URL("../app/management/customer-audit/hooks/useOrder.js", import.meta.url), "utf8");
 
 function createHarness(result, { draftId = 586 } = {}) {
-  const states = [draftId, "O586", "customer:1462", { SKU: 10 }, false, false, true, [{ action: "draft" }], "DRAFT"];
+  // draftId, number, context, qty, saving, submitting, deletingDraft, showReview, history, status
+  const states = [draftId, "O586", "customer:1462", { SKU: 10 }, false, false, false, true, [{ action: "draft" }], "DRAFT"];
   const refs = [];
   const requests = [];
   const errors = [];
@@ -15,6 +16,11 @@ function createHarness(result, { draftId = 586 } = {}) {
   let refIndex = 0;
   const context = vm.createContext({
     crypto: { randomUUID },
+    navigator: { onLine: true },
+    window: { confirm: () => true, dispatchEvent: () => {} },
+    CustomEvent: class CustomEvent {
+      constructor(type) { this.type = type; }
+    },
     useState: (initial) => {
       const index = stateIndex++;
       if (index >= states.length) states[index] = initial;
@@ -35,6 +41,8 @@ function createHarness(result, { draftId = 586 } = {}) {
     captureGpsLocationWithFallbackConfirm: async () => ({ latitude: 24, longitude: 46 }),
     resolveGpsCapturePlatform: async () => "web",
     loadVisitDistanceMetrics: async () => ({ distance: 0 }),
+    loadWorkingHoursTillMessage: async () => ({}),
+    buildCurrentWorkingHoursEntry: () => ({}),
     resolveOrderMakerFromScope: () => ({ salesmanCode: "OSAMA", salesmanName: "Osama" }),
     allocateLocalSalesOrderNumber: async () => "O586",
     rememberSalesmanOrderSequence: async () => {},
@@ -48,10 +56,18 @@ function createHarness(result, { draftId = 586 } = {}) {
       return typeof result === "function" ? result() : result;
     },
     buildQueuedPendingOrderId: (id) => `pending:${id}`,
+    cancelQueuedSalesOrderDraft: async () => true,
+    removeLocalPendingOrder: async () => true,
+    removeOfflineQueueItemById: async () => true,
     upsertLocalPendingOrder: async () => {},
     requestLoginFirstCustomerHintCheck: () => {},
     friendlyErrorMessage: (error) => error.message,
     blockedByAvgDaysMessage: () => "Blocked",
+    isSalesOrderSubmissionBlocked: () => false,
+    assertLocalOrderQuantityControls: async () => ({ ok: true }),
+    recordConfirmedOrderQuantityUsage: () => {},
+    claimUnsavedEntry: () => () => {},
+    WORKING_HOURS_WHATSAPP_TIMEOUT_MS: 8000,
   });
   vm.runInContext(source.replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];\s*/g, "").replace("export function useOrder", "function useOrder"), context);
   function render(customerCode = "1462") {
@@ -144,5 +160,7 @@ test("late submission completion cannot clear another customer's cart", async ()
 test("draft restoration skips already submitted rows, including late lines and history", () => {
   assert.equal((source.match(/completedOrderIds\.current\.has\(String\(order\.id\)\)/g) || []).length, 3);
   const page = fs.readFileSync(new URL("../app/management/new-order/page.js", import.meta.url), "utf8");
-  assert.match(page, /const snapshot = buildOrderSnapshot\(saved\.orderId, "Submitted", saved\.orderNumber, saved\.visitDistance\)/);
+  assert.match(page, /"Submitted"/);
+  assert.match(page, /saved\.workingHours/);
+  assert.match(page, /buildOrderSnapshot\(\s*saved\.orderId,/);
 });

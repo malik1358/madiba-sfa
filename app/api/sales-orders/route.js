@@ -998,6 +998,69 @@ export async function POST(request) {
       });
     }
 
+    if (action === "delete_draft") {
+      const admin = createClient(supabaseUrl, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+      const orderId = Number(body?.orderId);
+      if (!Number.isFinite(orderId) || orderId <= 0) {
+        return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
+      }
+
+      const order = await ensureOrderAccess(admin, orderId, user.id);
+      if (String(order.status || "").toUpperCase() !== "DRAFT") {
+        return NextResponse.json({
+          success: false,
+          error: "Only draft orders can be deleted.",
+        }, { status: 400 });
+      }
+
+      const nowIso = new Date().toISOString();
+      const { data: cancelledOrder, error: cancelError } = await admin
+        .from("sales_orders")
+        .update({
+          status: "CANCELLED",
+          updated_at: nowIso,
+        })
+        .eq("id", orderId)
+        .eq("status", "DRAFT")
+        .select("id,order_number,customer_code,status")
+        .maybeSingle();
+      if (cancelError) throw cancelError;
+      if (!cancelledOrder) {
+        return NextResponse.json({
+          success: false,
+          error: "Draft was already submitted or deleted.",
+        }, { status: 409 });
+      }
+
+      const pricingMeta = await readOrderPricingMeta(admin, orderId);
+      const history = await appendOrderHistory(admin, {
+        orderId,
+        customerCode: cancelledOrder.customer_code || order.customer_code,
+        userId: user.id,
+        action: "DELETED_DRAFT",
+        previousStatus: "DRAFT",
+        nextStatus: "CANCELLED",
+        changes: [],
+        changedAt: nowIso,
+        paymentType: pricingMeta?.paymentType,
+        pricingRegion: pricingMeta?.pricingRegion,
+        pricingType: pricingMeta?.pricingType,
+      });
+
+      return NextResponse.json({
+        success: true,
+        action,
+        orderId,
+        orderNumber: cancelledOrder.order_number || null,
+        customerCode: cancelledOrder.customer_code || order.customer_code,
+        status: "CANCELLED",
+        history,
+      });
+    }
+
     const customerCode = String(body?.customerCode || "").trim();
     const customerName = String(body?.customerName || "").trim();
     const customerSalesmanCode = String(body?.customerSalesmanCode || "").trim();

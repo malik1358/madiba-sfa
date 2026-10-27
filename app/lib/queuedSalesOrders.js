@@ -1,4 +1,4 @@
-import { listOfflineQueue } from "./offlineSyncQueue.js";
+import { listOfflineQueue, removeOfflineQueueItemById } from "./offlineSyncQueue.js";
 
 export function buildQueuedPendingOrderId(queueId) {
   return `pending:${String(queueId || "").slice(0, 12)}`;
@@ -52,6 +52,19 @@ export async function listQueuedPendingOrders() {
     .filter(isSalesOrderQueueItem)
     .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
     .map(queuedSalesOrderToRow);
+}
+
+export async function cancelQueuedSalesOrderDraft(pendingOrderId) {
+  const targetId = String(pendingOrderId || "").trim();
+  if (!isQueuedPendingOrderId(targetId)) return false;
+
+  const queuedOrders = await listQueuedPendingOrders();
+  const match = queuedOrders.find((row) => (
+    String(row.id) === targetId
+    && String(row.status || "").toUpperCase() === "DRAFT"
+  ));
+  if (!match?.queueId) return false;
+  return removeOfflineQueueItemById(match.queueId);
 }
 
 export function mergeServerAndQueuedOrders(serverOrders = [], queuedOrders = []) {

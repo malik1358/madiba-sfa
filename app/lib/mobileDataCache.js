@@ -1014,6 +1014,19 @@ export async function upsertLocalPendingOrder(userId, scope, order) {
   );
 }
 
+export async function removeLocalPendingOrder(userId, scope, orderId) {
+  if (!userId || !scope || !orderId) return false;
+  const current = await readPendingOrdersCache(userId, scope);
+  if (!Array.isArray(current) || current.length === 0) return false;
+  const next = current.filter((row) => String(row?.id) !== String(orderId));
+  if (next.length === current.length) return false;
+  return writeCacheEntry(
+    pendingOrdersCacheKey(userId, scope),
+    next,
+    { ttlMs: CACHE_TTL.pendingOrdersMs },
+  );
+}
+
 export async function fetchPendingOrdersCached(userId, scope, options = {}) {
   if (!userId) throw new Error("Please login again.");
 

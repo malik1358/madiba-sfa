@@ -211,6 +211,7 @@ function CustomerAuditPageContent() {
     setOrderQuantities,
     savingOrder,
     submittingOrder,
+    deletingDraft,
     showOrderReview,
     setShowOrderReview,
     updateQty,
@@ -218,7 +219,9 @@ function CustomerAuditPageContent() {
     decreaseQty,
     saveDraft,
     submitOrder,
+    deleteDraft,
     draftOrderId,
+    loadedOrderStatus,
   } = useOrder({
     analytics,
     quickOrderAllItems: [
@@ -877,10 +880,13 @@ function CustomerAuditPageContent() {
               orderSummary={orderSummary}
               savingOrder={savingOrder}
               submittingOrder={submittingOrder}
+              deletingDraft={deletingDraft}
               saveDraft={saveDraft}
+              deleteDraft={deleteDraft}
               setShowOrderReview={setShowOrderReview}
               priceList={displayPriceList}
               draftOrderId={draftOrderId}
+              loadedOrderStatus={loadedOrderStatus}
               orderWriteBlocked={isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType)}
             />
 
@@ -891,20 +897,31 @@ function CustomerAuditPageContent() {
               priceList={displayPriceList}
               savingOrder={savingOrder}
               submittingOrder={submittingOrder}
+              deletingDraft={deletingDraft}
               saveDraft={saveDraft}
+              deleteDraft={deleteDraft}
               submitOrder={submitOrder}
               setShowOrderReview={setShowOrderReview}
               draftOrderId={draftOrderId}
+              loadedOrderStatus={loadedOrderStatus}
               decreaseOrderQty={decreaseQty}
               increaseOrderQty={increaseQty}
               changeOrderQty={updateQty}
               orderWriteBlocked={isSalesOrderSubmissionBlocked(displayedOrderBlock, paymentType)}
             />
 
-            {draftOrderId && (
+            {draftOrderId && String(loadedOrderStatus || "DRAFT").toUpperCase() === "DRAFT" && (
               <div className="auditDraftNotice">
                 <span>Draft Order</span>
                 <small>Changes are not final until the order is submitted.</small>
+                <button
+                  type="button"
+                  className="auditDeleteDraftButton"
+                  disabled={savingOrder || submittingOrder || deletingDraft}
+                  onClick={deleteDraft}
+                >
+                  {deletingDraft ? "Deleting..." : "Delete Draft"}
+                </button>
               </div>
             )}
 

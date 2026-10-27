@@ -945,6 +945,7 @@ export default function NewOrderPage() {
     orderQuantities,
     savingOrder,
     submittingOrder,
+    deletingDraft,
     orderHistory,
     loadedOrderStatus,
     updateQty,
@@ -952,6 +953,7 @@ export default function NewOrderPage() {
     decreaseQty,
     saveDraft,
     submitOrder,
+    deleteDraft,
   } = useOrder({
     analytics: orderAnalytics,
     quickOrderAllItems,
@@ -1298,6 +1300,20 @@ export default function NewOrderPage() {
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
   }, [buildOrderSnapshot, creditApproval?.required, language, presentOrderWhatsappShare, submitOrder]);
+
+  const canDeleteDraft = Boolean(draftOrderId)
+    && String(loadedOrderStatus || "DRAFT").toUpperCase() === "DRAFT";
+
+  const handleDeleteDraft = useCallback(async () => {
+    const deleted = await deleteDraft({ silent: true });
+    if (!deleted?.orderId) return;
+    setLastSavedOrder(null);
+    setMessage(
+      language === "ar"
+        ? "تم حذف مسودة الطلب."
+        : "Draft order deleted.",
+    );
+  }, [deleteDraft, language, setMessage]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
@@ -2271,13 +2287,25 @@ export default function NewOrderPage() {
                       <strong>{formatMoneyAmount(orderTotals.amountInclVat)}</strong>
                     </div>
                     <div className="moduleOrderActions">
-                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf || orderSubmissionBlocked}>
+                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || deletingDraft || downloadingPdf || orderSubmissionBlocked}>
                         {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
                       </button>
+                      {canDeleteDraft ? (
+                        <button
+                          type="button"
+                          className="moduleDangerButton"
+                          onClick={handleDeleteDraft}
+                          disabled={savingOrder || submittingOrder || deletingDraft || downloadingPdf}
+                        >
+                          {deletingDraft
+                            ? (language === "ar" ? "جارٍ الحذف..." : "Deleting...")
+                            : (language === "ar" ? "حذف المسودة" : "Delete Draft")}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={handleSubmitOrder}
-                        disabled={savingOrder || submittingOrder || downloadingPdf || orderSubmissionBlocked}
+                        disabled={savingOrder || submittingOrder || deletingDraft || downloadingPdf || orderSubmissionBlocked}
                       >
                         {submittingOrder ? "Submitting..." : "Submit Order"}
                       </button>

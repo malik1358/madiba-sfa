@@ -32,7 +32,7 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 6;
+const PERFORMANCE_KPI_CACHE_VERSION = 7;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 

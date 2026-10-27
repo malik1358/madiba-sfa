@@ -161,6 +161,21 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
   assert.equal(closed.expected, 100);
 });
 
+test("averaged pace shares stay non-decreasing after a late-month dip", () => {
+  // Month A books early; month B books almost everything on day 31. Plain averages
+  // can put day 26 below day 12; cumulative share must not fall.
+  const curve = averageCumulativeDayShares([
+    { transaction_date: "2026-07-12", sales_amount: 65 },
+    { transaction_date: "2026-07-26", sales_amount: 35 },
+    { transaction_date: "2026-08-12", sales_amount: 10 },
+    { transaction_date: "2026-08-31", sales_amount: 90 },
+  ]);
+  assert.equal(curve.monthCount, 2);
+  assert.ok(curve.shares[26] >= curve.shares[12]);
+  assert.ok(curve.shares[31] >= curve.shares[26]);
+  assert.ok(expectedPacePercent("2026-09-26", curve.shares) >= expectedPacePercent("2026-09-12", curve.shares));
+});
+
 test("expected pace uses historical share of month sales by that date", () => {
   const curve = averageCumulativeDayShares([
     { transaction_date: "2026-07-08", sales_amount: 70 },
@@ -575,7 +590,7 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 6,
+    version: 7,
     receiptStamp: "stamp-1",
     salesAsOfDate: "2026-09-08",
     batchId: "42",

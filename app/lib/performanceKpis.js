@@ -236,6 +236,14 @@ export function averageCumulativeDayShares(salesRows = []) {
       result[day] = values.reduce((sum, value) => sum + value, 0) / values.length;
     }
   }
+  // Averaging months can dip later days below earlier ones; cumulative share must not fall.
+  let runningMax = 0;
+  for (let day = 1; day <= 31; day += 1) {
+    const value = result[day];
+    if (value == null || !Number.isFinite(Number(value))) continue;
+    runningMax = Math.max(runningMax, Number(value));
+    result[day] = runningMax;
+  }
   return { shares: result, monthCount: curves.length };
 }
 
@@ -316,8 +324,10 @@ export function estimateFromPaceGap(target, paceGap) {
 
 /**
  * One salesman's month-end figure for the Estimate at current pace footer.
- * Prefer the target gap when a target exists; otherwise scale actual by expected pace.
- * Never returns below the current actual, and keeps untarged actuals in the sum.
+ * Scales actual by expected pace share (`actual × 100 / expected%`) so leftover
+ * matches historical (or workday) share still ahead, not target × ahead/behind gap.
+ * Never returns below the current actual; keeps untarged actuals in the sum.
+ * `target` / `paceGap` are accepted for call-site compatibility but unused.
  */
 export function monthEndPaceEstimate({
   actual = 0,
@@ -328,10 +338,7 @@ export function monthEndPaceEstimate({
   const value = Number(actual || 0) || 0;
   const goal = Number(target || 0) || 0;
   if (!(value > 0) && !(goal > 0)) return null;
-  let estimate = estimateFromPaceGap(goal, paceGap);
-  if (estimate == null) {
-    estimate = estimateAtCurrentPace(value, expected);
-  }
+  const estimate = estimateAtCurrentPace(value, expected);
   if (estimate == null) {
     return value > 0 ? value : null;
   }

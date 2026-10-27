@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import {
   badDebtReportEmailRecipients,
   buildBadDebtReportEmail,
+  buildPotentialBadDebtsSection,
   debtCustomerWasListed,
+  filterBadDebtRowsForProfile,
   groupBadDebtRowsBySalesman,
   markDebtRowsAddedToday,
 } from "../app/lib/badDebtReportEmail.js";
 import { runBadDebtReportEmailCycle } from "../app/lib/badDebtReportEmailServer.js";
+import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 
 const date = "2026-10-19";
 
@@ -135,4 +138,57 @@ test("a claimed day does not send again", async () => {
   });
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "already_claimed_or_sent");
+});
+
+test("filterBadDebtRowsForProfile keeps that salesman's open debts only", () => {
+  const matched = filterBadDebtRowsForProfile([
+    row({ customerCode: "1001C", salesman: "AHMED" }),
+    row({ customerCode: "1002", salesman: "SALEH" }),
+    row({
+      customerCode: "1004C",
+      salesman: "AHMED",
+      transferredToLegal: true,
+      transferredAt: "2026-09-01",
+    }),
+  ], { salesman_code: "AHMED", salesman_name: "Ahmed" });
+  assert.deepEqual(matched.map((entry) => entry.customerCode), ["1001C"]);
+});
+
+test("buildUserVisitReportEmail embeds potential bad debts for salesman and bosses", () => {
+  const section = buildPotentialBadDebtsSection({
+    salesmanName: "Ahmed",
+    asOf: date,
+    rows: [
+      row({
+        customerCode: "1001C",
+        customerName: "Alpha Trading",
+        salesman: "AHMED",
+        outstandingAbove120: 5000,
+        oldestInvoiceDays: 140,
+        lastVisitDate: "2026-10-01",
+        lastVisitPerson: "AHMED",
+        lastVisitRemark: "Promised next week",
+      }),
+      row({
+        customerCode: "1004C",
+        customerName: "Legal Hold",
+        salesman: "AHMED",
+        transferredToLegal: true,
+      }),
+    ],
+  });
+  assert.equal(section.customerCount, 1);
+  assert.match(section.html, /Potential bad debts/);
+  assert.match(section.html, /Alpha Trading/);
+  assert.equal(section.html.includes("Legal Hold"), false);
+  assert.match(section.text, /Promised next week/);
+
+  const message = buildUserVisitReportEmail({
+    date: "2026-10-18",
+    user: { userName: "Ahmed", visitCount: 0, farFromCustomerCount: 0, entries: [] },
+    potentialBadDebtsSection: section,
+  });
+  assert.match(message.html, /Potential bad debts/);
+  assert.match(message.html, /Alpha Trading/);
+  assert.match(message.text, /Potential bad debts — Ahmed/);
 });

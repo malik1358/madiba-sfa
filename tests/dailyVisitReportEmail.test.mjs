@@ -566,6 +566,7 @@ test("runDailyVisitReportEmailCycle sends one consolidated boss digest for the r
       { id: "soyeb", user_metadata: {} },
     ]),
     loadSummary: async () => ({ daySummary: { lines: ["One visit."] } }),
+    loadBadDebts: async () => ({ asOf: "2026-09-03", badDebts: [] }),
   });
 
   assert.equal(result.sentCount, 2);
@@ -575,6 +576,91 @@ test("runDailyVisitReportEmailCycle sends one consolidated boss digest for the r
   assert.match(nabilDigest.html, /Belal/);
   assert.deepEqual(soyebDigest.to, ["soyeb@company.com"]);
   assert.match(soyebDigest.html, /Belal/);
+});
+
+test("runDailyVisitReportEmailCycle embeds potential bad debts in salesman and boss emails", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-02",
+    userIds: ["belal"],
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-02",
+      thresholdKm: 0.5,
+      users: [{
+        userId: "belal",
+        userName: "Belal",
+        email: "belal@madiba-sfa.local",
+        visitCount: 1,
+        farFromCustomerCount: 0,
+        totalRouteDistanceKm: 2,
+        entries: [],
+        daySummary: { lines: ["One visit."] },
+      }],
+    }),
+    loadProfiles: async () => ([
+      { id: "belal", role: "salesman", salesman_code: "BELAL", salesman_name: "Belal", email: "belal@madiba-sfa.local", report_email: "belal@company.com", is_active: true },
+      { id: "nabil", role: "salesman", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil", email: "nabil@madiba-sfa.local", report_email: "ahmed.nabil@noorshukran.com", is_active: true },
+    ]),
+    loadAuthUsers: async () => ([
+      { id: "belal", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+      { id: "nabil", user_metadata: {} },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["One visit."] } }),
+    loadDueCollectionCustomers: async () => [],
+    loadBadDebts: async () => ({
+      asOf: "2026-09-03",
+      badDebts: [
+        {
+          customerCode: "1001C",
+          customerName: "Alpha Trading",
+          salesman: "BELAL",
+          cityArea: "Riyadh / Olaya",
+          outstandingAbove120: 5000,
+          totalOutstanding: 5200,
+          transferredToLegal: false,
+          oldestInvoiceDays: 150,
+          lastVisitDate: "2026-08-20",
+          lastVisitPerson: "Belal",
+          lastVisitRemark: "No payment",
+        },
+        {
+          customerCode: "2002",
+          customerName: "Other Shop",
+          salesman: "SALEH",
+          outstandingAbove120: 900,
+          totalOutstanding: 900,
+          transferredToLegal: false,
+        },
+        {
+          customerCode: "1004C",
+          customerName: "Legal Hold",
+          salesman: "BELAL",
+          outstandingAbove120: 700,
+          totalOutstanding: 700,
+          transferredToLegal: true,
+        },
+      ],
+    }),
+  });
+
+  assert.equal(result.sentCount, 2);
+  const personal = sent.find((message) => /Daily Visit Report — Belal/.test(message.subject));
+  const bossDigest = sent.find((message) => /Team digest — Ahmed Nabil/.test(message.subject));
+  assert.match(personal.html, /Potential bad debts/);
+  assert.match(personal.html, /Alpha Trading/);
+  assert.equal(personal.html.includes("Other Shop"), false);
+  assert.equal(personal.html.includes("Legal Hold"), false);
+  assert.match(personal.text, /No payment/);
+  assert.match(bossDigest.html, /Potential bad debts/);
+  assert.match(bossDigest.html, /Alpha Trading/);
 });
 
 test("resolveVisitReportChainEmails uses each head report inbox", () => {

@@ -1,3 +1,4 @@
+import { collectSalesmanIdentities } from "./collectionStaleOverdueEmail.js";
 import { customerAccountCodesMatch } from "./outstanding.js";
 import { parseEmailList } from "./mailer.js";
 
@@ -74,6 +75,73 @@ export function groupBadDebtRowsBySalesman(rows = []) {
       )),
     }))
     .sort((left, right) => left.salesman.localeCompare(right.salesman));
+}
+
+export function badDebtRowMatchesSalesmanProfile(row = {}, profile = {}) {
+  const profileIds = collectSalesmanIdentities(profile);
+  if (!profileIds.size) return false;
+  const rowIds = collectSalesmanIdentities({
+    salesman_code: row?.salesman,
+    salesman_name: row?.salesman,
+  });
+  for (const identity of rowIds) {
+    if (profileIds.has(identity)) return true;
+  }
+  return false;
+}
+
+export function filterBadDebtRowsForProfile(rows = [], profile = {}) {
+  return (rows || [])
+    .filter((row) => !row?.transferredToLegal)
+    .filter((row) => badDebtRowMatchesSalesmanProfile(row, profile));
+}
+
+export function buildPotentialBadDebtsSection({
+  salesmanName = "",
+  rows = [],
+  asOf = "",
+} = {}) {
+  const openRows = [...(rows || [])]
+    .filter((row) => !row?.transferredToLegal)
+    .sort((left, right) => (
+      Number(right.outstandingAbove120 || 0) - Number(left.outstandingAbove120 || 0)
+      || String(left.customerName || "").localeCompare(String(right.customerName || ""))
+    ));
+  const totals = sumRows(openRows);
+  if (!openRows.length) {
+    return { html: "", text: "", customerCount: 0, totals };
+  }
+
+  const who = String(salesmanName || "").trim() || "Salesman";
+  const asOfLabel = String(asOf || "").trim();
+  const html = `<div style="margin:18px 0 8px;">
+    <h2 style="font-size:16px;margin:0 0 8px;color:#0f4c5c;">Potential bad debts</h2>
+    <p style="margin:0 0 10px;font-size:12px;color:#475569;">
+      ${escapeHtml(who)}${asOfLabel ? ` · as of ${escapeHtml(asOfLabel)} (KSA)` : ""} · outstanding older than 120 days · no Funds Received in the last 10 days · customers already with legal are omitted
+    </p>
+    ${badDebtTable(openRows)}
+  </div>`;
+
+  const text = [
+    `Potential bad debts — ${who}`,
+    ...(asOfLabel ? [`As of ${asOfLabel} (KSA)`] : []),
+    "Outstanding older than 120 days · no Funds Received in the last 10 days · legal transfers omitted",
+    "Customer | City/Area | >120 | Total outstanding | Oldest invoice days | Last visit | Visit person | Remarks",
+    ...openRows.map((row) => [
+      `${row.customerCode || ""} ${row.customerName || ""}`.trim(),
+      row.cityArea || "-",
+      formatMoney(row.outstandingAbove120),
+      formatMoney(row.totalOutstanding),
+      row.oldestInvoiceDays || "-",
+      formatDate(row.lastVisitDate),
+      row.lastVisitPerson || "-",
+      row.lastVisitRemark || "-",
+    ].join(" | ")),
+    `Total | ${totals.customers} customers | ${formatMoney(totals.above120)} | ${formatMoney(totals.total)}`,
+    "",
+  ].join("\n");
+
+  return { html, text, customerCount: totals.customers, totals };
 }
 
 function sumRows(rows = []) {

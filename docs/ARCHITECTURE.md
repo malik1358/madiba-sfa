@@ -83,6 +83,7 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
 | roleAccess | Y | | | | | |
 | salesmanHierarchy, upload | Y | Y | | | Y | |
+| eodStock | Y | Y | | | Y | |
 | salesmanVisitPlan | Y | Y* | Y* | | Y* | Y* |
 | itemPriceHistory | Y | Y | Y | | Y | Y |
 | gpsMap | Y | | | | Y | Y |
@@ -118,7 +119,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 **Admin / imports / BI**
 
-- `/api/import-sales`, `/api/upload-files`, `/api/pricing/cache`, `/api/admin/price-sync`
+- `/api/import-sales`, `/api/upload-files`, `/api/eod-stock`, `/api/pricing/cache`, `/api/admin/price-sync`
 - `/api/business-dashboard`, `/api/business-dashboard/category-growth`
 - `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth); scope uses management roles company-wide or `resolveSalesScopeForUserId` for team heads
 - `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend
@@ -192,7 +193,7 @@ New field orders go to `sales_orders`. Invoice status is not a column on that ta
 
 `/api/import-sales` loads an Excel sales file into `sales_raw` under a new `import_batches` row, then activates it. `activate_sales_batch` archives the previous `ACTIVE` batch and sets `system_settings.active_sales_batch_id`. The view `public.active_sales` is that batch only.
 
-Outstanding customer sheets and the receipt register are parsed and stored as JSON settings (`outstanding_customerwise_dataset_v1`, `receipt_register_dataset_v1`). When that outstanding workbook has invoice or row data, Payment Collections uses it and does **not** merge `public.invoices` (that merge reloaded every open invoice on each queue fetch). `readOutstandingInvoicesFromTable` in `app/api/payment-collections/route.js` runs only when no workbook has been uploaded. Receipt uploads accept an optional `includePaymentVouchers` flag so Payment Register rows (Dr) for dual customer/supplier parties merge as **negative** receipt amounts into the same dataset used by FIFO settlement.
+Outstanding customer sheets, the receipt register, and end-of-day city stock are parsed and stored as JSON settings (`outstanding_customerwise_dataset_v1`, `receipt_register_dataset_v1`, `eod_stock_citywise_v1`). `/api/eod-stock` accepts an Excel closing-stock file for Riyadh, Dammam, and Jeddah and `/management/eod-stock` shows that snapshot against the previous stock date. The original file is stored like the other uploads (`kind=eod-stock`). When that outstanding workbook has invoice or row data, Payment Collections uses it and does **not** merge `public.invoices` (that merge reloaded every open invoice on each queue fetch). `readOutstandingInvoicesFromTable` in `app/api/payment-collections/route.js` runs only when no workbook has been uploaded. Receipt uploads accept an optional `includePaymentVouchers` flag so Payment Register rows (Dr) for dual customer/supplier parties merge as **negative** receipt amounts into the same dataset used by FIFO settlement.
 
 After a sales import, the BI cube and the daily supplier-order email can rebuild or send. Those side effects live in `app/api/import-sales/route.js`.
 

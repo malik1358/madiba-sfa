@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { EOD_STOCK_DATASET_KEY } from "../../lib/eodStock.js";
 import { OUTSTANDING_DATASET_KEY } from "../../lib/outstanding";
 import { RECEIPT_DATASET_KEY } from "../../lib/receiptRegister.js";
 import {
@@ -76,6 +77,24 @@ async function resolveUploadMeta(admin, kind) {
     });
   }
 
+  if (kind === "eod-stock") {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", EOD_STOCK_DATASET_KEY)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const parsed = parseJson(data?.setting_value);
+    return parseUploadFileMeta({
+      kind: "eod-stock",
+      fileName: parsed?.fileName || "",
+      filePath: parsed?.filePath || "",
+      uploadedAt: parsed?.uploadedAt || "",
+    });
+  }
+
   if (kind === "receipt") {
     const { data, error } = await admin
       .from("system_settings")
@@ -121,8 +140,8 @@ export async function GET(request) {
     const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
     const metaOnly = url.searchParams.get("meta") === "1";
 
-    if (!["sales", "outstanding", "receipt"].includes(kind)) {
-      return NextResponse.json({ success: false, error: "kind must be sales, outstanding, or receipt." }, { status: 400 });
+    if (!["sales", "outstanding", "receipt", "eod-stock"].includes(kind)) {
+      return NextResponse.json({ success: false, error: "kind must be sales, outstanding, receipt, or eod-stock." }, { status: 400 });
     }
 
     const meta = await resolveUploadMeta(admin, kind);

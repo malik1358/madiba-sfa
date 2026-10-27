@@ -52,6 +52,7 @@ export const MODULES = {
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
   stockTake: { href: "/management/stock-take", label: "Stock Take" },
+  eodStock: { href: "/management/eod-stock", label: "End-of-day Stock" },
   roleAccess: { href: "/management/role-access", label: "Role Access" },
 };
 
@@ -109,7 +110,7 @@ export const NAV_GROUPS = [
   {
     key: "warehouse",
     label: "Warehouse",
-    modules: ["stockTake"],
+    modules: ["stockTake", "eodStock"],
   },
   {
     key: "admin",
@@ -267,6 +268,7 @@ export function buildModuleAccess(context = {}) {
       itemPriceHistory: (isAdmin || isManager || isInvoiceMaker || isSalesman || isProductPromoter) && !isCollector,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
+      eodStock: isAdmin || isManager || isInvoiceMaker,
       stockTake: stockTakeAccess,
       roleAccess: isAdmin,
     },
@@ -468,6 +470,7 @@ export const MODULE_LABELS = {
   itemPriceHistory: { en: "Item Price History", ar: "سجل أسعار الأصناف" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
+  eodStock: { en: "End-of-day Stock", ar: "مخزون نهاية اليوم" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },
   roleAccess: { en: "Role Access", ar: "صلاحيات الأدوار" },
 };

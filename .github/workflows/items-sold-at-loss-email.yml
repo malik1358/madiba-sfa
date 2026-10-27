@@ -1,0 +1,110 @@
+name: Items Sold at Loss Email
+
+on:
+  schedule:
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday — previous KSA day loss sales.
+    - cron: "30 5 * * 0-4,6"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (KSA). Empty = previous KSA day."
+        required: false
+        default: ""
+      to:
+        description: "Test-only recipient override (skips default digest list)."
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already marked sent"
+        required: false
+        default: "true"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger items sold at loss email endpoint
+        env:
+          ITEMS_SOLD_AT_LOSS_EMAIL_URL: ${{ secrets.ITEMS_SOLD_AT_LOSS_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          DEFAULT_ITEMS_SOLD_AT_LOSS_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/items-sold-at-loss-email'
+          ITEMS_SOLD_AT_LOSS_EMAIL_URL_TRIMMED="$(printf '%s' "$ITEMS_SOLD_AT_LOSS_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE="$ITEMS_SOLD_AT_LOSS_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "ITEMS_SOLD_AT_LOSS_EMAIL_URL secret is missing; falling back to default endpoint."
+            ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE="$DEFAULT_ITEMS_SOLD_AT_LOSS_EMAIL_URL"
+          elif [[ ! "$ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE" =~ /api/cron/items-sold-at-loss-email([/?].*)?$ ]]; then
+            echo "ITEMS_SOLD_AT_LOSS_EMAIL_URL secret does not point to /api/cron/items-sold-at-loss-email; falling back to default endpoint."
+            ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE="$DEFAULT_ITEMS_SOLD_AT_LOSS_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          export EVENT_NAME
+          export FORCE_VALUE="${INPUT_FORCE:-}"
+          export DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          python3 - <<'PY' > payload.json
+          import json, os
+          event_name = os.environ.get("EVENT_NAME", "").strip()
+          force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
+          if event_name == "schedule":
+            force = False
+            trigger = "cron"
+          elif force_raw:
+            force = force_raw not in ("0", "false", "no")
+            trigger = "manual"
+          else:
+            force = True
+            trigger = "manual"
+          payload = {"force": force, "trigger": trigger}
+          date = os.environ.get("DATE_VALUE", "").strip()
+          to = os.environ.get("TO_VALUE", "").strip()
+          if date:
+            payload["date"] = date
+          if to:
+            payload["to"] = to
+          print(json.dumps(payload))
+          PY
+
+          echo "Request payload:"
+          cat payload.json
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 240 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data @payload.json
+          }
+
+          status_code="$(post_report "$ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE" != "$DEFAULT_ITEMS_SOLD_AT_LOSS_EMAIL_URL" ]]; then
+            echo "Primary ITEMS_SOLD_AT_LOSS_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE="$DEFAULT_ITEMS_SOLD_AT_LOSS_EMAIL_URL"
+            status_code="$(post_report "$ITEMS_SOLD_AT_LOSS_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Items sold at loss email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Items sold at loss email succeeded with HTTP $status_code"
+          cat response.json

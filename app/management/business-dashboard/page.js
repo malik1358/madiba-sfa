@@ -11,9 +11,11 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { isAdminRole } from "../../lib/moduleAccess";
 import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import CustomerCohortReport from "./CustomerCohortReport";
+import ItemsSoldAtLossReport from "./ItemsSoldAtLossReport";
 import SalesMixReport from "./SalesMixReport";
 import ReceivableDaysReport from "./ReceivableDaysReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
@@ -48,6 +50,43 @@ const TEXT = {
   customerGrowth: { en: "Customer growth", ar: "نمو العملاء" },
   itemGrowth: { en: "Item growth", ar: "نمو الأصناف" },
   salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
+  itemsSoldAtLoss: { en: "Items sold at loss", ar: "أصناف بيعت بخسارة" },
+  itemsSoldAtLossSubtitle: {
+    en: "Admin only. Active sales lines where imported GP is negative. Every column has an Excel filter. Cost is not stored in SFA.",
+    ar: "للأدمن فقط. أسطر المبيعات النشطة حيث الربح المستورد سالب. كل عمود له تصفية Excel. التكلفة غير مخزنة في النظام.",
+  },
+  itemsSoldAtLossAccessDenied: {
+    en: "Items sold at loss is available to admin only.",
+    ar: "تقرير البيع بخسارة متاح للأدمن فقط.",
+  },
+  itemsSoldAtLossNoRows: {
+    en: "No loss lines match this period.",
+    ar: "لا توجد أسطر خسارة في هذه الفترة.",
+  },
+  itemsSoldAtLossProfitMissing: {
+    en: "Profit amount is not available yet. Re-upload sales after the profit column is applied.",
+    ar: "مبلغ الربح غير متوفر بعد. أعد رفع المبيعات بعد تطبيق عمود الربح.",
+  },
+  itemsSoldAtLossLines: { en: "Loss lines", ar: "أسطر الخسارة" },
+  itemsSoldAtLossQty: { en: "Qty", ar: "الكمية" },
+  itemsSoldAtLossPrice: { en: "Price", ar: "السعر" },
+  itemsSoldAtLossLoss: { en: "Loss (GP)", ar: "الخسارة (GP)" },
+  itemsSoldAtLossVoucher: { en: "Voucher", ar: "السند" },
+  itemsSoldAtLossVoucherType: { en: "Voucher type", ar: "نوع السند" },
+  itemsSoldAtLossReference: { en: "Reference", ar: "المرجع" },
+  itemsSoldAtLossSalesmanCode: { en: "Salesman code", ar: "رمز المندوب" },
+  itemsSoldAtLossSalesmanName: { en: "Salesman", ar: "المندوب" },
+  itemsSoldAtLossCustomerCode: { en: "Customer code", ar: "رمز العميل" },
+  itemsSoldAtLossCustomerName: { en: "Customer", ar: "العميل" },
+  itemsSoldAtLossItemCode: { en: "Item code", ar: "رمز الصنف" },
+  itemsSoldAtLossItemName: { en: "Item", ar: "الصنف" },
+  itemsSoldAtLossCategory: { en: "Category", ar: "الفئة" },
+  itemsSoldAtLossLocalImport: { en: "Local/Import", ar: "محلي/مستورد" },
+  itemsSoldAtLossAbc: { en: "ABC", ar: "ABC" },
+  itemsSoldAtLossDate: { en: "Date", ar: "التاريخ" },
+  itemsSoldAtLossTotal: { en: "Total", ar: "الإجمالي" },
+  itemsSoldAtLossAll: { en: "All", ar: "الكل" },
+  itemsSoldAtLossRefresh: { en: "Refresh", ar: "تحديث" },
   operations: { en: "Daily operations", ar: "التشغيل اليومي" },
   date: { en: "Report date", ar: "تاريخ التقرير" },
   redAlerts: { en: "Red alerts", ar: "تنبيهات حمراء" },
@@ -93,6 +132,7 @@ export default function BusinessDashboardPage() {
   const [view, setView] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isAdminViewer, setIsAdminViewer] = useState(false);
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [dashboard, setDashboard] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -170,6 +210,37 @@ export default function BusinessDashboardPage() {
   usePopupMessages({ error });
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadViewerRole() {
+      try {
+        const supabase = getSupabaseClient();
+        if (!supabase) return;
+        const session = await resolveAuthSession(supabase, 12000);
+        if (!session?.user?.id || cancelled) return;
+        const { data } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        setIsAdminViewer(isAdminRole(data?.role));
+      } catch {
+        if (!cancelled) setIsAdminViewer(false);
+      }
+    }
+    void loadViewerRole();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAdminViewer && view === "items-sold-at-loss") {
+      setView("overview");
+    }
+  }, [isAdminViewer, view]);
+
+  useEffect(() => {
     if (!reportFocus || view === "overview") return;
     if (view === "category-growth" && growthLoading) return;
     if (view === "madiba" && growthLoading) return;
@@ -178,6 +249,7 @@ export default function BusinessDashboardPage() {
     if (view === "salesman-mom" && salesmanLoading) return;
     if (view === "sales-mix" && growthLoading) return;
     if (view === "receivable-days" && receivableLoading) return;
+    if (view === "items-sold-at-loss") return;
     if (view === "operations" && loading) return;
     const node = document.getElementById(reportFocus);
     if (!node) return;
@@ -930,6 +1002,17 @@ export default function BusinessDashboardPage() {
               >
                 {t("salesmanMom")}
               </button>
+              {isAdminViewer ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "items-sold-at-loss"}
+                  className={`moduleBiTab${view === "items-sold-at-loss" ? " isActive" : ""}`}
+                  onClick={() => setView("items-sold-at-loss")}
+                >
+                  {t("itemsSoldAtLoss")}
+                </button>
+              ) : null}
               <button
                 type="button"
                 role="tab"
@@ -942,7 +1025,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "overview" || view === "sales-mix" || view === "receivable-days" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "sales-mix" || view === "receivable-days" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" || view === "items-sold-at-loss" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
@@ -983,7 +1066,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
                 {periodRangeLabel ? <em className="moduleBiPeriodRange">{periodRangeLabel}</em> : null}
-                {view !== "sales-mix" && view !== "receivable-days" ? (
+                {view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" ? (
                   <>
                     <span>{t("measure")}</span>
                     <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
@@ -1005,7 +1088,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
               </div>
-              {view !== "sales-mix" && view !== "receivable-days" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
+              {view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
             </section>
           ) : null}
 
@@ -1202,6 +1285,44 @@ export default function BusinessDashboardPage() {
                 setSalesmanApplied(empty);
                 setSalesmanSearch("");
                 setSalesmanStatusFilter([]);
+              }}
+            />
+          ) : null}
+
+          {view === "items-sold-at-loss" && isAdminViewer ? (
+            <ItemsSoldAtLossReport
+              periodRange={periodRange}
+              periodLabel={periodRangeLabel}
+              labels={{
+                title: t("itemsSoldAtLoss"),
+                subtitle: t("itemsSoldAtLossSubtitle"),
+                accessDenied: t("itemsSoldAtLossAccessDenied"),
+                noRows: t("itemsSoldAtLossNoRows"),
+                profitMissing: t("itemsSoldAtLossProfitMissing"),
+                lines: t("itemsSoldAtLossLines"),
+                quantity: t("itemsSoldAtLossQty"),
+                price: t("itemsSoldAtLossPrice"),
+                sales: t("sales"),
+                loss: t("itemsSoldAtLossLoss"),
+                voucher: t("itemsSoldAtLossVoucher"),
+                voucherType: t("itemsSoldAtLossVoucherType"),
+                reference: t("itemsSoldAtLossReference"),
+                salesmanCode: t("itemsSoldAtLossSalesmanCode"),
+                salesmanName: t("itemsSoldAtLossSalesmanName"),
+                customerCode: t("itemsSoldAtLossCustomerCode"),
+                customerName: t("itemsSoldAtLossCustomerName"),
+                itemCode: t("itemsSoldAtLossItemCode"),
+                itemName: t("itemsSoldAtLossItemName"),
+                category: t("itemsSoldAtLossCategory"),
+                localImport: t("itemsSoldAtLossLocalImport"),
+                abcClass: t("itemsSoldAtLossAbc"),
+                date: t("itemsSoldAtLossDate"),
+                total: t("itemsSoldAtLossTotal"),
+                all: t("itemsSoldAtLossAll"),
+                refresh: t("itemsSoldAtLossRefresh"),
+                loading: t("loading"),
+                signIn: "Please login again.",
+                loadError: "Unable to load items sold at loss.",
               }}
             />
           ) : null}

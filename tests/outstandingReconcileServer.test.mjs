@@ -1,6 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { forEachCustomerSalesHistory } from "../app/lib/outstandingReconcileServer.js";
+import {
+  forEachCustomerSalesHistory,
+  preferredReconcileCustomerCode,
+  receiptsForAccount,
+  reconcileAccountGroupKey,
+} from "../app/lib/outstandingReconcileServer.js";
+
+test("reconcileAccountGroupKey groups 1171 with 1171C", () => {
+  assert.equal(reconcileAccountGroupKey("1171C"), "1171");
+  assert.equal(reconcileAccountGroupKey("1171"), "1171");
+  assert.equal(reconcileAccountGroupKey("1035C"), "1035");
+  assert.equal(reconcileAccountGroupKey("C001"), "C001");
+});
+
+test("receiptsForAccount includes related customer codes", () => {
+  const byCode = new Map([
+    ["1171", [{ customer_code: "1171", amount: 10 }]],
+    ["1171C", [{ customer_code: "1171C", amount: 20 }]],
+    ["9999", [{ customer_code: "9999", amount: 99 }]],
+  ]);
+  const rows = receiptsForAccount(byCode, "1171C");
+  assert.deepEqual(rows.map((row) => row.amount).sort((a, b) => a - b), [10, 20]);
+});
+
+test("preferredReconcileCustomerCode keeps the outstanding upload code", () => {
+  const customersByCode = new Map([["1171C", { customer_code: "1171C" }]]);
+  assert.equal(preferredReconcileCustomerCode(["1171", "1171C"], customersByCode), "1171C");
+  assert.equal(preferredReconcileCustomerCode(["1171", "1171C"], new Map()), "1171C");
+});
+
 
 test("forEachCustomerSalesHistory reads the canonical active sales view", async () => {
   let queriedTable = "";

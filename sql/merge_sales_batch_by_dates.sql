@@ -1,5 +1,6 @@
 -- Run in Supabase SQL Editor to enable incremental sales uploads by date.
--- After applying, uploads replace only the transaction dates found in the Excel file.
+-- After applying, uploads replace overlapping vouchers on the dates found in the
+-- Excel file and keep any active voucher the file does not re-state.
 
 CREATE OR REPLACE FUNCTION public.merge_sales_batch_by_dates(
   p_new_batch_id bigint,
@@ -47,9 +48,19 @@ BEGIN
   END IF;
 
   IF p_dates IS NOT NULL AND array_length(p_dates, 1) > 0 THEN
-    DELETE FROM public.sales_raw
-    WHERE import_batch_id = v_active_batch_id
-      AND transaction_date = ANY (p_dates);
+    DELETE FROM public.sales_raw AS old
+    WHERE old.import_batch_id = v_active_batch_id
+      AND old.transaction_date = ANY (p_dates)
+      AND EXISTS (
+        SELECT 1
+        FROM public.sales_raw AS incoming
+        WHERE incoming.import_batch_id = p_new_batch_id
+          AND incoming.transaction_date = old.transaction_date
+          AND upper(trim(coalesce(incoming.customer_code, '')))
+            = upper(trim(coalesce(old.customer_code, '')))
+          AND upper(trim(coalesce(incoming.voucher_number, '')))
+            = upper(trim(coalesce(old.voucher_number, '')))
+      );
   END IF;
 
   UPDATE public.sales_raw

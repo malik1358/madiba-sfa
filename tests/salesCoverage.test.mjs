@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  describePartialDateOverwrites,
   detectPartialDateOverwrites,
   detectSalesCoverageGaps,
   isSalesCoverageGapDate,
+  selectSalesRowsReplacedByUpload,
   summarizeSalesDays,
 } from "../app/lib/salesCoverage.js";
 
@@ -119,4 +121,38 @@ test("detectPartialDateOverwrites warns when the same salesman uploads a fractio
   assert.equal(warnings[0].stored_lines, 20);
   assert.equal(warnings[0].incoming_lines, 1);
   assert.deepEqual(warnings[0].missing_salesmen, []);
+});
+
+test("selectSalesRowsReplacedByUpload keeps vouchers the file does not re-state", () => {
+  // Customer 1183 style: a Dammam-only upload for 2026-09-13 must not wipe DC/0017
+  // when the file never mentions that voucher.
+  const existing = [
+    { transaction_date: "2026-09-13", customer_code: "1183", voucher_number: "DC/0017" },
+    { transaction_date: "2026-09-13", customer_code: "1424", voucher_number: "DNFD/095" },
+    { transaction_date: "2026-09-13", customer_code: "1001", voucher_number: "NFD/2000" },
+  ];
+  const incoming = [
+    { transaction_date: "2026-09-13", customer_code: "1424", voucher_number: "DNFD/095" },
+  ];
+
+  const replaced = selectSalesRowsReplacedByUpload({ existing, incoming });
+
+  assert.deepEqual(
+    replaced.map((row) => `${row.customer_code}:${row.voucher_number}`),
+    ["1424:DNFD/095"],
+  );
+});
+
+test("describePartialDateOverwrites no longer claims a full-date wipe", () => {
+  const message = describePartialDateOverwrites([
+    {
+      date: "2026-09-13",
+      stored_lines: 108,
+      incoming_lines: 12,
+      missing_salesmen: ["MOINUDIN KHAJA"],
+    },
+  ]);
+  assert.match(message, /partial export/i);
+  assert.match(message, /kept/i);
+  assert.doesNotMatch(message, /deletes the existing sales/i);
 });

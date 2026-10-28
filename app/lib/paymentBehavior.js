@@ -968,6 +968,9 @@ export function buildSortedReceipts(receipts = []) {
  * follows oldest-open FIFO on the other invoices. Sales on the named bill stay
  * the gross figure; the credit note shows in Paid.
  * Unreferenced orphans follow normal oldest-open FIFO with cash in date order.
+ * A receipt that exactly equals one still-fully-open invoice (VAT-incl) claims
+ * that bill before oldest-open FIFO — same idea as Payment↔Purchase Matched —
+ * so an exact collection is not parked on an older open bill (1171C 1797→1411).
  * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
  * A Purchase still open after those Payments settles sales invoices already
@@ -1367,6 +1370,43 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         if (event.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
         remaining = applyToInvoice(event, invoice, remaining);
         invoice.cash_first_receipt_used = true;
+      }
+
+      // Exact full-bill receipt↔invoice (same amount, still fully open), like
+      // Payment↔Purchase Matched. Prefer same-day, then closest earlier bill.
+      // Without this, oldest-open FIFO parks an exact receipt on an older open
+      // (1171C: 1797→1215 instead of 1411; 1336→898 instead of 1023) and invents
+      // a customer Open Δ vs Tally (−1,106.30) while the named bill stays open.
+      if (hasSettlementAmount(remaining)) {
+        const exactCandidates = invoices
+          .filter((invoice) => (
+            hasSettlementAmount(invoice.remaining)
+            && amountsMatch(invoice.remaining, invoice.amount)
+            && amountsMatch(remaining, invoice.remaining)
+            && !receiptBeforeInvoice(event, invoice)
+            && (!invoice.invoice_date || !event.date || invoice.invoice_date <= event.date)
+          ))
+          .map((invoice) => {
+            const dayGap = Math.abs(isoDayOffset(invoice.invoice_date, event.date) ?? 9999);
+            return {
+              invoice,
+              sameDay: invoice.invoice_date === event.date,
+              dayGap,
+            };
+          })
+          .sort((left, right) => {
+            if (left.sameDay !== right.sameDay) return left.sameDay ? -1 : 1;
+            if (left.dayGap !== right.dayGap) return left.dayGap - right.dayGap;
+            if (left.invoice.invoice_date !== right.invoice.invoice_date) {
+              return left.invoice.invoice_date.localeCompare(right.invoice.invoice_date);
+            }
+            return String(left.invoice.voucher_number || "")
+              .localeCompare(String(right.invoice.voucher_number || ""));
+          });
+        const exact = exactCandidates[0];
+        if (exact) {
+          remaining = applyToInvoice(event, exact.invoice, remaining);
+        }
       }
     }
 

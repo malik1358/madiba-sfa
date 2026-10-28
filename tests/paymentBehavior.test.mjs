@@ -202,6 +202,27 @@ test("matchPaymentsFifo exact Payment↔Purchase amount pairs go to matchedPurch
   assert.equal(ledger.purchases.length, 0);
 });
 
+test("matchPaymentsFifo exact full-bill receipt claims that invoice before older FIFO", () => {
+  // 1171C-style: receipt 1797 equals NFD/1411; oldest-open would park it on 1215.
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-07-26", voucher_number: "NFD/1215", sales_amount: 21000, category: "Paper" },
+      { transaction_date: "2026-08-15", voucher_number: "NFD/1411", sales_amount: 24605.8, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-09-22", amount: 28296.67, vch_no: "1797", vch_type: "Receipt" },
+    ],
+  );
+
+  const paid1411 = allocations.filter((row) => row.voucher_number === "NFD/1411");
+  const paid1215 = allocations.filter((row) => row.voucher_number === "NFD/1215");
+  assert.equal(paid1411.length, 1);
+  assert.equal(Number(paid1411[0].amount.toFixed(2)), 28296.67);
+  assert.equal(paid1215.length, 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "NFD/1411").remaining.toFixed(2)), 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "NFD/1215").remaining.toFixed(2)), 24150);
+});
+
 test("matchPaymentsFifo settles dual-party Payment against Purchase before sales", () => {
   const {
     allocations,

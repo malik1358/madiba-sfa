@@ -2,8 +2,26 @@ import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from '../../../lib/regionalPricing';
+import {
+  availableEodStockQty,
+  formatEodStockAvailableLabel,
+} from '../../../lib/eodStock.js';
 
-export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit', schemeApplications = {} }) {
+export default function QuickOrder({
+  quickOrderSuggestions,
+  orderQuantities,
+  decreaseOrderQty,
+  increaseOrderQty,
+  changeOrderQty,
+  priceList,
+  cashDiscountMap = {},
+  valueDiscountMap = {},
+  paymentType = 'credit',
+  schemeApplications = {},
+  eodStock = null,
+  pricingRegion = 'riyadh',
+  language = 'en',
+}) {
   const quickOrderAllItems = [
     ...quickOrderSuggestions.newItems,
     ...quickOrderSuggestions.notBoughtRecently,
@@ -76,6 +94,8 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                           schemeDiscountedQty: scheme.discountedQty,
                           excludeCashDiscount: scheme.excludeCashDiscount === true,
                         });
+                        const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
+                        const availableLabel = formatEodStockAvailableLabel(availableStock, language);
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
                             <td>
@@ -116,9 +136,10 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                <input type="number" min="0" step="1" max={availableStock ?? undefined} inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                <button type="button" className="auditQtyButton" disabled={availableStock != null && orderQty >= availableStock} onClick={() => increaseOrderQty(item.item_code)}>+</button>
                               </div>
+                              {availableLabel ? <div className="moduleCode moduleStockAvailable">{availableLabel}</div> : null}
                             </td>
                           </tr>
                         );

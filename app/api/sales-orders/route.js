@@ -25,6 +25,12 @@ import {
 import { canManageOrderInvoice } from "../../lib/moduleAccess.js";
 import { assertOrderQuantityControls } from "../../lib/orderQuantityControlsServer.js";
 import {
+  EOD_STOCK_DATASET_KEY,
+  assertOrderLinesWithinEodStock,
+  buildEodStockAvailability,
+  readEodStockDataset,
+} from "../../lib/eodStock.js";
+import {
   blockedByAvgDaysMessage,
   orderBlockOverrideKey,
   parseOrderBlockOverride,
@@ -54,6 +60,20 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function invoiceMetaKey(orderId) {
   return `order_invoice_meta:${String(orderId || "").trim()}`;
+}
+
+async function loadEodStockAvailability(admin) {
+  try {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", EOD_STOCK_DATASET_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    return buildEodStockAvailability(readEodStockDataset(data?.setting_value));
+  } catch {
+    return buildEodStockAvailability(null);
+  }
 }
 
 async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
@@ -907,6 +927,19 @@ export async function POST(request) {
         }, { status: 400 });
       }
 
+      const stockCheck = assertOrderLinesWithinEodStock({
+        lines: pricedLines,
+        availability: await loadEodStockAvailability(admin),
+        pricingRegion: pricingContext.pricingRegion,
+      });
+      if (!stockCheck.ok) {
+        return NextResponse.json({
+          success: false,
+          error: stockCheck.error,
+          eodStockViolations: stockCheck.violations,
+        }, { status: 400 });
+      }
+
       const nowIso = new Date().toISOString();
       const { error: deleteError } = await admin
         .from("sales_order_items")
@@ -1203,6 +1236,19 @@ export async function POST(request) {
         success: false,
         error: quantityControlCheck.error,
         quantityControlViolations: quantityControlCheck.violations,
+      }, { status: 400 });
+    }
+
+    const stockCheck = assertOrderLinesWithinEodStock({
+      lines: pricedLines,
+      availability: await loadEodStockAvailability(admin),
+      pricingRegion: pricedCatalog.region || requestedPricingRegion,
+    });
+    if (!stockCheck.ok) {
+      return NextResponse.json({
+        success: false,
+        error: stockCheck.error,
+        eodStockViolations: stockCheck.violations,
       }, { status: 400 });
     }
 

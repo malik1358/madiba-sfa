@@ -4907,6 +4907,13 @@ th:has(.moduleTableColumnFilterInput) {
   outline: 0;
 }
 
+.moduleStockAvailable {
+  margin-top: 4px;
+  color: #0d5a6b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .moduleOrderTable {
   min-width: 760px;
 }

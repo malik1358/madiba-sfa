@@ -69,6 +69,10 @@ import { blockedByAvgDaysMessage, cashOrderAllowedDespiteBlockMessage, isSalesOr
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
+import {
+  availableEodStockQty,
+  formatEodStockAvailableLabel,
+} from "../../lib/eodStock.js";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -644,6 +648,7 @@ export default function NewOrderPage() {
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
   const [quantityControls, setQuantityControls] = useState([]);
+  const [eodStock, setEodStock] = useState(null);
   const [paymentType, setPaymentType] = useState("credit");
   const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
@@ -966,6 +971,7 @@ export default function NewOrderPage() {
     valueDiscountMap,
     schemes,
     quantityControls,
+    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -1637,6 +1643,7 @@ export default function NewOrderPage() {
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
         setQuantityControls(parsed.quantityControls || []);
+        setEodStock(parsed.eodStock || null);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch (err) {
         if (catalogueMode) setError(err.message || "Unable to load catalogue prices.");
@@ -1789,6 +1796,7 @@ export default function NewOrderPage() {
             onQty={updateQty}
             onIncrease={increaseQty}
             onDecrease={decreaseQty}
+            eodStock={eodStock}
             priceList={regionPriceList}
             pricingRegion={pricingRegion}
             pricingType={pricingType}
@@ -2081,6 +2089,9 @@ export default function NewOrderPage() {
                   valueDiscountMap={valueDiscountMap}
                   paymentType={paymentType}
                   schemeApplications={schemeApplications}
+                  eodStock={eodStock}
+                  pricingRegion={pricingRegion}
+                  language={language}
                 />
 
                 {Array.isArray(orderHistory) && orderHistory.length > 0 && (
@@ -2213,6 +2224,8 @@ export default function NewOrderPage() {
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
+                              const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
+                              const availableLabel = formatEodStockAvailableLabel(availableStock, language);
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
@@ -2236,11 +2249,19 @@ export default function NewOrderPage() {
                                         type="number"
                                         min="0"
                                         step="1"
+                                        max={availableStock ?? undefined}
                                         value={qty || ""}
                                         onChange={(event) => updateQty(item.item_code, event.target.value)}
                                       />
-                                      <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
+                                      <button
+                                        type="button"
+                                        disabled={availableStock != null && qty >= availableStock}
+                                        onClick={() => increaseQty(item.item_code)}
+                                      >
+                                        +
+                                      </button>
                                     </div>
+                                    {availableLabel ? <div className="moduleCode moduleStockAvailable">{availableLabel}</div> : null}
                                   </td>
                                   <td>{formatMoney(priced.lineValue)}</td>
                                   <td>

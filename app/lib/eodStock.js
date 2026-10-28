@@ -648,3 +648,147 @@ export function eodStockTemplateMatrix() {
     ["AB100", "A4 paper", "CTN", 30, 18, 9, 900, 540, 270, "2026-10-26"],
   ];
 }
+
+function emptyCityQtyMaps() {
+  return {
+    riyadh: {},
+    dammam: {},
+    jeddah: {},
+  };
+}
+
+/** Compact city→item→qty map for pricing cache / offline order caps. Negative stock becomes 0. */
+export function buildEodStockAvailability(dataset) {
+  const source = dataset && typeof dataset === "object" ? dataset : null;
+  const stockDate = String(source?.stockDate || "").trim();
+  if (!source || !/^\d{4}-\d{2}-\d{2}$/.test(stockDate) || !Array.isArray(source.rows) || source.rows.length === 0) {
+    return {
+      stockDate: "",
+      byCity: emptyCityQtyMaps(),
+      active: false,
+    };
+  }
+
+  const byCity = emptyCityQtyMaps();
+  source.rows.forEach((row) => {
+    const code = String(row?.itemCode || row?.item_code || "").trim().toUpperCase();
+    if (!code) return;
+    EOD_STOCK_CITIES.forEach((city) => {
+      const qty = Math.max(0, roundEodQty(row?.cities?.[city]?.qty || 0));
+      if (!qty) return;
+      byCity[city][code] = roundEodQty((byCity[city][code] || 0) + qty);
+    });
+  });
+
+  return {
+    stockDate,
+    byCity,
+    active: true,
+  };
+}
+
+export function normalizeEodStockAvailability(value) {
+  if (!value || typeof value !== "object") {
+    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+  }
+  if (value.active === false) {
+    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+  }
+  const stockDate = String(value.stockDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate)) {
+    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+  }
+  const byCity = emptyCityQtyMaps();
+  EOD_STOCK_CITIES.forEach((city) => {
+    const source = value.byCity?.[city] && typeof value.byCity[city] === "object" ? value.byCity[city] : {};
+    Object.entries(source).forEach(([rawCode, rawQty]) => {
+      const code = String(rawCode || "").trim().toUpperCase();
+      const qty = Math.max(0, roundEodQty(rawQty));
+      if (!code || !qty) return;
+      byCity[city][code] = qty;
+    });
+  });
+  return { stockDate, byCity, active: true };
+}
+
+/**
+ * Available order qty for an item in a pricing region.
+ * Returns null when no end-of-day stock snapshot is loaded (do not clamp).
+ * Returns 0 when stock is loaded but the item has no positive qty in that city.
+ */
+export function availableEodStockQty(availability, pricingRegion, itemCode) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return null;
+  const city = String(pricingRegion || "").trim().toLowerCase();
+  if (!EOD_STOCK_CITIES.includes(city)) return null;
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return 0;
+  return Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+}
+
+export function clampOrderQuantitiesToEodStock(orderQuantities = {}, availability, pricingRegion) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return orderQuantities || {};
+  const next = {};
+  Object.entries(orderQuantities || {}).forEach(([rawCode, rawQty]) => {
+    const code = String(rawCode || "").trim().toUpperCase();
+    let qty = Number(rawQty || 0);
+    if (!code || !Number.isFinite(qty) || qty <= 0) return;
+    const available = availableEodStockQty(stock, pricingRegion, code);
+    if (available == null) {
+      next[code] = qty;
+      return;
+    }
+    qty = Math.min(qty, available);
+    if (qty > 0) next[code] = qty;
+  });
+  return next;
+}
+
+export function formatEodStockAvailableLabel(available, language = "en") {
+  if (available == null) return "";
+  const qtyText = formatEodQty(available);
+  if (language === "ar") return `المتاح: ${qtyText}`;
+  return `Available: ${qtyText}`;
+}
+
+export function formatEodStockOverLimitMessage({ itemCode, quantity, available, language = "en" } = {}) {
+  const code = String(itemCode || "").trim().toUpperCase() || "item";
+  const wanted = formatEodQty(quantity);
+  const left = formatEodQty(available);
+  if (language === "ar") {
+    return `${code}: الكمية ${wanted} أكبر من المخزون المتاح ${left} حسب منطقة التسعير.`;
+  }
+  return `${code}: quantity ${wanted} exceeds available stock ${left} for the selected pricing region.`;
+}
+
+export function assertOrderLinesWithinEodStock({ lines = [], availability, pricingRegion, language = "en" } = {}) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return { ok: true, violations: [] };
+  const violations = [];
+  (lines || []).forEach((line) => {
+    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
+    const quantity = Number(line?.quantity ?? line?.order_quantity ?? 0);
+    if (!code || !Number.isFinite(quantity) || quantity <= 0) return;
+    const available = availableEodStockQty(stock, pricingRegion, code);
+    if (available == null) return;
+    if (quantity > available) {
+      violations.push({
+        itemCode: code,
+        quantity,
+        available,
+        message: formatEodStockOverLimitMessage({
+          itemCode: code,
+          quantity,
+          available,
+          language,
+        }),
+      });
+    }
+  });
+  return {
+    ok: violations.length === 0,
+    violations,
+    error: violations[0]?.message || "",
+  };
+}

@@ -121,7 +121,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 **Admin / imports / BI**
 
-- `/api/import-sales`, `/api/upload-files`, `/api/eod-stock`, `/api/pricing/cache`, `/api/admin/price-sync`
+- `/api/import-sales`, `/api/upload-files`, `/api/eod-stock`, `/api/pricing/cache` (also ships compact end-of-day stock by city for order qty caps), `/api/admin/price-sync`
 - `/api/business-dashboard`, `/api/business-dashboard/category-growth`, `/api/business-dashboard/items-sold-at-loss`
 - `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth); scope uses management roles company-wide or `resolveSalesScopeForUserId` for team heads
 - `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend

@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   applyEodStockUpload,
+  assertOrderLinesWithinEodStock,
+  availableEodStockQty,
+  buildEodStockAvailability,
   buildEodStockReportRows,
+  clampOrderQuantitiesToEodStock,
   eodQtyMovement,
   eodStockTemplateMatrix,
   formatEodDelta,
+  formatEodStockAvailableLabel,
   parseEodQtyCell,
   parseEodStockDate,
   parseEodStockSheets,
@@ -139,6 +144,60 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.deepEqual(dammam.citiesPresent, ["dammam"]);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003234").cities.dammam.qty, 140);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003283").cities.dammam.qty, 6);
+});
+
+test("order qty uses end-of-day stock for the pricing region", () => {
+  const availability = buildEodStockAvailability({
+    stockDate: "2026-10-27",
+    rows: [{
+      itemCode: "A004426",
+      itemName: "Lighter",
+      unit: "TRAY",
+      cities: {
+        riyadh: { qty: 30, value: 0 },
+        dammam: { qty: 6, value: 0 },
+        jeddah: { qty: 0, value: 0 },
+      },
+    }, {
+      itemCode: "NEG1",
+      itemName: "Negative",
+      cities: {
+        riyadh: { qty: -12, value: 0 },
+        dammam: { qty: 0, value: 0 },
+        jeddah: { qty: 0, value: 0 },
+      },
+    }],
+  });
+
+  assert.equal(availability.active, true);
+  assert.equal(availableEodStockQty(availability, "riyadh", "A004426"), 30);
+  assert.equal(availableEodStockQty(availability, "dammam", "A004426"), 6);
+  assert.equal(availableEodStockQty(availability, "jeddah", "A004426"), 0);
+  assert.equal(availableEodStockQty(availability, "riyadh", "MISSING"), 0);
+  assert.equal(availableEodStockQty(availability, "riyadh", "NEG1"), 0);
+  assert.equal(availableEodStockQty(null, "riyadh", "A004426"), null);
+  assert.equal(formatEodStockAvailableLabel(30, "en"), "Available: 30");
+  assert.equal(formatEodStockAvailableLabel(30, "ar"), "المتاح: 30");
+
+  assert.deepEqual(
+    clampOrderQuantitiesToEodStock({ A004426: 40, OTHER: 2 }, availability, "riyadh"),
+    { A004426: 30 },
+  );
+
+  const blocked = assertOrderLinesWithinEodStock({
+    lines: [{ item_code: "A004426", quantity: 31 }],
+    availability,
+    pricingRegion: "riyadh",
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /available stock 30/);
+
+  const allowed = assertOrderLinesWithinEodStock({
+    lines: [{ item_code: "A004426", quantity: 6 }],
+    availability,
+    pricingRegion: "dammam",
+  });
+  assert.equal(allowed.ok, true);
 });
 
 test("template, missing date, and snapshot comparison", () => {

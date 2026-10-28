@@ -18,6 +18,10 @@ import {
 } from "../lib/catalogueOffline";
 import { CATALOGUE_PHOTO_SYNC_EVENT, startCataloguePhotoSync } from "../lib/catalogueOfflineClient";
 import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
+import {
+  availableEodStockQty,
+  formatEodStockAvailableLabel,
+} from "../lib/eodStock.js";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
 
@@ -101,7 +105,7 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
 
 export default function ProductCatalogue({
   items, categories, search, onSearch, category, onCategory, quantities,
-  onQty, onIncrease, onDecrease, priceList, pricingRegion, language,
+  onQty, onIncrease, onDecrease, eodStock = null, priceList, pricingRegion, language,
   selectedCustomer, customerSearch, onCustomerSearch, customerSuggestions, onCustomer,
   orderTotal, selectedCount, orderLines,
   pricingType, onPricingType, allowedPricingRegions, onPricingRegion, retailAvailable,
@@ -735,6 +739,9 @@ export default function ProductCatalogue({
           });
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
+          const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language);
+          const atStockLimit = availableStock != null && qty >= availableStock;
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
               <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
@@ -771,10 +778,19 @@ export default function ProductCatalogue({
                 </button>
                 <div className={styles.qty}>
                   <button type="button" disabled={disabled || qty <= 0} aria-label={`${ar ? "تقليل" : "Decrease"} ${item.item_name}`} onClick={() => onDecrease(item.item_code)}>-</button>
-                  <input type="number" min="0" step="1" disabled={disabled} aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`} value={qty || ""}
-                    onChange={(event) => onQty(item.item_code, event.target.value)} />
-                  <button type="button" disabled={disabled} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => onIncrease(item.item_code)}>+</button>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    max={availableStock ?? undefined}
+                    disabled={disabled}
+                    aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`}
+                    value={qty || ""}
+                    onChange={(event) => onQty(item.item_code, event.target.value)}
+                  />
+                  <button type="button" disabled={disabled || atStockLimit} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => onIncrease(item.item_code)}>+</button>
                 </div>
+                {availableLabel ? <div className={styles.stockAvailable}>{availableLabel}</div> : null}
                 {canManagePhotos && (
                   <label className={styles.upload}>
                     {ar ? "رفع صورة" : "Upload photo"}

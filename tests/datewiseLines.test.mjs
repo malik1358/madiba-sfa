@@ -28,6 +28,16 @@ test("datewise lines stay one row per voucher on the same date", () => {
           status: "Open",
         },
       ],
+      credit_notes: [
+        {
+          voucher_number: "43",
+          amount_excl_vat: -200,
+          amount_incl_vat: -230,
+          remaining: 0,
+          status: "Reverses S0",
+          kind: "Credit Note",
+        },
+      ],
       purchases: [
         {
           vch_no: "P1",
@@ -50,13 +60,14 @@ test("datewise lines stay one row per voucher on the same date", () => {
   assert.deepEqual(lines.map((row) => `${row.kind} ${row.voucher}`), [
     "Invoice S1",
     "Invoice S2",
+    "Credit Note 43",
     "Purchase P1",
     "Receipt R1",
   ]);
-  assert.equal(lines.filter((row) => row.date === "2025-10-02").length, 4);
-  assert.equal(sumDatewise(lines, "sales_incl_vat"), 1575);
+  assert.equal(lines.filter((row) => row.date === "2025-10-02").length, 5);
+  assert.equal(sumDatewise(lines, "sales_incl_vat"), 1345);
   assert.equal(sumDatewise(lines, "collected_amount"), 400);
   assert.equal(sumDatewise(lines, "open_amount"), 1175);
-  assert.equal(lines[2].detail.includes("Invoice S1"), true);
+  assert.equal(lines[3].detail.includes("Invoice S1"), true);
   assert.equal(lines.some((row) => row.kind === "Date"), false);
 });

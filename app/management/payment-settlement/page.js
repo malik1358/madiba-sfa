@@ -1591,7 +1591,7 @@ export default function PaymentSettlementPage() {
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
-                  Each invoice, receipt, payment, and purchase is its own row. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
+                  Each invoice, credit note, receipt, payment, and purchase is its own row — including invoices reversed the same day. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

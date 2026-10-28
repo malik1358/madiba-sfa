@@ -70,8 +70,8 @@ test("export rows use the Tally voucher columns", () => {
   assert.deepEqual(Object.keys(rows[0]), TALLY_EXPORT_COLUMNS);
   assert.equal(rows[0]["Voucher Type Name"], "DAMMAM W/S CREDIT");
   assert.equal(rows[0].PriceListName, "DAMMAM W/S");
-  assert.equal(rows[0]["Voucher.Class"], "e.Invoice.Integration Phase");
   assert.equal(rows[0]["Voucher Number"], "");
+  assert.equal(Object.prototype.hasOwnProperty.call(rows[0], "Voucher.Class"), false);
   assert.equal(rows[0]["Ref.No"], "SO-1");
   assert.equal(rows[0]["order no"], "SO-1");
   assert.equal(rows[0]["CUSTOMER NAME"], "TEST CUST");

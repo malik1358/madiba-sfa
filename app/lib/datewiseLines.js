@@ -96,7 +96,11 @@ export function flattenDatewiseLines(days) {
         voucher: receipt.vch_no || "—",
         sales_excl_vat: null,
         sales_incl_vat: null,
-        collected_amount: Number(isPayment ? receipt.ar_amount : receipt.amount) || 0,
+        // Prefer nullish coalescing so a negative Payment Collected (e.g. -3340.75)
+        // is never coerced to 0 by `||`.
+        collected_amount: Number(
+          isPayment ? (receipt.ar_amount ?? 0) : (receipt.amount ?? 0),
+        ),
         open_amount: null,
         detail: receiptDetail(receipt),
         unmatched_collection: applications.some((application) => application?.unmatched_collection),

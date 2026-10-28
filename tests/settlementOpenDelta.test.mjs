@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   formatSettlementOpenDelta,
   isSettlementOpenDeltaDust,
+  settlementSalesBillDelta,
   settlementTransactionDelta,
 } from "../app/lib/settlementOpenDelta.js";
 
@@ -66,4 +67,25 @@ test("Open Δ is Machine Open minus Tally Open", () => {
     remaining: 563.05,
   }), -0.7);
   assert.equal(settlementTransactionDelta({ amount_incl_vat: 100, remaining: 100 }), null);
+});
+
+test("paid bill with matching Tally face amount keeps the full open gap on Compare", () => {
+  assert.equal(settlementSalesBillDelta({
+    amount_incl_vat: 20024.32,
+    outstanding_pending: 20024.33,
+    remaining: 0,
+  }), -20024.33);
+  assert.equal(settlementSalesBillDelta({
+    amount_incl_vat: 4600,
+    outstanding_pending: 4600,
+    remaining: 0,
+  }), -4600);
+});
+
+test("still-open bill keeps the one-fil sales-versus-Tally gap", () => {
+  assert.equal(settlementSalesBillDelta({
+    amount_incl_vat: 20024.32,
+    outstanding_pending: 20024.33,
+    remaining: 20024.33,
+  }), -0.01);
 });

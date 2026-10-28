@@ -30,22 +30,22 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 const TEXT = {
   title: { en: "Tally vs Computed Outstanding", ar: "المستحقات: تالي مقابل المحسوب" },
   subtitle: {
-    en: "Compare each Tally bill with the SFA sales amount for the same voucher. A difference is a bill that does not match.",
-    ar: "قارن كل فاتورة تالي مع مبلغ المبيعات في SFA لنفس القسيمة. الفرق يعني أن الفاتورة غير متطابقة.",
+    en: "Compare Machine Open with each Tally bill. A difference is an open-balance gap; invoice gaps that net to zero are a branch issue.",
+    ar: "قارن الرصيد المفتوح المحسوب مع كل فاتورة تالي. الفرق فجوة في الرصيد المفتوح؛ فروقات الفواتير التي تتعادل تُعد مشكلة تخصيص.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   settlement: { en: "Full Payment Settlement", ar: "تسوية المدفوعات كاملة" },
   search: { en: "Search customer, code, or salesman", ar: "بحث بالعميل أو الكود أو المندوب" },
   loading: { en: "Loading comparison...", ar: "جاري تحميل المقارنة..." },
   selectCustomer: {
-    en: "Select a customer to compare each Tally bill with the SFA sales amount.",
-    ar: "اختر عميلاً لمقارنة كل فاتورة تالي مع مبلغ المبيعات في SFA.",
+    en: "Select a customer to compare each Tally bill with Machine Open.",
+    ar: "اختر عميلاً لمقارنة كل فاتورة تالي مع الرصيد المفتوح المحسوب.",
   },
   code: { en: "Code", ar: "الكود" },
   customer: { en: "Customer", ar: "العميل" },
   salesman: { en: "Salesman", ar: "المندوب" },
   totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
-  computedOutstanding: { en: "SFA sales", ar: "مبيعات SFA" },
+  computedOutstanding: { en: "SFA open", ar: "مفتوح SFA" },
   difference: { en: "Difference", ar: "الفرق" },
   branchIssue: { en: "Branch issue", ar: "مشكلة تخصيص الفاتورة" },
   branchIssueTitle: {
@@ -999,7 +999,7 @@ export default function OutstandingComparePage() {
                     <strong>{formatMoney(compareTotals.tally_open || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>SFA sales</span>
+                    <span>SFA open</span>
                     <strong>{formatMoney(compareTotals.sales_compared ?? compareTotals.computed_open ?? 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
@@ -1007,7 +1007,7 @@ export default function OutstandingComparePage() {
                     <strong className={deltaClass(compareTotals.open_delta || 0)}>
                       {formatDelta(compareTotals.open_delta || 0)}
                     </strong>
-                    <em className="auditSummaryCardMeta">SFA sales − Tally bill</em>
+                    <em className="auditSummaryCardMeta">Machine Open − Tally Open</em>
                   </div>
                 </div>
               </section>
@@ -1022,7 +1022,8 @@ export default function OutstandingComparePage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Open Δ is the SFA sales amount minus the Tally bill. A voucher Tally does not list contributes nothing.
+                  Open Δ is Machine Open minus Tally Open — the same figure as Invoices &amp; Settlement.
+                  A paid voucher that Tally still lists keeps the full Tally balance in the gap.
                 </p>
                 <ExportableTable filename="outstanding-compare" sheetName="OutstandingCompare" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

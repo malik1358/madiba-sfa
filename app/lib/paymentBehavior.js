@@ -1886,8 +1886,11 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       : Math.max(0, toNumber(row.fifo_remaining));
     const tallyKnown = hasOutstandingRows && row.outstanding_pending != null;
     const tallyOpen = tallyKnown ? toNumber(row.outstanding_pending) : computedOpen;
+    // "Sales vs bill" wording only when the open balance still tracks that bill.
+    // A paid invoice with a matching Tally face amount is an open-balance gap.
     const hasTallyBill = tallyKnown && Math.abs(tallyOpen) > OUTSTANDING_RECONCILE_TOLERANCE
-      && Math.abs(salesIncl - tallyOpen) <= 1;
+      && Math.abs(salesIncl - tallyOpen) <= 1
+      && Math.abs(computedOpen - tallyOpen) <= 1;
     const openDelta = settlementSalesBillDelta({
       outstanding_pending: tallyKnown ? tallyOpen : null,
       gross_amount_incl_vat: salesIncl,

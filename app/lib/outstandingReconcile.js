@@ -110,7 +110,7 @@ export function classifyOutstandingBillMismatch({
 /**
  * Customer-level Tally vs SFA row for the precomputed difference report.
  * Tally = customer total on the outstanding upload.
- * SFA = sales amount of those bills when sales_compared is present.
+ * SFA = sales_compared (Machine Open side of each bill) when present, else computed_open.
  */
 export function buildOutstandingReconcileRow({
   customer = {},

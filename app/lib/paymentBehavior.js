@@ -2232,17 +2232,24 @@ export function buildPaymentSettlementLedger({
   });
 
   const salesByDateMap = new Map();
-  invoiceRows.forEach((row) => {
-    if (!row.invoice_date) return;
-    const current = salesByDateMap.get(row.invoice_date) || {
-      date: row.invoice_date,
+  const ensureSalesDay = (date) => {
+    const current = salesByDateMap.get(date) || {
+      date,
       invoice_count: 0,
       sales_excl_vat: 0,
       sales_incl_vat: 0,
       paid_amount: 0,
       open_amount: 0,
       invoices: [],
+      credit_notes: [],
     };
+    if (!Array.isArray(current.credit_notes)) current.credit_notes = [];
+    salesByDateMap.set(date, current);
+    return current;
+  };
+  invoiceRows.forEach((row) => {
+    if (!row.invoice_date) return;
+    const current = ensureSalesDay(row.invoice_date);
     current.invoice_count += 1;
     current.sales_excl_vat += row.amount_excl_vat;
     current.sales_incl_vat += roundMoney(row.amount_incl_vat);
@@ -2256,7 +2263,41 @@ export function buildPaymentSettlementLedger({
       remaining: row.remaining,
       status: row.status,
     });
-    salesByDateMap.set(row.invoice_date, current);
+  });
+  // Immediate reversals leave invoiceRows, so without this a voided day (e.g. 1198
+  // on 2025-11-13: 1730 / 43 / 44) would disappear from Datewise entirely.
+  (Array.isArray(reversedInvoices) ? reversedInvoices : []).forEach((row) => {
+    if (!row.invoice_date) return;
+    const current = ensureSalesDay(row.invoice_date);
+    current.invoice_count += 1;
+    current.sales_excl_vat += toNumber(row.amount_excl_vat);
+    current.sales_incl_vat += roundMoney(row.amount_incl_vat);
+    current.paid_amount += toNumber(row.amount_incl_vat);
+    current.invoices.push({
+      voucher_number: row.voucher_number,
+      amount_excl_vat: toNumber(row.amount_excl_vat),
+      amount_incl_vat: toNumber(row.amount_incl_vat),
+      paid_amount: toNumber(row.amount_incl_vat),
+      remaining: 0,
+      status: "Reversed",
+    });
+  });
+  buildCreditNotes(transactions).forEach((note) => {
+    if (!note.credit_date) return;
+    const current = ensureSalesDay(note.credit_date);
+    const excl = toNumber(note.amount_excl_vat);
+    const incl = toNumber(note.amount);
+    current.sales_excl_vat -= excl;
+    current.sales_incl_vat = roundMoney(current.sales_incl_vat - incl);
+    current.credit_notes.push({
+      voucher_number: note.voucher_number,
+      reference: note.reference || "",
+      amount_excl_vat: -excl,
+      amount_incl_vat: -incl,
+      remaining: 0,
+      status: note.reference ? ("Reverses " + note.reference) : (note.kind || "Credit Note"),
+      kind: note.kind || "Credit Note",
+    });
   });
 
   const applicationsByReceipt = new Map();
@@ -2374,6 +2415,7 @@ export function buildPaymentSettlementLedger({
       paid_amount: 0,
       open_amount: 0,
       invoices: [],
+      credit_notes: [],
     };
     const collections = collectionsByDateMap.get(date) || {
       date,
@@ -2399,6 +2441,7 @@ export function buildPaymentSettlementLedger({
       paid_against_sales: sales.paid_amount,
       open_sales_amount: sales.open_amount,
       invoices: sales.invoices || [],
+      credit_notes: sales.credit_notes || [],
       receipts: collections.receipts || [],
       purchases: dayPurchases.purchases || [],
     };

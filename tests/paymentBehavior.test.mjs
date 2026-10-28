@@ -1869,6 +1869,16 @@ test("referenced CNs claim their voucher before same-amount twins steal them (11
   // Leftover same-day mirror (046 refs 1820, already voided by 44) clears the twin 1818.
   assert.equal(byInvoice["1818"], "046");
   assert.equal(ledger.invoices.length, 0);
+  const nov13 = ledger.datewise.find((row) => row.date === "2025-11-13");
+  assert.ok(nov13, "voided day still appears in datewise");
+  assert.deepEqual(
+    (nov13.invoices || []).map((row) => row.voucher_number),
+    ["1730"],
+  );
+  assert.deepEqual(
+    (nov13.credit_notes || []).map((row) => row.voucher_number).sort(),
+    ["43", "44"],
+  );
 });
 
 test("blank early CN still must not reverse a next-day reissue", () => {

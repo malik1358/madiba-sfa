@@ -50,6 +50,19 @@ export function flattenDatewiseLines(days) {
         detail: invoice.status || "",
       });
     });
+    (Array.isArray(day?.credit_notes) ? day.credit_notes : []).forEach((note, index) => {
+      lines.push({
+        id: `${date}|credit-note|${note.voucher_number || "—"}|${index}`,
+        date,
+        kind: note.kind || "Credit Note",
+        voucher: note.voucher_number || "—",
+        sales_excl_vat: Number(note.amount_excl_vat || 0),
+        sales_incl_vat: Number(note.amount_incl_vat || 0),
+        collected_amount: null,
+        open_amount: Number(note.remaining || 0),
+        detail: note.status || note.reference || "",
+      });
+    });
     (Array.isArray(day?.purchases) ? day.purchases : []).forEach((purchase, index) => {
       lines.push({
         id: `${date}|purchase|${purchase.vch_no || "—"}|${index}`,

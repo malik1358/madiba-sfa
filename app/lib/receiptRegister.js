@@ -49,6 +49,8 @@ const HEADER_ALIASES = {
     "voucher no",
     "ref no",
     "receipt no",
+    // Tally Payment Register sometimes exports the bare header VOUCHER.
+    "voucher",
   ],
   debit: ["debit", "dr"],
   credit: ["credit", "cr", "amount", "receipt amount", "received"],
@@ -73,13 +75,25 @@ function compactHeader(value) {
 function findColumnIndex(headerRow, aliases) {
   const normalized = (headerRow || []).map(normalizeHeader);
   const compacted = normalized.map((cell) => cell.replace(/[^a-z0-9]+/g, ""));
-  for (const alias of aliases) {
+  const list = Array.isArray(aliases) ? aliases : [];
+  // Exact matches first so a bare VOUCHER column does not steal VOUCHERTYPENAME
+  // when the alias list later includes the short token "voucher".
+  for (const alias of list) {
     const aliasNorm = normalizeHeader(alias);
     const aliasCompact = compactHeader(alias);
     const index = normalized.findIndex((cell, cellIndex) => (
-      cell === aliasNorm
-      || cell.includes(aliasNorm)
-      || compacted[cellIndex] === aliasCompact
+      cell === aliasNorm || compacted[cellIndex] === aliasCompact
+    ));
+    if (index >= 0) return index;
+  }
+  const byLength = [...list].sort((left, right) => (
+    compactHeader(right).length - compactHeader(left).length
+  ));
+  for (const alias of byLength) {
+    const aliasNorm = normalizeHeader(alias);
+    const aliasCompact = compactHeader(alias);
+    const index = normalized.findIndex((cell, cellIndex) => (
+      (aliasNorm.length >= 3 && cell.includes(aliasNorm))
       || (aliasCompact.length >= 3 && compacted[cellIndex].includes(aliasCompact))
     ));
     if (index >= 0) return index;

@@ -5,6 +5,10 @@ import { getPrice, normalizeCode } from "../lib/helpers";
 import { buildOrderCatalog } from "../lib/orderHelpers";
 import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from "../../../lib/regionalPricing";
+import {
+  availableEodStockQty,
+  formatEodStockAvailableLabel,
+} from "../../../lib/eodStock.js";
 import ExportableTable from "../../../components/ExportableTable";
 
 function normalizedText(value) {
@@ -23,7 +27,22 @@ function normalizeCategoryLabel(value) {
     .join(" ");
 }
 
-export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = "credit", schemeApplications = {} }) {
+export default function FullItemList({
+  itemCatalog,
+  priceSheetItems,
+  orderQuantities,
+  decreaseOrderQty,
+  increaseOrderQty,
+  changeOrderQty,
+  priceList,
+  cashDiscountMap = {},
+  valueDiscountMap = {},
+  paymentType = "credit",
+  schemeApplications = {},
+  eodStock = null,
+  pricingRegion = "riyadh",
+  language = "en",
+}) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [expandedCategories, setExpandedCategories] = useState({});
@@ -117,11 +136,20 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                       excludeCashDiscount: scheme.excludeCashDiscount === true,
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
+                    const availableStock = availableEodStockQty(eodStock, pricingRegion, code);
+                    const availableLabel = formatEodStockAvailableLabel(availableStock, language);
                     return (
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>
                         <td><strong>{nameIsCode ? code : item.item_name}</strong>{!nameIsCode && <div className="moduleCode">{code}</div>}</td>
-                        <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
+                        <td>
+                          <div className="moduleQtyControl">
+                            <button type="button" onClick={() => decreaseOrderQty(code)}>−</button>
+                            <input type="number" min="0" step="1" max={availableStock ?? undefined} inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
+                            <button type="button" disabled={availableStock != null && orderQty >= availableStock} onClick={() => increaseOrderQty(code)}>+</button>
+                          </div>
+                          {availableLabel ? <div className="moduleCode moduleStockAvailable">{availableLabel}</div> : null}
+                        </td>
                         <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                         <td>
                           {wholesale ? Number(wholesale).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "NOT FOUND"}

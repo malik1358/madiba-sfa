@@ -5,6 +5,11 @@ import {
   ORDER_QUANTITY_CONTROLS_CACHE_KEY,
   resolveStoredOrderQuantityControls,
 } from "../../../lib/orderQuantityControls.js";
+import {
+  EOD_STOCK_DATASET_KEY,
+  buildEodStockAvailability,
+  readEodStockDataset,
+} from "../../../lib/eodStock.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { overlayGoogleSheetItemNames } from "../../../lib/pricePayload.js";
 import { loadRetailPriceMaps } from "../../../lib/retailPricingServer.js";
@@ -84,7 +89,7 @@ export async function GET() {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const [{ data, error }, { data: rulesRow }, { data: schemesRow }, { data: quantityControlsRow }] = await Promise.all([
+    const [{ data, error }, { data: rulesRow }, { data: schemesRow }, { data: quantityControlsRow }, { data: eodStockRow }] = await Promise.all([
       admin
         .from("price_catalog_cache")
         .select("cache_key,price_map,sheet_items,source_synced_at,updated_at")
@@ -104,6 +109,11 @@ export async function GET() {
         .from("price_catalog_cache")
         .select("price_map")
         .eq("cache_key", ORDER_QUANTITY_CONTROLS_CACHE_KEY)
+        .maybeSingle(),
+      admin
+        .from("system_settings")
+        .select("setting_value")
+        .eq("setting_key", EOD_STOCK_DATASET_KEY)
         .maybeSingle(),
     ]);
 
@@ -135,6 +145,13 @@ export async function GET() {
       ? overlayGoogleSheetItemNames(cachedSheetItems, googleSheetItems)
       : cachedSheetItems;
 
+    let eodStock = buildEodStockAvailability(null);
+    try {
+      eodStock = buildEodStockAvailability(readEodStockDataset(eodStockRow?.setting_value));
+    } catch {
+      eodStock = buildEodStockAvailability(null);
+    }
+
     return NextResponse.json({
       success: true,
       source: "database-cache",
@@ -148,6 +165,7 @@ export async function GET() {
       valueDiscountMap: rules.valueDiscountMap || {},
       schemes: resolveStoredOrderSchemes(schemesRow?.price_map),
       quantityControls: resolveStoredOrderQuantityControls(quantityControlsRow?.price_map),
+      eodStock,
       sheetItems,
     });
   } catch (error) {

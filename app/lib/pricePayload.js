@@ -1,5 +1,6 @@
 import { applyPriceCodeAliases } from "./itemCodeAliases.js";
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
+import { normalizeEodStockAvailability } from "./eodStock.js";
 import { resolveStoredOrderSchemes } from "./orderSchemes.js";
 import {
   ORDER_QUANTITY_CONTROLS_LOCAL_KEY,
@@ -312,6 +313,7 @@ function normalizeCatalogResult(
   schemes,
   retailRegionPriceMaps,
   quantityControls,
+  eodStock,
 ) {
   const aliasedRegions = {};
   PRICING_REGIONS.forEach((region) => {
@@ -364,6 +366,7 @@ function normalizeCatalogResult(
     sheetItems: keptSheetItems,
     schemes: resolveStoredOrderSchemes({ schemes }),
     quantityControls: resolvedQuantityControls,
+    eodStock: normalizeEodStockAvailability(eodStock),
   };
 }
 
@@ -760,6 +763,7 @@ export function parsePricePayload(payload) {
       undefined,
       retailRegionPriceMaps,
       undefined,
+      undefined,
     );
   }
 
@@ -781,6 +785,7 @@ export function parsePricePayload(payload) {
       payload.schemes,
       retailRegionPriceMaps,
       payload.quantityControls,
+      payload.eodStock,
     );
   }
 
@@ -792,6 +797,7 @@ export function parsePricePayload(payload) {
     sheetItems,
     undefined,
     retailRegionPriceMaps,
+    undefined,
     undefined,
   );
 }
@@ -813,6 +819,7 @@ function readCached(cacheKey) {
       parsed.schemes,
       parsed.retailRegionPriceMaps,
       parsed.quantityControls,
+      parsed.eodStock,
     );
   } catch {
     return null;
@@ -868,6 +875,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
             data.schemes,
             data.retailRegionPriceMaps,
             data.quantityControls,
+            data.eodStock,
           )
         : parsePricePayload(data || {});
 

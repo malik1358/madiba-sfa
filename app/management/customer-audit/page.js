@@ -98,6 +98,7 @@ function CustomerAuditPageContent() {
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
   const [quantityControls, setQuantityControls] = useState([]);
+  const [eodStock, setEodStock] = useState(null);
   const [paymentType, setPaymentType] = useState("credit");
   const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [priceSheetItems, setPriceSheetItems] = useState([]);
@@ -238,6 +239,7 @@ function CustomerAuditPageContent() {
     valueDiscountMap,
     schemes,
     quantityControls,
+    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -432,6 +434,7 @@ function CustomerAuditPageContent() {
         setValueDiscountMap(parsed.valueDiscountMap || {});
         setSchemes(parsed.schemes || []);
         setQuantityControls(parsed.quantityControls || []);
+        setEodStock(parsed.eodStock || null);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.
@@ -859,6 +862,9 @@ function CustomerAuditPageContent() {
               valueDiscountMap={valueDiscountMap}
               paymentType={paymentType}
               schemeApplications={schemeApplications}
+              eodStock={eodStock}
+              pricingRegion={pricingRegion}
+              language={language}
             />
 
             <FullItemList
@@ -873,6 +879,9 @@ function CustomerAuditPageContent() {
               valueDiscountMap={valueDiscountMap}
               paymentType={paymentType}
               schemeApplications={schemeApplications}
+              eodStock={eodStock}
+              pricingRegion={pricingRegion}
+              language={language}
             />
 
             <OrderBar

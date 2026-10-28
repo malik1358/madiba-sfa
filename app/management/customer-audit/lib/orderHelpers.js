@@ -125,12 +125,17 @@ export function calculateGrandTotal(orderItems, priceList) {
   return orderItems.reduce((sum, item) => sum + getOrderLineValue(priceList, item.item_code, item.order_quantity), 0);
 }
 
-export function changeOrderQty(orderQuantities, itemCode, value) {
+export function changeOrderQty(orderQuantities, itemCode, value, options = {}) {
   if (!itemCode) return orderQuantities;
 
   let newValue = Number(value || 0);
   if (!Number.isFinite(newValue)) newValue = 0;
   if (newValue < 0) newValue = 0;
+
+  const maxAvailable = options.maxAvailable;
+  if (maxAvailable != null && Number.isFinite(Number(maxAvailable))) {
+    newValue = Math.min(newValue, Math.max(0, Number(maxAvailable)));
+  }
 
   const next = { ...orderQuantities };
   if (newValue <= 0) {
@@ -142,12 +147,12 @@ export function changeOrderQty(orderQuantities, itemCode, value) {
   return next;
 }
 
-export function increaseOrderQty(orderQuantities, itemCode) {
+export function increaseOrderQty(orderQuantities, itemCode, options = {}) {
   const current = Number(orderQuantities[itemCode] || 0);
-  return changeOrderQty(orderQuantities, itemCode, current + 1);
+  return changeOrderQty(orderQuantities, itemCode, current + 1, options);
 }
 
-export function decreaseOrderQty(orderQuantities, itemCode) {
+export function decreaseOrderQty(orderQuantities, itemCode, options = {}) {
   const current = Number(orderQuantities[itemCode] || 0);
-  return changeOrderQty(orderQuantities, itemCode, Math.max(current - 1, 0));
+  return changeOrderQty(orderQuantities, itemCode, Math.max(current - 1, 0), options);
 }

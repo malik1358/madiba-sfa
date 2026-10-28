@@ -286,6 +286,36 @@ test("1035C uses the bill refs stored under 1035, not the open balance", () => {
     outstandingInvoices: bills,
     todayIso: "2026-10-23",
   });
-  assert.equal(Number(ledger.outstandingCompareTotals.sales_compared.toFixed(2)), 89599.32);
-  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), -0.01);
+  // SFA open is FIFO residual; paid Tally bills still count as open gaps.
+  assert.equal(Number(ledger.outstandingCompareTotals.sales_compared.toFixed(2)), 20599.32);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 20599.32);
+  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), -69000.01);
+});
+
+test("paid Tally bills offset by untallied SFA opens do not invent a money gap", () => {
+  // Same pattern as 1035C: Tally still lists a paid bill; SFA open sits on another
+  // voucher Tally does not list. Invoice Open Δ nets to 0 — Compare must too.
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "PAID-TALLY", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-02-01", voucher_number: "OPEN-SFA", sales_amount: 1000, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-01-15", amount: 1150, vch_no: "R1" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "PAID-TALLY", pending_amount: 1150 },
+    ],
+    todayIso: "2026-03-01",
+  });
+
+  const paid = ledger.invoices.find((row) => row.voucher_number === "PAID-TALLY");
+  const open = ledger.invoices.find((row) => row.voucher_number === "OPEN-SFA");
+  assert.equal(Number(paid.remaining.toFixed(2)), 0);
+  assert.equal(Number(paid.outstanding_pending.toFixed(2)), 1150);
+  assert.equal(Number(open.remaining.toFixed(2)), 1150);
+  assert.equal(Number(open.outstanding_pending.toFixed(2)), 0);
+
+  const invoiceOpenDelta = Number((paid.remaining - paid.outstanding_pending + open.remaining - open.outstanding_pending).toFixed(2));
+  assert.equal(invoiceOpenDelta, 0);
+  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), 0);
+  assert.ok(ledger.outstandingCompareTotals.discrepancy_count >= 2);
 });

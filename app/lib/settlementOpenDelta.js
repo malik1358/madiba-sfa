@@ -34,8 +34,11 @@ export function settlementTransactionDelta(invoice) {
 }
 
 /**
- * Outstanding Compare keeps the sales-versus-bill gap. A one-fil difference
- * still counts as that bill. A larger gap is Machine Open minus Tally Open.
+ * Outstanding Compare: one-fil sales-versus-bill only when Machine Open still
+ * tracks that bill. A paid invoice whose Tally bill matches the sales amount
+ * must still show Machine Open − Tally Open (1035C NFD/1030: −20,024.33), not
+ * −0.01 — otherwise paid Tally bills drop out of the customer total while
+ * untallied SFA opens remain, inventing a false +24,624.32 gap.
  */
 const BILL_AMOUNT_SPAN = 0.01;
 
@@ -45,8 +48,14 @@ export function settlementSalesBillDelta(invoice) {
   if (!Number.isFinite(tally)) return null;
   const sales = Number(invoice.gross_amount_incl_vat ?? invoice.amount_incl_vat ?? 0);
   const machine = Number(invoice.remaining || 0);
-  if (Math.abs(tally) > SETTLEMENT_OPEN_DELTA_DUST && Math.abs(roundMoney(sales - tally)) <= BILL_AMOUNT_SPAN) {
-    return roundMoney(sales - tally);
+  const openGap = roundMoney(machine - tally);
+  const salesGap = roundMoney(sales - tally);
+  if (
+    Math.abs(tally) > SETTLEMENT_OPEN_DELTA_DUST
+    && Math.abs(salesGap) <= BILL_AMOUNT_SPAN
+    && Math.abs(openGap) <= BILL_AMOUNT_SPAN
+  ) {
+    return salesGap;
   }
-  return roundMoney(machine - tally);
+  return openGap;
 }

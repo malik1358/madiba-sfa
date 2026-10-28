@@ -1241,12 +1241,12 @@ export default function PaymentSettlementPage() {
                   <h2>Tally vs Computed Outstanding</h2>
                   <span>
                     {formatCount(ledger.outstandingCompareTotals?.discrepancy_count || 0)} gaps ·{" "}
-                    SFA sales {formatMoney(ledger.outstandingCompareTotals?.sales_compared || 0)} ·{" "}
+                    SFA open {formatMoney(ledger.outstandingCompareTotals?.sales_compared || 0)} ·{" "}
                     Tally {formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}
                   </span>
                 </div>
                 <p className="moduleHint">
-                  The gap is the SFA sales amount minus the Tally bill on the same voucher.
+                  The gap is Machine Open minus Tally Open on the same voucher — the same rule as Invoices &amp; Settlement above.
                   Computed open underneath is still sales minus cash and credit notes.
                 </p>
                 <div className="auditSummaryGrid" style={{ marginBottom: 12 }}>
@@ -1255,7 +1255,7 @@ export default function PaymentSettlementPage() {
                     <strong>{formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>SFA sales</span>
+                    <span>SFA open</span>
                     <strong>{formatMoney(ledger.outstandingCompareTotals?.sales_compared || 0)}</strong>
                   </div>
                   <div className="auditSummaryCard">
@@ -1263,7 +1263,7 @@ export default function PaymentSettlementPage() {
                     <strong className={deltaClass(ledger.outstandingCompareTotals?.open_delta || 0)}>
                       {formatDelta(ledger.outstandingCompareTotals?.open_delta || 0)}
                     </strong>
-                    <em className="auditSummaryCardMeta">SFA sales − Tally bill</em>
+                    <em className="auditSummaryCardMeta">Machine Open − Tally Open</em>
                     <em className="auditSummaryCardMeta">
                       Higher {formatMoney(ledger.outstandingCompareTotals?.computed_higher || 0)}
                       {" · Lower "}

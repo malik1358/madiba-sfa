@@ -34,7 +34,9 @@ import {
 import { isMissingRpcError } from "./salesmanIdentityMatch.js";
 
 const SALES_PAGE_SIZE = 1000;
-const SALES_SELECT = "id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_name,category,item_code,item_name,quantity,sales_amount";
+// import_batch_id is required so mergeSalesSnapshots can keep same-signature lines
+// that share one active batch (customer-history already selects it).
+const SALES_SELECT = "id,import_batch_id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_name,category,item_code,item_name,quantity,sales_amount";
 
 function parseJson(value) {
   try {

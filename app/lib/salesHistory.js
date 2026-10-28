@@ -25,8 +25,12 @@ export function mergeSalesSnapshots(rows) {
 
   (rows || []).forEach((row) => {
     const signature = transactionSignature(row);
+    // Missing import_batch_id must share one LEGACY bucket. Per-id LEGACY keys
+    // (LEGACY:<id>) dropped true duplicate lines inside active_sales — e.g. 1171C
+    // NFD/57 Binding 1,959.63 and 2255 Sanding 160 — and Outstanding Compare
+    // then understated SFA open by their VAT-incl total (2,437.58).
     const batchKey = row?.import_batch_id == null
-      ? `LEGACY:${row?.id || signature}`
+      ? "LEGACY"
       : String(row.import_batch_id);
     const byBatch = snapshotsByTransaction.get(signature) || new Map();
     const batchRows = byBatch.get(batchKey) || [];

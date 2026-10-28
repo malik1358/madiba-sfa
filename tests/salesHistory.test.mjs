@@ -37,6 +37,17 @@ test("mergeSalesSnapshots preserves legitimate repeated lines within one export"
   assert.deepEqual(merged.map((row) => row.import_batch_id), [10, 10]);
 });
 
+test("mergeSalesSnapshots keeps same-signature lines when import_batch_id is missing", () => {
+  // Outstanding Compare streams without batch id must not drop duplicate active_sales lines.
+  const merged = mergeSalesSnapshots([
+    sale(1, null),
+    sale(2, null),
+  ]);
+
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged.map((row) => row.id).sort((a, b) => a - b), [1, 2]);
+});
+
 test("mergeSalesSnapshots keeps distinct transactions across historical exports", () => {
   const merged = mergeSalesSnapshots([
     sale(1, 10),

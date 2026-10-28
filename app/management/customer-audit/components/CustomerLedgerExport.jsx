@@ -1,8 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
-import ExportableTable from "../../../components/ExportableTable";
-import ExportExcelButton from "../../../components/ExportExcelButton";
+import { useMemo, useState } from "react";
 import BiExcelHead, { useBiExcelFilters } from "../../business-dashboard/BiExcelHead";
 import {
   datewiseFilterValue,
@@ -11,7 +9,12 @@ import {
   openSettlementInvoices,
   sumDatewise,
 } from "../../../lib/datewiseLines.js";
+import {
+  buildCustomerLedgerPdfModel,
+  downloadCustomerLedgerPdf,
+} from "../../../lib/customerLedgerPdf.js";
 import { formatSettlementOpenDelta, isSettlementOpenDeltaDust, settlementTransactionDelta } from "../../../lib/settlementOpenDelta.js";
+import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 const LEDGER_FILTER_KEYS = ["date", "kind", "voucher", "excl", "incl", "collected", "open", "detail"];
 const OPEN_FILTER_KEYS = ["date", "voucher", "excl", "incl", "paid", "machine", "tally", "delta", "status", "days"];
@@ -88,72 +91,12 @@ function reversedFilterValue(row, key) {
   return "Reversed";
 }
 
-function buildLedgerExportSheets({
-  customer,
-  ledgerLines,
-  openInvoices,
-  reversedInvoices,
-}) {
-  const code = String(customer?.customer_code || "customer").trim() || "customer";
-  const name = String(customer?.customer_name || "").trim();
-  const title = name ? `${code} ${name}` : code;
-
-  const ledgerRows = ledgerLines.map((row) => ({
-    Customer: title,
-    Date: row.date || "",
-    Type: row.kind || "",
-    Voucher: row.voucher || "",
-    "Sales excl VAT": row.sales_excl_vat == null ? "" : Number(row.sales_excl_vat),
-    "Sales incl VAT": row.sales_incl_vat == null ? "" : Number(row.sales_incl_vat),
-    Collected: row.collected_amount == null ? "" : Number(row.collected_amount),
-    Open: row.open_amount == null ? "" : Number(row.open_amount),
-    Detail: row.detail || "",
-  }));
-
-  const openRows = openInvoices.map((row) => {
-    const delta = settlementTransactionDelta(row);
-    return {
-      Customer: title,
-      Date: row.invoice_date || "",
-      Voucher: row.voucher_number || "",
-      "Sales excl VAT": Number(row.amount_excl_vat || 0),
-      "Sales incl VAT": Number(row.amount_incl_vat || 0),
-      Paid: Number(row.paid_amount || 0),
-      "Machine Open": Number(row.remaining || 0),
-      "Tally Open": row.outstanding_pending == null ? "" : Number(row.outstanding_pending || 0),
-      "Open Δ": delta == null ? "" : Number(delta),
-      Status: row.status || "",
-      Days: row.payment_days != null
-        ? row.payment_days
-        : (row.open_days > 0 ? `Open ${row.open_days}d` : ""),
-    };
-  });
-
-  const reversedRows = reversedInvoices.map((row) => ({
-    Customer: title,
-    "Sales Date": row.invoice_date || "",
-    "Invoice Voucher": row.voucher_number || "",
-    "Sales excl VAT": Number(row.amount_excl_vat || 0),
-    "Sales incl VAT": Number(row.amount_incl_vat || 0),
-    "Credit Note Date": row.credit_note_date || "",
-    "Credit Note Voucher": row.credit_note_voucher || "",
-    "Credit Note Amount": Number(row.credit_note_amount || 0),
-    "Reversal Days": row.reversal_days != null ? row.reversal_days : "",
-    Status: "Reversed",
-  }));
-
-  return [
-    { name: "Ledger", rows: ledgerRows.length ? ledgerRows : [{ Customer: title, Note: "No ledger rows" }] },
-    { name: "Open Invoices", rows: openRows.length ? openRows : [{ Customer: title, Note: "No open invoices" }] },
-    { name: "Reversed", rows: reversedRows.length ? reversedRows : [{ Customer: title, Note: "No reversed invoices" }] },
-  ];
-}
-
 export default function CustomerLedgerExport({
   customer,
   ledger,
-  filenamePrefix = "customer-ledger",
 }) {
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportError, setExportError] = useState("");
   const invoices = Array.isArray(ledger?.invoices) ? ledger.invoices : [];
   const reversedInvoices = Array.isArray(ledger?.reversedInvoices) ? ledger.reversedInvoices : [];
   const totals = ledger?.totals || {};
@@ -187,8 +130,26 @@ export default function CustomerLedgerExport({
 
   if (!ledger || !customer) return null;
 
-  const code = String(customer.customer_code || "").trim() || "customer";
-  const exportFilename = `${filenamePrefix}-${code}`;
+  async function handleExportPdf() {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    setExportError("");
+    try {
+      const model = buildCustomerLedgerPdfModel({
+        customer,
+        ledger,
+        asOfDate: getKsaDateString(),
+        lines: visibleLedgerLines,
+      });
+      if (!model) throw new Error("Ledger is not ready for PDF export.");
+      await downloadCustomerLedgerPdf(model);
+    } catch (error) {
+      setExportError(error?.message || "Could not create the ledger PDF.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   const openMachineTotal = visibleOpenInvoices.reduce(
     (total, row) => total + Number(row.remaining || 0),
     0,
@@ -216,9 +177,9 @@ export default function CustomerLedgerExport({
         <div>
           <h3>Customer Ledger</h3>
           <p className="auditSectionNote">
-            Datewise sales and collections for export. Immediate credit-note reversals stay
-            out of the ledger and appear in their own table below. Open invoices are listed
-            separately so unpaid bills are easy to check.
+            Balance-confirmation PDF: party ledger (Debit / Credit / Balance), open invoices,
+            and reversed invoices excluded from the ledger. Immediate credit-note reversals
+            stay out of the main account statement.
           </p>
         </div>
         <div className="customerLedgerExportActions">
@@ -227,19 +188,20 @@ export default function CustomerLedgerExport({
             {formatCount(openInvoices.length)} open ·{" "}
             {formatCount(reversedInvoices.length)} reversed
           </span>
-          <ExportExcelButton
-            filename={exportFilename}
-            label="Export Ledger"
-            title="Download Ledger, Open Invoices, and Reversed sheets"
-            getRows={() => buildLedgerExportSheets({
-              customer,
-              ledgerLines: visibleLedgerLines,
-              openInvoices: visibleOpenInvoices,
-              reversedInvoices: visibleReversed,
-            })}
-          />
+          <button
+            type="button"
+            className="moduleInlineButton"
+            onClick={handleExportPdf}
+            disabled={exportingPdf}
+            title="Download balance confirmation PDF"
+          >
+            {exportingPdf ? "Preparing PDF..." : "Export Ledger PDF"}
+          </button>
         </div>
       </div>
+      {exportError ? (
+        <div className="moduleHint" style={{ marginTop: "8px", color: "#9b1c1c" }}>{exportError}</div>
+      ) : null}
 
       <div className="auditSummaryGrid" style={{ marginTop: "12px", marginBottom: "12px" }}>
         <div className="auditSummaryCard">
@@ -273,12 +235,7 @@ export default function CustomerLedgerExport({
             </p>
           </div>
         </div>
-        <ExportableTable
-          filename={`${exportFilename}-ledger`}
-          sheetName="Ledger"
-          className="moduleTableWrap"
-          style={{ marginTop: "10px" }}
-        >
+        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
           <table className="moduleTable moduleBiTable paymentSettleTable customerLedgerTable">
             <thead>
               <tr>
@@ -336,7 +293,7 @@ export default function CustomerLedgerExport({
               </tr>
             </tfoot>
           </table>
-        </ExportableTable>
+        </div>
       </div>
 
       <div className="customerLedgerBlock" style={{ marginTop: "18px" }}>
@@ -350,12 +307,7 @@ export default function CustomerLedgerExport({
           </div>
           <span>{formatCount(visibleOpenInvoices.length)} open</span>
         </div>
-        <ExportableTable
-          filename={`${exportFilename}-open`}
-          sheetName="OpenInvoices"
-          className="moduleTableWrap"
-          style={{ marginTop: "10px" }}
-        >
+        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
           <table className="moduleTable moduleBiTable paymentSettleTable">
             <thead>
               <tr>
@@ -421,7 +373,7 @@ export default function CustomerLedgerExport({
               </tr>
             </tfoot>
           </table>
-        </ExportableTable>
+        </div>
       </div>
 
       <div className="customerLedgerBlock" style={{ marginTop: "18px" }}>
@@ -435,12 +387,7 @@ export default function CustomerLedgerExport({
           </div>
           <span>{formatCount(visibleReversed.length)} excluded from ledger</span>
         </div>
-        <ExportableTable
-          filename={`${exportFilename}-reversed`}
-          sheetName="Reversed"
-          className="moduleTableWrap"
-          style={{ marginTop: "10px" }}
-        >
+        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
           <table className="moduleTable moduleBiTable paymentSettleTable">
             <thead>
               <tr>
@@ -488,7 +435,7 @@ export default function CustomerLedgerExport({
               </tr>
             </tfoot>
           </table>
-        </ExportableTable>
+        </div>
       </div>
     </section>
   );

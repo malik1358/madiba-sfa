@@ -289,7 +289,7 @@ These are large or shared. Read them fully enough to see callers before editing:
 - `app/lib/outstanding.js`
 - `app/lib/workdayActivity.js`
 - `app/lib/moduleAccess.js`
-- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` (datewise ledger export; reversed invoices excluded from Ledger sheet)
+- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` / `customerLedgerPdf.js` (balance-confirmation PDF; reversed invoices excluded from the ledger)
 - `app/management/pending-orders/page.js`
 - `app/management/new-order/page.js`
 - `app/management/payment-collections/PaymentCollectionsView.jsx`

@@ -771,7 +771,6 @@ function CustomerAuditPageContent() {
             <CustomerLedgerExport
               customer={selectedCustomer}
               ledger={paymentSettlement}
-              filenamePrefix="customer-ledger"
             />
             <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
           </>

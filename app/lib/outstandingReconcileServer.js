@@ -3,6 +3,7 @@ import {
   buildOutstandingRow,
   customerAccountCodesMatch,
   hydrateOutstandingInvoices,
+  resolveCustomerAccountCode,
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "./outstanding.js";
@@ -116,6 +117,43 @@ export function indexReceiptsByCustomer(dataset) {
   return byCode;
 }
 
+/**
+ * Group 1171 / 1171C so reconcile matches Payment Settlement history, which already
+ * merges related account codes for sales and receipts.
+ */
+export function reconcileAccountGroupKey(code) {
+  const normalized = normalizeCode(code);
+  if (!normalized) return "";
+  const digitLetter = normalized.match(/^(\d{3,6})([A-Z])$/);
+  if (digitLetter) return digitLetter[1];
+  const account = normalizeCode(resolveCustomerAccountCode(normalized));
+  const accountDigitLetter = account.match(/^(\d{3,6})([A-Z])$/);
+  if (accountDigitLetter) return accountDigitLetter[1];
+  return account || normalized;
+}
+
+/** Receipts for this account, including related codes (1171 + 1171C). */
+export function receiptsForAccount(receiptsByCode, code) {
+  const target = normalizeCode(code);
+  if (!target || !(receiptsByCode instanceof Map)) return [];
+  const gathered = [];
+  receiptsByCode.forEach((rows, key) => {
+    if (key === target || customerAccountCodesMatch(key, target)) {
+      gathered.push(...(Array.isArray(rows) ? rows : []));
+    }
+  });
+  return gathered;
+}
+
+/** Prefer the outstanding-upload code, then the longer variant (1171C over 1171). */
+export function preferredReconcileCustomerCode(codes = [], customersByCode = new Map()) {
+  const list = [...new Set((Array.isArray(codes) ? codes : []).map(normalizeCode).filter(Boolean))];
+  if (!list.length) return "";
+  const onOutstanding = list.find((code) => customersByCode.has(code));
+  if (onOutstanding) return onOutstanding;
+  return [...list].sort((left, right) => right.length - left.length || left.localeCompare(right))[0];
+}
+
 async function readHistoryPage(admin, { useOffset, from, cursor }) {
   if (!useOffset && typeof admin?.rpc === "function") {
     const { data, error } = await admin.rpc("active_sales_history_page", {
@@ -204,15 +242,18 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
   let failedCount = 0;
 
   function evaluate(code, transactions) {
-    const outstandingCustomer = customersByCode.get(code) || null;
-    const outstandingInvoices = outstandingInvoicesForAccount(invoicesByCode, code);
-    const receipts = receiptsByCode.get(code) || [];
+    const outstandingCustomer = customersByCode.get(code)
+      || [...customersByCode.entries()].find(([key]) => customerAccountCodesMatch(key, code))?.[1]
+      || null;
+    const reportCode = normalizeCode(outstandingCustomer?.customer_code) || normalizeCode(code);
+    const outstandingInvoices = outstandingInvoicesForAccount(invoicesByCode, reportCode);
+    const receipts = receiptsForAccount(receiptsByCode, reportCode);
 
     transactions.forEach((entry) => {
       const ref = normalizeBillRef(entry.voucher_number);
       if (!ref) return;
       if (!voucherOwners.has(ref)) voucherOwners.set(ref, new Set());
-      voucherOwners.get(ref).add(code);
+      voucherOwners.get(ref).add(reportCode);
     });
 
     const ledger = buildPaymentSettlementLedger({
@@ -243,7 +284,7 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
       .forEach((invoice) => {
         const billRef = normalizeBillRef(invoice.voucher_number);
         pendingMismatches.push({
-          customer_code: code,
+          customer_code: reportCode,
           customer_name: customerName,
           salesman_name: salesmanName,
           bill_ref: String(invoice.voucher_number || ""),
@@ -259,7 +300,7 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
 
     const row = buildOutstandingReconcileRow({
       customer: {
-        customer_code: code,
+        customer_code: reportCode,
         customer_name: customerName,
         salesman_name: salesmanName,
       },
@@ -270,22 +311,43 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     if (row.has_difference) rows.push(row);
   }
 
-  await forEachCustomerSalesHistory(admin, async (code, salesRows) => {
-    seenCodes.add(code);
+  let groupKey = "";
+  let groupCodes = [];
+  let groupSales = [];
+
+  async function flushSalesGroup() {
+    if (!groupCodes.length) return;
+    const preferred = preferredReconcileCustomerCode(groupCodes, customersByCode);
     scannedCount += 1;
+    groupCodes.forEach((code) => seenCodes.add(code));
     try {
-      const merged = mergeSalesSnapshots(salesRows);
+      const merged = mergeSalesSnapshots(groupSales);
       merged.forEach((row) => coverage.add(row));
-      evaluate(code, merged);
+      evaluate(preferred, merged);
     } catch (error) {
       failedCount += 1;
-      console.error(`Outstanding reconcile failed for ${code}:`, error);
+      console.error(`Outstanding reconcile failed for ${preferred}:`, error);
     }
+    groupKey = "";
+    groupCodes = [];
+    groupSales = [];
+  }
+
+  await forEachCustomerSalesHistory(admin, async (code, salesRows) => {
+    const key = reconcileAccountGroupKey(code) || normalizeCode(code);
+    if (groupKey && key !== groupKey) await flushSalesGroup();
+    groupKey = key;
+    if (!groupCodes.includes(normalizeCode(code))) groupCodes.push(normalizeCode(code));
+    groupSales.push(...(Array.isArray(salesRows) ? salesRows : []));
   });
+  await flushSalesGroup();
 
   // Customers on the Tally upload with no sales history still show up as a full difference.
   for (const code of customersByCode.keys()) {
-    if (seenCodes.has(code)) continue;
+    const alreadySeen = [...seenCodes].some(
+      (seen) => seen === code || customerAccountCodesMatch(seen, code),
+    );
+    if (alreadySeen) continue;
     scannedCount += 1;
     try {
       evaluate(code, []);

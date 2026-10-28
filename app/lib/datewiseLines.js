@@ -152,23 +152,6 @@ export function flattenLedgerLinesExcludingReversed(days) {
   return flattenDatewiseLines(days).filter((row) => !isImmediateReversalLedgerLine(row));
 }
 
-/**
- * Void-cycle cash (cancelled collection / CN refund Payment) shows Collected 0 and
- * Open "—" on Datewise and looks like a second reverse of the same bill. Keep the
- * invoice + credit note rows; drop only that cash.
- */
-export function isVoidCycleCashDatewiseLine(row) {
-  if (!row) return false;
-  const kind = String(row.kind || "").trim();
-  if (kind !== "Receipt" && kind !== "Payment") return false;
-  return isImmediateReversalLedgerLine(row);
-}
-
-/** Payment Settlement Datewise: reversals stay, void-cycle cash rows do not. */
-export function flattenDatewiseLinesExcludingVoidCycleCash(days) {
-  return flattenDatewiseLines(days).filter((row) => !isVoidCycleCashDatewiseLine(row));
-}
-
 /** Invoices still carrying Machine Open (or Tally-only pending). */
 export function openSettlementInvoices(invoices = []) {
   return (Array.isArray(invoices) ? invoices : []).filter((invoice) => {

@@ -184,9 +184,8 @@ function receiptEventKey(date, vchNo) {
  * When a sale is immediately reversed by CN, a same-amount collection on that
  * bill and a near-amount Payment refund must not settle other open invoices.
  * Pair them to the reversed voucher (1020C: receipt 378 + P-1061 → 2214).
- * A matching collection with no Payment refund is still cancelled and tagged
- * against the voided bill (1424: JV/Coll/2026/0411 → DNFD/038) so Datewise
- * Detail is not blank.
+ * A same-amount collection with **no** Payment refund is real AR cash — leave
+ * it in FIFO (1424: JV/Coll/2026/0411 settles twin DC/005, not voided DNFD/038).
  */
 export function pairRefundsForReversedSales(reversals = [], receipts = []) {
   const cashRows = buildSortedReceipts(receipts);
@@ -244,31 +243,13 @@ export function pairRefundsForReversedSales(reversals = [], receipts = []) {
       }
     });
 
+    // Need the Payment refund to treat this as a voided collection cycle.
+    // Without it the receipt is ordinary cash and must settle open sales.
+    if (bestPaymentIndex < 0) continue;
+
     if (bestReceiptIndex >= 0) {
       usedReceipt.add(bestReceiptIndex);
       cancelledReceiptKeys.add(receiptEventKey(receiptRow.receipt_date, receiptRow.vch_no));
-    }
-
-    // Receipt-only void cycles (collection on the reversed bill, no Payment refund
-    // yet — 1424 JV/Coll/2026/0411 ↔ DNFD/038) still need a Datewise application
-    // so Detail is not a blank "—".
-    if (bestPaymentIndex < 0) {
-      if (bestReceiptIndex >= 0) {
-        refundMatches.push({
-          invoice_date: invoiceDate,
-          invoice_voucher: String(reversal.voucher_number || "").trim(),
-          credit_note_date: cnDate,
-          credit_note_voucher: String(reversal.credit_note_voucher || "").trim(),
-          receipt_date: receiptRow.receipt_date,
-          receipt_voucher: String(receiptRow.vch_no || "").trim(),
-          receipt_amount: toNumber(receiptRow.amount),
-          payment_date: "",
-          payment_voucher: "",
-          amount: toNumber(receiptRow.amount),
-          status: "Reversed",
-        });
-      }
-      continue;
     }
     const paymentRow = cashRows[bestPaymentIndex];
     usedPayment.add(bestPaymentIndex);

@@ -25,10 +25,10 @@ This file lists objects found in the repo. It is not a live dump of production. 
 
 Helper functions in the baseline migration:
 
-- `current_salesman_code()`, `current_user_role()`
-- `is_admin()` — role `admin` only
+- `current_salesman_code()`, `current_user_role()`, `request_uid()` — `request_uid` is SECURITY DEFINER `auth.uid()` for RLS when the table owner cannot reference schema `auth` (`20261028083914_rls_auth_initplan_remaining.sql`)
+- `is_admin()` — role `admin`, `report-user`, or `report_user`
 - `enforce_single_platform_session(p_session_id, p_platform)` — `20261016120000_single_platform_session.sql`. Service role only. Deletes other `auth.sessions` for that user on the same platform (`android` WebView or `web`). Role `admin` is unchanged. Refresh tokens and MFA claims cascade with the session. Production ledger version is `20261016080833` (`single_platform_session`); do not insert a second ledger row or replay the SQL.
-- `is_management()` — role `admin` or `manager` only
+- `is_management()` — role `admin`, `report-user` / `report_user`, or `manager`
 - `activate_sales_batch(p_batch_id)`, `delete_import_batch(p_batch_id)`
 - `set_updated_at()` trigger function
 - `rls_auto_enable()` event trigger (enables RLS on new public tables)
@@ -240,6 +240,10 @@ If the attachments migration is not applied, uploads still succeed and write the
 ## Row level security
 
 Baseline migration enables RLS and adds policies for customers, documents, follow-ups, import batches, items, KPIs, both order pairs, profiles, prospects, visits, recommendations, and activity logs. Later migrations replace `customers_select` and add collection-visit policies.
+
+`profiles` (`20261028081800_profiles_rls_auth_initplan.sql`, applied on production): `profiles_select` is own-row only (`id = (select auth.uid())`); `profiles_management_all` uses `(select is_management())`; redundant `profiles_select_own_or_admin` is dropped.
+
+Hot-path RLS initplan (`20261028083914_rls_auth_initplan_remaining.sql`, applied on production): activity logs, push tokens, prospects, sales orders/items, collection visits use `(select public.request_uid())` / `(select is_management())`; redundant `daily_logs_select_own` is dropped.
 
 Treat RLS as a backstop for browser queries with the publishable key. API authorization is in the route. Changing a policy does not by itself change what `/api/*` returns.
 

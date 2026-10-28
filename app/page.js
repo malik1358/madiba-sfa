@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
+import { withTimeout } from "./lib/authSession";
 import { loginErrorMessage } from "./lib/loginError";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
@@ -22,6 +23,8 @@ import { isNativeAndroidPlatform } from "./lib/nativeFieldTracking";
 import { useModuleAccess } from "./hooks/useModuleAccess";
 import { clearCatalogueReturn, readCatalogueReturn } from "./lib/productCatalogue";
 
+const PROFILE_LOAD_TIMEOUT_MS = 15000;
+
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
   const [email, setEmail] = useState("");
@@ -31,6 +34,7 @@ export default function Home() {
   const [profile, setProfile] = useState(null);
 
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [checkingApkVersion, setCheckingApkVersion] = useState(true);
   const [apkVersionState, setApkVersionState] = useState(null);
@@ -113,13 +117,18 @@ export default function Home() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // checkSession already loads the restored session. Ignore INITIAL_SESSION and
+      // token refreshes so Home does not stampede /rest/v1/profiles on every mount.
+      if (event === "SIGNED_IN" && session?.user) {
         setUser(session.user);
         loadProfile(session.user.id);
-      } else {
+        return;
+      }
+      if (event === "SIGNED_OUT") {
         setUser(null);
         setProfile(null);
+        setProfileError("");
       }
     });
 
@@ -178,27 +187,55 @@ export default function Home() {
 
     if (!supabase) {
       setProfile(null);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (error) {
-      setProfile(null);
+      setProfileError("Supabase is not configured.");
       return null;
     }
 
-    setProfile(data);
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .single(),
+        PROFILE_LOAD_TIMEOUT_MS,
+        "PROFILE_TIMEOUT",
+      );
 
-    if (data?.preferred_language) {
-      setLanguage(data.preferred_language);
+      if (error) {
+        setProfile(null);
+        setProfileError(error.message || "Could not load profile.");
+        return null;
+      }
+
+      setProfile(data);
+      setProfileError("");
+
+      if (data?.preferred_language) {
+        setLanguage(data.preferred_language);
+      }
+
+      return data;
+    } catch (error) {
+      setProfile(null);
+      setProfileError(
+        error?.message === "PROFILE_TIMEOUT"
+          ? "Profile load timed out. Check your connection and try again."
+          : (error?.message || "Could not load profile."),
+      );
+      return null;
     }
+  }
 
-    return data;
+  async function retryLoadProfile() {
+    if (!user?.id) return;
+    setLoading(true);
+    setProfileError("");
+    try {
+      await loadProfile(user.id);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleLogin(e) {
@@ -380,6 +417,28 @@ export default function Home() {
         title="Supabase is not configured"
         message="Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to enable authentication and data access."
       />
+    );
+  }
+
+  // Signed in, but profile fetch failed/timed out — do not flash the login form.
+  if (user && !profile) {
+    return (
+      <main className="loginPage" dir={ar ? "rtl" : "ltr"}>
+        <div className="loginCard">
+          <div className="loadingText">
+            {profileError
+              || (ar ? "تعذر تحميل الملف الشخصي." : "Could not load your profile.")}
+          </div>
+          <button
+            type="button"
+            className="loginButton"
+            onClick={retryLoadProfile}
+            style={{ marginTop: 16 }}
+          >
+            {ar ? "إعادة المحاولة" : "Retry"}
+          </button>
+        </div>
+      </main>
     );
   }
 

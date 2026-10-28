@@ -13,7 +13,11 @@ function appliedTargetLabel(application) {
     : status === "Reversed"
       ? "Reversed sale "
       : "";
-  const target = application.target_kind === "purchase" ? "Purchase" : "Invoice";
+  const target = application.target_kind === "purchase"
+    ? "Purchase"
+    : application.target_kind === "unmatched"
+      ? "unmatched collection"
+      : "Invoice";
   const voucher = application.voucher_number ? ` ${application.voucher_number}` : "";
   return `${prefix}${target}${voucher} (${formatMoney(application.amount)})`;
 }

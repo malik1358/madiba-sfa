@@ -549,6 +549,50 @@ test("matchPaymentsFifo Payment leftover does not settle a sales invoice dated a
   assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 3850);
 });
 
+test("matchPaymentsFifo Payment leftover refunds unmatched overcollection (1424 Bpmt0057)", () => {
+  const transactions = [
+    {
+      transaction_date: "2026-04-14",
+      voucher_number: "CNFD/APR/014",
+      voucher_type: "CASH SALES NON FOOD DIVISION",
+      sales_amount: 2905,
+      category: "Paper",
+    },
+    { transaction_date: "2026-04-19", voucher_number: "NFD/451", sales_amount: 515, category: "Paper" },
+    { transaction_date: "2026-04-27", voucher_number: "NFD/509", sales_amount: 480, category: "Paper" },
+    { transaction_date: "2026-05-12", voucher_number: "NFD/725", sales_amount: 580, category: "Paper" },
+    { transaction_date: "2026-05-20", voucher_number: "NFD/844", sales_amount: 465, category: "Paper" },
+    { transaction_date: "2026-05-21", voucher_number: "NFD/854", sales_amount: 465, category: "Paper" },
+  ];
+  const receipts = [
+    { receipt_date: "2026-04-20", amount: 3340.75, vch_no: "675", vch_type: "Receipt" },
+    { receipt_date: "2026-06-02", amount: 6221.5, vch_no: "957", vch_type: "Receipt" },
+    { receipt_date: "2026-06-16", amount: -3340.75, vch_no: "Jun/Bpmt0057", vch_type: "Payment" },
+  ];
+
+  const matched = matchPaymentsFifo(transactions, receipts);
+  assert.equal(Number(matched.paymentRefundedUnmatched.toFixed(2)), 3340.75);
+  assert.equal(Number(matched.paymentAppliedToSales.toFixed(2)), 0);
+  assert.ok(matched.unmatchedReceiptAmount < 0.01);
+  assert.equal(matched.paymentUnmatchedRefunds.length, 1);
+  assert.equal(matched.paymentUnmatchedRefunds[0].payment_voucher, "Jun/Bpmt0057");
+  assert.equal(matched.paymentUnmatchedRefunds[0].invoice_voucher, "CNFD/APR/014");
+  assert.ok(matched.invoices.every((row) => row.remaining <= 0.009));
+
+  const ledger = buildPaymentSettlementLedger({ transactions, receipts });
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 6221.5);
+  assert.equal(Number(ledger.totals.payment_refunded_unmatched.toFixed(2)), 3340.75);
+  assert.ok(Math.abs(ledger.totals.balance_delta) <= 0.02);
+
+  const paymentDay = ledger.datewise.find((day) => day.date === "2026-06-16");
+  const payment = paymentDay.receipts.find((row) => row.vch_no === "Jun/Bpmt0057");
+  assert.ok(payment);
+  assert.equal(Number(payment.ar_amount.toFixed(2)), -3340.75);
+  assert.equal(payment.applications.length, 1);
+  assert.equal(payment.applications[0].status, "Refund");
+  assert.equal(payment.applications[0].voucher_number, "CNFD/APR/014");
+});
+
 test("matchPaymentsFifo applies an advance receipt to the next customer invoice", () => {
   const { allocations, invoices, unmatchedReceiptAmount } = matchPaymentsFifo(
     [

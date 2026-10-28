@@ -101,7 +101,7 @@ test("datewise receipt detail names a reversed sale when collection only funded 
 
   assert.equal(lines[0].kind, "Receipt");
   assert.equal(lines[0].collected_amount, 0);
-  assert.equal(lines[0].detail, "Reversed sale Invoice DNFD/038 (517.5)");
+  assert.equal(lines[0].detail, "Collection on reversed Invoice DNFD/038 (517.5)");
   assert.equal(isImmediateReversalLedgerLine(lines[0]), true);
 });
 

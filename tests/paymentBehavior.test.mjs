@@ -270,7 +270,7 @@ test("matchPaymentsFifo refunds a reversed sale instead of advancing the receipt
 
 test("receipt-only void cycle still names the reversed sale in Datewise Detail", () => {
   // 1424: DNFD/038 + CN 389 + JV/Coll/2026/0411 (517.5) same day as twin DC/005.
-  // No Payment refund — collection must cancel and show Reversed sale, not blank "—",
+  // No Payment refund — collection must cancel and name the voided bill, not blank "—",
   // and must not steal payment of the surviving twin bill.
   const transactions = [
     { transaction_date: "2026-07-19", voucher_number: "DC/005", voucher_type: "Sales", sales_amount: 450, category: "Paper" },

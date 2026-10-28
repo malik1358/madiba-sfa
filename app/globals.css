@@ -4914,6 +4914,10 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 700;
 }
 
+.moduleStockAvailable--over {
+  color: #9b1c1c;
+}
+
 .moduleOrderTable {
   min-width: 760px;
 }

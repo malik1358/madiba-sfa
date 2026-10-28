@@ -31,6 +31,7 @@
 .qty input { min-width: 0; width: 100%; text-align: center; border: 1px solid #bed3d9; border-radius: 8px; }
 .qty button:disabled, .qty input:disabled { opacity: .45; cursor: not-allowed; }
 .stockAvailable { margin-top: 6px; color: #0d5a6b; font-size: 13px; font-weight: 700; }
+.stockOver { color: #9b1c1c; }
 .upload { display: grid; gap: 6px; font-size: 13px; color: #0f4c5c; margin-top: 6px; }
 .upload input { width: 100%; font-size: 12px; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 22px 0; }

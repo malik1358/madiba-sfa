@@ -72,6 +72,7 @@ import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCata
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
+  isEodStockQtyOverAvailable,
 } from "../../lib/eodStock.js";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
@@ -971,7 +972,6 @@ export default function NewOrderPage() {
     valueDiscountMap,
     schemes,
     quantityControls,
-    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -2225,7 +2225,8 @@ export default function NewOrderPage() {
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
                               const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-                              const availableLabel = formatEodStockAvailableLabel(availableStock, language);
+                              const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty);
+                              const overStock = isEodStockQtyOverAvailable(qty, availableStock);
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
@@ -2249,19 +2250,16 @@ export default function NewOrderPage() {
                                         type="number"
                                         min="0"
                                         step="1"
-                                        max={availableStock ?? undefined}
                                         value={qty || ""}
                                         onChange={(event) => updateQty(item.item_code, event.target.value)}
                                       />
-                                      <button
-                                        type="button"
-                                        disabled={availableStock != null && qty >= availableStock}
-                                        onClick={() => increaseQty(item.item_code)}
-                                      >
-                                        +
-                                      </button>
+                                      <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
                                     </div>
-                                    {availableLabel ? <div className="moduleCode moduleStockAvailable">{availableLabel}</div> : null}
+                                    {availableLabel ? (
+                                      <div className={`moduleCode moduleStockAvailable${overStock ? " moduleStockAvailable--over" : ""}`}>
+                                        {availableLabel}
+                                      </div>
+                                    ) : null}
                                   </td>
                                   <td>{formatMoney(priced.lineValue)}</td>
                                   <td>

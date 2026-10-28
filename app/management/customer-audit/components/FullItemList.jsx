@@ -8,6 +8,7 @@ import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from ".
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
+  isEodStockQtyOverAvailable,
 } from "../../../lib/eodStock.js";
 import ExportableTable from "../../../components/ExportableTable";
 
@@ -137,7 +138,8 @@ export default function FullItemList({
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     const availableStock = availableEodStockQty(eodStock, pricingRegion, code);
-                    const availableLabel = formatEodStockAvailableLabel(availableStock, language);
+                    const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty);
+                    const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
                     return (
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>
@@ -145,10 +147,14 @@ export default function FullItemList({
                         <td>
                           <div className="moduleQtyControl">
                             <button type="button" onClick={() => decreaseOrderQty(code)}>−</button>
-                            <input type="number" min="0" step="1" max={availableStock ?? undefined} inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
-                            <button type="button" disabled={availableStock != null && orderQty >= availableStock} onClick={() => increaseOrderQty(code)}>+</button>
+                            <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
+                            <button type="button" onClick={() => increaseOrderQty(code)}>+</button>
                           </div>
-                          {availableLabel ? <div className="moduleCode moduleStockAvailable">{availableLabel}</div> : null}
+                          {availableLabel ? (
+                            <div className={`moduleCode moduleStockAvailable${overStock ? " moduleStockAvailable--over" : ""}`}>
+                              {availableLabel}
+                            </div>
+                          ) : null}
                         </td>
                         <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                         <td>

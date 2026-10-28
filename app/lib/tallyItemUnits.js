@@ -17,14 +17,12 @@ export const TALLY_UNIT_SOURCE_EXCEL = "excel_import";
 export const TALLY_UNIT_SOURCE_INVOICE_PDF = "invoice_pdf";
 export const TALLY_UNIT_SOURCE_MANUAL = "manual";
 
-export const TALLY_VOUCHER_CLASS = "e.Invoice.Integration Phase";
 export const TALLY_VAT_LEDGER = "Output VAT 15% - Non Food Division";
 
 export const TALLY_EXPORT_COLUMNS = [
   "Voucher Date",
   "Voucher Type Name",
   "Voucher Number",
-  "Voucher.Class",
   "Ref.No",
   "Ref.Date",
   "CUSTOMER NAME",
@@ -543,7 +541,6 @@ export function buildTallyOrderExportRows({
       "Voucher Date": voucherDate,
       "Voucher Type Name": setup.voucherType,
       "Voucher Number": "",
-      "Voucher.Class": TALLY_VOUCHER_CLASS,
       "Ref.No": orderNo,
       "Ref.Date": orderDateText,
       "CUSTOMER NAME": partyName,
@@ -576,7 +573,6 @@ export function buildTallyOrderExportRows({
   const vatRow = Object.fromEntries(TALLY_EXPORT_COLUMNS.map((column) => [column, ""]));
   vatRow["Voucher Date"] = voucherDate;
   vatRow["Voucher Type Name"] = setup.voucherType;
-  vatRow["Voucher.Class"] = TALLY_VOUCHER_CLASS;
   vatRow["Ref.Date"] = orderDateText;
   vatRow["Charge.Ledgers VAT/Freight"] = TALLY_VAT_LEDGER;
   vatRow.Amount = vatTotal;

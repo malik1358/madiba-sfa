@@ -57,7 +57,7 @@ const TEXT = {
   deltaLoading: { en: "…", ar: "…" },
   deltaPending: { en: "—", ar: "—" },
   differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
-  ignoreWithinOneSar: { en: "Ignore differences of 1 SAR or less", ar: "تجاهل الفروق بمقدار 1 ريال أو أقل" },
+  ignoreWithinOneSar: { en: "Ignore differences of 10 SAR or less", ar: "تجاهل الفروق بمقدار 10 ريال أو أقل" },
   noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
   recalculate: { en: "Recalculate", ar: "إعادة الحساب" },
   recalculating: { en: "Recalculating…", ar: "جاري إعادة الحساب…" },

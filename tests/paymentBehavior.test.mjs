@@ -268,10 +268,10 @@ test("matchPaymentsFifo refunds a reversed sale instead of advancing the receipt
   assert.equal(Number(ledger.invoices.find((row) => row.voucher_number === "2270").remaining.toFixed(2)), 29725.2);
 });
 
-test("receipt-only void cycle still names the reversed sale in Datewise Detail", () => {
+test("receipt without Payment refund stays in FIFO and settles the surviving twin", () => {
   // 1424: DNFD/038 + CN 389 + JV/Coll/2026/0411 (517.5) same day as twin DC/005.
-  // No Payment refund — collection must cancel and name the voided bill, not blank "—",
-  // and must not steal payment of the surviving twin bill.
+  // No Payment refund — the JV is real cash and must pay DC/005, not be cancelled
+  // against the voided bill.
   const transactions = [
     { transaction_date: "2026-07-19", voucher_number: "DC/005", voucher_type: "Sales", sales_amount: 450, category: "Paper" },
     { transaction_date: "2026-07-19", voucher_number: "DNFD/038", voucher_type: "Sales", sales_amount: 450, category: "Paper" },
@@ -296,22 +296,18 @@ test("receipt-only void cycle still names the reversed sale in Datewise Detail",
     ).reversals,
     receipts,
   );
-  assert.equal(paired.refundMatches.length, 1);
-  assert.equal(paired.refundMatches[0].invoice_voucher, "DNFD/038");
-  assert.equal(paired.refundMatches[0].receipt_voucher, "JV/Coll/2026/0411");
-  assert.equal(paired.refundMatches[0].payment_voucher, "");
-  assert.equal(paired.cancelledReceiptKeys.has("2026-07-19::JV/Coll/2026/0411"), true);
+  assert.equal(paired.refundMatches.length, 0);
+  assert.equal(paired.cancelledReceiptKeys.has("2026-07-19::JV/Coll/2026/0411"), false);
 
   const ledger = buildPaymentSettlementLedger({ transactions, receipts, todayIso: "2026-10-28" });
   const day = ledger.datewise.find((row) => row.date === "2026-07-19");
   const collection = day.receipts.find((row) => row.vch_no === "JV/Coll/2026/0411");
   assert.ok(collection);
-  assert.equal(Number(collection.ar_amount.toFixed(2)), 0);
-  assert.equal(collection.applications.length, 1);
-  assert.equal(collection.applications[0].status, "Reversed");
-  assert.equal(collection.applications[0].voucher_number, "DNFD/038");
-  assert.equal(ledger.invoices.find((row) => row.voucher_number === "DC/005").settlements[0].vch_no, "1382");
-  assert.equal(Number(ledger.totals.unmatched_receipt_amount.toFixed(2)), 0);
+  assert.equal(Number(collection.ar_amount.toFixed(2)), 517.5);
+  assert.equal(collection.applications[0].voucher_number, "DC/005");
+  assert.equal(collection.applications[0].status, "Applied");
+  assert.equal(ledger.invoices.find((row) => row.voucher_number === "DC/005").settlements[0].vch_no, "JV/Coll/2026/0411");
+  assert.equal(Number(ledger.totals.unmatched_receipt_amount.toFixed(2)), 517.5);
 });
 
 test("matchPaymentsFifo exact full-bill receipt claims that invoice before older FIFO", () => {

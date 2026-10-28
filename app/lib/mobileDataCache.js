@@ -56,7 +56,7 @@ function customerHistoryCacheKey(scope, customerCode, { fullHistory = false } = 
   // v11: Payment leftover unpays prior Paid (customer 1231 Payment 384).
   // fullHistory = day-1 settlement history, not the 6-month BI window.
   const historySuffix = fullHistory ? ":full" : "";
-  return `history:v11${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  return `history:v12${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -116,7 +116,7 @@ export function subscribeOutstandingCacheCleared(handler) {
   };
 }
 
-export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v11";
+export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v12";
 export const CUSTOMER_HISTORY_CACHE_CLEARED_EVENT = "madiba-customer-history-cache-cleared";
 const CUSTOMER_HISTORY_CACHE_CHANNEL = "madiba-customer-history-cache";
 

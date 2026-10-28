@@ -1437,29 +1437,98 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     return applied;
   }
 
+  // Drop newest positive receipt allocations on an invoice (FIFO prepaid undo).
+  function reducePositiveReceiptAllocations(invoice, amountToRemove) {
+    let left = toNumber(amountToRemove);
+    if (!(left > SETTLEMENT_DUST)) return 0;
+    let removed = 0;
+    for (let index = allocations.length - 1; index >= 0; index -= 1) {
+      if (!(left > SETTLEMENT_DUST)) break;
+      const row = allocations[index];
+      if (String(row.voucher_number || "") !== String(invoice.voucher_number || "")) continue;
+      if (String(row.invoice_date || "") !== String(invoice.invoice_date || "")) continue;
+      if (row.is_payment) continue;
+      const rowAmount = toNumber(row.amount);
+      if (!(rowAmount > SETTLEMENT_DUST)) continue;
+      const take = Math.min(left, rowAmount);
+      const nextAmount = rowAmount - take;
+      if (nextAmount > SETTLEMENT_DUST) {
+        allocations[index] = { ...row, amount: nextAmount };
+      } else {
+        allocations.splice(index, 1);
+      }
+      left -= take;
+      removed += take;
+    }
+    return removed;
+  }
+
+  function refundUnmatchedOvercollection(event, left) {
+    if (!(hasSettlementAmount(left) && unmatchedReceiptAmount > SETTLEMENT_DUST)) {
+      return left;
+    }
+    const refunded = Math.min(left, unmatchedReceiptAmount);
+    if (!hasSettlementAmount(refunded)) return left;
+    unmatchedReceiptAmount = Math.max(0, unmatchedReceiptAmount - refunded);
+    paymentRefundedUnmatched += refunded;
+    const labeled = findPaidInvoiceForUnmatchedRefund(refunded, event.date);
+    paymentUnmatchedRefunds.push({
+      payment_date: event.date,
+      payment_voucher: event.vch_no,
+      amount: refunded,
+      invoice_date: labeled?.invoice_date || "",
+      invoice_voucher: labeled?.voucher_number || "",
+      status: "Refund",
+      target_kind: labeled ? "sales" : "unmatched",
+      unmatched_collection: true,
+    });
+    return Math.max(0, left - refunded);
+  }
+
   function applyPaymentLeftoverToSales(event, remaining) {
     let left = remaining;
     // 1) Net prior unmatched overcollection first so a Payment that returns an
     // overcollection does not reopen paid invoices (1424 Bpmt0057).
-    if (hasSettlementAmount(left) && unmatchedReceiptAmount > SETTLEMENT_DUST) {
-      const refunded = Math.min(left, unmatchedReceiptAmount);
-      if (hasSettlementAmount(refunded)) {
-        unmatchedReceiptAmount = Math.max(0, unmatchedReceiptAmount - refunded);
-        left = Math.max(0, left - refunded);
-        paymentRefundedUnmatched += refunded;
-        const labeled = findPaidInvoiceForUnmatchedRefund(refunded, event.date);
-        paymentUnmatchedRefunds.push({
-          payment_date: event.date,
-          payment_voucher: event.vch_no,
-          amount: refunded,
-          invoice_date: labeled?.invoice_date || "",
-          invoice_voucher: labeled?.voucher_number || "",
-          status: "Refund",
-          target_kind: labeled ? "sales" : "unmatched",
-          unmatched_collection: true,
+    left = refundUnmatchedOvercollection(event, left);
+
+    // 1b) Receipt FIFO may have prepaid invoices dated after this Payment with
+    // that same overcollection (957 → later DNFD/NFD). Restore those bills into
+    // unmatched (up to this leftover), then refund — otherwise unmatched is 0
+    // and Collected stays 0 / Not adjusted unless we incorrectly unpay earlier
+    // paid invoices.
+    if (hasSettlementAmount(left)) {
+      let restoredTotal = 0;
+      const futurePrepaid = [...invoices]
+        .filter((invoice) => (
+          invoice.invoice_date
+          && event.date
+          && invoice.invoice_date > event.date
+          && (toNumber(invoice.amount) - toNumber(invoice.remaining)) > SETTLEMENT_DUST
+        ))
+        .sort((leftInv, rightInv) => {
+          const byDate = String(rightInv.invoice_date || "").localeCompare(
+            String(leftInv.invoice_date || ""),
+          );
+          if (byDate !== 0) return byDate;
+          return String(rightInv.voucher_number || "").localeCompare(
+            String(leftInv.voucher_number || ""),
+          );
         });
+      for (const invoice of futurePrepaid) {
+        const room = left - restoredTotal;
+        if (!(room > SETTLEMENT_DUST)) break;
+        const capacity = Math.max(0, toNumber(invoice.amount) - toNumber(invoice.remaining));
+        const take = Math.min(room, capacity);
+        if (!(take > SETTLEMENT_DUST)) continue;
+        const restored = reducePositiveReceiptAllocations(invoice, take);
+        if (!(restored > SETTLEMENT_DUST)) continue;
+        invoice.remaining = toNumber(invoice.remaining) + restored;
+        unmatchedReceiptAmount += restored;
+        restoredTotal += restored;
       }
+      left = refundUnmatchedOvercollection(event, left);
     }
+
     // 2) Remaining leftover is money paid to the party: unpay newest already-paid
     // sales dated on or before the payment (1231 Payment 384). Capacity is only
     // prior Paid — do not inflate open above the bill or prepay a later invoice.

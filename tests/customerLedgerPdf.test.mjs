@@ -6,6 +6,7 @@ import {
   formatBalanceSide,
   ledgerLineDebitCredit,
   ledgerLineParticulars,
+  LEDGER_COMPANY_NAME,
 } from "../app/lib/customerLedgerPdf.js";
 
 test("ledger debit/credit maps invoices receipts and CN like a party ledger", () => {
@@ -35,6 +36,25 @@ test("ledger debit/credit maps invoices receipts and CN like a party ledger", ()
   }), { debit: 0, credit: 200 });
 });
 
+test("receipt and payment particulars omit applied invoice numbers and amounts", () => {
+  assert.equal(ledgerLineParticulars({
+    kind: "Receipt",
+    detail: "Invoice 2397 (5,000)",
+  }), "Receipt");
+  assert.equal(ledgerLineParticulars({
+    kind: "Payment",
+    detail: "Refund Invoice 2214 (1,661)",
+  }), "Payment");
+  assert.equal(ledgerLineParticulars({
+    kind: "Purchase",
+    detail: "2,000 → Invoice S1 (2,000)",
+  }), "Purchase");
+  assert.equal(ledgerLineParticulars({
+    kind: "Invoice",
+    detail: "Open",
+  }), "Sales — Open");
+});
+
 test("balance confirmation running balance is receivable Dr", () => {
   const statement = buildBalanceConfirmationLedgerRows([
     {
@@ -49,7 +69,7 @@ test("balance confirmation running balance is receivable Dr", () => {
       kind: "Receipt",
       voucher: "R1",
       collected_amount: 400,
-      detail: "",
+      detail: "Invoice S1 (400)",
     },
     {
       date: "2026-01-20",
@@ -64,21 +84,70 @@ test("balance confirmation running balance is receivable Dr", () => {
   assert.equal(statement.rows[0].balance, 1150);
   assert.equal(statement.rows[1].balance, 750);
   assert.equal(statement.rows[2].balance, 635);
+  assert.equal(statement.rows[1].particulars, "Receipt");
   assert.equal(statement.totalDebit, 1150);
   assert.equal(statement.totalCredit, 515);
   assert.equal(statement.closingBalance, 635);
   assert.equal(formatBalanceSide(635), "635.00 Dr");
-  assert.equal(statement.rows[0].particulars, "Sales — Open");
-  assert.equal(ledgerLineParticulars({
-    kind: "Invoice",
-    detail: "Open",
-  }), "Sales — Open");
 });
 
-test("PDF model excludes reversed invoices from ledger and lists schedules", () => {
+test("year sections close each year and open the next with opening balance", () => {
+  const statement = buildBalanceConfirmationLedgerRows([
+    {
+      date: "2024-11-10",
+      kind: "Invoice",
+      voucher: "A1",
+      sales_incl_vat: 1000,
+      detail: "Open",
+    },
+    {
+      date: "2024-12-05",
+      kind: "Receipt",
+      voucher: "R1",
+      collected_amount: 200,
+      detail: "Invoice A1 (200)",
+    },
+    {
+      date: "2025-02-01",
+      kind: "Invoice",
+      voucher: "B1",
+      sales_incl_vat: 500,
+      detail: "Open",
+    },
+    {
+      date: "2025-03-15",
+      kind: "Invoice",
+      voucher: "B2",
+      sales_incl_vat: 100,
+      detail: "Open",
+    },
+  ]);
+
+  assert.equal(statement.years.length, 2);
+  assert.equal(statement.years[0].year, "2024");
+  assert.equal(statement.years[0].openingBalance, 0);
+  assert.equal(statement.years[0].closingBalance, 800);
+  assert.equal(statement.years[0].totalDebit, 1000);
+  assert.equal(statement.years[0].totalCredit, 200);
+  assert.equal(statement.years[0].rows[1].monthBreakBefore, true);
+
+  assert.equal(statement.years[1].year, "2025");
+  assert.equal(statement.years[1].openingBalance, 800);
+  assert.equal(statement.years[1].closingBalance, 1400);
+  assert.equal(statement.years[1].rows[1].monthBreakBefore, true);
+  assert.equal(statement.closingBalance, 1400);
+});
+
+test("PDF model uses company name, excludes reversed, and includes outstanding buckets", () => {
   const model = buildCustomerLedgerPdfModel({
     customer: { customer_code: "1198", customer_name: "Test Party" },
     asOfDate: "2026-10-28",
+    outstandingCustomer: {
+      buckets: { "0-30": 500, "31-60": 650, "61-90": 0, "91-120": 0, ">120": 0 },
+      open_invoices: 2,
+      total_outstanding: 1150,
+    },
+    outstandingBucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
     ledger: {
       datewise: [
         {
@@ -140,13 +209,18 @@ test("PDF model excludes reversed invoices from ledger and lists schedules", () 
   });
 
   assert.ok(model);
+  assert.equal(model.companyName, LEDGER_COMPANY_NAME);
+  assert.equal(model.companyName, "Noor Shukran Trading Company");
   assert.equal(model.subtitle, "Balance Confirmation");
   assert.equal(model.ledger.rows.length, 1);
   assert.equal(model.ledger.rows[0].voucher, "1821");
   assert.equal(model.ledger.closingBalance, 1150);
+  assert.equal(model.ledger.years.length, 1);
   assert.equal(model.openInvoices.length, 1);
   assert.equal(model.openTotal, 1150);
   assert.equal(model.reversedInvoices.length, 1);
+  assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("0-30")));
+  assert.ok(model.outstandingBuckets.some((row) => row.kind === "total" && row.amount === 1150));
   assert.match(model.confirmationText, /1,150\.00 Dr/);
   assert.match(model.filename, /balance-confirmation-1198/);
 });

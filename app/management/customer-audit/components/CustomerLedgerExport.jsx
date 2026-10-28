@@ -94,6 +94,8 @@ function reversedFilterValue(row, key) {
 export default function CustomerLedgerExport({
   customer,
   ledger,
+  outstandingCustomer = null,
+  outstandingBucketLabels = [],
 }) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportError, setExportError] = useState("");
@@ -140,6 +142,8 @@ export default function CustomerLedgerExport({
         ledger,
         asOfDate: getKsaDateString(),
         lines: visibleLedgerLines,
+        outstandingCustomer,
+        outstandingBucketLabels,
       });
       if (!model) throw new Error("Ledger is not ready for PDF export.");
       await downloadCustomerLedgerPdf(model);

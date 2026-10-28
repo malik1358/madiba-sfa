@@ -3,7 +3,10 @@ import {
   flattenLedgerLinesExcludingReversed,
   openSettlementInvoices,
 } from "./datewiseLines.js";
+import { buildOutstandingPdfBucketRows } from "./outstanding.js";
 import { getKsaDateString } from "./workdayActivity.js";
+
+export const LEDGER_COMPANY_NAME = "Noor Shukran Trading Company";
 
 const COLORS = {
   headerBg: [15, 76, 92],
@@ -43,6 +46,16 @@ function formatDisplayDate(isoDate) {
   return `${day}-${months[Number(month) - 1]}-${year}`;
 }
 
+export function yearKeyFromDate(isoDate) {
+  const raw = String(isoDate || "").trim();
+  return /^\d{4}/.test(raw) ? raw.slice(0, 4) : "";
+}
+
+export function monthKeyFromDate(isoDate) {
+  const raw = String(isoDate || "").trim();
+  return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
+}
+
 /**
  * Map one datewise ledger line to party-ledger Debit / Credit.
  * Customer AR: sales debit; receipts / CN / purchase settlements credit;
@@ -76,8 +89,14 @@ export function ledgerLineDebitCredit(row) {
   return { debit: 0, credit: 0 };
 }
 
+/**
+ * Balance-confirmation particulars stay short.
+ * Receipt / Payment do not repeat applied invoice numbers or amounts.
+ */
 export function ledgerLineParticulars(row) {
   const kind = String(row?.kind || "Entry").trim() || "Entry";
+  if (kind === "Receipt" || kind === "Payment") return kind;
+  if (kind === "Purchase") return "Purchase";
   const detail = String(row?.detail || "").trim();
   if (!detail || detail === "—") return kind;
   if (kind === "Invoice") return `Sales — ${detail}`;
@@ -85,14 +104,14 @@ export function ledgerLineParticulars(row) {
 }
 
 /**
- * Running-balance party ledger rows for balance confirmation.
+ * Running-balance rows plus year sections (month gaps, year close, opening BF).
  * Balance is positive when the customer owes (Dr).
  */
 export function buildBalanceConfirmationLedgerRows(lines = []) {
   let balance = 0;
   let totalDebit = 0;
   let totalCredit = 0;
-  const rows = [];
+  const entries = [];
 
   (Array.isArray(lines) ? lines : []).forEach((line) => {
     const { debit, credit } = ledgerLineDebitCredit(line);
@@ -100,8 +119,11 @@ export function buildBalanceConfirmationLedgerRows(lines = []) {
     balance = roundMoney(balance + debit - credit);
     totalDebit = roundMoney(totalDebit + debit);
     totalCredit = roundMoney(totalCredit + credit);
-    rows.push({
+    entries.push({
+      type: "entry",
       date: line.date || "",
+      year: yearKeyFromDate(line.date),
+      month: monthKeyFromDate(line.date),
       particulars: ledgerLineParticulars(line),
       voucher: line.voucher || "—",
       debit,
@@ -110,8 +132,43 @@ export function buildBalanceConfirmationLedgerRows(lines = []) {
     });
   });
 
+  const yearKeys = [...new Set(entries.map((row) => row.year).filter(Boolean))].sort();
+  const years = [];
+  let carry = 0;
+
+  yearKeys.forEach((year) => {
+    const yearEntries = entries.filter((row) => row.year === year);
+    let yearDebit = 0;
+    let yearCredit = 0;
+    let previousMonth = "";
+    const rows = [];
+
+    yearEntries.forEach((row) => {
+      yearDebit = roundMoney(yearDebit + row.debit);
+      yearCredit = roundMoney(yearCredit + row.credit);
+      const monthBreakBefore = Boolean(previousMonth && row.month && row.month !== previousMonth);
+      rows.push({ ...row, monthBreakBefore });
+      previousMonth = row.month || previousMonth;
+    });
+
+    const closingBalance = yearEntries.length
+      ? yearEntries[yearEntries.length - 1].balance
+      : carry;
+
+    years.push({
+      year,
+      openingBalance: carry,
+      rows,
+      totalDebit: yearDebit,
+      totalCredit: yearCredit,
+      closingBalance,
+    });
+    carry = closingBalance;
+  });
+
   return {
-    rows,
+    rows: entries,
+    years,
     totalDebit,
     totalCredit,
     closingBalance: balance,
@@ -123,6 +180,8 @@ export function buildCustomerLedgerPdfModel({
   ledger = null,
   asOfDate = "",
   lines = null,
+  outstandingCustomer = null,
+  outstandingBucketLabels = [],
 } = {}) {
   if (!customer || !ledger) return null;
 
@@ -138,9 +197,13 @@ export function buildCustomerLedgerPdfModel({
   const statementDate = String(asOfDate || getKsaDateString() || "").trim();
   const openTotal = roundMoney(openInvoices.reduce((total, row) => total + Number(row.remaining || 0), 0));
   const closing = statement.closingBalance;
+  const bucketRows = buildOutstandingPdfBucketRows(
+    outstandingCustomer,
+    outstandingBucketLabels,
+  ).filter((row) => row.kind === "bucket" || row.kind === "total");
 
   return {
-    companyName: "MADIBA",
+    companyName: LEDGER_COMPANY_NAME,
     title: "Customer Account Statement",
     subtitle: "Balance Confirmation",
     customerCode: code,
@@ -150,6 +213,7 @@ export function buildCustomerLedgerPdfModel({
     periodFrom: dates[0] || "",
     periodTo: dates[dates.length - 1] || statementDate,
     ledger: statement,
+    outstandingBuckets: bucketRows,
     openInvoices: openInvoices.map((row) => ({
       invoice_date: row.invoice_date || "",
       voucher_number: row.voucher_number || "—",
@@ -201,6 +265,88 @@ function moneyOrBlank(value) {
   return Number(value || 0) > 0.009 ? formatLedgerMoney(value) : "";
 }
 
+function drawLedgerTableHeader(doc, marginX, contentWidth, ledgerCols, headerHeight, ensureSpace, cursorRef) {
+  ensureSpace(headerHeight + 16);
+  fillHeader(doc, marginX, cursorRef.y, contentWidth, headerHeight);
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(8);
+  let colX = marginX;
+  ledgerCols.forEach((col) => {
+    drawCellText(doc, col.label, colX, cursorRef.y + 12, col.width, {
+      align: col.align,
+      color: COLORS.headerText,
+    });
+    colX += col.width;
+  });
+  cursorRef.y += headerHeight;
+}
+
+function drawLedgerDataRow(doc, {
+  marginX,
+  contentWidth,
+  ledgerCols,
+  rowHeight,
+  row,
+  zebra,
+  ensureSpace,
+  cursorRef,
+}) {
+  ensureSpace(rowHeight + 2);
+  if (cursorRef.y <= 42) {
+    // Page just started — caller redraws header when needed.
+  }
+  if (zebra) {
+    doc.setFillColor(...COLORS.zebraBg);
+    doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
+  }
+  doc.setDrawColor(...COLORS.border);
+  doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
+  doc.setFont(undefined, row.bold ? "bold" : "normal");
+  doc.setFontSize(8);
+  let colX = marginX;
+  ledgerCols.forEach((col) => {
+    let text = row.values[col.key];
+    if (col.key === "particulars") {
+      const clipped = doc.splitTextToSize(String(text || ""), col.width - 6);
+      text = Array.isArray(clipped) ? clipped[0] : text;
+    }
+    drawCellText(doc, text, colX, cursorRef.y + 11, col.width, { align: col.align });
+    colX += col.width;
+  });
+  cursorRef.y += rowHeight;
+}
+
+function drawYearTotalRow(doc, {
+  marginX,
+  contentWidth,
+  ledgerCols,
+  rowHeight,
+  label,
+  totalDebit,
+  totalCredit,
+  closingBalance,
+  ensureSpace,
+  cursorRef,
+}) {
+  ensureSpace(rowHeight + 8);
+  doc.setFillColor(...COLORS.totalBg);
+  doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
+  doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(8);
+  let totalX = marginX;
+  [
+    { text: label, width: 62 + 190 + 70, align: "left" },
+    { text: formatLedgerMoney(totalDebit), width: 68, align: "right" },
+    { text: formatLedgerMoney(totalCredit), width: 68, align: "right" },
+    { text: formatBalanceSide(closingBalance), width: ledgerCols[5].width, align: "right" },
+  ].forEach((cell) => {
+    drawCellText(doc, cell.text, totalX, cursorRef.y + 11, cell.width, { align: cell.align });
+    totalX += cell.width;
+  });
+  cursorRef.y += rowHeight;
+}
+
 /**
  * Render a professional balance-confirmation PDF (A4) and return the jsPDF doc.
  */
@@ -214,51 +360,54 @@ export async function createCustomerLedgerPdfDoc(model) {
   const contentWidth = pageWidth - marginX * 2;
   const rowHeight = 15;
   const headerHeight = 17;
-  let cursorY = 40;
+  const cursorRef = { y: 40 };
 
   const ensureSpace = (needed) => {
-    if (cursorY + needed <= pageHeight - 42) return;
+    if (cursorRef.y + needed <= pageHeight - 42) return;
     doc.addPage();
-    cursorY = 40;
+    cursorRef.y = 40;
   };
 
-  // Title block
+  // Title block — company may wrap to two lines.
+  const companyLines = doc.splitTextToSize(model.companyName || LEDGER_COMPANY_NAME, contentWidth - 200);
+  const titleBlockHeight = 70 + Math.max(0, (companyLines.length - 1) * 14);
   doc.setDrawColor(...COLORS.accent);
   doc.setLineWidth(1.2);
-  doc.roundedRect(marginX, cursorY, contentWidth, 78, 4, 4);
+  doc.roundedRect(marginX, cursorRef.y, contentWidth, titleBlockHeight, 4, 4);
   doc.setFont(undefined, "bold");
-  doc.setFontSize(16);
+  doc.setFontSize(14);
   doc.setTextColor(...COLORS.accent);
-  doc.text(model.companyName, marginX + 14, cursorY + 24);
+  doc.text(companyLines, marginX + 14, cursorRef.y + 22);
+  const afterCompanyY = cursorRef.y + 22 + companyLines.length * 14;
   doc.setFontSize(12);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text(model.title, marginX + 14, cursorY + 44);
+  doc.text(model.title, marginX + 14, afterCompanyY + 4);
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text(model.subtitle, marginX + 14, cursorY + 60);
+  doc.text(model.subtitle, marginX + 14, afterCompanyY + 20);
 
   doc.setFont(undefined, "normal");
   doc.setFontSize(9);
   doc.setTextColor(...COLORS.bodyText);
   const rightX = marginX + contentWidth - 14;
-  doc.text(`Statement date: ${formatDisplayDate(model.statementDate)}`, rightX, cursorY + 24, { align: "right" });
+  doc.text(`Statement date: ${formatDisplayDate(model.statementDate)}`, rightX, cursorRef.y + 22, { align: "right" });
   doc.text(
     `Period: ${formatDisplayDate(model.periodFrom)} to ${formatDisplayDate(model.periodTo)}`,
     rightX,
-    cursorY + 40,
+    cursorRef.y + 38,
     { align: "right" },
   );
-  cursorY += 96;
+  cursorRef.y += titleBlockHeight + 16;
 
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
-  doc.text("Party", marginX, cursorY);
+  doc.setTextColor(...COLORS.bodyText);
+  doc.text("Party", marginX, cursorRef.y);
   doc.setFont(undefined, "normal");
   const partyLines = doc.splitTextToSize(model.customerLabel || "—", contentWidth - 50);
-  doc.text(partyLines, marginX + 42, cursorY);
-  cursorY += Math.max(18, partyLines.length * 12 + 8);
+  doc.text(partyLines, marginX + 42, cursorRef.y);
+  cursorRef.y += Math.max(18, partyLines.length * 12 + 8);
 
-  // Ledger table
   const ledgerCols = [
     { key: "date", label: "Date", width: 62, align: "left" },
     { key: "particulars", label: "Particulars", width: 190, align: "left" },
@@ -268,118 +417,209 @@ export async function createCustomerLedgerPdfDoc(model) {
     { key: "balance", label: "Balance", width: contentWidth - (62 + 190 + 70 + 68 + 68), align: "right" },
   ];
 
-  const drawLedgerHeader = () => {
-    ensureSpace(headerHeight + rowHeight);
-    fillHeader(doc, marginX, cursorY, contentWidth, headerHeight);
-    doc.setFont(undefined, "bold");
-    doc.setFontSize(8);
-    let colX = marginX;
-    ledgerCols.forEach((col) => {
-      drawCellText(doc, col.label, colX, cursorY + 12, col.width, {
-        align: col.align,
-        color: COLORS.headerText,
-      });
-      colX += col.width;
-    });
-    cursorY += headerHeight;
-  };
-
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
   ensureSpace(24);
-  doc.text("Account Ledger", marginX, cursorY);
-  cursorY += 16;
-  doc.setFont(undefined, "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(...COLORS.mutedText);
-  doc.text("Amounts in Saudi Riyals. Closing balance Dr = amount receivable from the party.", marginX, cursorY);
-  cursorY += 14;
+  doc.text("Account Ledger", marginX, cursorRef.y);
+  cursorRef.y += 16;
 
-  drawLedgerHeader();
+  const yearSections = Array.isArray(model.ledger?.years) && model.ledger.years.length
+    ? model.ledger.years
+    : [{
+      year: "",
+      openingBalance: 0,
+      rows: model.ledger?.rows || [],
+      totalDebit: model.ledger?.totalDebit || 0,
+      totalCredit: model.ledger?.totalCredit || 0,
+      closingBalance: model.ledger?.closingBalance || 0,
+    }];
 
-  const ledgerRows = model.ledger.rows || [];
-  if (!ledgerRows.length) {
+  if (!yearSections.some((section) => (section.rows || []).length)) {
     ensureSpace(rowHeight);
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No ledger movements for this customer.", marginX + 4, cursorY + 11);
-    cursorY += rowHeight;
+    doc.text("No ledger movements for this customer.", marginX + 4, cursorRef.y + 11);
+    cursorRef.y += rowHeight + 10;
   }
 
-  ledgerRows.forEach((row, index) => {
-    ensureSpace(rowHeight + 2);
-    if (cursorY === 40) drawLedgerHeader();
-    if (index % 2 === 1) {
-      doc.setFillColor(...COLORS.zebraBg);
-      doc.rect(marginX, cursorY, contentWidth, rowHeight, "F");
+  yearSections.forEach((section, sectionIndex) => {
+    ensureSpace(36 + headerHeight + rowHeight * 3);
+    if (section.year) {
+      doc.setFont(undefined, "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(...COLORS.accent);
+      doc.text(`Year ${section.year}`, marginX, cursorRef.y);
+      cursorRef.y += 14;
     }
-    doc.setDrawColor(...COLORS.border);
-    doc.rect(marginX, cursorY, contentWidth, rowHeight);
-    doc.setFont(undefined, "normal");
-    doc.setFontSize(8);
-    const values = {
-      date: formatDisplayDate(row.date),
-      particulars: row.particulars,
-      voucher: row.voucher,
-      debit: moneyOrBlank(row.debit),
-      credit: moneyOrBlank(row.credit),
-      balance: formatBalanceSide(row.balance),
-    };
-    let colX = marginX;
-    ledgerCols.forEach((col) => {
-      let text = values[col.key];
-      if (col.key === "particulars") {
-        const clipped = doc.splitTextToSize(String(text || ""), col.width - 6);
-        text = Array.isArray(clipped) ? clipped[0] : text;
+
+    drawLedgerTableHeader(doc, marginX, contentWidth, ledgerCols, headerHeight, ensureSpace, cursorRef);
+
+    const showOpening = sectionIndex > 0 || Math.abs(Number(section.openingBalance || 0)) > 0.009;
+    if (showOpening) {
+      drawLedgerDataRow(doc, {
+        marginX,
+        contentWidth,
+        ledgerCols,
+        rowHeight,
+        zebra: false,
+        ensureSpace,
+        cursorRef,
+        row: {
+          bold: true,
+          values: {
+            date: section.year ? `01-Jan-${section.year}` : "",
+            particulars: "Opening Balance",
+            voucher: "",
+            debit: "",
+            credit: "",
+            balance: formatBalanceSide(section.openingBalance),
+          },
+        },
+      });
+    }
+
+    let zebraIndex = showOpening ? 1 : 0;
+    (section.rows || []).forEach((row) => {
+      if (row.monthBreakBefore) {
+        ensureSpace(rowHeight);
+        cursorRef.y += rowHeight;
       }
-      drawCellText(doc, text, colX, cursorY + 11, col.width, { align: col.align });
-      colX += col.width;
+      if (cursorRef.y <= 42) {
+        drawLedgerTableHeader(doc, marginX, contentWidth, ledgerCols, headerHeight, ensureSpace, cursorRef);
+      }
+      drawLedgerDataRow(doc, {
+        marginX,
+        contentWidth,
+        ledgerCols,
+        rowHeight,
+        zebra: zebraIndex % 2 === 1,
+        ensureSpace,
+        cursorRef,
+        row: {
+          values: {
+            date: formatDisplayDate(row.date),
+            particulars: row.particulars,
+            voucher: row.voucher,
+            debit: moneyOrBlank(row.debit),
+            credit: moneyOrBlank(row.credit),
+            balance: formatBalanceSide(row.balance),
+          },
+        },
+      });
+      zebraIndex += 1;
     });
-    cursorY += rowHeight;
+
+    drawYearTotalRow(doc, {
+      marginX,
+      contentWidth,
+      ledgerCols,
+      rowHeight,
+      label: section.year ? `Total ${section.year}` : "Total",
+      totalDebit: section.totalDebit,
+      totalCredit: section.totalCredit,
+      closingBalance: section.closingBalance,
+      ensureSpace,
+      cursorRef,
+    });
+
+    ensureSpace(20);
+    doc.setFont(undefined, "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...COLORS.bodyText);
+    doc.text(
+      section.year
+        ? `Closing balance ${section.year}: SAR ${formatBalanceSide(section.closingBalance)}`
+        : `Closing balance: SAR ${formatBalanceSide(section.closingBalance)}`,
+      marginX,
+      cursorRef.y + 12,
+    );
+    cursorRef.y += 22;
   });
 
-  // Totals
-  ensureSpace(rowHeight + 8);
-  doc.setFillColor(...COLORS.totalBg);
-  doc.rect(marginX, cursorY, contentWidth, rowHeight, "F");
-  doc.rect(marginX, cursorY, contentWidth, rowHeight);
-  doc.setFont(undefined, "bold");
-  doc.setFontSize(8);
-  let totalX = marginX;
-  [
-    { text: "Total", width: 62 + 190 + 70, align: "left" },
-    { text: formatLedgerMoney(model.ledger.totalDebit), width: 68, align: "right" },
-    { text: formatLedgerMoney(model.ledger.totalCredit), width: 68, align: "right" },
-    { text: formatBalanceSide(model.ledger.closingBalance), width: ledgerCols[5].width, align: "right" },
-  ].forEach((cell) => {
-    drawCellText(doc, cell.text, totalX, cursorY + 11, cell.width, { align: cell.align });
-    totalX += cell.width;
-  });
-  cursorY += rowHeight + 16;
-
-  ensureSpace(36);
+  ensureSpace(28);
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text(`Closing balance as on ${formatDisplayDate(model.statementDate)}: SAR ${formatBalanceSide(model.ledger.closingBalance)}`, marginX, cursorY);
-  cursorY += 18;
+  doc.text(
+    `Closing balance as on ${formatDisplayDate(model.statementDate)}: SAR ${formatBalanceSide(model.ledger.closingBalance)}`,
+    marginX,
+    cursorRef.y,
+  );
+  cursorRef.y += 18;
+
+  // Bucket-wise outstanding under closing balance
+  ensureSpace(40);
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(10);
+  doc.text("Outstanding by aging bucket", marginX, cursorRef.y);
+  cursorRef.y += 12;
+
+  const bucketCols = [
+    { key: "label", label: "Bucket", width: contentWidth - 120, align: "left" },
+    { key: "amount", label: "Amount", width: 120, align: "right" },
+  ];
+  ensureSpace(headerHeight + rowHeight);
+  fillHeader(doc, marginX, cursorRef.y, contentWidth, headerHeight);
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(8);
+  let bucketHeaderX = marginX;
+  bucketCols.forEach((col) => {
+    drawCellText(doc, col.label, bucketHeaderX, cursorRef.y + 12, col.width, {
+      align: col.align,
+      color: COLORS.headerText,
+    });
+    bucketHeaderX += col.width;
+  });
+  cursorRef.y += headerHeight;
+
+  const buckets = Array.isArray(model.outstandingBuckets) ? model.outstandingBuckets : [];
+  if (!buckets.length) {
+    ensureSpace(rowHeight);
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...COLORS.mutedText);
+    doc.text("No outstanding bucket row for this customer.", marginX + 4, cursorRef.y + 11);
+    cursorRef.y += rowHeight;
+  }
+  buckets.forEach((bucket, index) => {
+    ensureSpace(rowHeight + 2);
+    if (index % 2 === 1) {
+      doc.setFillColor(...COLORS.zebraBg);
+      doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
+    }
+    doc.setDrawColor(...COLORS.border);
+    doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
+    doc.setFont(undefined, bucket.kind === "total" ? "bold" : "normal");
+    doc.setFontSize(8);
+    drawCellText(doc, bucket.label, marginX, cursorRef.y + 11, bucketCols[0].width, { align: "left" });
+    drawCellText(
+      doc,
+      formatLedgerMoney(bucket.amount),
+      marginX + bucketCols[0].width,
+      cursorRef.y + 11,
+      bucketCols[1].width,
+      { align: "right", color: bucket.kind === "total" ? COLORS.open : COLORS.bodyText },
+    );
+    cursorRef.y += rowHeight;
+  });
+  cursorRef.y += 16;
 
   // Confirmation
   ensureSpace(90);
   doc.setDrawColor(...COLORS.accent);
   doc.setLineWidth(0.8);
-  doc.roundedRect(marginX, cursorY, contentWidth, 78, 3, 3);
+  doc.roundedRect(marginX, cursorRef.y, contentWidth, 78, 3, 3);
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
-  doc.text("Balance Confirmation", marginX + 10, cursorY + 16);
+  doc.setTextColor(...COLORS.bodyText);
+  doc.text("Balance Confirmation", marginX + 10, cursorRef.y + 16);
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
-  doc.setTextColor(...COLORS.bodyText);
   const confirmLines = doc.splitTextToSize(model.confirmationText, contentWidth - 20);
-  doc.text(confirmLines, marginX + 10, cursorY + 32);
-  cursorY += 94;
+  doc.text(confirmLines, marginX + 10, cursorRef.y + 32);
+  cursorRef.y += 94;
 
   // Signatures
   ensureSpace(70);
@@ -387,26 +627,26 @@ export async function createCustomerLedgerPdfDoc(model) {
   ["Prepared by", "Authorised signatory", "Customer confirmation"].forEach((label, index) => {
     const x = marginX + index * (sigWidth + 12);
     doc.setDrawColor(...COLORS.border);
-    doc.line(x, cursorY + 36, x + sigWidth, cursorY + 36);
+    doc.line(x, cursorRef.y + 36, x + sigWidth, cursorRef.y + 36);
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text(label, x, cursorY + 50);
+    doc.text(label, x, cursorRef.y + 50);
   });
-  cursorY += 70;
+  cursorRef.y += 70;
 
   // Open invoices schedule
   ensureSpace(40);
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Schedule A — Open Invoices", marginX, cursorY);
-  cursorY += 14;
+  doc.text("Schedule A — Open Invoices", marginX, cursorRef.y);
+  cursorRef.y += 14;
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text("Bills still open as per FIFO settlement (excluded reversals not listed here).", marginX, cursorY);
-  cursorY += 12;
+  doc.text("Bills still open as per FIFO settlement (excluded reversals not listed here).", marginX, cursorRef.y);
+  cursorRef.y += 12;
 
   const openCols = [
     { key: "invoice_date", label: "Date", width: 62, align: "left" },
@@ -420,18 +660,18 @@ export async function createCustomerLedgerPdfDoc(model) {
 
   const drawOpenHeader = () => {
     ensureSpace(headerHeight + rowHeight);
-    fillHeader(doc, marginX, cursorY, contentWidth, headerHeight);
+    fillHeader(doc, marginX, cursorRef.y, contentWidth, headerHeight);
     doc.setFont(undefined, "bold");
     doc.setFontSize(8);
     let colX = marginX;
     openCols.forEach((col) => {
-      drawCellText(doc, col.label, colX, cursorY + 12, col.width, {
+      drawCellText(doc, col.label, colX, cursorRef.y + 12, col.width, {
         align: col.align,
         color: COLORS.headerText,
       });
       colX += col.width;
     });
-    cursorY += headerHeight;
+    cursorRef.y += headerHeight;
   };
 
   drawOpenHeader();
@@ -440,18 +680,18 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No open invoices.", marginX + 4, cursorY + 11);
-    cursorY += rowHeight;
+    doc.text("No open invoices.", marginX + 4, cursorRef.y + 11);
+    cursorRef.y += rowHeight;
   }
   model.openInvoices.forEach((row, index) => {
     ensureSpace(rowHeight + 2);
-    if (cursorY === 40) drawOpenHeader();
+    if (cursorRef.y === 40) drawOpenHeader();
     if (index % 2 === 1) {
       doc.setFillColor(...COLORS.zebraBg);
-      doc.rect(marginX, cursorY, contentWidth, rowHeight, "F");
+      doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
     }
     doc.setDrawColor(...COLORS.border);
-    doc.rect(marginX, cursorY, contentWidth, rowHeight);
+    doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     const values = {
@@ -465,40 +705,40 @@ export async function createCustomerLedgerPdfDoc(model) {
     };
     let colX = marginX;
     openCols.forEach((col) => {
-      drawCellText(doc, values[col.key], colX, cursorY + 11, col.width, {
+      drawCellText(doc, values[col.key], colX, cursorRef.y + 11, col.width, {
         align: col.align,
         color: col.key === "remaining" ? COLORS.open : COLORS.bodyText,
       });
       colX += col.width;
     });
-    cursorY += rowHeight;
+    cursorRef.y += rowHeight;
   });
 
   ensureSpace(rowHeight + 10);
   doc.setFillColor(...COLORS.totalBg);
-  doc.rect(marginX, cursorY, contentWidth, rowHeight, "F");
-  doc.rect(marginX, cursorY, contentWidth, rowHeight);
+  doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
+  doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
   doc.setFont(undefined, "bold");
   doc.setFontSize(8);
-  drawCellText(doc, "Total open", marginX, cursorY + 11, 140, { align: "left" });
-  drawCellText(doc, formatLedgerMoney(model.openTotal), marginX + 286, cursorY + 11, 68, {
+  drawCellText(doc, "Total open", marginX, cursorRef.y + 11, 140, { align: "left" });
+  drawCellText(doc, formatLedgerMoney(model.openTotal), marginX + 286, cursorRef.y + 11, 68, {
     align: "right",
     color: COLORS.open,
   });
-  cursorY += rowHeight + 18;
+  cursorRef.y += rowHeight + 18;
 
   // Reversed schedule
   ensureSpace(40);
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Schedule B — Reversed Invoices (excluded from ledger)", marginX, cursorY);
-  cursorY += 14;
+  doc.text("Schedule B — Reversed Invoices (excluded from ledger)", marginX, cursorRef.y);
+  cursorRef.y += 14;
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text("Same-day / next-day full credit-note reversals. Not included in the account ledger above.", marginX, cursorY);
-  cursorY += 12;
+  doc.text("Same-day / next-day full credit-note reversals. Not included in the account ledger above.", marginX, cursorRef.y);
+  cursorRef.y += 12;
 
   const revCols = [
     { key: "invoice_date", label: "Sales Date", width: 62, align: "left" },
@@ -511,18 +751,18 @@ export async function createCustomerLedgerPdfDoc(model) {
 
   const drawRevHeader = () => {
     ensureSpace(headerHeight + rowHeight);
-    fillHeader(doc, marginX, cursorY, contentWidth, headerHeight);
+    fillHeader(doc, marginX, cursorRef.y, contentWidth, headerHeight);
     doc.setFont(undefined, "bold");
     doc.setFontSize(8);
     let colX = marginX;
     revCols.forEach((col) => {
-      drawCellText(doc, col.label, colX, cursorY + 12, col.width, {
+      drawCellText(doc, col.label, colX, cursorRef.y + 12, col.width, {
         align: col.align,
         color: COLORS.headerText,
       });
       colX += col.width;
     });
-    cursorY += headerHeight;
+    cursorRef.y += headerHeight;
   };
 
   drawRevHeader();
@@ -531,18 +771,18 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No reversed invoices.", marginX + 4, cursorY + 11);
-    cursorY += rowHeight;
+    doc.text("No reversed invoices.", marginX + 4, cursorRef.y + 11);
+    cursorRef.y += rowHeight;
   }
   model.reversedInvoices.forEach((row, index) => {
     ensureSpace(rowHeight + 2);
-    if (cursorY === 40) drawRevHeader();
+    if (cursorRef.y === 40) drawRevHeader();
     if (index % 2 === 1) {
       doc.setFillColor(...COLORS.zebraBg);
-      doc.rect(marginX, cursorY, contentWidth, rowHeight, "F");
+      doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
     }
     doc.setDrawColor(...COLORS.border);
-    doc.rect(marginX, cursorY, contentWidth, rowHeight);
+    doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     const values = {
@@ -555,10 +795,10 @@ export async function createCustomerLedgerPdfDoc(model) {
     };
     let colX = marginX;
     revCols.forEach((col) => {
-      drawCellText(doc, values[col.key], colX, cursorY + 11, col.width, { align: col.align });
+      drawCellText(doc, values[col.key], colX, cursorRef.y + 11, col.width, { align: col.align });
       colX += col.width;
     });
-    cursorY += rowHeight;
+    cursorRef.y += rowHeight;
   });
 
   addPdfBuildFooter(doc, getClientBuildId());

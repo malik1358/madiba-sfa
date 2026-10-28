@@ -771,6 +771,8 @@ function CustomerAuditPageContent() {
             <CustomerLedgerExport
               customer={selectedCustomer}
               ledger={paymentSettlement}
+              outstandingCustomer={outstandingInfo.customer}
+              outstandingBucketLabels={visibleOutstandingBuckets}
             />
             <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
           </>

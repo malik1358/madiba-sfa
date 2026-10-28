@@ -151,6 +151,10 @@ test("matchPaymentsFifo Payment leftover without Purchases settles open sales", 
   assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 0);
   assert.equal(allocations.length, 2);
   assert.equal(Number(invoices[0].remaining.toFixed(2)), 120);
+  const cash = allocations.find((row) => row.vch_no === "R1");
+  const payment = allocations.find((row) => row.vch_no === "PV-1");
+  assert.equal(Boolean(cash?.is_payment), false);
+  assert.equal(Boolean(payment?.is_payment), true);
 
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -163,6 +167,10 @@ test("matchPaymentsFifo Payment leftover without Purchases settles open sales", 
   });
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 1030);
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 120);
+  const settled = ledger.invoices[0].settlements.find((row) => row.vch_no === "PV-1");
+  assert.equal(Boolean(settled?.is_payment), true);
+  // Customer 1231 Payment 384: leftover closes AR but must stay labelled Payment/Dr, not Rcpt.
+  assert.equal(Number(settled?.amount.toFixed(2)), 230);
 });
 
 test("matchPaymentsFifo exact Payment↔Purchase amount pairs go to matchedPurchasePayments", () => {

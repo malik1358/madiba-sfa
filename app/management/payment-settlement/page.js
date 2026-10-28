@@ -236,22 +236,25 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           ) : "—"}
         </td>
       </tr>
-      {open && (invoice.settlements || []).map((settlement, index) => (
-        <tr key={`${invoice.invoice_date}-rcpt-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
-          <td colSpan={2} style={{ paddingLeft: 18 }}>
-            {Number(settlement.amount) < 0 ? "Payment" : "Paid"} on {settlement.receipt_date}
-            {settlement.vch_no
-              ? ` · ${Number(settlement.amount) < 0 ? "" : "Rcpt "}${settlement.vch_no}`
-              : ""}
-          </td>
-          <td colSpan={2} />
-          <td>{formatMoney(settlement.amount)}</td>
-          <td colSpan={3} />
-          <td />
-          <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
-          <td />
-        </tr>
-      ))}
+      {open && (invoice.settlements || []).map((settlement, index) => {
+        const isPayment = Boolean(settlement.is_payment) || Number(settlement.amount) < 0;
+        return (
+          <tr key={`${invoice.invoice_date}-rcpt-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
+            <td colSpan={2} style={{ paddingLeft: 18 }}>
+              {isPayment ? "Payment" : "Paid"} on {settlement.receipt_date}
+              {settlement.vch_no
+                ? ` · ${isPayment ? "" : "Rcpt "}${settlement.vch_no}`
+                : ""}
+            </td>
+            <td colSpan={2} />
+            <td>{formatMoney(settlement.amount)}</td>
+            <td colSpan={3} />
+            <td>{isPayment ? <span className={statusClass("Open")}>Dr</span> : null}</td>
+            <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
+            <td />
+          </tr>
+        );
+      })}
       {open && (invoice.purchase_settlements || []).map((purchase, index) => (
         <tr key={`${invoice.invoice_date}-pur-${purchase.voucher_number}-${index}`} className="paymentSettleChildRow">
           <td colSpan={2} style={{ paddingLeft: 18 }}>
@@ -1329,7 +1332,7 @@ export default function PaymentSettlementPage() {
                               <div className="auditSummaryCardMeta">
                                 {(row.receipt_chunks || []).map((chunk, index) => (
                                   <div key={`rc-${chunk.vch_no}-${index}`}>
-                                    Rcpt {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
+                                    {chunk.is_payment || Number(chunk.amount) < 0 ? "Payment" : "Rcpt"} {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
                                   </div>
                                 ))}
                               </div>
@@ -1425,7 +1428,7 @@ export default function PaymentSettlementPage() {
                               <div className="auditSummaryCardMeta">
                                 {(row.receipt_chunks || []).map((chunk, index) => (
                                   <div key={`${chunk.receipt_date}-${chunk.vch_no}-${index}`}>
-                                    Rcpt {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
+                                    {chunk.is_payment || Number(chunk.amount) < 0 ? "Payment" : "Rcpt"} {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
                                   </div>
                                 ))}
                               </div>

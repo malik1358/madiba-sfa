@@ -478,7 +478,7 @@ export default function InvoiceSettlement({
             <h3>Payment Matched to Purchase</h3>
             <p className="auditSectionNote">
               Dual-party Payments applied to Purchases (Matched = exact amount; Applied = FIFO).
-              Leftover Payment after Purchases settles open sales invoices.
+              Leftover Payment after Purchases unpays prior Paid on sales invoices (Dr).
             </p>
           </div>
           <span>{formatCount(totals.matched_purchase_payment_count || 0)} applications</span>

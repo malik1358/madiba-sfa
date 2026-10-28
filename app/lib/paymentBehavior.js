@@ -1273,9 +1273,6 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
           vch_no: event.vch_no,
           amount: applied,
           days,
-          // Payment leftovers settle sales via a receipt-shaped event so Paid
-          // still closes the bill; keep is_payment so the UI labels Dr/Payment
-          // instead of "Paid · Rcpt" (customer 1231 Payment 384).
           is_payment: Boolean(event.is_payment),
           exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
         });
@@ -1420,34 +1417,30 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     return candidates[0]?.invoice || null;
   }
 
+  function unpayInvoice(event, invoice, requested, options = {}) {
+    const capacity = Math.max(0, toNumber(invoice.amount) - toNumber(invoice.remaining));
+    const applied = Math.min(toNumber(requested), capacity);
+    if (!(applied > SETTLEMENT_DUST)) return 0;
+    invoice.remaining = toNumber(invoice.remaining) + applied;
+    allocations.push({
+      invoice_date: invoice.invoice_date,
+      voucher_number: invoice.voucher_number,
+      receipt_date: event.date,
+      vch_no: event.vch_no,
+      amount: -applied,
+      days: isoDaysBetween(event.date, invoice.invoice_date),
+      // Payment leftovers that return cash to the party keep is_payment so the
+      // UI labels Dr/Payment (customer 1231 Payment 384).
+      is_payment: Boolean(options.is_payment),
+      exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
+    });
+    return applied;
+  }
+
   function applyPaymentLeftoverToSales(event, remaining) {
     let left = remaining;
-    const settleEvent = {
-      kind: "receipt",
-      date: event.date,
-      amount: left,
-      vch_no: event.vch_no,
-      is_payment: true,
-    };
-    for (const invoice of invoices) {
-      if (!hasSettlementAmount(left)) break;
-      if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
-      if (!hasSettlementAmount(invoice.remaining)) continue;
-      if (!paymentCanSettleInvoice(event, invoice)) continue;
-      if (receiptBeforeInvoice(settleEvent, invoice)) continue;
-      if (settleEvent.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
-      left = applyToInvoice(settleEvent, invoice, left);
-      invoice.cash_first_receipt_used = true;
-    }
-    for (const invoice of invoices) {
-      if (!hasSettlementAmount(left)) break;
-      if (!paymentCanSettleInvoice(event, invoice)) continue;
-      left = applyToInvoice(settleEvent, invoice, left);
-    }
-    const applied = Math.max(0, remaining - left);
-    paymentAppliedToSales += applied;
-    // Refund unmatched overcollection before treating the Payment as unadjusted
-    // (1424: Bpmt0057 −3,340.75 nets receipt 957's leftover after cash was paid).
+    // 1) Net prior unmatched overcollection first so a Payment that returns an
+    // overcollection does not reopen paid invoices (1424 Bpmt0057).
     if (hasSettlementAmount(left) && unmatchedReceiptAmount > SETTLEMENT_DUST) {
       const refunded = Math.min(left, unmatchedReceiptAmount);
       if (hasSettlementAmount(refunded)) {
@@ -1467,25 +1460,23 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         });
       }
     }
+    // 2) Remaining leftover is money paid to the party: unpay newest already-paid
+    // sales dated on or before the payment (1231 Payment 384). Capacity is only
+    // prior Paid — do not inflate open above the bill or prepay a later invoice.
+    const beforeUnpay = left;
+    const newestPaid = [...invoices].sort((leftInv, rightInv) => {
+      const byDate = String(rightInv.invoice_date || "").localeCompare(String(leftInv.invoice_date || ""));
+      if (byDate !== 0) return byDate;
+      return String(rightInv.voucher_number || "").localeCompare(String(leftInv.voucher_number || ""));
+    });
+    for (const invoice of newestPaid) {
+      if (!hasSettlementAmount(left)) break;
+      if (!paymentCanSettleInvoice(event, invoice)) continue;
+      left -= unpayInvoice(event, invoice, left, { is_payment: true });
+    }
+    paymentAppliedToSales += Math.max(0, beforeUnpay - left);
     if (hasSettlementAmount(left)) unmatchedReceiptAmount += left;
     return left;
-  }
-
-  function unpayInvoice(event, invoice, requested) {
-    const capacity = Math.max(0, toNumber(invoice.amount) - toNumber(invoice.remaining));
-    const applied = Math.min(toNumber(requested), capacity);
-    if (!(applied > SETTLEMENT_DUST)) return 0;
-    invoice.remaining = toNumber(invoice.remaining) + applied;
-    allocations.push({
-      invoice_date: invoice.invoice_date,
-      voucher_number: invoice.voucher_number,
-      receipt_date: event.date,
-      vch_no: event.vch_no,
-      amount: -applied,
-      days: isoDaysBetween(event.date, invoice.invoice_date),
-      exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
-    });
-    return applied;
   }
 
   function applyDebitReceiptReversal(event) {
@@ -2898,9 +2889,11 @@ export function buildPaymentSettlementLedger({
   const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
   const salesInclVat = sumMoney([invoiceSalesInclVat, reversedSalesInclVat]);
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
-  // AR collected = positive collection receipts + Payment leftovers that settled sales
+  // AR collected = positive collection receipts + negative sales allocations
+  // (debit reversals and Payment leftovers that unpay prior Paid)
   // − Payment leftovers that refunded unmatched overcollection.
-  // Purchase-side Payments stay on AP and do not reduce AR collected.
+  // Purchase-side Payments stay on AP. Payment leftovers no longer add to
+  // Collected — they reduce Paid/Collected like money returned to the party.
   // Receipts that only funded an immediately reversed sale (then refunded) drop out.
   const cashRows = buildSortedReceipts(receipts);
   const positiveReceiptSum = cashRows
@@ -2911,7 +2904,6 @@ export function buildPaymentSettlementLedger({
     .filter((row) => toNumber(row.amount) < 0)
     .reduce((total, row) => total + toNumber(row.amount), 0);
   const collectedAmount = positiveReceiptSum
-    + toNumber(paymentAppliedToSales)
     + debitReceiptSum
     - toNumber(paymentRefundedUnmatched);
 

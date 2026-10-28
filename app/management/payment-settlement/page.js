@@ -17,7 +17,7 @@ import {
 } from "../../lib/paymentBehavior.js";
 import {
   datewiseFilterValue,
-  flattenDatewiseLines,
+  flattenDatewiseLinesExcludingVoidCycleCash,
   formatOptionalMoney,
   sumDatewise,
 } from "../../lib/datewiseLines.js";
@@ -634,7 +634,7 @@ export default function PaymentSettlementPage() {
   );
 
   const datewiseLines = useMemo(
-    () => flattenDatewiseLines(ledger?.datewise || []),
+    () => flattenDatewiseLinesExcludingVoidCycleCash(ledger?.datewise || []),
     [ledger],
   );
   const datewiseValueOf = useCallback((row, key) => datewiseFilterValue(row, key), []);
@@ -1594,7 +1594,7 @@ export default function PaymentSettlementPage() {
                   <h2>Datewise Sales & Collections</h2>
                 </div>
                 <p className="moduleHint">
-                  Each invoice, credit note, receipt, payment, and purchase is its own row — including invoices reversed the same day. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
+                  Each invoice, credit note, receipt, payment, and purchase is its own row — including invoices reversed the same day and their credit notes. Cash that only funded a voided sale (then cancelled) is omitted here so Open/Collected stay meaningful; the credit note keeps Reverses. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

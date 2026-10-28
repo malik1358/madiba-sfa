@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   flattenDatewiseLines,
+  flattenDatewiseLinesExcludingVoidCycleCash,
   flattenLedgerLinesExcludingReversed,
   isImmediateReversalLedgerLine,
   openSettlementInvoices,
@@ -103,6 +104,41 @@ test("datewise receipt detail names a reversed sale when collection only funded 
   assert.equal(lines[0].collected_amount, 0);
   assert.equal(lines[0].detail, "Collection on reversed Invoice DNFD/038 (517.5)");
   assert.equal(isImmediateReversalLedgerLine(lines[0]), true);
+  assert.deepEqual(
+    flattenDatewiseLinesExcludingVoidCycleCash([
+      {
+        date: "2026-07-19",
+        invoices: [{
+          voucher_number: "DNFD/038",
+          amount_excl_vat: 450,
+          amount_incl_vat: 517.5,
+          remaining: 0,
+          status: "Reversed",
+        }],
+        credit_notes: [{
+          voucher_number: "389",
+          amount_excl_vat: -450,
+          amount_incl_vat: -517.5,
+          remaining: 0,
+          status: "Reverses DNFD/038",
+          kind: "Credit Note",
+        }],
+        receipts: [{
+          vch_no: "JV/Coll/2026/0411",
+          amount: 517.5,
+          ar_amount: 0,
+          kind: "receipt",
+          applications: [{
+            target_kind: "sales",
+            voucher_number: "DNFD/038",
+            amount: 517.5,
+            status: "Reversed",
+          }],
+        }],
+      },
+    ]).map((row) => `${row.kind} ${row.voucher}`),
+    ["Invoice DNFD/038", "Credit Note 389"],
+  );
 });
 
 test("datewise payment detail names a refund against the reversed invoice", () => {

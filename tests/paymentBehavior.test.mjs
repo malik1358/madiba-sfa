@@ -10,6 +10,7 @@ import {
   isCashSalesVoucher,
   matchPaymentsFifo,
   pairRefundsForReversedSales,
+  parseCreditNoteReferences,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 
@@ -1598,6 +1599,120 @@ test("customer 1177 partial credit notes stay on the named invoices", () => {
   assert.equal(older.credit_note_settled, 0);
   assert.equal(ledger.creditNotes.find((row) => row.voucher_number === "401").applied_to_voucher, "RNFD/084");
   assert.equal(ledger.creditNotes.find((row) => row.voucher_number === "510").applied_to_voucher, "NFD/1497");
+});
+
+test("parseCreditNoteReferences splits Tally compound refs like NFD/1341-1340", () => {
+  assert.deepEqual(parseCreditNoteReferences("NFD/1341-1340"), ["NFD/1341", "NFD/1340"]);
+  assert.deepEqual(parseCreditNoteReferences("DNFD/095"), ["DNFD/095"]);
+  assert.deepEqual(parseCreditNoteReferences("NFD/1340, NFD/1341"), ["NFD/1340", "NFD/1341"]);
+  assert.deepEqual(parseCreditNoteReferences(""), []);
+});
+
+test("compound Ref. No. credit note reverses both named same-day invoices (1424 CN 447)", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-08-09",
+        voucher_number: "NFD/1340",
+        voucher_type: "SALES-NON FOOD DIVISION",
+        item_code: "A004075",
+        quantity: 750,
+        sales_amount: 4950,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-08-09",
+        voucher_number: "NFD/1341",
+        voucher_type: "SALES-NON FOOD DIVISION",
+        item_code: "A004075",
+        quantity: 750,
+        sales_amount: 4950,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-08-09",
+        voucher_number: "447",
+        voucher_type: "Credit Note",
+        reference: "NFD/1341-1340",
+        item_code: "A004075",
+        quantity: -1500,
+        sales_amount: -9900,
+        category: "Paper",
+      },
+    ],
+    receipts: [],
+  });
+
+  assert.equal(ledger.creditNotes.length, 0);
+  assert.equal(ledger.reversedInvoices.length, 2);
+  assert.deepEqual(
+    ledger.reversedInvoices.map((row) => row.voucher_number).sort(),
+    ["NFD/1340", "NFD/1341"],
+  );
+  assert.ok(ledger.reversedInvoices.every((row) => row.credit_note_voucher === "447"));
+});
+
+test("partial named credit note settles DNFD/095 not a later open bill (1424 CN 627)", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-09-13",
+        voucher_number: "DNFD/095",
+        voucher_type: "DAMMAM W/S CREDIT",
+        item_code: "A004224",
+        quantity: 120,
+        sales_amount: 243,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-09-13",
+        voucher_number: "DNFD/095",
+        voucher_type: "DAMMAM W/S CREDIT",
+        item_code: "A004388",
+        quantity: 200,
+        sales_amount: 121,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-09-13",
+        voucher_number: "DNFD/095",
+        voucher_type: "DAMMAM W/S CREDIT",
+        item_code: "A005514",
+        quantity: 60,
+        sales_amount: 572.28,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-09-20",
+        voucher_number: "DNFD/108",
+        voucher_type: "DAMMAM W/S CREDIT",
+        item_code: "A004555",
+        quantity: 500,
+        sales_amount: 5700,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-10-12",
+        voucher_number: "627",
+        voucher_type: "Credit Note",
+        reference: "DNFD/095",
+        item_code: "A005514",
+        quantity: -60,
+        sales_amount: -572.28,
+        category: "Paper",
+      },
+    ],
+    receipts: [],
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.creditNotes.length, 1);
+  assert.equal(ledger.creditNotes[0].voucher_number, "627");
+  assert.equal(ledger.creditNotes[0].applied_to_voucher, "DNFD/095");
+  const named = ledger.invoices.find((row) => row.voucher_number === "DNFD/095");
+  const later = ledger.invoices.find((row) => row.voucher_number === "DNFD/108");
+  assert.equal(Number(named.credit_note_settled.toFixed(2)), Number((572.28 * 1.15).toFixed(2)));
+  assert.equal(later.credit_note_settled, 0);
 });
 
 test("next-day matching credit note still counts as immediate reversal", () => {

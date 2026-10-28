@@ -146,6 +146,32 @@ function normalizeRef(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
+/**
+ * Split a credit-note Ref. No. into invoice vouchers.
+ * Tally often packs two same-day voids as `NFD/1341-1340` (customer 1424 CN 447).
+ * Comma/semicolon lists are also accepted. A single voucher is returned as-is.
+ */
+export function parseCreditNoteReferences(reference = "") {
+  const raw = normalizeRef(reference);
+  if (!raw) return [];
+
+  const chunks = raw.split(/[,;&]+/).map((part) => part.trim()).filter(Boolean);
+  const out = [];
+  for (const chunk of chunks) {
+    // PREFIX/123-456 → PREFIX/123 + PREFIX/456 (not PREFIX/123-456 as one id).
+    const ranged = chunk.match(/^([A-Z0-9]*\/)(\d+(?:-\d+)+)$/i);
+    if (ranged) {
+      const prefix = ranged[1].toUpperCase();
+      for (const num of ranged[2].split("-")) {
+        if (num) out.push(normalizeRef(`${prefix}${num}`));
+      }
+      continue;
+    }
+    out.push(normalizeRef(chunk));
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+
 function amountsMatch(left, right, tolerance = AMOUNT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
 }
@@ -549,6 +575,8 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
     if (!ref) return false;
     const voucher = normalizeRef(invoice.voucher_number);
     if (!voucher) return false;
+    const named = parseCreditNoteReferences(ref);
+    if (named.length) return named.includes(voucher);
     return ref.includes(voucher) || voucher.includes(ref);
   }
 
@@ -680,6 +708,9 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
  *    A CN dated before its referenced invoice is still allowed when the reference
  *    names that voucher (Tally forward Ref. No.); blank / unreferenced early CNs
  *    must not reverse a later reissue.
+ *    A compound Ref. No. like `NFD/1341-1340` that names two or more vouchers and
+ *    matches their combined amount voids every named bill together (customer 1424
+ *    CN 447). Partial named notes still settle FIFO, not here.
  *    If the named voucher is the same day as the credit note and an exact
  *    amount-and-items invoice from the day before is still open, the credit note
  *    reverses that earlier invoice (customer 1486: CN 552 → RNFD/414). The
@@ -721,10 +752,10 @@ export function findImmediateCreditNoteReversals(
   }
 
   function noteRefsInvoice(note, invoice) {
-    const noteRef = normalizeRef(note.reference);
+    const named = parseCreditNoteReferences(note.reference);
     const invoiceRef = normalizeRef(invoice.voucher_number);
-    if (!noteRef || !invoiceRef) return false;
-    return noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef);
+    if (!named.length || !invoiceRef) return false;
+    return named.includes(invoiceRef);
   }
 
   function invoiceRefsNote(invoice, note) {
@@ -734,9 +765,13 @@ export function findImmediateCreditNoteReversals(
     return invoiceRef.includes(noteVoucher) || noteVoucher.includes(invoiceRef);
   }
 
-  function pushReversal(invoice, note, days) {
-    note.remaining = 0;
+  function pushReversal(invoice, note, days, { consumeNote = true } = {}) {
     const invoiceAmount = toNumber(invoice.amount);
+    if (consumeNote) {
+      note.remaining = 0;
+    } else {
+      note.remaining = Math.max(0, toNumber(note.remaining) - invoiceAmount);
+    }
     const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
     reversedKeys.add(key);
     reversals.push({
@@ -761,6 +796,39 @@ export function findImmediateCreditNoteReversals(
     if (byDate !== 0) return byDate;
     return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
   });
+
+  // Pass 1a: one CN that names several vouchers and fully voids their combined
+  // amount (1424: CN 447 Ref NFD/1341-1340 → both same-day invoices).
+  for (const note of notesByDate) {
+    if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) continue;
+    const namedRefs = parseCreditNoteReferences(note.reference);
+    if (namedRefs.length < 2) continue;
+
+    const targets = invoiceList
+      .map((invoice) => {
+        const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+        if (reversedKeys.has(key)) return null;
+        const invoiceAmount = toNumber(invoice.amount);
+        if (invoiceAmount <= AMOUNT_TOLERANCE) return null;
+        if (!noteRefsInvoice(note, invoice)) return null;
+        const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
+        if (offset == null) return null;
+        if (offset < 0 || offset > maxDays) return null;
+        return { invoice, offset, invoiceAmount };
+      })
+      .filter(Boolean);
+
+    if (targets.length < 2) continue;
+    const namedSum = targets.reduce((total, row) => total + row.invoiceAmount, 0);
+    if (!amountsMatch(note.remaining, namedSum) && !amountsMatch(note.amount, namedSum)) {
+      continue;
+    }
+
+    for (const target of targets) {
+      pushReversal(target.invoice, note, target.offset, { consumeNote: false });
+    }
+    note.remaining = 0;
+  }
 
   for (const note of notesByDate) {
     if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) continue;
@@ -857,12 +925,7 @@ export function findImmediateCreditNoteReversals(
 
         const noteVoucher = String(note.voucher_number || "").trim();
         const explicitRef = normalizeRef(note.reference);
-        const invoiceRef = normalizeRef(invoice.voucher_number);
-        const namedHit = Boolean(
-          invoiceRef
-          && explicitRef
-          && (explicitRef.includes(invoiceRef) || invoiceRef.includes(explicitRef)),
-        );
+        const namedHit = noteRefsInvoice(note, invoice);
         const backHit = invoiceRefsNote(invoice, note);
         const refHit = namedHit || backHit;
         // A named credit note may void only that voucher while the named bill
@@ -1452,20 +1515,23 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       continue;
     }
 
-    // Referenced credit notes settle the named Ref. No. first. Leftover
-    // (bill already paid, or the note is larger than the bill) then follows
-    // oldest-open FIFO on the other invoices.
+    // Referenced credit notes settle the named Ref. No. first (including
+    // compound refs like NFD/1341-1340). Leftover (bill already paid, or the
+    // note is larger than the bill) then follows oldest-open FIFO elsewhere.
     if (event.kind === "credit_note") {
-      const referencedVoucher = normalizeRef(event.reference);
-      if (referencedVoucher) {
-        for (const invoice of invoices) {
-          if (!hasSettlementAmount(remaining)) break;
-          if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
-          remaining = applyToInvoice(event, invoice, remaining);
+      const referencedVouchers = parseCreditNoteReferences(event.reference);
+      if (referencedVouchers.length) {
+        const namedSet = new Set(referencedVouchers);
+        for (const named of referencedVouchers) {
+          for (const invoice of invoices) {
+            if (!hasSettlementAmount(remaining)) break;
+            if (normalizeRef(invoice.voucher_number) !== named) continue;
+            remaining = applyToInvoice(event, invoice, remaining);
+          }
         }
         for (const invoice of invoices) {
           if (!hasSettlementAmount(remaining)) break;
-          if (normalizeRef(invoice.voucher_number) === referencedVoucher) continue;
+          if (namedSet.has(normalizeRef(invoice.voucher_number))) continue;
           remaining = applyToInvoice(event, invoice, remaining);
         }
         continue;

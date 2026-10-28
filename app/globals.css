@@ -8187,6 +8187,89 @@ body:has(.workdayTimesBar--punches) .paymentSettleTable.moduleStackedHeaderTable
   color: #5a4a6a;
 }
 
+.customerLedgerExportActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.customerLedgerExportActions .moduleInlineButton {
+  background: #0f4c5c;
+  color: #fff;
+  border-color: #0f4c5c;
+  font-weight: 700;
+}
+
+.customerLedgerExportActions .moduleInlineButton:hover:not(:disabled) {
+  background: #0b3a46;
+}
+
+.customerLedgerBlock h4 {
+  margin: 0;
+  color: #0f4c5c;
+  font-size: 1.05rem;
+}
+
+.customerLedgerKind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #eef1f4;
+  color: #4a5560;
+}
+
+.customerLedgerKind--invoice {
+  background: #e6f1f4;
+  color: #0f4c5c;
+}
+
+.customerLedgerKind--receipt {
+  background: #e6f6ea;
+  color: #1f7a3a;
+}
+
+.customerLedgerKind--payment {
+  background: #fff4df;
+  color: #9a6700;
+}
+
+.customerLedgerKind--purchase {
+  background: #eaf0ff;
+  color: #3553a0;
+}
+
+.customerLedgerKind--credit {
+  background: #f3eef8;
+  color: #6b4f8a;
+}
+
+.customerLedgerRow--invoice td:first-child {
+  box-shadow: inset 3px 0 0 #0f4c5c;
+}
+
+.customerLedgerRow--receipt td:first-child {
+  box-shadow: inset 3px 0 0 #1f7a3a;
+}
+
+.customerLedgerRow--payment td:first-child {
+  box-shadow: inset 3px 0 0 #9a6700;
+}
+
+.customerLedgerRow--purchase td:first-child {
+  box-shadow: inset 3px 0 0 #3553a0;
+}
+
+.customerLedgerRow--credit-note td:first-child,
+.customerLedgerRow--sales-return td:first-child {
+  box-shadow: inset 3px 0 0 #6b4f8a;
+}
+
 .paymentSettleStatementLead {
   background: #fff4df;
   border-radius: 8px;

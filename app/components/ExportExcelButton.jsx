@@ -18,10 +18,12 @@ export default function ExportExcelButton({
   disabled = false,
   onError,
   title,
+  label,
 }) {
   const { language } = useAppLanguage();
   const t = translate(language, TEXT);
   const [exporting, setExporting] = useState(false);
+  const buttonLabel = label || t("exportExcel");
 
   async function handleClick() {
     if (exporting || disabled) return;
@@ -44,9 +46,9 @@ export default function ExportExcelButton({
       className="moduleInlineButton"
       onClick={handleClick}
       disabled={disabled || exporting}
-      title={title || t("exportExcel")}
+      title={title || buttonLabel}
     >
-      {exporting ? t("exporting") : t("exportExcel")}
+      {exporting ? t("exporting") : buttonLabel}
     </button>
   );
 }

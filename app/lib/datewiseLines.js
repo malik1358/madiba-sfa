@@ -88,6 +88,7 @@ export function flattenDatewiseLines(days) {
     });
     (Array.isArray(day?.receipts) ? day.receipts : []).forEach((receipt, index) => {
       const isPayment = receipt.kind === "payment" || Number(receipt.amount) < 0;
+      const applications = Array.isArray(receipt.applications) ? receipt.applications : [];
       lines.push({
         id: `${date}|${isPayment ? "payment" : "receipt"}|${receipt.vch_no || "—"}|${index}`,
         date,
@@ -98,6 +99,7 @@ export function flattenDatewiseLines(days) {
         collected_amount: Number(isPayment ? receipt.ar_amount : receipt.amount) || 0,
         open_amount: null,
         detail: receiptDetail(receipt),
+        unmatched_collection: applications.some((application) => application?.unmatched_collection),
       });
     });
   });
@@ -117,4 +119,37 @@ export function datewiseFilterValue(row, key) {
 
 export function sumDatewise(rows, key) {
   return rows.reduce((total, row) => total + (row[key] == null ? 0 : Number(row[key]) || 0), 0);
+}
+
+/**
+ * Immediate CN reversals belong on the Reversed table, not the customer ledger.
+ * Matches reversed invoice rows and the credit notes / refunds that voided them.
+ */
+export function isImmediateReversalLedgerLine(row) {
+  if (!row) return false;
+  const kind = String(row.kind || "").trim();
+  const detail = String(row.detail || "").trim();
+  if (kind === "Invoice" && detail === "Reversed") return true;
+  if (/^Reverses\b/i.test(detail)) return true;
+  if (kind === "Payment" || kind === "Receipt") {
+    if (/^Reversed sale\b/i.test(detail)) return true;
+    // Keep unmatched-overcollection refunds on the ledger; drop CN-reversal refunds.
+    if (/^Refund Invoice\b/i.test(detail) && !row.unmatched_collection) return true;
+  }
+  return false;
+}
+
+/** Datewise ledger lines with immediate reversals removed. */
+export function flattenLedgerLinesExcludingReversed(days) {
+  return flattenDatewiseLines(days).filter((row) => !isImmediateReversalLedgerLine(row));
+}
+
+/** Invoices still carrying Machine Open (or Tally-only pending). */
+export function openSettlementInvoices(invoices = []) {
+  return (Array.isArray(invoices) ? invoices : []).filter((invoice) => {
+    if (Number(invoice?.remaining || 0) > 0.009) return true;
+    if (invoice?.status === "Open" || invoice?.status === "Partial") return true;
+    if (invoice?.tally_only && Number(invoice?.outstanding_pending || 0) > 0.009) return true;
+    return false;
+  });
 }

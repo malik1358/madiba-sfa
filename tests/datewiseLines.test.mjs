@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { flattenDatewiseLines, sumDatewise } from "../app/lib/datewiseLines.js";
+import {
+  flattenDatewiseLines,
+  flattenLedgerLinesExcludingReversed,
+  isImmediateReversalLedgerLine,
+  openSettlementInvoices,
+  sumDatewise,
+} from "../app/lib/datewiseLines.js";
 
 test("datewise lines stay one row per voucher on the same date", () => {
   const lines = flattenDatewiseLines([
@@ -123,4 +129,95 @@ test("datewise payment shows negative collected for unmatched overcollection ref
   assert.equal(lines[0].collected_amount, -3340.75);
   assert.equal(lines[0].detail, "Refund Invoice CNFD/APR/014 (3,340.75)");
   assert.equal(sumDatewise(lines, "collected_amount"), -3340.75);
+  assert.equal(isImmediateReversalLedgerLine(lines[0]), false);
+});
+
+test("customer ledger export drops reversed invoices and their voiding notes", () => {
+  const days = [
+    {
+      date: "2025-11-13",
+      invoices: [
+        {
+          voucher_number: "1730",
+          amount_excl_vat: 8554,
+          amount_incl_vat: 8554,
+          remaining: 0,
+          status: "Reversed",
+        },
+        {
+          voucher_number: "1821",
+          amount_excl_vat: 1000,
+          amount_incl_vat: 1150,
+          remaining: 1150,
+          status: "Open",
+        },
+      ],
+      credit_notes: [
+        {
+          voucher_number: "43",
+          amount_excl_vat: -8554,
+          amount_incl_vat: -8554,
+          remaining: 0,
+          status: "Reverses 1730",
+          kind: "Credit Note",
+        },
+        {
+          voucher_number: "50",
+          amount_excl_vat: -100,
+          amount_incl_vat: -115,
+          remaining: 0,
+          status: "Partial return",
+          kind: "Sales Return",
+        },
+      ],
+      receipts: [
+        {
+          vch_no: "P-1",
+          amount: -8554,
+          ar_amount: 0,
+          kind: "payment",
+          applications: [{
+            target_kind: "sales",
+            voucher_number: "1730",
+            amount: 8554,
+            status: "Refund",
+          }],
+        },
+        {
+          vch_no: "R-9",
+          amount: 500,
+          ar_amount: 500,
+          kind: "receipt",
+          applications: [],
+        },
+      ],
+    },
+  ];
+
+  const all = flattenDatewiseLines(days);
+  assert.equal(all.some((row) => row.voucher === "1730"), true);
+  assert.equal(isImmediateReversalLedgerLine(all.find((row) => row.voucher === "1730")), true);
+  assert.equal(isImmediateReversalLedgerLine(all.find((row) => row.voucher === "43")), true);
+  assert.equal(isImmediateReversalLedgerLine(all.find((row) => row.voucher === "P-1")), true);
+  assert.equal(isImmediateReversalLedgerLine(all.find((row) => row.voucher === "1821")), false);
+
+  const ledger = flattenLedgerLinesExcludingReversed(days);
+  assert.deepEqual(ledger.map((row) => `${row.kind} ${row.voucher}`), [
+    "Invoice 1821",
+    "Sales Return 50",
+    "Receipt R-9",
+  ]);
+  assert.equal(sumDatewise(ledger, "sales_incl_vat"), 1035);
+  assert.equal(sumDatewise(ledger, "collected_amount"), 500);
+});
+
+test("openSettlementInvoices keeps Machine Open and Tally-only pending bills", () => {
+  const open = openSettlementInvoices([
+    { voucher_number: "A", remaining: 100, status: "Open" },
+    { voucher_number: "B", remaining: 0, status: "Paid" },
+    { voucher_number: "C", remaining: 0.004, status: "Paid" },
+    { voucher_number: "D", remaining: 50, status: "Partial" },
+    { voucher_number: "E", remaining: 0, status: "Tally", tally_only: true, outstanding_pending: 25 },
+  ]);
+  assert.deepEqual(open.map((row) => row.voucher_number), ["A", "D", "E"]);
 });

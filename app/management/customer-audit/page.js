@@ -45,6 +45,7 @@ import CategoryPerformance from "./components/CategoryPerformance";
 import QuickOrder from "./components/QuickOrder";
 import FullItemList from "./components/FullItemList";
 import InvoiceSettlement, { SalesReturnsSection } from "./components/InvoiceSettlement";
+import CustomerLedgerExport from "./components/CustomerLedgerExport";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
@@ -766,7 +767,14 @@ function CustomerAuditPageContent() {
         ) : null}
 
         {!receiptsPending && !outstandingLoading && paymentSettlement ? (
-          <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
+          <>
+            <CustomerLedgerExport
+              customer={selectedCustomer}
+              ledger={paymentSettlement}
+              filenamePrefix="customer-ledger"
+            />
+            <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
+          </>
         ) : null}
 
         <section className="auditSection">

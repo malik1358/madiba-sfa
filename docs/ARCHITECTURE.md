@@ -156,8 +156,8 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 1. Home page signs in with `supabase.auth.signInWithPassword`.
   Network/auth-host failures show a connection error rather than claiming the password is wrong. A reachable PC-local Supabase backend is required for local sign-in; neither the legacy cloud staging project nor production belongs in local config.
-2. Profile row is `public.profiles` where `id` is `auth.users.id`.
-3. `app/lib/authSession.js` caches the session for a few seconds and times out slow `getSession` calls.
+2. Profile row is `public.profiles` where `id` is `auth.users.id`. Home session restore awaits that row (15s timeout via `withTimeout`) before clearing “Loading MADIBA SFA...”; on timeout/error it shows Retry instead of the login form. Auth `INITIAL_SESSION` / token refresh no longer re-fetch the profile. Profiles RLS uses `(select auth.uid())` / `(select is_management())` (`20261028081800_profiles_rls_auth_initplan.sql`, applied on production).
+3. `app/lib/authSession.js` caches the session for a few seconds and times out slow `getSession` calls. Browser RLS policies on other hot tables prefer `(select public.request_uid())` / `(select is_management())` (`20261028083914_rls_auth_initplan_remaining.sql`, applied on production).
 4. API routes expect `Authorization: Bearer <access token>`, then `auth.getUser`.
 5. Cron routes use `app/lib/cronAuth.js`: `Authorization: Bearer <CRON_SECRET>` or header `x-cron-secret`. If `CRON_SECRET` is empty, cron calls are rejected.
 6. Android login can be blocked by a minimum APK version (`app/lib/androidAppVersionPolicy.js`, setting `android_apk_min_version_v1`, env `MIN_ANDROID_APK_VERSION_CODE`).

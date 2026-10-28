@@ -295,7 +295,11 @@ export function buildSalesInvoices(transactions = []) {
     if (amountExclVat <= 0) return;
 
     const amountInclVat = lineVatInclAmount(row, amountExclVat);
-    const voucher = String(row?.voucher_number || row?.reference || "").trim();
+    const voucherNumber = String(row?.voucher_number || "").trim();
+    const reference = String(row?.reference || "").trim();
+    // Keep voucher identity on voucher_number; do not promote reference into it
+    // when both exist (sale NFD/1173 references CN 396).
+    const voucher = voucherNumber || reference;
     const voucherType = String(row?.voucher_type || "").trim();
     const lineExcluded = isCashSalesVoucher(voucher) || isCashSalesVoucherType(voucherType);
     const key = `${invoiceDate}::${voucher || "NO-VOUCHER"}`;
@@ -303,6 +307,7 @@ export function buildSalesInvoices(transactions = []) {
       invoice_date: invoiceDate,
       voucher_number: voucher,
       voucher_type: voucherType,
+      reference: "",
       amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
@@ -315,6 +320,7 @@ export function buildSalesInvoices(transactions = []) {
     current.remaining = current.amount;
     current.exclude_from_avg_days = current.exclude_from_avg_days && lineExcluded;
     if (voucherType && !current.voucher_type) current.voucher_type = voucherType;
+    if (voucherNumber && reference && !current.reference) current.reference = reference;
     pushItemFingerprint(current, row);
     map.set(key, current);
   });
@@ -581,10 +587,16 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
  *    amount-and-items invoice from the day before is still open, the credit note
  *    reverses that earlier invoice (customer 1486: CN 552 → RNFD/414). The
  *    same-day named voucher stays open as the reissue.
+ *    A sale that names the credit note voucher (invoice.reference → CN) also
+ *    claims in this pass when amounts match. Prefer the CN's named bill when
+ *    that bill amount-matches; otherwise reverse the back-referenced sale
+ *    (customer 1171C: CN 396 names NFD/898 but reverses NFD/1173 which refs 396).
  * 2) Same-day or next-day full amount (classic void / reissue cancel).
- *    A CN that already names a different voucher is skipped here.
+ *    A CN that already names a different voucher is skipped here unless the
+ *    candidate sale itself references that CN.
  * 3) Any later date when amount AND items+qty exactly match (full mirror CN).
- *    A named CN is skipped here too unless the mirror is the named voucher.
+ *    A named CN is skipped here too unless the mirror is the named voucher or
+ *    the sale references the CN.
  *    A credit note dated before the invoice does not void that later sale,
  *    except a leftover named note whose own bill is already reversed: it may
  *    void an exact mirror up to LEFTOVER_FORWARD_MIRROR_MAX_DAYS later
@@ -618,6 +630,13 @@ export function findImmediateCreditNoteReversals(
     return noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef);
   }
 
+  function invoiceRefsNote(invoice, note) {
+    const invoiceRef = normalizeRef(invoice.reference);
+    const noteVoucher = normalizeRef(note.voucher_number);
+    if (!invoiceRef || !noteVoucher) return false;
+    return invoiceRef.includes(noteVoucher) || noteVoucher.includes(invoiceRef);
+  }
+
   function pushReversal(invoice, note, days) {
     note.remaining = 0;
     const invoiceAmount = toNumber(invoice.amount);
@@ -648,7 +667,9 @@ export function findImmediateCreditNoteReversals(
 
   for (const note of notesByDate) {
     if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) continue;
-    if (!normalizeRef(note.reference)) continue;
+    const hasNamedRef = Boolean(normalizeRef(note.reference));
+    const hasBackRefTarget = invoiceList.some((invoice) => invoiceRefsNote(invoice, note));
+    if (!hasNamedRef && !hasBackRefTarget) continue;
 
     const targets = invoiceList
       .map((invoice, index) => {
@@ -656,7 +677,9 @@ export function findImmediateCreditNoteReversals(
         if (reversedKeys.has(key)) return null;
         const invoiceAmount = toNumber(invoice.amount);
         if (invoiceAmount <= AMOUNT_TOLERANCE) return null;
-        if (!noteRefsInvoice(note, invoice)) return null;
+        const namedHit = noteRefsInvoice(note, invoice);
+        const backHit = invoiceRefsNote(invoice, note);
+        if (!namedHit && !backHit) return null;
         if (!noteAmountMatchesInvoice(note, invoiceAmount)) return null;
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
         if (offset == null) return null;
@@ -665,7 +688,11 @@ export function findImmediateCreditNoteReversals(
           invoice,
           index,
           offset,
-          score: (offset >= 0 ? 2000 : 0)
+          namedHit,
+          backHit,
+          score: (namedHit ? 3000 : 0)
+            + (backHit ? 1500 : 0)
+            + (offset >= 0 ? 2000 : 0)
             + (exactMirror ? 500 : 0)
             - Math.abs(offset)
             - index,
@@ -679,8 +706,9 @@ export function findImmediateCreditNoteReversals(
 
     // Same-day named voucher is the reissue. Reverse the bill made the day
     // before the credit note when it is the same amount and the same items.
+    // Do not redirect a sale→CN back-reference onto an earlier unrelated bill.
     let chosen = best;
-    if (best.offset === 0) {
+    if (best.offset === 0 && best.namedHit && !best.backHit) {
       const earlier = invoiceList
         .map((invoice, index) => {
           const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
@@ -733,14 +761,18 @@ export function findImmediateCreditNoteReversals(
         const noteVoucher = String(note.voucher_number || "").trim();
         const explicitRef = normalizeRef(note.reference);
         const invoiceRef = normalizeRef(invoice.voucher_number);
-        const refHit = Boolean(
+        const namedHit = Boolean(
           invoiceRef
           && explicitRef
           && (explicitRef.includes(invoiceRef) || invoiceRef.includes(explicitRef)),
         );
+        const backHit = invoiceRefsNote(invoice, note);
+        const refHit = namedHit || backHit;
         // A named credit note may void only that voucher while the named bill
         // is still open. Once that bill is already reversed, a later CN with the
-        // same Ref. No. may still clear a leftover same-amount twin.
+        // same Ref. No. may still clear a leftover same-amount twin. A sale that
+        // itself names this CN is the void pair even when the CN also names an
+        // older open bill it cannot fully reverse (1171C 396 → NFD/1173).
         const namedBills = explicitRef
           ? invoiceList.filter((candidate) => noteRefsInvoice(note, candidate))
           : [];

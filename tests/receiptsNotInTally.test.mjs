@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileAppReceiptsToTally } from "../app/lib/receiptsNotInTally.js";
+import {
+  recentKsaOrderDayWindowStart,
+  reconcileAppReceiptsToTally,
+  selectRecentReceiptsMissingFromTally,
+} from "../app/lib/receiptsNotInTally.js";
 
 test("reconcileAppReceiptsToTally finds app visits missing from Tally", () => {
   const result = reconcileAppReceiptsToTally({
@@ -218,4 +222,61 @@ test("reconcileAppReceiptsToTally keeps separate visits outside the duplicate wi
   assert.equal(result.appCount, 2);
   assert.equal(result.duplicateCount, 0);
   assert.equal(result.missingCount, 2);
+});
+
+test("recentKsaOrderDayWindowStart skips Friday when counting order days", () => {
+  // Saturday 2026-10-31: last 2 order days are Sat 31 and Thu 29 (Fri 30 off).
+  assert.equal(recentKsaOrderDayWindowStart("2026-10-31", 2), "2026-10-29");
+  // Wednesday 2026-10-28: Tue 27 + Wed 28.
+  assert.equal(recentKsaOrderDayWindowStart("2026-10-28", 2), "2026-10-27");
+});
+
+test("selectRecentReceiptsMissingFromTally keeps only last 2 working days unmatched", () => {
+  const result = selectRecentReceiptsMissingFromTally({
+    todayKey: "2026-10-28",
+    workingDays: 2,
+    appVisits: [
+      {
+        id: "recent",
+        customer_code: "1106",
+        customer_name: "Acme Trading",
+        amount_received: 500,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-10-27",
+        saved_at: "2026-10-27T10:00:00.000Z",
+      },
+      {
+        id: "older",
+        customer_code: "1106",
+        customer_name: "Acme Trading",
+        amount_received: 700,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-10-25",
+        saved_at: "2026-10-25T10:00:00.000Z",
+      },
+      {
+        id: "matched-recent",
+        customer_code: "1106",
+        customer_name: "Acme Trading",
+        amount_received: 300,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-10-28",
+        saved_at: "2026-10-28T09:00:00.000Z",
+      },
+    ],
+    tallyReceipts: [
+      {
+        receipt_date: "2026-10-28",
+        customer_code: "1106",
+        customer_name: "Acme Trading",
+        amount: 300,
+        vch_no: "R1",
+      },
+    ],
+  });
+
+  assert.equal(result.missingCount, 1);
+  assert.equal(result.missingInTally[0].id, "recent");
+  assert.equal(result.windowStart, "2026-10-27");
+  assert.equal(result.missingTotal, 500);
 });

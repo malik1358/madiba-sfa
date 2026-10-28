@@ -4,7 +4,11 @@ import {
 } from "./receiptRegister.js";
 import {
   DEFAULT_DATE_WINDOW_DAYS,
+  ORDER_PDF_PENDING_TALLY_WORKING_DAYS,
+  isSameReceiptCustomer,
+  recentKsaOrderDayWindowStart,
   reconcileAppReceiptsToTally,
+  selectRecentReceiptsMissingFromTally,
   shiftIsoDate,
 } from "./receiptsNotInTally.js";
 import {
@@ -79,28 +83,28 @@ export async function saveIgnoredMistakes(admin, dataset) {
   if (error) throw error;
 }
 
-async function loadAppReceiptVisits(admin, { startIso, endIso }) {
+async function loadAppReceiptVisits(admin, { startIso, endIso, customerCode = "" }) {
   const selectWithMode = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,saved_at,created_by";
   const selectLegacy = "id,customer_code,visit_outcome,payment_status,amount_received,saved_at,created_by";
+  const code = String(customerCode || "").trim().toUpperCase();
 
-  let result = await admin
-    .from("collection_visits")
-    .select(selectWithMode)
-    .eq("visit_outcome", "FUNDS_RECEIVED")
-    .gt("amount_received", 0)
-    .gte("saved_at", startIso)
-    .lte("saved_at", endIso)
-    .order("saved_at", { ascending: true });
-
-  if (result.error && isMissingColumnError(result.error)) {
-    result = await admin
+  function buildQuery(selectColumns) {
+    let query = admin
       .from("collection_visits")
-      .select(selectLegacy)
+      .select(selectColumns)
       .eq("visit_outcome", "FUNDS_RECEIVED")
       .gt("amount_received", 0)
       .gte("saved_at", startIso)
       .lte("saved_at", endIso)
       .order("saved_at", { ascending: true });
+    if (code) query = query.eq("customer_code", code);
+    return query;
+  }
+
+  let result = await buildQuery(selectWithMode);
+
+  if (result.error && isMissingColumnError(result.error)) {
+    result = await buildQuery(selectLegacy);
   }
 
   if (result.error) {
@@ -164,6 +168,105 @@ function mapMissingRow(visit) {
     collectorName: visit.collector_name,
     createdBy: visit.created_by,
     salesmanCode: visit.salesman_code || "",
+  };
+}
+
+/**
+ * Customer-scoped pending app receipts from the last N KSA order days that are
+ * still missing from the uploaded Tally receipt register (for Order PDF).
+ */
+export async function buildCustomerPendingTallyReceipts(admin, {
+  customerCode = "",
+  customerName = "",
+  workingDays = ORDER_PDF_PENDING_TALLY_WORKING_DAYS,
+  todayKey = getKsaDateString(),
+  windowDays = DEFAULT_DATE_WINDOW_DAYS,
+} = {}) {
+  const code = String(customerCode || "").trim();
+  const name = String(customerName || "").trim();
+  if (!code && !name) {
+    throw new Error("customerCode or customerName is required.");
+  }
+
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const limit = Math.max(1, Number(workingDays) || ORDER_PDF_PENDING_TALLY_WORKING_DAYS);
+  const windowStart = recentKsaOrderDayWindowStart(today, limit);
+  const resolvedWindow = parseReceiptsNotInTallyWindowDays(windowDays);
+  // Widen visit load slightly so ±windowDays Tally lag still soft-matches.
+  const visitFrom = shiftIsoDate(windowStart, -resolvedWindow);
+  const { startIso } = ksaDayBounds(visitFrom);
+  const { endIso } = ksaDayBounds(today);
+
+  // Load the short calendar window without a code filter so related account
+  // codes (1106 vs 1106C) still soft-match via isSameReceiptCustomer.
+  const [visits, dataset, ignored] = await Promise.all([
+    loadAppReceiptVisits(admin, { startIso, endIso }),
+    readReceiptDataset(admin),
+    loadIgnoredMistakes(admin),
+  ]);
+
+  const customerCodes = visits.map((row) => row.customer_code);
+  if (code) customerCodes.push(code);
+  const collectorIds = visits.map((row) => row.created_by);
+  const [customerNames, collectorNames] = await Promise.all([
+    loadCustomerNames(admin, customerCodes),
+    loadCollectorNames(admin, collectorIds),
+  ]);
+
+  const resolvedName = name
+    || customerNames.get(String(code || "").trim().toUpperCase())?.customerName
+    || code
+    || "";
+
+  const enrichedVisits = visits
+    .map((visit) => {
+      const visitCode = String(visit.customer_code || "").trim().toUpperCase();
+      return {
+        ...visit,
+        customer_name: customerNames.get(visitCode)?.customerName || visit.customer_code || "",
+        salesman_code: customerNames.get(visitCode)?.salesmanCode || "",
+        collector_name: collectorNames.get(visit.created_by) || "",
+        visit_date: getKsaDateString(new Date(visit.saved_at)),
+      };
+    })
+    .filter((visit) => isSameReceiptCustomer(
+      visit.customer_code,
+      visit.customer_name,
+      code,
+      resolvedName,
+    ));
+
+  const tallyFrom = shiftIsoDate(visitFrom, -resolvedWindow);
+  const tallyTo = shiftIsoDate(today, resolvedWindow);
+  const tallyInRange = (dataset.rows || []).filter((row) => {
+    const date = String(row.receipt_date || "").slice(0, 10);
+    if (date < tallyFrom || date > tallyTo) return false;
+    return isSameReceiptCustomer(
+      row.customer_code,
+      row.customer_name || row.particulars,
+      code,
+      resolvedName,
+    );
+  });
+
+  const recent = selectRecentReceiptsMissingFromTally({
+    appVisits: enrichedVisits,
+    tallyReceipts: tallyInRange,
+    workingDays: limit,
+    todayKey: today,
+    windowDays: resolvedWindow,
+  });
+  const openMissing = filterIgnoredMissing(recent.missingInTally, ignored);
+
+  return {
+    customerCode: code,
+    customerName: resolvedName,
+    today: today,
+    workingDays: limit,
+    windowStart: recent.windowStart,
+    windowDays: recent.windowDays,
+    amountTolerance: recent.amountTolerance,
+    pendingTallyReceipts: openMissing.map(mapMissingRow),
   };
 }
 

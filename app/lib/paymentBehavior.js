@@ -1143,6 +1143,10 @@ export function buildSortedReceipts(receipts = []) {
  * bill and a near-amount Payment refund pair to the reversed voucher instead of
  * advancing the receipt onto a later invoice or leaving the Payment unadjusted
  * (1020C: 378 + P-1061 → 2214, not 2270).
+ * Payment leftover that still cannot settle open sales nets against prior
+ * unmatched overcollection first (1424 Jun/Bpmt0057 refunds the 3,340.75 leftover
+ * from receipt 957 after cash CNFD/APR/014 was already paid by 675). That reduces
+ * Collected without reopening paid invoices.
  * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
@@ -1160,14 +1164,18 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   } = pairRefundsForReversedSales(reversals, receipts);
   const invoices = allInvoices
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
-    .map((invoice) => ({
-      ...invoice,
-      remaining: toNumber(invoice.amount),
-      is_cash: isCashSalesVoucher(invoice.voucher_number),
-      exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days)
-        || isCashSalesVoucher(invoice.voucher_number),
-      cash_first_receipt_used: false,
-    }));
+    .map((invoice) => {
+      const isCash = isCashSalesVoucher(invoice.voucher_number)
+        || isCashSalesVoucherType(invoice.voucher_type)
+        || Boolean(invoice.exclude_from_avg_days);
+      return {
+        ...invoice,
+        remaining: toNumber(invoice.amount),
+        is_cash: isCash,
+        exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days) || isCash,
+        cash_first_receipt_used: false,
+      };
+    });
   const pairedCreditNoteKeys = new Set(
     reversals.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
   );
@@ -1180,10 +1188,12 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   const purchaseAllocations = [];
   const purchaseSalesAllocations = [];
   const matchedPurchasePayments = [];
+  const paymentUnmatchedRefunds = [];
   const purchases = [];
   let unmatchedReceiptAmount = 0;
   let paymentAppliedToPurchases = 0;
   let paymentAppliedToSales = 0;
+  let paymentRefundedUnmatched = 0;
 
   const events = [
     ...unpairedNotes.map((note) => ({
@@ -1371,10 +1381,39 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
    * Payments can reduce Machine Open toward Tally (party-ledger netting).
    * A Payment is not a customer prepayment — it only settles invoices already
    * dated on or before the payment. Later bills stay open for a real receipt.
+   * What still cannot settle open AR nets against prior unmatched overcollection
+   * (refund) instead of leaving the Payment unadjusted with Collected 0.
    */
   function paymentCanSettleInvoice(event, invoice) {
     if (!event?.date || !invoice?.invoice_date) return true;
     return event.date >= invoice.invoice_date;
+  }
+
+  function findPaidInvoiceForUnmatchedRefund(amount, paymentDate) {
+    const candidates = invoices
+      .filter((invoice) => (
+        !hasSettlementAmount(invoice.remaining)
+        && amountsMatch(invoice.amount, amount)
+        && (!invoice.invoice_date || !paymentDate || invoice.invoice_date <= paymentDate)
+      ))
+      .map((invoice) => ({
+        invoice,
+        cash: Boolean(invoice.is_cash || invoice.exclude_from_avg_days),
+        dayGap: Math.abs(isoDayOffset(invoice.invoice_date, paymentDate) ?? 9999),
+      }))
+      .sort((left, right) => {
+        if (left.cash !== right.cash) return left.cash ? -1 : 1;
+        if (left.dayGap !== right.dayGap) return left.dayGap - right.dayGap;
+        if (left.invoice.invoice_date !== right.invoice.invoice_date) {
+          return String(right.invoice.invoice_date || "").localeCompare(
+            String(left.invoice.invoice_date || ""),
+          );
+        }
+        return String(left.invoice.voucher_number || "").localeCompare(
+          String(right.invoice.voucher_number || ""),
+        );
+      });
+    return candidates[0]?.invoice || null;
   }
 
   function applyPaymentLeftoverToSales(event, remaining) {
@@ -1402,6 +1441,27 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     }
     const applied = Math.max(0, remaining - left);
     paymentAppliedToSales += applied;
+    // Refund unmatched overcollection before treating the Payment as unadjusted
+    // (1424: Bpmt0057 −3,340.75 nets receipt 957's leftover after cash was paid).
+    if (hasSettlementAmount(left) && unmatchedReceiptAmount > SETTLEMENT_DUST) {
+      const refunded = Math.min(left, unmatchedReceiptAmount);
+      if (hasSettlementAmount(refunded)) {
+        unmatchedReceiptAmount = Math.max(0, unmatchedReceiptAmount - refunded);
+        left = Math.max(0, left - refunded);
+        paymentRefundedUnmatched += refunded;
+        const labeled = findPaidInvoiceForUnmatchedRefund(refunded, event.date);
+        paymentUnmatchedRefunds.push({
+          payment_date: event.date,
+          payment_voucher: event.vch_no,
+          amount: refunded,
+          invoice_date: labeled?.invoice_date || "",
+          invoice_voucher: labeled?.voucher_number || "",
+          status: "Refund",
+          target_kind: labeled ? "sales" : "unmatched",
+          unmatched_collection: true,
+        });
+      }
+    }
     if (hasSettlementAmount(left)) unmatchedReceiptAmount += left;
     return left;
   }
@@ -1611,9 +1671,11 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     purchaseAllocations,
     purchaseSalesAllocations,
     matchedPurchasePayments,
+    paymentUnmatchedRefunds,
     purchases,
     paymentAppliedToPurchases,
     paymentAppliedToSales,
+    paymentRefundedUnmatched,
     unmatchedReceiptAmount,
     reversedInvoices: reversals,
     reversedSaleRefunds,
@@ -2265,6 +2327,8 @@ export function buildPaymentSettlementLedger({
     purchases = [],
     paymentAppliedToPurchases = 0,
     paymentAppliedToSales = 0,
+    paymentRefundedUnmatched = 0,
+    paymentUnmatchedRefunds = [],
     unmatchedReceiptAmount,
     reversedInvoices = [],
     reversedSaleRefunds = [],
@@ -2607,6 +2671,16 @@ export function buildPaymentSettlementLedger({
       status: row.status || "Refund",
     });
   });
+  paymentUnmatchedRefunds.forEach((row) => {
+    pushReceiptApplication(row.payment_date, row.payment_voucher, {
+      target_kind: row.target_kind || (row.invoice_voucher ? "sales" : "unmatched"),
+      voucher_number: row.invoice_voucher || "",
+      target_date: row.invoice_date || "",
+      amount: toNumber(row.amount),
+      status: row.status || "Refund",
+      unmatched_collection: true,
+    });
+  });
 
   const collectionsByDateMap = new Map();
   buildSortedReceipts(receipts).forEach((row) => {
@@ -2619,16 +2693,21 @@ export function buildPaymentSettlementLedger({
         // Refund / Reversed labels are display-only for CN-voided cycles.
         && application.status !== "Refund"
         && application.status !== "Reversed"
+        && !application.unmatched_collection
       ))
+      .reduce((total, application) => total + toNumber(application.amount), 0);
+    const unmatchedRefund = applications
+      .filter((application) => application.unmatched_collection)
       .reduce((total, application) => total + toNumber(application.amount), 0);
     // Datewise Collected is AR only. A Payment spent on Purchases is not a
     // negative sales collection; its bills are listed on the expanded row.
     // A collection that only funded a CN-reversed sale (then refunded) is not
-    // lasting AR cash either.
+    // lasting AR cash either. A Payment that refunds unmatched overcollection
+    // reduces Collected (negative ar_amount) without reopening paid invoices.
     const cancelledReversalCollection = cancelledReceiptKeys.has(rowKey);
     const arAmount = cancelledReversalCollection
       ? 0
-      : (signed < 0 ? salesApplied : signed);
+      : (signed < 0 ? salesApplied - unmatchedRefund : signed);
     const current = collectionsByDateMap.get(row.receipt_date) || {
       date: row.receipt_date,
       receipt_count: 0,
@@ -2812,7 +2891,8 @@ export function buildPaymentSettlementLedger({
   const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
   const salesInclVat = sumMoney([invoiceSalesInclVat, reversedSalesInclVat]);
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
-  // AR collected = positive collection receipts + Payment leftovers that settled sales.
+  // AR collected = positive collection receipts + Payment leftovers that settled sales
+  // − Payment leftovers that refunded unmatched overcollection.
   // Purchase-side Payments stay on AP and do not reduce AR collected.
   // Receipts that only funded an immediately reversed sale (then refunded) drop out.
   const cashRows = buildSortedReceipts(receipts);
@@ -2823,7 +2903,10 @@ export function buildPaymentSettlementLedger({
   const debitReceiptSum = allocations
     .filter((row) => toNumber(row.amount) < 0)
     .reduce((total, row) => total + toNumber(row.amount), 0);
-  const collectedAmount = positiveReceiptSum + toNumber(paymentAppliedToSales) + debitReceiptSum;
+  const collectedAmount = positiveReceiptSum
+    + toNumber(paymentAppliedToSales)
+    + debitReceiptSum
+    - toNumber(paymentRefundedUnmatched);
 
   // Credit notes already paired as immediate reversals are not deducted again.
   // Remaining credit notes reduce billable sales so: Sales − CN − Collected = Open.
@@ -2919,6 +3002,7 @@ export function buildPaymentSettlementLedger({
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
     payment_applied_to_purchases: toNumber(paymentAppliedToPurchases),
     payment_applied_to_sales: toNumber(paymentAppliedToSales),
+    payment_refunded_unmatched: toNumber(paymentRefundedUnmatched),
     purchase_applied_to_sales: purchaseAppliedToSales,
     open_purchase_amount: purchaseRows.reduce((total, row) => total + toNumber(row.remaining), 0),
     purchase_count: purchaseRows.length,

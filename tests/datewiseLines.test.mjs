@@ -96,3 +96,31 @@ test("datewise payment detail names a refund against the reversed invoice", () =
   assert.equal(lines[0].kind, "Payment");
   assert.equal(lines[0].detail, "Refund Invoice 2214 (1,661)");
 });
+
+test("datewise payment shows negative collected for unmatched overcollection refund", () => {
+  const lines = flattenDatewiseLines([
+    {
+      date: "2026-06-16",
+      receipts: [
+        {
+          vch_no: "Jun/Bpmt0057",
+          amount: -3340.75,
+          ar_amount: -3340.75,
+          kind: "payment",
+          applications: [{
+            target_kind: "sales",
+            voucher_number: "CNFD/APR/014",
+            amount: 3340.75,
+            status: "Refund",
+            unmatched_collection: true,
+          }],
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(lines[0].kind, "Payment");
+  assert.equal(lines[0].collected_amount, -3340.75);
+  assert.equal(lines[0].detail, "Refund Invoice CNFD/APR/014 (3,340.75)");
+  assert.equal(sumDatewise(lines, "collected_amount"), -3340.75);
+});

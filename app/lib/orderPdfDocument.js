@@ -51,6 +51,7 @@ export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
 export const ORDER_PDF_SALES_ORDER_API = "/api/sales-orders";
 export const ORDER_PDF_PROSPECTS_API = "/api/prospects";
+export const ORDER_PDF_PENDING_TALLY_RECEIPTS_API = "/api/customer-pending-tally-receipts";
 
 function formatHistoryMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -227,6 +228,7 @@ export function buildOrderPdfSnapshotFromSavedOrder({
   lines = [],
   history = [],
   outstanding = null,
+  pendingTallyReceipts = [],
   creditApprovalRemark = "",
   paymentType,
   pricingRegion,
@@ -270,6 +272,7 @@ export function buildOrderPdfSnapshotFromSavedOrder({
       customer: outstanding?.customer || null,
       customerInvoices: Array.isArray(outstanding?.customerInvoices) ? outstanding.customerInvoices : [],
     },
+    pendingTallyReceipts: Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : [],
   };
 }
 
@@ -279,10 +282,12 @@ export async function enrichOrderPdfLiveData(snapshot, {
   customerHistoryApi = ORDER_PDF_CUSTOMER_HISTORY_API,
   salesOrderApi = ORDER_PDF_SALES_ORDER_API,
   prospectsApi = ORDER_PDF_PROSPECTS_API,
+  pendingTallyReceiptsApi = ORDER_PDF_PENDING_TALLY_RECEIPTS_API,
   analyticsFallback = null,
   skipOutstanding = false,
   skipHistory = false,
   skipPricing = false,
+  skipPendingTallyReceipts = false,
 } = {}) {
   const next = {
     ...snapshot,
@@ -292,6 +297,7 @@ export async function enrichOrderPdfLiveData(snapshot, {
       customer: snapshot?.outstanding?.customer || null,
       customerInvoices: Array.isArray(snapshot?.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [],
     },
+    pendingTallyReceipts: Array.isArray(snapshot?.pendingTallyReceipts) ? snapshot.pendingTallyReceipts : [],
   };
 
   let analytics = analyticsFallback;
@@ -381,6 +387,25 @@ export async function enrichOrderPdfLiveData(snapshot, {
         }
       } catch {
         // Keep generating the order PDF even if outstanding cannot be refreshed.
+      }
+    })());
+  }
+
+  if (authHeaders && liveCustomerCode && !skipPendingTallyReceipts) {
+    dataLookups.push((async () => {
+      try {
+        const pendingResponse = await fetch(
+          `${pendingTallyReceiptsApi}?customerCode=${encodeURIComponent(liveCustomerCode || "")}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
+          { headers: authHeaders, cache: "no-store" }
+        );
+        const pendingPayload = await pendingResponse.json().catch(() => ({}));
+        if (pendingResponse.ok && pendingPayload.success) {
+          next.pendingTallyReceipts = Array.isArray(pendingPayload.pendingTallyReceipts)
+            ? pendingPayload.pendingTallyReceipts
+            : [];
+        }
+      } catch {
+        // Keep generating the order PDF even if pending Tally receipts cannot be refreshed.
       }
     })());
   }
@@ -500,6 +525,7 @@ export async function resolveLiveOrderPdfSnapshot(snapshot, options = {}, {
       skipOutstanding: identityOnly || options.skipOutstanding,
       skipHistory: identityOnly || options.skipHistory,
       skipPricing: identityOnly || options.skipPricing,
+      skipPendingTallyReceipts: identityOnly || options.skipPendingTallyReceipts,
     });
     current = enriched.snapshot;
     analytics = enriched.analytics;
@@ -804,6 +830,13 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ? 14 + 10 + bucketRows.length * 18
     : 0;
   const hasOutstandingBuckets = bucketRows.length > 0;
+  const pendingTallyReceipts = Array.isArray(snapshot.pendingTallyReceipts)
+    ? snapshot.pendingTallyReceipts.slice(0, 8)
+    : [];
+  const pendingTallyBlockHeight = pendingTallyReceipts.length > 0
+    ? 12 + 14 + 10 + pendingTallyReceipts.length * 16 + 4
+    : 0;
+  const hasPendingTallyReceipts = pendingTallyReceipts.length > 0;
   const hasAnyDiscount = discountVisibility.cash || discountVisibility.value || discountVisibility.scheme;
   const summaryRows = [
     ...(hasAnyDiscount ? [["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)]] : []),
@@ -814,9 +847,11 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     [vatLabel, formatMoneyAmount(vatAmount)],
   ];
   const summaryBoxHeight = 16 + summaryRows.length * 16 + 28;
-  const combinedSectionHeight = hasOutstandingBuckets
-    ? paymentBehaviorHeight + outstandingBlockHeight + 12 + summaryBoxHeight
-    : paymentBehaviorHeight + summaryBoxHeight;
+  const leftStackHeight = paymentBehaviorHeight
+    + outstandingBlockHeight
+    + pendingTallyBlockHeight
+    + ((hasOutstandingBuckets || hasPendingTallyReceipts) ? 12 : 0);
+  const combinedSectionHeight = Math.max(leftStackHeight, summaryBoxHeight);
 
   ensureSpace(combinedSectionHeight + 16);
   const sectionY = cursorY;
@@ -863,6 +898,44 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
     cursorY = bucketY;
     summaryY = bucketY + 12;
+    blockY = bucketY + 12;
+  }
+
+  if (hasPendingTallyReceipts) {
+    doc.setFont(undefined, "bold");
+    doc.setFontSize(10);
+    doc.text("Receipts not yet in Tally", marginX, blockY);
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(8);
+    doc.text("(last 2 working days)", marginX + 148, blockY);
+    doc.setFontSize(9);
+
+    let pendingY = blockY + 14;
+    const dateW = 72;
+    const modeW = 90;
+    const amountW = 90;
+
+    pendingTallyReceipts.forEach((row) => {
+      const rowH = 16;
+      const dateLabel = String(row.visitDate || row.visit_date || "-");
+      const modeLabel = String(row.receiptMode || row.receipt_mode || "-");
+      const amountLabel = formatOutstandingValue(
+        row.amountReceived ?? row.amount_received,
+        0,
+        true,
+      );
+      doc.rect(marginX, pendingY, dateW, rowH);
+      doc.rect(marginX + dateW, pendingY, modeW, rowH);
+      doc.rect(marginX + dateW + modeW, pendingY, amountW, rowH);
+      doc.text(dateLabel, marginX + 4, pendingY + 11);
+      doc.text(modeLabel, marginX + dateW + 4, pendingY + 11);
+      doc.text(amountLabel, marginX + dateW + modeW + amountW - 4, pendingY + 11, { align: "right" });
+      pendingY += rowH;
+    });
+
+    cursorY = pendingY;
+    if (!hasOutstandingBuckets) summaryY = pendingY + 12;
+    blockY = pendingY + 4;
   }
 
   doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);

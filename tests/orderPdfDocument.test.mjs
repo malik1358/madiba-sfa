@@ -301,6 +301,54 @@ test("renderOrderPdfDocument draws the new order layout", () => {
   assert.equal(doc.texts.includes("Item Code"), false);
   assert.equal(doc.texts.includes("Line Total"), false);
   assert.equal(doc.texts.includes("Outstanding Buckets"), false);
+  assert.equal(doc.texts.includes("Receipts not yet in Tally"), false);
+});
+
+test("renderOrderPdfDocument shows recent receipts not yet in Tally below outstanding", () => {
+  const doc = createMockDoc();
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: {
+      id: 512,
+      status: "SUBMITTED",
+      customer_code: "1106",
+      customer_name: "Acme Trading",
+      salesman_code: "MOIN",
+      updated_at: "2026-10-28T12:00:00.000Z",
+    },
+    lines: [{ item_code: "A004075", item_name: "THERMAL ROLL", quantity: 10, rate: 72, line_value: 720 }],
+    outstanding: {
+      bucketLabels: ["0-30", "91-120"],
+      customer: {
+        buckets: { "0-30": 0, "91-120": 4278 },
+        open_invoices: 1,
+        total_outstanding: 4278,
+      },
+      customerInvoices: [],
+    },
+    pendingTallyReceipts: [
+      {
+        visitDate: "2026-10-27",
+        receiptMode: "Cash",
+        amountReceived: 1500,
+      },
+      {
+        visitDate: "2026-10-28",
+        receiptMode: "Bank Transfer",
+        amountReceived: 800,
+      },
+    ],
+  });
+
+  renderOrderPdfDocument(doc, snapshot);
+
+  const outstandingIndex = doc.texts.indexOf("Outstanding Details");
+  const pendingIndex = doc.texts.indexOf("Receipts not yet in Tally");
+  assert.ok(outstandingIndex >= 0);
+  assert.ok(pendingIndex > outstandingIndex);
+  assert.ok(doc.texts.includes("(last 2 working days)"));
+  assert.ok(doc.texts.includes("2026-10-27"));
+  assert.ok(doc.texts.includes("Cash"));
+  assert.ok(doc.texts.includes("Bank Transfer"));
 });
 
 test("renderOrderPdfDocument includes the historic Monthly Performance table", () => {

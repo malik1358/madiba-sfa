@@ -4,13 +4,19 @@ import {
   normalizeName,
   toNumber,
 } from "./outstanding.js";
-import { getKsaDateString } from "./workdayActivity.js";
+import {
+  addKsaCalendarDays,
+  getKsaDateString,
+  isKsaOrderDay,
+} from "./workdayActivity.js";
 
 /** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
 export const RECEIPT_AMOUNT_TOLERANCE = 1;
 export const DEFAULT_DATE_WINDOW_DAYS = 5;
 /** Drop near-identical double-saves by the same collector on the same day. */
 export const DUPLICATE_VISIT_MINUTES = 5;
+/** Order PDF: app receipts in this many KSA order days that are still missing from Tally. */
+export const ORDER_PDF_PENDING_TALLY_WORKING_DAYS = 2;
 const RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT = 100000;
 const RECEIPT_MATCH_DAY_GAP_WEIGHT = 1000;
 const RECEIPT_MATCH_AMOUNT_GAP_WEIGHT = 10;
@@ -326,4 +332,72 @@ export function shiftIsoDate(isoDate, days) {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Earliest KSA calendar date that still falls inside the last `workingDays`
+ * order days (Friday excluded; Saturday counts), walking back from today.
+ */
+export function recentKsaOrderDayWindowStart(
+  todayKey = getKsaDateString(),
+  workingDays = ORDER_PDF_PENDING_TALLY_WORKING_DAYS,
+) {
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const limit = Math.max(1, Number(workingDays) || ORDER_PDF_PENDING_TALLY_WORKING_DAYS);
+  let countedDays = 0;
+  let dateKey = today;
+  // Cap calendar walk so a bad calendar never loops forever.
+  for (let guard = 0; guard < 60; guard += 1) {
+    if (isKsaOrderDay(dateKey)) {
+      countedDays += 1;
+      if (countedDays >= limit) return dateKey;
+    }
+    dateKey = addKsaCalendarDays(dateKey, -1);
+  }
+  return dateKey;
+}
+
+export function isIsoDateWithinRecentKsaOrderDays(dateKey, {
+  todayKey = getKsaDateString(),
+  workingDays = ORDER_PDF_PENDING_TALLY_WORKING_DAYS,
+} = {}) {
+  const visitKey = String(dateKey || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitKey) || !isKsaOrderDay(visitKey)) return false;
+  const startKey = recentKsaOrderDayWindowStart(todayKey, workingDays);
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  return visitKey >= startKey && visitKey <= today;
+}
+
+/**
+ * Keep only unmatched app receipts whose visit date falls in the last N
+ * KSA order days (default 2). Reuses the same soft-match as the report.
+ */
+export function selectRecentReceiptsMissingFromTally({
+  appVisits = [],
+  tallyReceipts = [],
+  workingDays = ORDER_PDF_PENDING_TALLY_WORKING_DAYS,
+  todayKey = getKsaDateString(),
+  windowDays = DEFAULT_DATE_WINDOW_DAYS,
+  amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  duplicateWithinMinutes = DUPLICATE_VISIT_MINUTES,
+} = {}) {
+  const reconciliation = reconcileAppReceiptsToTally({
+    appVisits,
+    tallyReceipts,
+    windowDays,
+    amountTolerance,
+    duplicateWithinMinutes,
+  });
+  const missing = reconciliation.missingInTally.filter((visit) => (
+    isIsoDateWithinRecentKsaOrderDays(visit.visit_date, { todayKey, workingDays })
+  ));
+  return {
+    ...reconciliation,
+    workingDays,
+    todayKey: String(todayKey || "").trim() || getKsaDateString(),
+    windowStart: recentKsaOrderDayWindowStart(todayKey, workingDays),
+    missingInTally: missing,
+    missingCount: missing.length,
+    missingTotal: missing.reduce((sum, visit) => sum + toNumber(visit.amount_received), 0),
+  };
 }

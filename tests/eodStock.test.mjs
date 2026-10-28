@@ -3,15 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   applyEodStockUpload,
-  assertOrderLinesWithinEodStock,
   availableEodStockQty,
   buildEodStockAvailability,
   buildEodStockReportRows,
-  clampOrderQuantitiesToEodStock,
   eodQtyMovement,
   eodStockTemplateMatrix,
   formatEodDelta,
   formatEodStockAvailableLabel,
+  isEodStockQtyOverAvailable,
   parseEodQtyCell,
   parseEodStockDate,
   parseEodStockSheets,
@@ -146,7 +145,7 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003283").cities.dammam.qty, 6);
 });
 
-test("order qty uses end-of-day stock for the pricing region", () => {
+test("order qty stock hint warns when over available without changing qty", () => {
   const availability = buildEodStockAvailability({
     stockDate: "2026-10-27",
     rows: [{
@@ -176,28 +175,13 @@ test("order qty uses end-of-day stock for the pricing region", () => {
   assert.equal(availableEodStockQty(availability, "riyadh", "MISSING"), 0);
   assert.equal(availableEodStockQty(availability, "riyadh", "NEG1"), 0);
   assert.equal(availableEodStockQty(null, "riyadh", "A004426"), null);
+  assert.equal(isEodStockQtyOverAvailable(31, 30), true);
+  assert.equal(isEodStockQtyOverAvailable(30, 30), false);
+  assert.equal(isEodStockQtyOverAvailable(40, null), false);
   assert.equal(formatEodStockAvailableLabel(30, "en"), "Available: 30");
   assert.equal(formatEodStockAvailableLabel(30, "ar"), "المتاح: 30");
-
-  assert.deepEqual(
-    clampOrderQuantitiesToEodStock({ A004426: 40, OTHER: 2 }, availability, "riyadh"),
-    { A004426: 30 },
-  );
-
-  const blocked = assertOrderLinesWithinEodStock({
-    lines: [{ item_code: "A004426", quantity: 31 }],
-    availability,
-    pricingRegion: "riyadh",
-  });
-  assert.equal(blocked.ok, false);
-  assert.match(blocked.error, /available stock 30/);
-
-  const allowed = assertOrderLinesWithinEodStock({
-    lines: [{ item_code: "A004426", quantity: 6 }],
-    availability,
-    pricingRegion: "dammam",
-  });
-  assert.equal(allowed.ok, true);
+  assert.equal(formatEodStockAvailableLabel(30, "en", 40), "Available: 30 — over stock");
+  assert.equal(formatEodStockAvailableLabel(30, "ar", 40), "المتاح: 30 — أكثر من المخزون");
 });
 
 test("template, missing date, and snapshot comparison", () => {

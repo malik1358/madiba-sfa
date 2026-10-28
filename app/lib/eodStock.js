@@ -713,7 +713,7 @@ export function normalizeEodStockAvailability(value) {
 
 /**
  * Available order qty for an item in a pricing region.
- * Returns null when no end-of-day stock snapshot is loaded (do not clamp).
+ * Returns null when no end-of-day stock snapshot is loaded (no stock hint).
  * Returns 0 when stock is loaded but the item has no positive qty in that city.
  */
 export function availableEodStockQty(availability, pricingRegion, itemCode) {
@@ -726,69 +726,19 @@ export function availableEodStockQty(availability, pricingRegion, itemCode) {
   return Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
 }
 
-export function clampOrderQuantitiesToEodStock(orderQuantities = {}, availability, pricingRegion) {
-  const stock = normalizeEodStockAvailability(availability);
-  if (!stock.active) return orderQuantities || {};
-  const next = {};
-  Object.entries(orderQuantities || {}).forEach(([rawCode, rawQty]) => {
-    const code = String(rawCode || "").trim().toUpperCase();
-    let qty = Number(rawQty || 0);
-    if (!code || !Number.isFinite(qty) || qty <= 0) return;
-    const available = availableEodStockQty(stock, pricingRegion, code);
-    if (available == null) {
-      next[code] = qty;
-      return;
-    }
-    qty = Math.min(qty, available);
-    if (qty > 0) next[code] = qty;
-  });
-  return next;
+export function isEodStockQtyOverAvailable(orderedQty, available) {
+  if (available == null) return false;
+  const qty = Number(orderedQty || 0);
+  return Number.isFinite(qty) && qty > available;
 }
 
-export function formatEodStockAvailableLabel(available, language = "en") {
+/** Label beside order qty. Warns when ordered qty exceeds available; does not change the qty. */
+export function formatEodStockAvailableLabel(available, language = "en", orderedQty = null) {
   if (available == null) return "";
   const qtyText = formatEodQty(available);
-  if (language === "ar") return `المتاح: ${qtyText}`;
-  return `Available: ${qtyText}`;
-}
-
-export function formatEodStockOverLimitMessage({ itemCode, quantity, available, language = "en" } = {}) {
-  const code = String(itemCode || "").trim().toUpperCase() || "item";
-  const wanted = formatEodQty(quantity);
-  const left = formatEodQty(available);
+  const over = isEodStockQtyOverAvailable(orderedQty, available);
   if (language === "ar") {
-    return `${code}: الكمية ${wanted} أكبر من المخزون المتاح ${left} حسب منطقة التسعير.`;
+    return over ? `المتاح: ${qtyText} — أكثر من المخزون` : `المتاح: ${qtyText}`;
   }
-  return `${code}: quantity ${wanted} exceeds available stock ${left} for the selected pricing region.`;
-}
-
-export function assertOrderLinesWithinEodStock({ lines = [], availability, pricingRegion, language = "en" } = {}) {
-  const stock = normalizeEodStockAvailability(availability);
-  if (!stock.active) return { ok: true, violations: [] };
-  const violations = [];
-  (lines || []).forEach((line) => {
-    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
-    const quantity = Number(line?.quantity ?? line?.order_quantity ?? 0);
-    if (!code || !Number.isFinite(quantity) || quantity <= 0) return;
-    const available = availableEodStockQty(stock, pricingRegion, code);
-    if (available == null) return;
-    if (quantity > available) {
-      violations.push({
-        itemCode: code,
-        quantity,
-        available,
-        message: formatEodStockOverLimitMessage({
-          itemCode: code,
-          quantity,
-          available,
-          language,
-        }),
-      });
-    }
-  });
-  return {
-    ok: violations.length === 0,
-    violations,
-    error: violations[0]?.message || "",
-  };
+  return over ? `Available: ${qtyText} — over stock` : `Available: ${qtyText}`;
 }

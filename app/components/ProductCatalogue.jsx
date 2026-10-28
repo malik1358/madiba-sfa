@@ -21,6 +21,7 @@ import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
+  isEodStockQtyOverAvailable,
 } from "../lib/eodStock.js";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
@@ -740,8 +741,8 @@ export default function ProductCatalogue({
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-          const availableLabel = formatEodStockAvailableLabel(availableStock, language);
-          const atStockLimit = availableStock != null && qty >= availableStock;
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty);
+          const overStock = isEodStockQtyOverAvailable(qty, availableStock);
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
               <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
@@ -782,15 +783,16 @@ export default function ProductCatalogue({
                     type="number"
                     min="0"
                     step="1"
-                    max={availableStock ?? undefined}
                     disabled={disabled}
                     aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`}
                     value={qty || ""}
                     onChange={(event) => onQty(item.item_code, event.target.value)}
                   />
-                  <button type="button" disabled={disabled || atStockLimit} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => onIncrease(item.item_code)}>+</button>
+                  <button type="button" disabled={disabled} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => onIncrease(item.item_code)}>+</button>
                 </div>
-                {availableLabel ? <div className={styles.stockAvailable}>{availableLabel}</div> : null}
+                {availableLabel ? (
+                  <div className={`${styles.stockAvailable}${overStock ? ` ${styles.stockOver}` : ""}`}>{availableLabel}</div>
+                ) : null}
                 {canManagePhotos && (
                   <label className={styles.upload}>
                     {ar ? "رفع صورة" : "Upload photo"}

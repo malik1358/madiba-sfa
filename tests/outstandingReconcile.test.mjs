@@ -75,13 +75,13 @@ test("Show differences only uses money gaps, not invoice-only branch issues", ()
   assert.equal(formatOutstandingCompareDelta(-3.25), "-3.25");
 });
 
-test("Ignore differences of 1 SAR or less hides either side of a 1 SAR gap", () => {
+test("Ignore differences of 10 SAR or less hides either side of a 10 SAR gap", () => {
+  assert.equal(isOutstandingCompareSmallDifference({ open_delta: 10 }), true);
+  assert.equal(isOutstandingCompareSmallDifference({ open_delta: -10 }), true);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: 1 }), true);
-  assert.equal(isOutstandingCompareSmallDifference({ open_delta: -1 }), true);
-  assert.equal(isOutstandingCompareSmallDifference({ open_delta: 0.5 }), true);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: -0.01 }), true);
-  assert.equal(isOutstandingCompareSmallDifference({ open_delta: 1.01 }), false);
-  assert.equal(isOutstandingCompareSmallDifference({ open_delta: -1.01 }), false);
+  assert.equal(isOutstandingCompareSmallDifference({ open_delta: 10.01 }), false);
+  assert.equal(isOutstandingCompareSmallDifference({ open_delta: -10.01 }), false);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: 0 }), false);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: 0.004 }), false);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: null }), false);

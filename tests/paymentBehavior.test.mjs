@@ -1443,6 +1443,59 @@ test("named partial credit note does not void the same-day reissue", () => {
   assert.equal(reissue.fifo_credit_notes.length, 0);
 });
 
+test("customer 1171C credit note 396 reverses invoice NFD/1173 that references it", () => {
+  // CN 396 names large NFD/898 (amount mismatch) while sale NFD/1173 references 396.
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-06-01", voucher_number: "NFD/898", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 900, item_code: "LP00039", quantity: 50, category: "Sundry" },
+      { transaction_date: "2026-06-01", voucher_number: "NFD/898", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 84, item_code: "LP00374", quantity: 2, category: "Sundry" },
+      {
+        transaction_date: "2026-07-21",
+        voucher_number: "396",
+        voucher_type: "Credit Note",
+        reference: "NFD/898",
+        sales_amount: -84,
+        item_code: "LP00374",
+        quantity: -2,
+        category: "Sundry",
+      },
+      {
+        transaction_date: "2026-07-21",
+        voucher_number: "397",
+        voucher_type: "Credit Note",
+        reference: "NFD/898",
+        sales_amount: -89.56,
+        item_code: "LP00374",
+        quantity: -2,
+        category: "Sundry",
+      },
+      {
+        transaction_date: "2026-07-21",
+        voucher_number: "NFD/1173",
+        voucher_type: "SALES-NON FOOD DIVISION",
+        reference: "396",
+        sales_amount: 84,
+        item_code: "LP00374",
+        quantity: 2,
+        category: "Sundry",
+      },
+    ],
+    receipts: [],
+    todayIso: "2026-10-28",
+  });
+
+  assert.equal(
+    ledger.reversedInvoices.some((row) => row.voucher_number === "NFD/1173" && row.credit_note_voucher === "396"),
+    true,
+  );
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1173"), false);
+  const named = ledger.invoices.find((row) => row.voucher_number === "NFD/898");
+  assert.ok(named);
+  assert.deepEqual(named.fifo_credit_notes.map((row) => row.voucher_number), ["397"]);
+  assert.equal(Number(named.credit_note_settled.toFixed(2)), Number((89.56 * 1.15).toFixed(2)));
+  assert.equal(ledger.creditNotes.some((row) => row.voucher_number === "396"), false);
+});
+
 test("customer 1177 partial credit notes stay on the named invoices", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

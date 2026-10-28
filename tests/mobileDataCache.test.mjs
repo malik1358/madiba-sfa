@@ -58,7 +58,7 @@ test("every upload (sales, outstanding, receipt) recalculates customer history a
 
   // Sales, outstanding, and receipt uploads must each invalidate every collection-dependent cache.
   const uploadFunctions = uploadSource.split(/async function upload/).slice(1);
-  assert.equal(uploadFunctions.length, 4); // Sales, Outstanding, Receipt, Item Unit
+  assert.equal(uploadFunctions.length, 5); // Sales, Outstanding, Receipt, Item Unit, Stock
   for (const fn of uploadFunctions.slice(0, 3)) {
     assert.match(fn, /await invalidateOutstandingCache\(\)/);
     assert.match(fn, /await invalidateCustomerHistoryCache\(\)/);
@@ -78,7 +78,7 @@ test("customer-history cache is exposed with invalidate/subscribe helpers", asyn
   assert.equal(typeof mobileDataCache.invalidateCustomerHistoryCache, "function");
   assert.equal(typeof mobileDataCache.subscribeCustomerHistoryCacheCleared, "function");
   assert.equal(typeof mobileDataCache.invalidateCollectionQueuesForUser, "function");
-  assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v7");
+  assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v8");
 });
 
 test("collection queue cache keeps v6 current and still reads legacy v5/v4 offline queues", async () => {

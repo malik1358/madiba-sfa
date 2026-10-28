@@ -657,13 +657,15 @@ function emptyCityQtyMaps() {
   };
 }
 
-/** Compact city→item→qty map for pricing cache / offline order caps. Negative stock becomes 0. */
+/** Compact city→item→qty map for pricing cache / offline order hints. Keeps the last upload until a newer file replaces it. */
 export function buildEodStockAvailability(dataset) {
   const source = dataset && typeof dataset === "object" ? dataset : null;
   const stockDate = String(source?.stockDate || "").trim();
+  const uploadedAt = String(source?.uploadedAt || "").trim();
   if (!source || !/^\d{4}-\d{2}-\d{2}$/.test(stockDate) || !Array.isArray(source.rows) || source.rows.length === 0) {
     return {
       stockDate: "",
+      uploadedAt: "",
       byCity: emptyCityQtyMaps(),
       active: false,
     };
@@ -682,6 +684,7 @@ export function buildEodStockAvailability(dataset) {
 
   return {
     stockDate,
+    uploadedAt,
     byCity,
     active: true,
   };
@@ -689,14 +692,14 @@ export function buildEodStockAvailability(dataset) {
 
 export function normalizeEodStockAvailability(value) {
   if (!value || typeof value !== "object") {
-    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
   }
   if (value.active === false) {
-    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
   }
   const stockDate = String(value.stockDate || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate)) {
-    return { stockDate: "", byCity: emptyCityQtyMaps(), active: false };
+    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
   }
   const byCity = emptyCityQtyMaps();
   EOD_STOCK_CITIES.forEach((city) => {
@@ -708,7 +711,45 @@ export function normalizeEodStockAvailability(value) {
       byCity[city][code] = qty;
     });
   });
-  return { stockDate, byCity, active: true };
+  return {
+    stockDate,
+    uploadedAt: String(value.uploadedAt || "").trim(),
+    byCity,
+    active: true,
+  };
+}
+
+/** Prefer upload time; otherwise start of the stock date in Asia/Riyadh. */
+export function eodStockReferenceTimeMs(availability) {
+  const stock = availability && typeof availability === "object" ? availability : {};
+  const uploaded = Date.parse(String(stock.uploadedAt || "").trim());
+  if (Number.isFinite(uploaded)) return uploaded;
+  const stockDate = String(stock.stockDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate)) return NaN;
+  return Date.parse(`${stockDate}T00:00:00+03:00`);
+}
+
+export function isEodStockOlderThanHours(availability, hours = 24, nowMs = Date.now()) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return false;
+  const referenceMs = eodStockReferenceTimeMs(stock);
+  if (!Number.isFinite(referenceMs)) return false;
+  const limitMs = Math.max(0, Number(hours) || 0) * 3600 * 1000;
+  return (Number(nowMs) - referenceMs) > limitMs;
+}
+
+export function formatEodStockAsOfDate(stockDate, language = "en") {
+  const text = String(stockDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+  const [year, month, day] = text.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Riyadh",
+  });
 }
 
 /**
@@ -732,13 +773,25 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   return Number.isFinite(qty) && qty > available;
 }
 
-/** Label beside order qty. Warns when ordered qty exceeds available; does not change the qty. */
-export function formatEodStockAvailableLabel(available, language = "en", orderedQty = null) {
+/**
+ * Label beside order qty. Keeps the last uploaded stock qty until a newer import replaces it.
+ * Shows the stock date when that snapshot is older than 24 hours. Warns when ordered qty exceeds available.
+ */
+export function formatEodStockAvailableLabel(available, language = "en", orderedQty = null, availability = null, nowMs = Date.now()) {
   if (available == null) return "";
   const qtyText = formatEodQty(available);
+  const stock = normalizeEodStockAvailability(availability);
+  const stale = isEodStockOlderThanHours(stock, 24, nowMs);
+  const asOf = stale ? formatEodStockAsOfDate(stock.stockDate, language) : "";
   const over = isEodStockQtyOverAvailable(orderedQty, available);
+
   if (language === "ar") {
-    return over ? `المتاح: ${qtyText} — أكثر من المخزون` : `المتاح: ${qtyText}`;
+    let label = asOf ? `المتاح: ${qtyText} · ${asOf}` : `المتاح: ${qtyText}`;
+    if (over) label = `${label} — أكثر من المخزون`;
+    return label;
   }
-  return over ? `Available: ${qtyText} — over stock` : `Available: ${qtyText}`;
+
+  let label = asOf ? `Available: ${qtyText} · ${asOf}` : `Available: ${qtyText}`;
+  if (over) label = `${label} — over stock`;
+  return label;
 }

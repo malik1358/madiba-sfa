@@ -741,7 +741,7 @@ export default function ProductCatalogue({
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty);
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>

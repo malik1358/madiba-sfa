@@ -78,6 +78,33 @@ test("datewise lines stay one row per voucher on the same date", () => {
   assert.equal(lines.some((row) => row.kind === "Date"), false);
 });
 
+test("datewise receipt detail names a reversed sale when collection only funded a void", () => {
+  const lines = flattenDatewiseLines([
+    {
+      date: "2026-07-19",
+      receipts: [
+        {
+          vch_no: "JV/Coll/2026/0411",
+          amount: 517.5,
+          ar_amount: 0,
+          kind: "receipt",
+          applications: [{
+            target_kind: "sales",
+            voucher_number: "DNFD/038",
+            amount: 517.5,
+            status: "Reversed",
+          }],
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(lines[0].kind, "Receipt");
+  assert.equal(lines[0].collected_amount, 0);
+  assert.equal(lines[0].detail, "Reversed sale Invoice DNFD/038 (517.5)");
+  assert.equal(isImmediateReversalLedgerLine(lines[0]), true);
+});
+
 test("datewise payment detail names a refund against the reversed invoice", () => {
   const lines = flattenDatewiseLines([
     {

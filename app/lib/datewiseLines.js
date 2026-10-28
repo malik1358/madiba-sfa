@@ -97,10 +97,11 @@ export function flattenDatewiseLines(days) {
         voucher: receipt.vch_no || "—",
         sales_excl_vat: null,
         sales_incl_vat: null,
-        // Prefer nullish coalescing so a negative Payment Collected (e.g. -3340.75)
-        // is never coerced to 0 by `||`.
+        // Prefer ar_amount when present so cancelled void-cycle collections
+        // (ar_amount 0) and negative Payment refunds are not replaced by raw amount.
+        // Fall back to amount for callers that only pass the cash figure.
         collected_amount: Number(
-          isPayment ? (receipt.ar_amount ?? 0) : (receipt.amount ?? 0),
+          receipt.ar_amount != null ? receipt.ar_amount : (receipt.amount ?? 0),
         ),
         open_amount: null,
         detail: receiptDetail(receipt),

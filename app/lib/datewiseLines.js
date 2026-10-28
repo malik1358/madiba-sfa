@@ -7,9 +7,15 @@ export function formatOptionalMoney(value) {
 }
 
 function appliedTargetLabel(application) {
+  const status = String(application.status || "").trim();
+  const prefix = status === "Refund"
+    ? "Refund "
+    : status === "Reversed"
+      ? "Reversed sale "
+      : "";
   const target = application.target_kind === "purchase" ? "Purchase" : "Invoice";
   const voucher = application.voucher_number ? ` ${application.voucher_number}` : "";
-  return `${target}${voucher} (${formatMoney(application.amount)})`;
+  return `${prefix}${target}${voucher} (${formatMoney(application.amount)})`;
 }
 
 function purchaseDetail(purchase) {

@@ -66,6 +66,11 @@ export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
 export const LEFTOVER_FORWARD_MIRROR_MAX_DAYS = 7;
 /** Two amounts count as the same bill (exact Payment↔Purchase, compare). Not a reason to drop money. */
 const AMOUNT_TOLERANCE = 0.02;
+/**
+ * Tally refund Payments on a reversed sale can be up to SAR 1 short of the
+ * collection (1020C: P-1061 1,661 vs receipt 378 / invoice 2214 at 1,661.75).
+ */
+const REVERSAL_REFUND_TOLERANCE = 1;
 /** Float noise only. A posted halala (0.01) is real money and must still settle. */
 const SETTLEMENT_DUST = 0.0000005;
 
@@ -143,6 +148,98 @@ function normalizeRef(value) {
 
 function amountsMatch(left, right, tolerance = AMOUNT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
+}
+
+function receiptEventKey(date, vchNo) {
+  return `${dateOnly(date)}::${String(vchNo || "").trim()}`;
+}
+
+/**
+ * When a sale is immediately reversed by CN, a same-amount collection on that
+ * bill and a near-amount Payment refund must not settle other open invoices.
+ * Pair them to the reversed voucher (1020C: receipt 378 + P-1061 → 2214).
+ */
+export function pairRefundsForReversedSales(reversals = [], receipts = []) {
+  const cashRows = buildSortedReceipts(receipts);
+  const usedReceipt = new Set();
+  const usedPayment = new Set();
+  const cancelledReceiptKeys = new Set();
+  const refundedPaymentKeys = new Set();
+  const refundMatches = [];
+
+  const sortedReversals = [...(Array.isArray(reversals) ? reversals : [])].sort((left, right) => {
+    const byDate = String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    if (byDate !== 0) return byDate;
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
+  for (const reversal of sortedReversals) {
+    const invoiceAmount = toNumber(reversal.amount_incl_vat);
+    const invoiceDate = dateOnly(reversal.invoice_date);
+    const cnDate = dateOnly(reversal.credit_note_date);
+    if (!invoiceDate || !cnDate || invoiceAmount <= AMOUNT_TOLERANCE) continue;
+
+    let bestReceiptIndex = -1;
+    let bestReceiptGap = Infinity;
+    cashRows.forEach((row, index) => {
+      if (usedReceipt.has(index)) return;
+      if (!(toNumber(row.amount) > 0)) return;
+      if (receiptSettlementKind(row) !== "receipt") return;
+      if (!amountsMatch(row.amount, invoiceAmount)) return;
+      if (row.receipt_date < invoiceDate || row.receipt_date > cnDate) return;
+      const dayGap = Math.abs(isoDayOffset(row.receipt_date, invoiceDate) ?? 9999);
+      if (dayGap < bestReceiptGap) {
+        bestReceiptGap = dayGap;
+        bestReceiptIndex = index;
+      }
+    });
+
+    const receiptRow = bestReceiptIndex >= 0 ? cashRows[bestReceiptIndex] : null;
+    const targetAmount = receiptRow ? toNumber(receiptRow.amount) : invoiceAmount;
+
+    let bestPaymentIndex = -1;
+    let bestPaymentGap = Infinity;
+    cashRows.forEach((row, index) => {
+      if (usedPayment.has(index)) return;
+      if (receiptSettlementKind(row) !== "payment") return;
+      const payAmt = Math.abs(toNumber(row.amount));
+      if (
+        !amountsMatch(payAmt, targetAmount, REVERSAL_REFUND_TOLERANCE)
+        && !amountsMatch(payAmt, invoiceAmount, REVERSAL_REFUND_TOLERANCE)
+      ) return;
+      if (row.receipt_date < invoiceDate || row.receipt_date > cnDate) return;
+      const dayGap = Math.abs(isoDayOffset(row.receipt_date, cnDate) ?? 9999);
+      if (dayGap < bestPaymentGap) {
+        bestPaymentGap = dayGap;
+        bestPaymentIndex = index;
+      }
+    });
+
+    if (bestReceiptIndex >= 0) {
+      usedReceipt.add(bestReceiptIndex);
+      cancelledReceiptKeys.add(receiptEventKey(receiptRow.receipt_date, receiptRow.vch_no));
+    }
+
+    if (bestPaymentIndex < 0) continue;
+    const paymentRow = cashRows[bestPaymentIndex];
+    usedPayment.add(bestPaymentIndex);
+    refundedPaymentKeys.add(receiptEventKey(paymentRow.receipt_date, paymentRow.vch_no));
+    refundMatches.push({
+      invoice_date: invoiceDate,
+      invoice_voucher: String(reversal.voucher_number || "").trim(),
+      credit_note_date: cnDate,
+      credit_note_voucher: String(reversal.credit_note_voucher || "").trim(),
+      receipt_date: receiptRow ? receiptRow.receipt_date : "",
+      receipt_voucher: receiptRow ? String(receiptRow.vch_no || "").trim() : "",
+      receipt_amount: receiptRow ? toNumber(receiptRow.amount) : 0,
+      payment_date: paymentRow.receipt_date,
+      payment_voucher: String(paymentRow.vch_no || "").trim(),
+      amount: Math.abs(toNumber(paymentRow.amount)),
+      status: "Refund",
+    });
+  }
+
+  return { cancelledReceiptKeys, refundedPaymentKeys, refundMatches };
 }
 
 function lineVatInclAmount(row, amountExclVat) {
@@ -979,6 +1076,10 @@ export function buildSortedReceipts(receipts = []) {
  * A debit on any other voucher (Round Off Dr) is a negative receipt: after cash
  * is applied it reduces Paid on the newest invoice, so Machine Open stays on
  * the newest bill and older invoices stay paid.
+ * When a sale is immediately reversed by CN, a same-amount collection on that
+ * bill and a near-amount Payment refund pair to the reversed voucher instead of
+ * advancing the receipt onto a later invoice or leaving the Payment unadjusted
+ * (1020C: 378 + P-1061 → 2214, not 2270).
  * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
@@ -989,6 +1090,11 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
   const creditNotes = buildCreditNotes(transactions);
   const { reversals, reversedKeys } = findImmediateCreditNoteReversals(allInvoices, creditNotes);
+  const {
+    cancelledReceiptKeys,
+    refundedPaymentKeys,
+    refundMatches: reversedSaleRefunds,
+  } = pairRefundsForReversedSales(reversals, receipts);
   const invoices = allInvoices
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
     .map((invoice) => ({
@@ -1031,14 +1137,21 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       amount: row.amount,
       vch_no: row.vch_no,
     })),
-    ...buildSortedReceipts(receipts).map((row) => ({
-      kind: receiptSettlementKind(row),
-      date: row.receipt_date,
-      amount: Math.abs(row.amount),
-      signed_amount: row.amount,
-      vch_no: row.vch_no,
-      vch_type: row.vch_type || "",
-    })),
+    ...buildSortedReceipts(receipts)
+      .filter((row) => {
+        const key = receiptEventKey(row.receipt_date, row.vch_no);
+        if (cancelledReceiptKeys.has(key)) return false;
+        if (refundedPaymentKeys.has(key)) return false;
+        return true;
+      })
+      .map((row) => ({
+        kind: receiptSettlementKind(row),
+        date: row.receipt_date,
+        amount: Math.abs(row.amount),
+        signed_amount: row.amount,
+        vch_no: row.vch_no,
+        vch_type: row.vch_type || "",
+      })),
   ]
     .filter((row) => row.date && row.amount > 0)
     .sort((left, right) => {
@@ -1437,6 +1550,8 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     paymentAppliedToSales,
     unmatchedReceiptAmount,
     reversedInvoices: reversals,
+    reversedSaleRefunds,
+    cancelledReceiptKeys,
   };
 }
 
@@ -2086,6 +2201,8 @@ export function buildPaymentSettlementLedger({
     paymentAppliedToSales = 0,
     unmatchedReceiptAmount,
     reversedInvoices = [],
+    reversedSaleRefunds = [],
+    cancelledReceiptKeys = new Set(),
   } = matchPaymentsFifo(transactions, receipts);
   const summary = buildPaymentBehavior({
     transactions,
@@ -2406,19 +2523,46 @@ export function buildPaymentSettlementLedger({
       status: "Applied",
     });
   });
+  reversedSaleRefunds.forEach((row) => {
+    if (row.receipt_date && row.receipt_voucher) {
+      pushReceiptApplication(row.receipt_date, row.receipt_voucher, {
+        target_kind: "sales",
+        voucher_number: row.invoice_voucher || "",
+        target_date: row.invoice_date || "",
+        amount: toNumber(row.receipt_amount || row.amount),
+        status: "Reversed",
+      });
+    }
+    pushReceiptApplication(row.payment_date, row.payment_voucher, {
+      target_kind: "sales",
+      voucher_number: row.invoice_voucher || "",
+      target_date: row.invoice_date || "",
+      amount: toNumber(row.amount),
+      status: row.status || "Refund",
+    });
+  });
 
   const collectionsByDateMap = new Map();
   buildSortedReceipts(receipts).forEach((row) => {
     const signed = toNumber(row.amount);
-    const applications = applicationsByReceipt.get(
-      `${dateOnly(row.receipt_date)}::${String(row.vch_no || "").trim()}`,
-    ) || [];
+    const rowKey = receiptEventKey(row.receipt_date, row.vch_no);
+    const applications = applicationsByReceipt.get(rowKey) || [];
     const salesApplied = applications
-      .filter((application) => application.target_kind === "sales")
+      .filter((application) => (
+        application.target_kind === "sales"
+        // Refund / Reversed labels are display-only for CN-voided cycles.
+        && application.status !== "Refund"
+        && application.status !== "Reversed"
+      ))
       .reduce((total, application) => total + toNumber(application.amount), 0);
     // Datewise Collected is AR only. A Payment spent on Purchases is not a
     // negative sales collection; its bills are listed on the expanded row.
-    const arAmount = signed < 0 ? salesApplied : signed;
+    // A collection that only funded a CN-reversed sale (then refunded) is not
+    // lasting AR cash either.
+    const cancelledReversalCollection = cancelledReceiptKeys.has(rowKey);
+    const arAmount = cancelledReversalCollection
+      ? 0
+      : (signed < 0 ? salesApplied : signed);
     const current = collectionsByDateMap.get(row.receipt_date) || {
       date: row.receipt_date,
       receipt_count: 0,
@@ -2604,9 +2748,11 @@ export function buildPaymentSettlementLedger({
   const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
   // AR collected = positive collection receipts + Payment leftovers that settled sales.
   // Purchase-side Payments stay on AP and do not reduce AR collected.
+  // Receipts that only funded an immediately reversed sale (then refunded) drop out.
   const cashRows = buildSortedReceipts(receipts);
   const positiveReceiptSum = cashRows
     .filter((row) => toNumber(row.amount) > 0)
+    .filter((row) => !cancelledReceiptKeys.has(receiptEventKey(row.receipt_date, row.vch_no)))
     .reduce((total, row) => total + toNumber(row.amount), 0);
   const debitReceiptSum = allocations
     .filter((row) => toNumber(row.amount) < 0)

@@ -71,3 +71,28 @@ test("datewise lines stay one row per voucher on the same date", () => {
   assert.equal(lines[3].detail.includes("Invoice S1"), true);
   assert.equal(lines.some((row) => row.kind === "Date"), false);
 });
+
+test("datewise payment detail names a refund against the reversed invoice", () => {
+  const lines = flattenDatewiseLines([
+    {
+      date: "2025-12-18",
+      receipts: [
+        {
+          vch_no: "P-1061",
+          amount: -1661,
+          ar_amount: 0,
+          kind: "payment",
+          applications: [{
+            target_kind: "sales",
+            voucher_number: "2214",
+            amount: 1661,
+            status: "Refund",
+          }],
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(lines[0].kind, "Payment");
+  assert.equal(lines[0].detail, "Refund Invoice 2214 (1,661)");
+});

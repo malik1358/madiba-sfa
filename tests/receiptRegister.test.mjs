@@ -56,6 +56,32 @@ test("findReceiptHeaderRow accepts Payment Register Dr-only exports", () => {
   assert.equal(header.columns.credit, -1);
 });
 
+test("findReceiptHeaderRow maps bare VOUCHER without stealing VOUCHERTYPENAME", () => {
+  const header = findReceiptHeaderRow([
+    ["TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHER", "LEDGERNAME", "Dr", "Cr"],
+  ]);
+
+  assert.ok(header);
+  assert.equal(header.columns.date, 0);
+  assert.equal(header.columns.vchType, 1);
+  assert.equal(header.columns.vchNo, 2);
+  assert.equal(header.columns.particulars, 3);
+  assert.equal(header.columns.debit, 4);
+  assert.equal(header.columns.credit, 5);
+
+  const parsed = parseReceiptRegisterRows([
+    ["TRANSACTIONDATE", "VOUCHERTYPENAME", "VOUCHER", "LEDGERNAME", "Dr", "Cr"],
+    ["18-12-2025", "Payment", "P-1061", "1020C AL AMAL AL MUWAHHADDAH FOR MANUFACTURING CO.", 1661, 0],
+  ], header, null, { includePaymentVouchers: true });
+
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].vch_no, "P-1061");
+  assert.equal(parsed.rows[0].vch_type, "Payment");
+  assert.equal(parsed.rows[0].customer_code, "1020C");
+  assert.equal(parsed.rows[0].amount, -1661);
+  assert.equal(parsed.rows[0].receipt_date, "2025-12-18");
+});
+
 test("isPaymentVoucherType detects Payment voucher labels", () => {
   assert.equal(isPaymentVoucherType("Payment"), true);
   assert.equal(isPaymentVoucherType("Payment Voucher"), true);

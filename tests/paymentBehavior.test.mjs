@@ -9,6 +9,7 @@ import {
   findImmediateCreditNoteReversals,
   isCashSalesVoucher,
   matchPaymentsFifo,
+  pairRefundsForReversedSales,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 
@@ -200,6 +201,59 @@ test("matchPaymentsFifo exact Payment↔Purchase amount pairs go to matchedPurch
   assert.equal(ledger.matchedPurchasePayments.length, 2);
   assert.equal(Number(ledger.totals.matched_purchase_payment_amount.toFixed(2)), 21217.5);
   assert.equal(ledger.purchases.length, 0);
+});
+
+test("matchPaymentsFifo refunds a reversed sale instead of advancing the receipt", () => {
+  // 1020C: sale 2214 collected by 378, CN 92 reverses it, Payment P-1061 refunds
+  // (1,661 vs 1,661.75). Without pairing, 378 wrongly pays later sale 2270 and
+  // P-1061 stays "Not adjusted against an invoice".
+  const transactions = [
+    { transaction_date: "2025-12-17", voucher_number: "2214", voucher_type: "Sales", sales_amount: 1445, category: "Paper" },
+    { transaction_date: "2025-12-18", voucher_number: "92", voucher_type: "Credit Note", sales_amount: -1445, category: "Paper" },
+    { transaction_date: "2025-12-22", voucher_number: "2270", voucher_type: "Sales", sales_amount: 25848, category: "Paper" },
+  ];
+  const receipts = [
+    { receipt_date: "2025-12-17", vch_type: "Receipt", vch_no: "378", amount: 1661.75 },
+    { receipt_date: "2025-12-18", vch_type: "Payment", vch_no: "P-1061", amount: -1661 },
+  ];
+
+  const paired = pairRefundsForReversedSales(
+    findImmediateCreditNoteReversals(
+      buildSalesInvoices(transactions),
+      buildCreditNotes(transactions),
+    ).reversals,
+    receipts,
+  );
+  assert.equal(paired.refundMatches.length, 1);
+  assert.equal(paired.refundMatches[0].invoice_voucher, "2214");
+  assert.equal(paired.refundMatches[0].payment_voucher, "P-1061");
+  assert.equal(paired.refundMatches[0].receipt_voucher, "378");
+
+  const { allocations, invoices, reversedSaleRefunds, unmatchedReceiptAmount } = matchPaymentsFifo(
+    transactions,
+    receipts,
+  );
+  assert.equal(reversedSaleRefunds.length, 1);
+  assert.equal(reversedSaleRefunds[0].invoice_voucher, "2214");
+  assert.equal(allocations.filter((row) => row.voucher_number === "2270").length, 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "2270").remaining.toFixed(2)), 29725.2);
+  assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 0);
+
+  const ledger = buildPaymentSettlementLedger({ transactions, receipts });
+  const paymentDay = ledger.datewise.find((day) => day.date === "2025-12-18");
+  const payment = paymentDay.receipts.find((row) => row.vch_no === "P-1061");
+  assert.ok(payment);
+  assert.equal(payment.applications.length, 1);
+  assert.equal(payment.applications[0].voucher_number, "2214");
+  assert.equal(payment.applications[0].status, "Refund");
+  assert.equal(Number(payment.ar_amount.toFixed(2)), 0);
+
+  const receiptDay = ledger.datewise.find((day) => day.date === "2025-12-17");
+  const collection = receiptDay.receipts.find((row) => row.vch_no === "378");
+  assert.equal(Number(collection.ar_amount.toFixed(2)), 0);
+  assert.equal(collection.applications[0].status, "Reversed");
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 0);
+  assert.equal(Number(ledger.invoices.find((row) => row.voucher_number === "2270").remaining.toFixed(2)), 29725.2);
 });
 
 test("matchPaymentsFifo exact full-bill receipt claims that invoice before older FIFO", () => {

@@ -8,10 +8,12 @@ export function formatOptionalMoney(value) {
 
 function appliedTargetLabel(application) {
   const status = String(application.status || "").trim();
+  // CN rows use "Reverses {voucher}". A cancelled collection on that voided bill
+  // is not a second reverse — label it as cash that funded the reversed sale.
   const prefix = status === "Refund"
     ? "Refund "
     : status === "Reversed"
-      ? "Reversed sale "
+      ? "Collection on reversed "
       : "";
   const target = application.target_kind === "purchase"
     ? "Purchase"
@@ -138,7 +140,7 @@ export function isImmediateReversalLedgerLine(row) {
   if (kind === "Invoice" && detail === "Reversed") return true;
   if (/^Reverses\b/i.test(detail)) return true;
   if (kind === "Payment" || kind === "Receipt") {
-    if (/^Reversed sale\b/i.test(detail)) return true;
+    if (/^Collection on reversed\b/i.test(detail) || /^Reversed sale\b/i.test(detail)) return true;
     // Keep unmatched-overcollection refunds on the ledger; drop CN-reversal refunds.
     if (/^Refund Invoice\b/i.test(detail) && !row.unmatched_collection) return true;
   }

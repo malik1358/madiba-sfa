@@ -1,12 +1,37 @@
 /**
  * Sales coverage health.
  *
- * A sales upload replaces every row whose transaction date appears in the file
- * (`sql/merge_sales_batch_by_dates.sql`). A file that only holds one salesman's
- * invoices for a date therefore deletes every other salesman's invoices for that
- * whole date. These helpers detect that before it happens (upload guard) and
- * after it happened (coverage gap report).
+ * A sales upload replaces overlapping vouchers (same date + customer + voucher)
+ * on each date in the file (`sql/merge_sales_batch_by_dates.sql`) and keeps any
+ * active voucher the file does not re-state. A one-salesman / one-city export is
+ * still incomplete history for that day, so these helpers warn before upload and
+ * flag thin days after the fact (coverage gap report).
  */
+
+/** Stable key used by the merge SQL when deciding which active rows to replace. */
+export function salesVoucherMergeKey(row) {
+  const date = normalizeDate(row?.transaction_date);
+  const customer = normalizeName(row?.customer_code);
+  const voucher = normalizeName(row?.voucher_number);
+  if (!date || !customer || !voucher) return "";
+  return `${date}|${customer}|${voucher}`;
+}
+
+/**
+ * Active-batch rows the next upload would delete: same date + customer + voucher
+ * as a row in the file. Other active rows on those dates are preserved.
+ */
+export function selectSalesRowsReplacedByUpload({ existing = [], incoming = [] } = {}) {
+  const incomingKeys = new Set(
+    (Array.isArray(incoming) ? incoming : [])
+      .map((row) => salesVoucherMergeKey(row))
+      .filter(Boolean),
+  );
+  return (Array.isArray(existing) ? existing : []).filter((row) => {
+    const key = salesVoucherMergeKey(row);
+    return key && incomingKeys.has(key);
+  });
+}
 
 /** A date is only worth comparing when the neighbouring days have this many salesmen. */
 export const SALES_COVERAGE_MIN_BASELINE = 3;
@@ -221,10 +246,10 @@ export function describePartialDateOverwrites(warnings = []) {
   const details = list
     .map((warning) => {
       const lost = warning.missing_salesmen.length
-        ? ` and remove ${warning.missing_salesmen.length} salesman(s): ${warning.missing_salesmen.join(", ")}`
+        ? ` and omits ${warning.missing_salesmen.length} salesman(s): ${warning.missing_salesmen.join(", ")}`
         : "";
-      return `${warning.date}: replaces ${warning.stored_lines} stored line(s) with ${warning.incoming_lines}${lost}`;
+      return `${warning.date}: file has ${warning.incoming_lines} line(s) vs ${warning.stored_lines} stored${lost}`;
     })
     .join(" | ");
-  return `This file looks like a partial export. Uploading it deletes the existing sales of ${list.length} date(s). ${details}`;
+  return `This file looks like a partial export for ${list.length} date(s). Other vouchers on those dates are kept, but prefer a full export. ${details}`;
 }

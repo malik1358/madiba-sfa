@@ -11,6 +11,11 @@ import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
 import {
+  describePartialDateOverwrites,
+  detectPartialDateOverwrites,
+  summarizeSalesDays,
+} from "../../lib/salesCoverage.js";
+import {
   findImportValue,
   findProfitAmount,
   parseImportNumber,
@@ -34,6 +39,65 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 /* ============================================================
    HELPERS
    ============================================================ */
+
+/**
+ * Reads what is already stored for the dates in this file and returns the dates
+ * where the merge would leave out salesmen or most of the lines.
+ */
+async function detectPartialUploadDates(admin, mappedRows) {
+  const uploadDates = [
+    ...new Set(
+      mappedRows
+        .map((row) => row.transaction_date)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!uploadDates.length) return [];
+
+  const { data: activeSetting, error: activeError } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", "active_sales_batch_id")
+    .maybeSingle();
+
+  if (activeError) return [];
+
+  const activeBatchId = Number(activeSetting?.setting_value);
+  if (!Number.isFinite(activeBatchId) || activeBatchId <= 0) return [];
+
+  const storedRows = [];
+  const PAGE = 1000;
+  const DATE_CHUNK = 50;
+
+  for (let i = 0; i < uploadDates.length; i += DATE_CHUNK) {
+    const dateChunk = uploadDates.slice(i, i + DATE_CHUNK);
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await admin
+        .from("sales_raw")
+        .select("transaction_date,voucher_number,salesman_name,salesman_code")
+        .eq("import_batch_id", activeBatchId)
+        .in("transaction_date", dateChunk)
+        .range(from, from + PAGE - 1);
+
+      if (error) return [];
+
+      const rows = data || [];
+      storedRows.push(...rows);
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  }
+
+  if (!storedRows.length) return [];
+
+  return detectPartialDateOverwrites({
+    incoming: summarizeSalesDays(mappedRows),
+    existing: summarizeSalesDays(storedRows),
+  });
+}
 
 function clean(value) {
   if (value === undefined || value === null) return null;
@@ -830,6 +894,51 @@ export async function POST(request) {
     ) {
       throw new Error(
         `Import cancelled. Only ${validTransactionRows.length} of ${mappedRows.length} rows contain valid Date, Customer and Item information.`
+      );
+    }
+
+    /* ========================================================
+       7b. PARTIAL-DAY OVERWRITE GUARD
+
+       The merge replaces overlapping vouchers on each date in
+       this file and keeps vouchers the file does not re-state.
+       Still stop and ask when the file looks incomplete so a
+       one-salesman / one-city export is not mistaken for a
+       full day.
+       ======================================================== */
+
+    const partialWarnings =
+      await detectPartialUploadDates(
+        admin,
+        mappedRows
+      );
+
+    const confirmPartial =
+      String(
+        formData.get(
+          "confirmPartialDates"
+        ) || ""
+      ) === "1";
+
+    if (
+      partialWarnings.length &&
+      !confirmPartial
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          requiresConfirmation: true,
+          reason: "partial_dates",
+          error:
+            describePartialDateOverwrites(
+              partialWarnings
+            ),
+          partialDates:
+            partialWarnings,
+        },
+        {
+          status: 409,
+        }
       );
     }
 

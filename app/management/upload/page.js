@@ -742,8 +742,9 @@ export default function UploadSalesPage() {
             <div className="partialDatesBox">
               <strong>This file looks like a partial export</strong>
               <p>
-                An upload replaces every stored sales row for the dates found in
-                the file. These dates would lose data:
+                Overlapping vouchers on these dates will be updated. Other
+                vouchers already stored for the same dates are kept. Prefer a
+                full day export when you have one:
               </p>
 
               <table className="partialDatesTable">
@@ -752,7 +753,7 @@ export default function UploadSalesPage() {
                     <th>Date</th>
                     <th>Stored lines</th>
                     <th>In file</th>
-                    <th>Salesmen that would be deleted</th>
+                    <th>Salesmen missing from file</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -772,8 +773,8 @@ export default function UploadSalesPage() {
               </table>
 
               <p>
-                Upload a full export for these dates instead, or continue if the
-                file really is complete.
+                Upload a full export for these dates instead, or continue if this
+                file is the update you intended.
               </p>
 
               <div className="partialDatesActions">

@@ -136,7 +136,9 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
-test("matchPaymentsFifo Payment leftover without Purchases settles open sales", () => {
+test("matchPaymentsFifo Payment leftover without Purchases unpays prior Paid", () => {
+  // Sale 1,150; receipt 800 → Paid 800 / Open 350; Payment 230 returns cash to the
+  // party and must reduce Paid (not add). Customer 1231 Payment 384 same rule.
   const { allocations, invoices, paymentAppliedToSales, unmatchedReceiptAmount } = matchPaymentsFifo(
     [
       { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Paper" },
@@ -150,11 +152,12 @@ test("matchPaymentsFifo Payment leftover without Purchases settles open sales", 
   assert.equal(Number(paymentAppliedToSales.toFixed(2)), 230);
   assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 0);
   assert.equal(allocations.length, 2);
-  assert.equal(Number(invoices[0].remaining.toFixed(2)), 120);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 580);
   const cash = allocations.find((row) => row.vch_no === "R1");
   const payment = allocations.find((row) => row.vch_no === "PV-1");
   assert.equal(Boolean(cash?.is_payment), false);
   assert.equal(Boolean(payment?.is_payment), true);
+  assert.equal(Number(payment?.amount.toFixed(2)), -230);
 
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -165,12 +168,12 @@ test("matchPaymentsFifo Payment leftover without Purchases settles open sales", 
       { receipt_date: "2026-01-20", amount: -230, vch_no: "PV-1", vch_type: "Payment" },
     ],
   });
-  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 1030);
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 120);
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 570);
+  assert.equal(Number(ledger.totals.paid_amount.toFixed(2)), 570);
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 580);
   const settled = ledger.invoices[0].settlements.find((row) => row.vch_no === "PV-1");
   assert.equal(Boolean(settled?.is_payment), true);
-  // Customer 1231 Payment 384: leftover closes AR but must stay labelled Payment/Dr, not Rcpt.
-  assert.equal(Number(settled?.amount.toFixed(2)), 230);
+  assert.equal(Number(settled?.amount.toFixed(2)), -230);
 });
 
 test("matchPaymentsFifo exact Payment↔Purchase amount pairs go to matchedPurchasePayments", () => {
@@ -415,7 +418,7 @@ test("matchPaymentsFifo open Purchase does not settle a sales invoice dated afte
   assert.equal(Number(invoices.find((row) => row.voucher_number === "LATER").remaining.toFixed(2)), 2300);
 });
 
-test("matchPaymentsFifo Payment leftover after Purchases settles sales invoices", () => {
+test("matchPaymentsFifo Payment leftover after Purchases unpays prior Paid", () => {
   const { allocations, invoices, paymentAppliedToPurchases, paymentAppliedToSales } = matchPaymentsFifo(
     [
       { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
@@ -432,29 +435,28 @@ test("matchPaymentsFifo Payment leftover after Purchases settles sales invoices"
   assert.equal(allocations.length, 2);
   assert.equal(Number(allocations[0].amount.toFixed(2)), 500);
   assert.equal(allocations[1].vch_no, "PV-1");
-  assert.equal(Number(allocations[1].amount.toFixed(2)), 200);
-  assert.equal(Number(invoices[0].remaining.toFixed(2)), 450);
+  assert.equal(Boolean(allocations[1].is_payment), true);
+  assert.equal(Number(allocations[1].amount.toFixed(2)), -200);
+  // Sale 1,150 − receipt 500 + Payment unpay 200 → Open 850 / Paid 300.
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 850);
 });
 
-test("matchPaymentsFifo applies a 0.01 payment to the open invoice instead of dropping it", () => {
+test("matchPaymentsFifo Payment leftover on a fully open invoice stays unmatched", () => {
+  // No prior Paid capacity — Payment must not inflate open above the bill.
   const { allocations, invoices, paymentAppliedToSales, paymentAppliedToPurchases, unmatchedReceiptAmount } = matchPaymentsFifo(
     [
       { transaction_date: "2026-10-04", voucher_number: "DNFD/119", sales_amount: 5814, category: "Office supplies" },
     ],
     [
       { receipt_date: "2026-10-13", amount: -0.01, vch_no: "VP-2", vch_type: "Payment" },
-      { receipt_date: "2026-10-13", amount: -0.01, vch_no: "VP-5", vch_type: "Payment" },
     ],
   );
 
   assert.equal(Number(paymentAppliedToPurchases.toFixed(2)), 0);
-  assert.equal(Number(paymentAppliedToSales.toFixed(2)), 0.02);
-  assert.ok(unmatchedReceiptAmount < 0.000001);
-  const hits = allocations.filter((row) => row.vch_no === "VP-2" || row.vch_no === "VP-5");
-  assert.equal(hits.length, 2);
-  assert.ok(hits.every((row) => row.voucher_number === "DNFD/119" && row.invoice_date === "2026-10-04"));
-  assert.equal(Number(hits.reduce((total, row) => total + row.amount, 0).toFixed(2)), 0.02);
-  assert.equal(Number((5814 * 1.15 - invoices[0].remaining).toFixed(2)), 0.02);
+  assert.equal(Number(paymentAppliedToSales.toFixed(2)), 0);
+  assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 0.01);
+  assert.equal(allocations.filter((row) => row.vch_no === "VP-2").length, 0);
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), Number((5814 * 1.15).toFixed(2)));
 
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -462,17 +464,13 @@ test("matchPaymentsFifo applies a 0.01 payment to the open invoice instead of dr
     ],
     receipts: [
       { receipt_date: "2026-10-13", amount: -0.01, vch_no: "VP-2", vch_type: "Payment" },
-      { receipt_date: "2026-10-13", amount: -0.01, vch_no: "VP-5", vch_type: "Payment" },
     ],
     todayIso: "2026-10-17",
   });
   const day = ledger.datewise.find((row) => row.date === "2026-10-13");
-  assert.equal(day.receipts.length, 2);
-  assert.ok(day.receipts.every((row) => (
-    row.applications.length === 1
-    && row.applications[0].target_kind === "sales"
-    && row.applications[0].voucher_number === "DNFD/119"
-  )));
+  assert.equal(day.receipts.length, 1);
+  assert.equal(day.receipts[0].applications.length, 0);
+  assert.equal(Number(day.collected_amount.toFixed(2)), 0);
 });
 
 test("matchPaymentsFifo applies a 0.01 payment to an open purchase instead of dropping it", () => {
@@ -490,7 +488,7 @@ test("matchPaymentsFifo applies a 0.01 payment to an open purchase instead of dr
   assert.equal(purchaseAllocations[0].vch_no, "VP-2");
 });
 
-test("matchPaymentsFifo Sep//Bpmt0125-style Payment settles Purchases and leftover Payment settles sales", () => {
+test("matchPaymentsFifo Sep//Bpmt0125-style Payment settles Purchases and leftover unpays Paid sales", () => {
   const receipts = [
     { receipt_date: "2025-09-02", amount: -10608.75, vch_no: "374", vch_type: "Payment" },
     { receipt_date: "2025-09-02", amount: 10608.75, vch_no: "46", vch_type: "Purchase" },
@@ -523,28 +521,32 @@ test("matchPaymentsFifo Sep//Bpmt0125-style Payment settles Purchases and leftov
     .filter((row) => row.vch_no === "Sep//Bpmt0125")
     .reduce((total, row) => total + row.amount, 0);
   assert.equal(Number(sepPurchase.toFixed(2)), 99679.39);
+  // Apr leftover unpays prior receipt-paid sales (negative is_payment rows).
   assert.ok(paymentAppliedToSales > 0.009);
-  assert.ok(allocations.some((row) => row.vch_no === "Apr//Bpmt0125"));
-  const open = invoices.reduce((total, row) => total + row.remaining, 0);
-  // Must not inflate open above sales (old reverse path pushed NFD/1942 above its bill).
-  assert.ok(open < 134313.1);
+  const aprSales = allocations.filter((row) => row.vch_no === "Apr//Bpmt0125");
+  assert.ok(aprSales.length > 0);
+  assert.ok(aprSales.every((row) => Number(row.amount) < 0 && Boolean(row.is_payment)));
   assert.ok(invoices.every((row) => row.remaining <= row.amount + 0.02));
 });
 
-test("matchPaymentsFifo Payment leftover does not settle a sales invoice dated after the payment", () => {
+test("matchPaymentsFifo Payment leftover does not unpay a sales invoice dated after the payment", () => {
   const { allocations, invoices, unmatchedReceiptAmount, paymentAppliedToSales } = matchPaymentsFifo(
     [
       { transaction_date: "2026-01-01", voucher_number: "OLD", sales_amount: 1000, category: "Paper" },
       { transaction_date: "2026-10-08", voucher_number: "LATER", sales_amount: 2000, category: "Paper" },
     ],
     [
+      { receipt_date: "2026-01-15", amount: 1150, vch_no: "R1", vch_type: "Receipt" },
       { receipt_date: "2026-04-29", amount: -5000, vch_no: "Apr//Bpmt0125", vch_type: "Payment" },
     ],
   );
 
+  // OLD is fully paid before the Payment; leftover unpays OLD only (not LATER).
   assert.equal(Number(paymentAppliedToSales.toFixed(2)), 1150);
-  assert.equal(allocations.length, 1);
-  assert.equal(allocations[0].voucher_number, "OLD");
+  assert.equal(allocations.filter((row) => row.vch_no === "Apr//Bpmt0125").length, 1);
+  assert.equal(allocations.find((row) => row.vch_no === "Apr//Bpmt0125")?.voucher_number, "OLD");
+  assert.equal(Number(allocations.find((row) => row.vch_no === "Apr//Bpmt0125")?.amount.toFixed(2)), -1150);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "OLD").remaining.toFixed(2)), 1150);
   assert.equal(Number(invoices.find((row) => row.voucher_number === "LATER").remaining.toFixed(2)), 2300);
   assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 3850);
 });

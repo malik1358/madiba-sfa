@@ -1273,6 +1273,10 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
           vch_no: event.vch_no,
           amount: applied,
           days,
+          // Payment leftovers settle sales via a receipt-shaped event so Paid
+          // still closes the bill; keep is_payment so the UI labels Dr/Payment
+          // instead of "Paid · Rcpt" (customer 1231 Payment 384).
+          is_payment: Boolean(event.is_payment),
           exclude_from_avg_days: Boolean(invoice.exclude_from_avg_days || invoice.is_cash),
         });
       }
@@ -1423,6 +1427,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       date: event.date,
       amount: left,
       vch_no: event.vch_no,
+      is_payment: true,
     };
     for (const invoice of invoices) {
       if (!hasSettlementAmount(left)) break;
@@ -2112,6 +2117,7 @@ export function buildTallyFifoDiscrepancies(invoiceRows = [], {
         vch_no: chunk.vch_no || "",
         amount: toNumber(chunk.amount),
         days: chunk.days,
+        is_payment: Boolean(chunk.is_payment),
       }));
 
       return {
@@ -2217,6 +2223,7 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
       vch_no: chunk.vch_no || "",
       amount: toNumber(chunk.amount),
       days: chunk.days,
+      is_payment: Boolean(chunk.is_payment),
     }));
 
     let status = "Match";

@@ -83,6 +83,7 @@ export function flattenDatewiseLines(days) {
         sales_incl_vat: null,
         collected_amount: null,
         open_amount: null,
+        purchase_amount: Number(purchase.amount || 0),
         detail: purchaseDetail(purchase),
       });
     });

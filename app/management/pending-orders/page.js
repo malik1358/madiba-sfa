@@ -1515,8 +1515,36 @@ export default function PendingOrdersPage() {
           tallyLedgerName = "";
         }
       }
+
+      if (!token) {
+        setError("Please login again to assign a Tally voucher number.");
+        return;
+      }
+      if (isQueuedPendingOrderId(order.id)) {
+        setError("Save this order online before generating Tally Excel so a voucher number can be attached.");
+        return;
+      }
+      const voucherResponse = await fetch("/api/tally-voucher-number", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          pricingRegion: snapshot.pricingRegion,
+          paymentType: snapshot.paymentType,
+        }),
+      });
+      const voucherPayload = await voucherResponse.json().catch(() => ({}));
+      if (!voucherResponse.ok || !voucherPayload.voucherNumber) {
+        setError(voucherPayload.error || "Unable to assign a Tally voucher number for this order.");
+        return;
+      }
+      const voucherNumber = String(voucherPayload.voucherNumber).trim();
+
       const exportRows = buildTallyOrderExportRows({
-        order: { ...order, tally_ledger_name: tallyLedgerName },
+        order: { ...order, tally_ledger_name: tallyLedgerName, tally_voucher_number: voucherNumber },
         lines: exportLines,
         unitMap,
         orderNumber,
@@ -1524,6 +1552,7 @@ export default function PendingOrdersPage() {
         paymentType: snapshot.paymentType,
         exportDate: new Date(),
         orderDate: order.created_at || order.submitted_at,
+        voucherNumber,
       });
 
       if (!exportRows.length) {

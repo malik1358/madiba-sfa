@@ -490,6 +490,7 @@ export function buildTallyOrderExportRows({
   paymentType = DEFAULT_PAYMENT_TYPE,
   exportDate = new Date(),
   orderDate = null,
+  voucherNumber = "",
 } = {}) {
   const region = normalizePricingRegion(pricingRegion);
   const payment = normalizePaymentType(paymentType);
@@ -505,6 +506,12 @@ export function buildTallyOrderExportRows({
   const orderDateText = formatTallyDate(orderDate || order?.created_at || order?.submitted_at || exportDate);
   const partyName = resolveTallyCustomerLedgerName(order);
   const orderNo = String(orderNumber || order?.order_number || order?.id || "").trim();
+  const voucherNo = String(
+    voucherNumber
+    || order?.tally_voucher_number
+    || order?.tallyVoucherNumber
+    || "",
+  ).trim();
 
   let vatTotal = 0;
   let vatPercent = "";
@@ -540,7 +547,7 @@ export function buildTallyOrderExportRows({
     return {
       "Voucher Date": voucherDate,
       "Voucher Type Name": setup.voucherType,
-      "Voucher Number": "",
+      "Voucher Number": voucherNo,
       "Ref.No": orderNo,
       "Ref.Date": orderDateText,
       "CUSTOMER NAME": partyName,
@@ -573,6 +580,7 @@ export function buildTallyOrderExportRows({
   const vatRow = Object.fromEntries(TALLY_EXPORT_COLUMNS.map((column) => [column, ""]));
   vatRow["Voucher Date"] = voucherDate;
   vatRow["Voucher Type Name"] = setup.voucherType;
+  vatRow["Voucher Number"] = voucherNo;
   vatRow["Ref.Date"] = orderDateText;
   vatRow["Charge.Ledgers VAT/Freight"] = TALLY_VAT_LEDGER;
   vatRow.Amount = vatTotal;

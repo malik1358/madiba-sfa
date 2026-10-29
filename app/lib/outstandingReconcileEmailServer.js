@@ -1,5 +1,9 @@
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
 import {
+  filterOutstandingReconcileEmailRows,
+  summarizeOutstandingReconcileRows,
+} from "./outstandingReconcile.js";
+import {
   buildOutstandingReconcileEmail,
   resolveOutstandingReconcileEmailCc,
   resolveOutstandingReconcileEmailRecipients,
@@ -54,8 +58,9 @@ export async function runOutstandingReconcileCycle(admin, {
   sendWhenEmpty = false,
 } = {}) {
   const dataset = await rebuild(admin, { trigger });
-  const rows = Array.isArray(dataset.rows) ? dataset.rows : [];
-  const base = summarize(dataset);
+  const rows = filterOutstandingReconcileEmailRows(dataset.rows);
+  const summary = summarizeOutstandingReconcileRows(rows);
+  const base = { ...summarize(dataset), differenceCount: rows.length };
 
   if (!rows.length && !sendWhenEmpty) {
     return { ...base, skipped: true, reason: "no_differences", sentCount: 0 };
@@ -84,7 +89,7 @@ export async function runOutstandingReconcileCycle(admin, {
 
   const message = buildOutstandingReconcileEmail({
     rows,
-    summary: dataset.summary || {},
+    summary,
     builtAt: dataset.builtAt,
     trigger,
     env,

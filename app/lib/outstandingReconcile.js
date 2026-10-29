@@ -25,6 +25,21 @@ export function isOutstandingCompareSmallDifference(row = {}, maximumAbs = OUTST
   return amount > OUTSTANDING_RECONCILE_TOLERANCE && amount <= maximumAbs;
 }
 
+/**
+ * True when the absolute money gap is above the report ignore threshold (10 SAR).
+ * Used by the differences email so noise under 10 SAR is not listed.
+ */
+export function isOutstandingCompareMaterialMoneyDifference(row = {}, minimumAbs = OUTSTANDING_COMPARE_IGNORE_SAR) {
+  const delta = row.open_delta ?? row.difference;
+  if (delta == null || Number.isNaN(Number(delta))) return false;
+  return Math.abs(Number(delta)) > minimumAbs;
+}
+
+/** Difference rows emailed / counted after ignoring gaps of 10 SAR or less. */
+export function filterOutstandingReconcileEmailRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => isOutstandingCompareMaterialMoneyDifference(row));
+}
+
 /** Format open Δ for Outstanding Compare; values within tolerance display as "0". */
 export function formatOutstandingCompareDelta(value, tolerance = OUTSTANDING_RECONCILE_TOLERANCE) {
   const number = Number(value || 0);

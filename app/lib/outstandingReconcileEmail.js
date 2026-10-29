@@ -1,4 +1,9 @@
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
+import {
+  OUTSTANDING_COMPARE_IGNORE_SAR,
+  filterOutstandingReconcileEmailRows,
+  summarizeOutstandingReconcileRows,
+} from "./outstandingReconcile.js";
 
 export const DEFAULT_OUTSTANDING_RECONCILE_EMAIL_TO = [
   "vinit.kulkarni@noorshukran.com",
@@ -111,23 +116,27 @@ export function buildOutstandingReconcileEmail({
   trigger = "",
   env = process.env,
 } = {}) {
-  const allRows = Array.isArray(rows) ? rows : [];
+  const allRows = filterOutstandingReconcileEmailRows(rows);
+  const reportSummary = summary && typeof summary === "object" && Number(summary.customer_count) === allRows.length
+    ? summary
+    : summarizeOutstandingReconcileRows(allRows);
   const shownRows = allRows.slice(0, MAX_EMAIL_ROWS);
   const hiddenCount = allRows.length - shownRows.length;
   const reportUrl = buildOutstandingReconcileReportUrl(env);
   const triggerLabel = String(trigger || "").replace(/[-_]/g, " ").trim();
+  const ignoreLabel = OUTSTANDING_COMPARE_IGNORE_SAR;
 
   const subject = allRows.length
-    ? `Tally vs SFA outstanding — ${allRows.length} customer(s) differ (${formatReconcileDelta(summary.difference)})`
+    ? `Tally vs SFA outstanding — ${allRows.length} customer(s) differ (${formatReconcileDelta(reportSummary.difference)})`
     : "Tally vs SFA outstanding — no differences";
 
   const intro = allRows.length
-    ? `Customers where SFA computed outstanding (cash FIFO + credit notes) does not match the Tally outstanding upload, or where an individual invoice still has an open gap. Only differing customers are listed.`
-    : "SFA computed outstanding matches the Tally outstanding upload for every customer.";
+    ? `Customers where SFA computed outstanding (cash FIFO + credit notes) differs from the Tally outstanding upload by more than ${ignoreLabel} SAR. Gaps of ${ignoreLabel} SAR or less are omitted.`
+    : `SFA computed outstanding matches the Tally outstanding upload within ${ignoreLabel} SAR for every customer.`;
 
   const body = shownRows.length
     ? shownRows.map((row, index) => tableRow(row, index, env)).join("")
-    : `<tr><td colspan="7" style="border:1px solid #99f6e4;padding:12px;background:#f0fdf4;color:#166534;">No differences.</td></tr>`;
+    : `<tr><td colspan="7" style="border:1px solid #99f6e4;padding:12px;background:#f0fdf4;color:#166534;">No differences above ${escapeHtml(String(ignoreLabel))} SAR.</td></tr>`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:980px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">
@@ -140,11 +149,11 @@ export function buildOutstandingReconcileEmail({
       <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
       <table style="border-collapse: collapse; font-size: 13px; width: 100%; border:1px solid #99f6e4;">
         <thead>${tableHeader()}</thead>
-        <tbody>${body}${allRows.length ? totalRow({ ...summary, customer_count: allRows.length }) : ""}</tbody>
+        <tbody>${body}${allRows.length ? totalRow({ ...reportSummary, customer_count: allRows.length }) : ""}</tbody>
       </table>
       ${hiddenCount > 0 ? `<p style="margin:12px 0 0;color:#b45309;font-size:12px;">${escapeHtml(String(hiddenCount))} more customer(s) not shown — open the report for the full list.</p>` : ""}
       <p style="margin:16px 0 0;"><a href="${escapeHtml(reportUrl)}" style="color:#0f766e;font-weight:700;">Open Outstanding Compare</a></p>
-      <p style="margin:12px 0 0; color: #64748b; font-size: 12px;">Customer names link to Invoices &amp; Settlement for that customer.</p>
+      <p style="margin:12px 0 0; color: #64748b; font-size: 12px;">Customer names link to Invoices &amp; Settlement for that customer. Gaps of ${escapeHtml(String(ignoreLabel))} SAR or less are omitted from this email.</p>
     </div>
   </div>
 </div>`;

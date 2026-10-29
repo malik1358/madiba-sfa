@@ -7,6 +7,8 @@ import {
   ledgerLineDebitCredit,
   ledgerLineParticulars,
   LEDGER_COMPANY_NAME,
+  LEDGER_COMPANY_NAME_AR,
+  LEDGER_PDF_LANGUAGES,
 } from "../app/lib/customerLedgerPdf.js";
 
 test("ledger debit/credit maps invoices receipts and CN like a party ledger", () => {
@@ -53,6 +55,14 @@ test("receipt and payment particulars omit applied invoice numbers and amounts",
     kind: "Invoice",
     detail: "Open",
   }), "Sales — Open");
+  assert.equal(ledgerLineParticulars({
+    kind: "Receipt",
+    detail: "Invoice 2397 (5,000)",
+  }, "ar"), "قبض");
+  assert.equal(ledgerLineParticulars({
+    kind: "Invoice",
+    detail: "Open",
+  }, "ar"), "مبيعات — مفتوح");
 });
 
 test("balance confirmation running balance is receivable Dr", () => {
@@ -89,6 +99,7 @@ test("balance confirmation running balance is receivable Dr", () => {
   assert.equal(statement.totalCredit, 515);
   assert.equal(statement.closingBalance, 635);
   assert.equal(formatBalanceSide(635), "635.00 Dr");
+  assert.equal(formatBalanceSide(635, "ar"), "635.00 مدين");
 });
 
 test("year sections close each year and open the next with opening balance", () => {
@@ -211,6 +222,9 @@ test("PDF model uses company name, excludes reversed, and includes outstanding b
   assert.ok(model);
   assert.equal(model.companyName, LEDGER_COMPANY_NAME);
   assert.equal(model.companyName, "Noor Shukran Trading Company");
+  assert.equal(model.companyNameAr, LEDGER_COMPANY_NAME_AR);
+  assert.deepEqual(model.languages, LEDGER_PDF_LANGUAGES);
+  assert.deepEqual(model.languages, ["ar", "en"]);
   assert.equal(model.subtitle, "Balance Confirmation");
   assert.equal(model.ledger.rows.length, 1);
   assert.equal(model.ledger.rows[0].voucher, "1821");
@@ -222,5 +236,6 @@ test("PDF model uses company name, excludes reversed, and includes outstanding b
   assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("0-30")));
   assert.ok(model.outstandingBuckets.some((row) => row.kind === "total" && row.amount === 1150));
   assert.match(model.confirmationText, /1,150\.00 Dr/);
+  assert.match(model.confirmationTextAr, /1,150\.00 مدين/);
   assert.match(model.filename, /balance-confirmation-1198/);
 });

@@ -6,6 +6,15 @@ on:
     # Thursday's report still goes Saturday morning because Friday is the holiday.
     - cron: "30 5 * * 0-4,6"
   workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (blank = previous working day)"
+        required: false
+        default: ""
+      digestOnlyTo:
+        description: "Optional single inbox for company digest only (skips salesman/boss mail)"
+        required: false
+        default: ""
 
 jobs:
   email:
@@ -15,6 +24,8 @@ jobs:
         env:
           DAILY_VISIT_REPORT_EMAIL_URL: ${{ secrets.DAILY_VISIT_REPORT_EMAIL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          REPORT_DATE: ${{ github.event.inputs.date }}
+          DIGEST_ONLY_TO: ${{ github.event.inputs.digestOnlyTo }}
         run: |
           DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/daily-visit-report-email'
           DAILY_VISIT_REPORT_EMAIL_URL_TRIMMED="$(printf '%s' "$DAILY_VISIT_REPORT_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -35,12 +46,24 @@ jobs:
 
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
+          REPORT_DATE_TRIMMED="$(printf '%s' "$REPORT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          DIGEST_ONLY_TO_TRIMMED="$(printf '%s' "$DIGEST_ONLY_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          BODY='{}'
+          if [[ -n "$REPORT_DATE_TRIMMED" && -n "$DIGEST_ONLY_TO_TRIMMED" ]]; then
+            BODY="$(printf '{"date":"%s","digestOnlyTo":"%s"}' "$REPORT_DATE_TRIMMED" "$DIGEST_ONLY_TO_TRIMMED")"
+          elif [[ -n "$REPORT_DATE_TRIMMED" ]]; then
+            BODY="$(printf '{"date":"%s"}' "$REPORT_DATE_TRIMMED")"
+          elif [[ -n "$DIGEST_ONLY_TO_TRIMMED" ]]; then
+            BODY="$(printf '{"digestOnlyTo":"%s"}' "$DIGEST_ONLY_TO_TRIMMED")"
+          fi
+
           post_report() {
             local target_url="$1"
             curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
               -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
               -H "Content-Type: application/json" \
-              --data '{}'
+              --data "$BODY"
           }
 
           status_code="$(post_report "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE")"

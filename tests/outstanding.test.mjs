@@ -43,6 +43,7 @@ import {
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   buildOutstandingPdfBucketRows,
+  buildMachineOpenOutstandingCustomer,
   buildOutstandingSummaryCustomer,
   summarizeOutstandingBuckets,
   summarizeOutstandingBucketsForVisitStatus,
@@ -898,6 +899,20 @@ test("order PDF outstanding rows use default buckets when labels and customer ar
     "Open invoices",
     "Total outstanding",
   ]);
+});
+
+test("machine-open outstanding customer ages Schedule A residuals into buckets", () => {
+  const customer = buildMachineOpenOutstandingCustomer([
+    { voucher_number: "A", remaining: 100, open_days: 10 },
+    { voucher_number: "B", remaining: 50, open_days: 45 },
+    { voucher_number: "C", remaining: 25, open_days: 100 },
+    { voucher_number: "Paid", remaining: 0, open_days: 200 },
+  ]);
+  assert.equal(customer.open_invoices, 3);
+  assert.equal(customer.total_outstanding, 175);
+  assert.equal(customer.buckets["0-30"], 100);
+  assert.equal(customer.buckets["31-60"], 50);
+  assert.equal(customer.buckets["91-120"], 25);
 });
 
 test("outstanding buckets collapse into the three Visit Status age bands", () => {

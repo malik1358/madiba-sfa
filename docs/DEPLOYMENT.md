@@ -242,7 +242,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `inactivity-push.yml` | Manual only | Backup trigger | same |
 | `auto-close-workdays.yml` | `59 20 * * *` and `5 21 * * *` | 23:59 and 00:05 KSA | `/api/cron/auto-close-workdays` |
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA build snapshot. Email, if enabled, waits for 08:30–22:00 KSA Sat–Thu | `/api/cron/salesman-visit-plan-email` |
-| `daily-visit-report-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-visit-report-email` |
+| `daily-visit-report-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-visit-report-email` (manual `date` + optional `digestOnlyTo` for company-digest-only resend) |
 | `daily-salesman-resume-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-salesman-resume-email` |
 | `daily-supplier-order-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/outstanding-no-gps-email` |

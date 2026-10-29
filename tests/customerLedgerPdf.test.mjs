@@ -244,7 +244,30 @@ test("PDF model uses company name, excludes reversed, and includes outstanding b
   assert.match(model.confirmationTextAr, /١,١٥٠\.٠٠ مدين/);
   assert.match(model.confirmationTextAr, /١١٩٨/);
   assert.doesNotMatch(model.confirmationTextAr, /þ/);
-  assert.match(model.filename, /balance-confirmation-1198/);
+  assert.match(
+    model.filename,
+    /^balance-confirmation-1198-Test-Party-2026-10-28$/,
+  );
+});
+
+test("ledger PDF filename keeps the full customer name", () => {
+  const model = buildCustomerLedgerPdfModel({
+    customer: {
+      customer_code: "1224",
+      customer_name: "RAWAAT MAZAYA GIFT LUXURIES TRADING CO.",
+    },
+    asOfDate: "2026-10-29",
+    ledger: {
+      datewise: [],
+      invoices: [],
+      reversedInvoices: [],
+      totals: {},
+    },
+  });
+  assert.equal(
+    model.filename,
+    "balance-confirmation-1224-RAWAAT-MAZAYA-GIFT-LUXURIES-TRADING-CO-2026-10-29",
+  );
 });
 
 test("PDF closing balance equals Machine Open aging total even when Tally upload differs", () => {

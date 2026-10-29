@@ -668,6 +668,7 @@ test("selectCollectionRowsForStaleOverdueEmail keeps overdue legal customers", (
   const emailRow = buildCollectionStaleOverdueEmailRow(legalDue);
   assert.equal(emailRow.isLegal, true);
   assert.match(emailRow.customer, /\(Legal\)$/);
+  assert.equal(emailRow.remarks, "-");
 
   const section = buildCollectionStaleOverdueSalesmanSection({
     salesmanName: "Parvez",
@@ -677,4 +678,43 @@ test("selectCollectionRowsForStaleOverdueEmail keeps overdue legal customers", (
   });
   assert.match(section.html, /Legal Shop \(Legal\)/);
   assert.match(section.text, /Legal Shop \(Legal\)/);
+});
+
+test("stale overdue email row and table include latest collection remarks", () => {
+  const source = {
+    customer_code: "1054C",
+    customer_name: "Court Case Co",
+    city: "Riyadh",
+    area: "Manfuhah",
+    outstanding_61_90: 1000,
+    total_due_amount: 1000,
+    max_overdue_days: 100,
+    latest_collection: {
+      saved_at: "2026-10-29T12:00:00Z",
+      visit_outcome: "TRANSFER_TO_LEGAL",
+      payment_status: "NOT_PAID",
+      remark_english: "case is currently with court, and we are following up with the lawyer regarding the case.",
+      latitude: 24.56825,
+      longitude: 46.74082,
+    },
+    legal_transfer: { is_transferred: true },
+  };
+  const emailRow = buildCollectionStaleOverdueEmailRow(source, { todayKey: "2026-10-29" });
+  assert.equal(
+    emailRow.remarks,
+    "case is currently with court, and we are following up with the lawyer regarding the case.",
+  );
+  assert.equal(emailRow.lastOutcome, "TRANSFER_TO_LEGAL");
+
+  const section = buildCollectionStaleOverdueSalesmanSection({
+    salesmanName: "Abdul Rehman",
+    sourceRows: [source],
+    todayKey: "2026-10-29",
+    agingThresholdDays: 60,
+  });
+  assert.match(section.html, />Remarks</);
+  assert.match(section.html, /case is currently with court/);
+  assert.match(section.html, /color:#b91c1c/);
+  assert.match(section.text, /\| Remarks$/m);
+  assert.match(section.text, /case is currently with court/);
 });

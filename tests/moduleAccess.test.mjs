@@ -307,6 +307,19 @@ test("salesman visit plan is available to admin and field sales after promotion"
   }), false);
 });
 
+test("collection remark import is admin/manager only", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("collectionRemarkImport"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("collectionRemarkImport"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("collectionRemarkImport"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("collectionRemarkImport"), false);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("collectionRemarkImport"), false);
+  assert.equal(localizedModuleLabel("collectionRemarkImport", "en"), "Import Collection Remarks");
+  assert.equal(moduleLabelForPath("/management/collection-remark-import", "en"), "Import Collection Remarks");
+  const collections = listAccessibleNavGroups(buildModuleAccess({ role: "admin" }))
+    .find((group) => group.key === "collections");
+  assert.equal(collections.items.some((item) => item.moduleKey === "collectionRemarkImport"), true);
+});
+
 test("KPI targets can be updated by admin and manager only", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("kpiTargets"), true);
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("kpiTargets"), true);

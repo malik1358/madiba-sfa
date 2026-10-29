@@ -26,6 +26,7 @@ export const MODULES = {
   mySalesInvoices: { href: "/management/my-sales-invoices", label: "My Sales Invoices" },
   myCollections: { href: "/management/my-collections", label: "My Customer Collections" },
   paymentCollections: { href: "/management/payment-collections", label: "Payment Collections" },
+  collectionRemarkImport: { href: "/management/collection-remark-import", label: "Import Collection Remarks" },
   collectionReport: { href: "/management/collection-report", label: "Collection Report" },
   receiptsNotInTally: { href: "/management/receipts-not-in-tally", label: "Receipts Not in Tally" },
   dailyVisitReport: { href: "/management/daily-visit-report", label: "Daily Visit Report" },
@@ -80,6 +81,7 @@ export const NAV_GROUPS = [
     label: "Collections",
     modules: [
       "paymentCollections",
+      "collectionRemarkImport",
       "myCollections",
       "collectionReport",
       "receiptsNotInTally",
@@ -239,6 +241,7 @@ export function buildModuleAccess(context = {}) {
       // Legacy /management/my-collections path stays available via canAccessPath.
       myCollections: false,
       paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker || (isSalesman && !isCollector),
+      collectionRemarkImport: isAdmin || isManager,
       collectionReport: hasManagementReportAccess || isCollector,
       receiptsNotInTally: hasManagementReportAccess || isCollector,
       dailyVisitReport: hasManagementReportAccess || isCollector || isSalesman,
@@ -447,6 +450,7 @@ export const MODULE_LABELS = {
   mySalesInvoices: { en: "My Sales Invoices", ar: "فواتير المبيعات" },
   myCollections: { en: "My Customer Collections", ar: "تحصيلات عملائي" },
   paymentCollections: { en: "Payment Collections", ar: "التحصيلات" },
+  collectionRemarkImport: { en: "Import Collection Remarks", ar: "استيراد ملاحظات التحصيل" },
   collectionReport: { en: "Collection Report", ar: "تقرير التحصيل" },
   receiptsNotInTally: { en: "Receipts Not in Tally", ar: "إيصالات غير موجودة في تالي" },
   dailyVisitReport: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومية" },

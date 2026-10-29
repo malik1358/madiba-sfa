@@ -1,7 +1,11 @@
 import { isFarFromCustomer } from "./customerLocation.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
-import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./paymentCollections.js";
+import {
+  formatLatestCollectionVisitRemark,
+  getCollectionSalesmanLabel,
+  sumCollectionReceivedInLastDays,
+} from "./paymentCollections.js";
 import {
   applySalesmanSpellingAliases,
   canonicalizeSalesmanDisplayText,
@@ -412,6 +416,7 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
       || row?.latest_collection?.payment_status
       || "",
     ).trim() || "-",
+    remarks: formatLatestCollectionVisitRemark(row?.latest_collection) || "-",
   };
 }
 
@@ -438,6 +443,7 @@ function tableHeader(agingLabel = "Over 60") {
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last collection</th>
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last visit w/o order</th>
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last outcome</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Remarks</th>
   </tr>`;
 }
 
@@ -462,6 +468,7 @@ function tableRow(row, index) {
     <td style="border:1px solid #99f6e4;padding:8px;">${formatVisitDateHtml(row.lastVisitDate, row.lastVisitIsFar)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;">${formatVisitDateHtml(row.lastVisitWithoutOrderDate, row.lastVisitWithoutOrderIsFar)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastOutcome)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;color:#b91c1c;max-width:280px;">${escapeHtml(row.remarks)}</td>
   </tr>`;
 }
 
@@ -470,7 +477,7 @@ function totalRow(totals) {
     <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="2">Total (${totals.customers} customer${totals.customers === 1 ? "" : "s"})</td>
     <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#0f766e;">${escapeHtml(formatCollectionMoney(totals.dueAmount))}</td>
     <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#b91c1c;">${escapeHtml(formatCollectionMoney(totals.overdueAmount))}</td>
-    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="5"></td>
+    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="6"></td>
   </tr>`;
 }
 
@@ -478,7 +485,7 @@ function renderTable(rows, agingLabel = "Over 60") {
   const totals = summarizeCollectionStaleOverdueRows(rows);
   const body = rows.length
     ? rows.map((row, index) => tableRow(row, index)).join("")
-    : `<tr><td colspan="9" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
+    : `<tr><td colspan="10" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
   return `<table style="border-collapse: collapse; font-size: 13px; width: 100%; border:1px solid #99f6e4;">
     <thead>${tableHeader(agingLabel)}</thead>
     <tbody>${body}${rows.length ? totalRow(totals) : ""}</tbody>
@@ -554,7 +561,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
   const text = [
     `Stale overdue collections — ${who}`,
     `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · near collection visit > ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} working days · near VWO > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d (FAR ignored)`,
-    `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome`,
+    `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome | Remarks`,
     ...rows.map((row) => [
       row.customer,
       `${row.city} / ${row.area}`,
@@ -565,6 +572,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
       row.lastVisitDate,
       row.lastVisitWithoutOrderDate,
       row.lastOutcome,
+      row.remarks,
     ].join(" | ")),
     `Total | ${totals.customers} customers | ${formatCollectionMoney(totals.dueAmount)} | ${formatCollectionMoney(totals.overdueAmount)}`,
     "",

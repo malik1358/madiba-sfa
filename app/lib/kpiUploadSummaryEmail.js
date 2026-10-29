@@ -104,6 +104,29 @@ export function isKpiUploadSummaryDue(pending, now = new Date()) {
 }
 
 /**
+ * KPI Targets page stores targets as flat row fields; API snapshots keep them
+ * under `targets`. Normalize so footer totals match the on-screen table.
+ */
+export function withFlatKpiTargets(row = {}) {
+  const targets = row?.targets && typeof row.targets === "object" ? row.targets : {};
+  const pick = (key) => (
+    row?.[key] != null && row[key] !== ""
+      ? row[key]
+      : (targets[key] ?? 0)
+  );
+  return {
+    ...row,
+    officeSupplies: pick("officeSupplies"),
+    localItemSales: pick("localItemSales"),
+    otherSales: pick("otherSales"),
+    totalSales: pick("totalSales"),
+    collection: pick("collection"),
+    newCustomers: pick("newCustomers"),
+    repeatCustomers: pick("repeatCustomers"),
+  };
+}
+
+/**
  * Build the three KPI Targets footer summaries, then transpose so those row
  * labels become email columns (one email row per KPI).
  */
@@ -117,7 +140,7 @@ export function buildKpiUploadSummaryTable({
   priorMonth = "",
   priorMonthActualsByCode = {},
 } = {}) {
-  const people = (rows || []).filter((row) => !row?.isTeam);
+  const people = (rows || []).filter((row) => !row?.isTeam).map(withFlatKpiTargets);
   const totals = sumFilteredKpiColumns(people, columns);
   const estimates = sumFilteredKpiPaceEstimates(people, columns, {
     reportDate,

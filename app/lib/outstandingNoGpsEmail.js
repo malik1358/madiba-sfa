@@ -1,6 +1,7 @@
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, normalizeDeliverableEmail, parseEmailList } from "./mailer.js";
 import { formatSalesmanDisplay } from "./outstandingNoGps.js";
+import { applySalesmanSpellingAliasesToUpper } from "./salesmanSpellingAliases.js";
 
 export const OUTSTANDING_NO_GPS_EMAIL_LAST_SENT_KEY = "outstanding_no_gps_email_last_sent";
 
@@ -32,11 +33,13 @@ export function resolveOutstandingNoGpsDigestCc(env = process.env, to = []) {
 }
 
 export function outstandingNoGpsGroupKey(row = {}) {
-  const code = String(row?.current_salesman_code || row?.salesman_code || "").trim().toUpperCase();
+  const code = applySalesmanSpellingAliasesToUpper(
+    String(row?.current_salesman_code || row?.salesman_code || "").trim(),
+  );
   if (code) return `code:${code}`;
-  const name = String(row?.salesman_name || row?.outstanding_salesman || row?.salesman_display || "")
-    .trim()
-    .toUpperCase();
+  const name = applySalesmanSpellingAliasesToUpper(
+    String(row?.salesman_name || row?.outstanding_salesman || row?.salesman_display || "").trim(),
+  );
   if (name) return `name:${name}`;
   return "unknown";
 }
@@ -55,14 +58,16 @@ export function outstandingNoGpsSalesmanDisplay(row = {}, profile = null) {
 export function groupOutstandingNoGpsBySalesman(rows = [], profiles = []) {
   const profileByCode = new Map();
   (profiles || []).forEach((profile) => {
-    const code = String(profile?.salesman_code || "").trim().toUpperCase();
+    const code = applySalesmanSpellingAliasesToUpper(String(profile?.salesman_code || "").trim());
     if (code && !profileByCode.has(code)) profileByCode.set(code, profile);
   });
 
   const groups = new Map();
   (rows || []).forEach((row) => {
     const key = outstandingNoGpsGroupKey(row);
-    const code = String(row?.current_salesman_code || row?.salesman_code || "").trim().toUpperCase();
+    const code = applySalesmanSpellingAliasesToUpper(
+      String(row?.current_salesman_code || row?.salesman_code || "").trim(),
+    );
     const profile = profileByCode.get(code) || null;
     if (!groups.has(key)) {
       groups.set(key, {

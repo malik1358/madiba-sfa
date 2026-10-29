@@ -3,6 +3,10 @@ import { isFarFromCustomer } from "./customerLocation.js";
 import { parseGpsFromActivityNote } from "./geo.js";
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
 import { isPlaceholderSalesmanValue, normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode } from "./outstanding.js";
+import {
+  applySalesmanSpellingAliasesToUpper,
+  canonicalizeSalesmanDisplayText,
+} from "./salesmanSpellingAliases.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
 export function potentialTargetAccountCode(value) {
@@ -19,7 +23,7 @@ function potentialTargetInvoiceAgeDays(invoice, todayKey) {
 }
 
 function normalizeTargetSalesmanCode(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim()).replace(/\s+/g, " ");
 }
 
 export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString() } = {}) {
@@ -202,10 +206,10 @@ export function potentialSalesTargetSalesmanCode(row = {}) {
 export function potentialSalesTargetSalesmanName(row = {}, salesmanCode = potentialSalesTargetSalesmanCode(row)) {
   const current = normalizeTargetSalesmanCode(row.current_salesman_code);
   const uploaded = normalizeTargetSalesmanCode(row.salesman_code);
-  const rawName = String(row.salesman_name || "").trim();
+  const rawName = canonicalizeSalesmanDisplayText(String(row.salesman_name || "").trim());
   const nameIsOwner = !current || !uploaded || uploaded === current
     || normalizeTargetSalesmanCode(rawName) === current;
-  if (!nameIsOwner) return current || salesmanCode || "Unassigned";
+  if (!nameIsOwner) return canonicalizeSalesmanDisplayText(current || salesmanCode || "Unassigned");
   return rawName || current || salesmanCode || "Unassigned";
 }
 

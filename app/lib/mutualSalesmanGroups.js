@@ -1,3 +1,8 @@
+import {
+  applySalesmanSpellingAliases,
+  applySalesmanSpellingAliasesToUpper,
+} from "./salesmanSpellingAliases.js";
+
 export const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 // One-way: the viewer can see the source salesman's customers, not the reverse.
@@ -15,6 +20,7 @@ export const SHARED_CUSTOMER_BOOKS = [
   },
   // One-way: Moinudin Khaja and Junaid see Mohammed Mubeen's customers on
   // My Day, Collection, Visit without order, and New order (via sales-scope).
+  // Moinuddin (double-d upload spelling) is the same person as Moinudin.
   {
     source: [
       "MOHAMMED MUBEEN",
@@ -25,19 +31,22 @@ export const SHARED_CUSTOMER_BOOKS = [
     ],
     viewers: [
       "MOINUDIN",
+      "MOINUDDIN",
       "MOINUDIN KHAJA",
+      "MOINUDDIN KHAJA",
       "MOINUDIN.KHAJA",
+      "MOINUDDIN.KHAJA",
       "JUNAID",
     ],
   },
 ];
 
 export function normalizeSalesmanName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim()).replace(/\s+/g, " ");
 }
 
 export function normalizeSalesmanCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim());
 }
 
 export function isSoyebProfile(profile) {
@@ -49,7 +58,9 @@ export function isSoyebProfile(profile) {
 }
 
 function comparableSalesmanName(value) {
-  return normalizeSalesmanName(value).replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return applySalesmanSpellingAliases(
+    normalizeSalesmanName(value).replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim(),
+  );
 }
 
 function looseSalesmanName(value) {

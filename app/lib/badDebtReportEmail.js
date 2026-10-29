@@ -1,6 +1,10 @@
 import { collectSalesmanIdentities } from "./collectionStaleOverdueEmail.js";
 import { customerAccountCodesMatch } from "./outstanding.js";
 import { parseEmailList } from "./mailer.js";
+import {
+  applySalesmanSpellingAliasesToUpper,
+  canonicalizeSalesmanDisplayText,
+} from "./salesmanSpellingAliases.js";
 
 export const BAD_DEBT_REPORT_EMAIL_KEY_PREFIX = "bad_debt_report_email:";
 export const BAD_DEBT_REPORT_EMAIL_SNAPSHOT_KEY = "bad_debt_report_email_snapshot_v1";
@@ -61,8 +65,8 @@ export function markDebtRowsAddedToday(rows = [], previousCodes, reportDate = ""
 export function groupBadDebtRowsBySalesman(rows = []) {
   const groups = new Map();
   (rows || []).filter((row) => !row.transferredToLegal).forEach((row) => {
-    const salesman = String(row.salesman || "").trim() || "Unassigned";
-    const key = salesman.toUpperCase();
+    const salesman = canonicalizeSalesmanDisplayText(String(row.salesman || "").trim()) || "Unassigned";
+    const key = applySalesmanSpellingAliasesToUpper(salesman);
     if (!groups.has(key)) groups.set(key, { salesman, rows: [] });
     groups.get(key).rows.push(row);
   });

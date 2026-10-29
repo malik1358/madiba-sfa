@@ -1,5 +1,6 @@
 import { customerMatchesMasterSearch } from "../../lib/customerMasterQuery.js";
 import { customerAccountCodesMatch } from "../../lib/outstanding.js";
+import { canonicalizeSalesmanDisplayText } from "../../lib/salesmanSpellingAliases.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -124,7 +125,7 @@ export function buildProspectScheduleRows(rows) {
 }
 
 export function normalizeVisitScheduleSalesmanLabel(value) {
-  const text = String(value || "").trim();
+  const text = canonicalizeSalesmanDisplayText(String(value || "").trim());
   if (!text) return "__UNASSIGNED__";
   if (text === "__UNASSIGNED__") return text;
 

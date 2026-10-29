@@ -237,11 +237,104 @@ test("PDF model uses company name, excludes reversed, and includes outstanding b
   assert.equal(model.openInvoices.length, 1);
   assert.equal(model.openTotal, 1150);
   assert.equal(model.reversedInvoices.length, 1);
-  assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("0-30")));
+  assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("0-30") && row.amount === 1150));
   assert.ok(model.outstandingBuckets.some((row) => row.kind === "total" && row.amount === 1150));
+  assert.equal(model.ledger.closingBalance, model.outstandingBuckets.find((row) => row.kind === "total")?.amount);
   assert.match(model.confirmationText, /1,150\.00 Dr/);
   assert.match(model.confirmationTextAr, /١,١٥٠\.٠٠ مدين/);
   assert.match(model.confirmationTextAr, /١١٩٨/);
   assert.doesNotMatch(model.confirmationTextAr, /þ/);
   assert.match(model.filename, /balance-confirmation-1198/);
+});
+
+test("PDF closing balance equals Machine Open aging total even when Tally upload differs", () => {
+  const model = buildCustomerLedgerPdfModel({
+    customer: { customer_code: "1224", customer_name: "RAWAAT" },
+    asOfDate: "2026-10-29",
+    outstandingCustomer: {
+      buckets: { "0-30": 82940.3, "31-60": 0, "61-90": 0, "91-120": 7.6, ">120": 0 },
+      open_invoices: 2,
+      total_outstanding: 82947.9,
+    },
+    outstandingBucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
+    ledger: {
+      datewise: [
+        {
+          date: "2026-01-01",
+          invoices: [{
+            voucher_number: "2397",
+            amount_excl_vat: 18026.2,
+            amount_incl_vat: 20730.13,
+            remaining: 0,
+            status: "Paid",
+          }],
+          credit_notes: [{
+            voucher_number: "121",
+            amount_excl_vat: -18026.2,
+            amount_incl_vat: -20730.13,
+            remaining: 0,
+            status: "Applied to 1737",
+            kind: "Credit Note",
+          }],
+          receipts: [],
+          purchases: [],
+        },
+        {
+          date: "2026-07-20",
+          invoices: [{
+            voucher_number: "DUST",
+            amount_excl_vat: 6.61,
+            amount_incl_vat: 7.6,
+            remaining: 7.6,
+            status: "Open",
+          }],
+          credit_notes: [],
+          receipts: [],
+          purchases: [],
+        },
+        {
+          date: "2026-10-14",
+          invoices: [{
+            voucher_number: "RNFD/569",
+            amount_excl_vat: 72122,
+            amount_incl_vat: 82940.3,
+            remaining: 82940.3,
+            status: "Open",
+          }],
+          credit_notes: [],
+          receipts: [],
+          purchases: [],
+        },
+      ],
+      invoices: [
+        {
+          invoice_date: "2026-10-14",
+          voucher_number: "RNFD/569",
+          amount_incl_vat: 82940.3,
+          paid_amount: 0,
+          remaining: 82940.3,
+          status: "Open",
+          open_days: 15,
+        },
+        {
+          invoice_date: "2026-07-20",
+          voucher_number: "DUST",
+          amount_incl_vat: 7.6,
+          paid_amount: 0,
+          remaining: 7.6,
+          status: "Open",
+          open_days: 101,
+        },
+      ],
+      reversedInvoices: [],
+      totals: {},
+    },
+  });
+
+  const totalOutstanding = model.outstandingBuckets.find((row) => row.kind === "total")?.amount;
+  assert.equal(model.ledger.closingBalance, 82947.9);
+  assert.equal(totalOutstanding, 82947.9);
+  assert.equal(model.openTotal, 82947.9);
+  assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("0-30") && row.amount === 82940.3));
+  assert.ok(model.outstandingBuckets.some((row) => row.label.startsWith("91-120") && row.amount === 7.6));
 });

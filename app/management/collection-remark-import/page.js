@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -14,14 +14,19 @@ const TEXT = {
   title: { en: "Import Collection Remarks", ar: "استيراد ملاحظات التحصيل" },
   back: { en: "Management", ar: "الإدارة" },
   intro: {
-    en: "Upload a Stale Overdue Collections screenshot (or paste the table). Review the extracted remarks, then save them as FAR office collection visits so they show on the Stale Overdue Remarks column without clearing the near-visit filter.",
-    ar: "ارفع لقطة شاشة لتقرير المتأخرات أو الصق الجدول. راجع الملاحظات ثم احفظها كزيارات تحصيل مكتبية (FAR) لتظهر في عمود الملاحظات دون إلغاء فلتر الزيارة القريبة.",
+    en: "Upload a Stale Overdue or Bills Receivable screenshot (or paste the table). Review remarks, choose whose login should own the visits, then save as FAR office collection visits.",
+    ar: "ارفع لقطة شاشة لتقرير المتأخرات أو فواتير مستحقة (أو الصق الجدول). راجع الملاحظات، اختر حساب الحفظ، ثم احفظ كزيارات تحصيل مكتبية (FAR).",
   },
   screenshot: { en: "Screenshot", ar: "لقطة الشاشة" },
   paste: { en: "Or paste table text", ar: "أو الصق نص الجدول" },
   pasteHint: {
-    en: "TSV / CSV with Customer and Remarks columns works best if OCR misses rows.",
-    ar: "الأفضل لصق جدول بأعمدة العميل والملاحظات إذا أخفق التعرف الضوئي.",
+    en: "For Bills Receivable Excel shots, paste Party’s Name + Remarks columns if OCR misses rows.",
+    ar: "للقطات فواتير مستحقة، الصق أعمدة اسم الطرف والملاحظات إذا أخفق التعرف الضوئي.",
+  },
+  saveAs: { en: "Save visits under login", ar: "حفظ الزيارات باسم" },
+  saveAsHint: {
+    en: "Collection visits are attributed to this user (created_by), using MADIBA store FAR GPS.",
+    ar: "تُنسب زيارات التحصيل لهذا المستخدم مع إحداثيات متجر ماديبا (FAR).",
   },
   parse: { en: "Extract remarks", ar: "استخراج الملاحظات" },
   parsing: { en: "Reading screenshot…", ar: "جاري قراءة اللقطة…" },
@@ -44,15 +49,16 @@ const TEXT = {
   },
   login: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   noRows: {
-    en: "No customer remarks found. Try a clearer screenshot or paste the Remarks column.",
-    ar: "لم يتم العثور على ملاحظات. جرّب لقطة أوضح أو الصق عمود الملاحظات.",
+    en: "No customer remarks found. Open OCR text below, or paste Party/Customer + Remarks columns.",
+    ar: "لم يتم العثور على ملاحظات. افتح نص OCR بالأسفل أو الصق أعمدة الطرف/العميل والملاحظات.",
   },
   saved: { en: "Saved FAR visits", ar: "تم حفظ زيارات FAR" },
   parseError: { en: "Unable to extract remarks.", ar: "تعذر استخراج الملاحظات." },
   commitError: { en: "Unable to save visits.", ar: "تعذر حفظ الزيارات." },
+  actorsError: { en: "Unable to load users for save-as.", ar: "تعذر تحميل المستخدمين للحفظ باسم." },
   farNote: {
-    en: "Visits are saved at the MADIBA store GPS (FAR) under your login.",
-    ar: "تُحفظ الزيارات بإحداثيات متجر ماديبا (FAR) باسم حسابك.",
+    en: "Visits use MADIBA store GPS (FAR) so customers stay on the Stale Overdue digest.",
+    ar: "الزيارات بإحداثيات متجر ماديبا (FAR) فتبقى العملاء في تقرير المتأخرات.",
   },
 };
 
@@ -70,6 +76,8 @@ export default function CollectionRemarkImportPage() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [actors, setActors] = useState([]);
+  const [createdByUserId, setCreatedByUserId] = useState("");
 
   const selectedCount = useMemo(
     () => rows.filter((row) => row.selected && row.customerCode && row.remark).length,
@@ -81,6 +89,30 @@ export default function CollectionRemarkImportPage() {
     if (!session?.access_token) throw new Error(t("login"));
     return { Authorization: `Bearer ${session.access_token}` };
   }
+
+  useEffect(() => {
+    if (!canAccess || !supabase) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = await authHeaders();
+        const response = await fetch("/api/collection-remark-import", { headers });
+        const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || t("actorsError"));
+        }
+        setActors(Array.isArray(payload.actors) ? payload.actors : []);
+        setCreatedByUserId(String(payload.currentUserId || payload.actors?.[0]?.id || ""));
+      } catch (err) {
+        if (!cancelled) setError(err?.message || t("actorsError"));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canAccess, supabase]);
 
   async function handleParse(event) {
     event.preventDefault();
@@ -108,7 +140,9 @@ export default function CollectionRemarkImportPage() {
         selected: row.customerExists !== false,
       })));
       setOcrPreview(String(payload.ocrText || "").trim());
-      if (!(payload.rows || []).length) setError(t("noRows"));
+      if (!(payload.rows || []).length) {
+        setError(payload.hint || t("noRows"));
+      }
     } catch (err) {
       setRows([]);
       setError(err?.message || t("parseError"));
@@ -132,6 +166,7 @@ export default function CollectionRemarkImportPage() {
         },
         body: JSON.stringify({
           action: "commit",
+          createdByUserId,
           rows: rows.filter((row) => row.selected),
         }),
       });
@@ -139,7 +174,9 @@ export default function CollectionRemarkImportPage() {
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || t("commitError"));
       }
-      setSuccess(`${t("saved")}: ${payload.savedCount}`);
+      const actorLabel = actors.find((actor) => actor.id === (payload.createdByUserId || createdByUserId))?.label
+        || createdByUserId;
+      setSuccess(`${t("saved")}: ${payload.savedCount} · ${actorLabel}`);
       setRows((prev) => prev.map((row) => (
         row.selected
           ? { ...row, selected: false, saved: true }
@@ -194,6 +231,20 @@ export default function CollectionRemarkImportPage() {
 
         <form className="moduleCard" onSubmit={handleParse} style={{ display: "grid", gap: 12, marginBottom: 16 }}>
           <label className="moduleField">
+            <span>{t("saveAs")}</span>
+            <select
+              value={createdByUserId}
+              onChange={(event) => setCreatedByUserId(event.target.value)}
+              required
+              style={{ minWidth: 280, maxWidth: "100%" }}
+            >
+              {actors.map((actor) => (
+                <option key={actor.id} value={actor.id}>{actor.label}</option>
+              ))}
+            </select>
+            <small className="moduleMuted">{t("saveAsHint")}</small>
+          </label>
+          <label className="moduleField">
             <span>{t("screenshot")}</span>
             <input
               type="file"
@@ -207,7 +258,7 @@ export default function CollectionRemarkImportPage() {
               rows={5}
               value={pastedText}
               onChange={(event) => setPastedText(event.target.value)}
-              placeholder={"Customer\tRemarks\n1054C\tcase is currently with court…"}
+              placeholder={"Party’s Name\tRemarks\n1058 Al -Rowad Wholesale Trading\tgood return in next 2 days"}
               style={{ width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 13 }}
             />
             <small className="moduleMuted">{t("pasteHint")}</small>
@@ -250,7 +301,7 @@ export default function CollectionRemarkImportPage() {
               <button
                 type="button"
                 className="modulePrimaryButton"
-                disabled={Boolean(busy) || selectedCount === 0}
+                disabled={Boolean(busy) || selectedCount === 0 || !createdByUserId}
                 onClick={handleCommit}
               >
                 {busy === "commit" ? t("committing") : t("commit")}
@@ -319,7 +370,7 @@ export default function CollectionRemarkImportPage() {
         ) : null}
 
         {ocrPreview ? (
-          <details className="moduleCard" style={{ marginTop: 16 }}>
+          <details className="moduleCard" style={{ marginTop: 16 }} open={!rows.length}>
             <summary>OCR text</summary>
             <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{ocrPreview}</pre>
           </details>

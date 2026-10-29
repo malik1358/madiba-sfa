@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   normalizeCollectionRemarkCustomerCode,
   normalizeCollectionRemarkImportRows,
+  parseBillsReceivableOcrText,
   parseCollectionRemarkImportText,
   parseCollectionRemarkOcrText,
   parseCollectionRemarkTableText,
@@ -80,4 +81,45 @@ test("normalizeCollectionRemarkImportRows dedupes and keeps selection", () => {
   assert.equal(rows[0].visitOutcome, "TRANSFER_TO_LEGAL");
   assert.equal(rows[1].selected, false);
   assert.equal(rows[1].visitOutcome, "ASKED_COME_LATER");
+});
+
+test("parseBillsReceivableOcrText extracts party codes and remarks", () => {
+  const ocr = `
+ABC LTD Bills Receivable Pending Bills
+Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Remarks
+27-Jun-26 RNFD/045 1058 Al -Rowad Wholesale Trading Est. Riyadh 2,500.00 27-Jun-26 124 2,500.00 Ahmed Nabil good return in next 2 days
+15-Jul-26 NFD/199 1053 AL RABEE ARABIYA TRADING Co. Riyadh 1,100.00 15-Jul-26 105 1,100.00 ABDALLA ANTHANATH follow up / dealyed due to wrong credit note..
+01-Aug-26 NFD/210 1005 Abdullah bin mousa al kabbi Trading Est. Riyadh 800.00 01-Aug-26 88 800.00 Ahmed Nabil Blanace confirmation today / payment 1st Nov. if not then legal
+10-Aug-26 NFD/220 1062 AL TAWFEER TRADING COMPANY Riyadh 400.00 10-Aug-26 79 400.00 Ahmed Nabil Shop closed so write off this amount / an email is shared
+`;
+  const rows = parseBillsReceivableOcrText(ocr);
+  const byCode = Object.fromEntries(rows.map((row) => [row.customerCode, row]));
+  assert.equal(byCode["1058"].remark.includes("good return"), true);
+  assert.match(byCode["1053"].remark, /follow up/i);
+  assert.match(byCode["1005"].remark, /Blanace confirmation/i);
+  assert.equal(byCode["1005"].visitOutcome, "TRANSFER_TO_LEGAL");
+  assert.match(byCode["1062"].remark, /Shop closed/i);
+  assert.equal(byCode["1062"].visitOutcome, "TRANSFER_TO_LEGAL");
+});
+
+test("parseCollectionRemarkOcrText auto-detects bills receivable layout", () => {
+  const rows = parseCollectionRemarkOcrText(`
+Pending Bills
+12-Sep-26 NFD/300 1457 Hayat Al Shabab Trading company Riyadh 500.00 12-Sep-26 47 500.00 Ahmed Nabil sunday 1st Nov. expected
+`);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].customerCode, "1457");
+  assert.match(rows[0].remark, /sunday 1st Nov/i);
+});
+
+test("parseCollectionRemarkTableText accepts Party's Name header", () => {
+  const table = [
+    "Party's Name\tRemarks",
+    "1058 Al -Rowad Wholesale Trading\tgood return in next 2 days",
+    "1005 Abdullah bin mousa\tBlanace confirmation today / payment 1st Nov. if not then legal",
+  ].join("\n");
+  const rows = parseCollectionRemarkTableText(table);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].customerCode, "1058");
+  assert.equal(rows[1].visitOutcome, "TRANSFER_TO_LEGAL");
 });

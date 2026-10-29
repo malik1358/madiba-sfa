@@ -1,4 +1,4 @@
-/** Parse Stale Overdue screenshot OCR / pasted tables into collection remark rows. */
+/** Parse Stale Overdue / Bills Receivable screenshot OCR or pasted tables into remark rows. */
 
 export const COLLECTION_REMARK_IMPORT_OUTCOMES = [
   "ASKED_COME_LATER",
@@ -17,9 +17,15 @@ const OUTCOME_TOKENS = [
   "NO_DUE_AS_PER_CUSTOMER",
 ];
 
-/** Prefer codes with C suffix, or bare digits that introduce a customer name (dash), not money. */
-const CUSTOMER_CODE_RE = /(?<![,\d])(\d{3,5}C)(?![A-Z0-9])|(?:^|[\n\r])\s*(\d{3,5})(?=\s*[—\-–:])|(?<![,\d])(\d{3,5})(?=\s+[A-Za-z\u0600-\u06FF])/gi;
+/** Prefer codes with C suffix, or bare digits that introduce a customer/party name. */
+const CUSTOMER_CODE_RE = /(?<![,\d])(\d{3,5}C)(?![A-Z0-9])|(?:^|[\n\r])\s*(\d{3,5})(?=\s*[—\-–:])|(?<![,\d.])(\d{3,5})(?=\s+[A-Za-z\u0600-\u06FF])/gi;
 const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
+
+const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
+const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
+const BILL_MONEY_RE = /\b\d{1,3}(?:,\d{3})*\.\d{2}\b/g;
+const BILL_STATE_RE = /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf)\b/gi;
+const REMARK_CUE_RE = /\b(good return|follow[\s/-]?up|sunday|expected|blanace|balance\s+confirmation|stock\s+returns?|shop\s+closed|write\s*off|payment\s+\d|goods\s+will|if\s+not\s+then\s+legal|dealyed|delayed|wrong\s+credit|an\s+email|aproximately|approximately|taken\s+back)\b/i;
 
 export function normalizeCollectionRemarkCustomerCode(value) {
   const raw = String(value || "").trim().toUpperCase();
@@ -40,7 +46,7 @@ export function cleanCollectionRemarkText(value) {
 
 export function suggestCollectionRemarkVisitOutcome(remark = "") {
   const text = String(remark || "");
-  if (/\b(court|lawyer|legal|enforcement|محام|محكمة|قانون)\b/i.test(text)) {
+  if (/\b(court|lawyer|legal|enforcement|write\s*off|محام|محكمة|قانون)\b/i.test(text)) {
     return "TRANSFER_TO_LEGAL";
   }
   return "ASKED_COME_LATER";
@@ -53,25 +59,34 @@ export function suggestCollectionRemarkPaymentStatus(visitOutcome) {
   return "PROMISED";
 }
 
+export function looksLikeBillsReceivableText(text = "") {
+  return /bills\s*receivable|pending\s*bills|party'?s?\s*name|overdue\s*\[?\s*days|ref\.?\s*no\.?|invoice\s*\[?\s*amount|sales\s*person/i.test(
+    String(text || ""),
+  );
+}
+
 function isNoiseRemark(text) {
   const value = cleanCollectionRemarkText(text);
   if (!value || value === "-" || value === "—") return true;
-  if (/^(never|far|null|n\/a)$/i.test(value)) return true;
+  if (/^(never|far|null|n\/a|riyadh|jeddah)$/i.test(value)) return true;
   if (OUTCOME_TOKENS.includes(value.toUpperCase())) return true;
   if (/^\d{4}-\d{2}-\d{2}(?:\s*FAR)?$/i.test(value)) return true;
-  if (/^[\d,.\s]+$/.test(value) && value.length < 16) return true;
-  return value.length < 8;
+  if (/^\d{1,2}-[A-Za-z]{3}-\d{2}$/i.test(value)) return true;
+  if (/^[\d,.\s/-]+$/.test(value) && value.length < 16) return true;
+  if (/^[A-Za-z\u0600-\u06FF][A-Za-z\u0600-\u06FF .'-]{1,40}$/.test(value) && value.length >= 3) {
+    // Short alphabetic remarks like "Osama" are valid.
+    return false;
+  }
+  return value.length < 6;
 }
 
 function extractRemarkFromSegment(segment) {
   let text = cleanCollectionRemarkText(segment);
   if (!text) return "";
 
-  // Drop leading "code — customer name (Legal)"
   text = text.replace(/^\d{3,5}C?\s*[-—–:]?\s*/i, "");
   text = text.replace(/^[^]*?\((?:Legal|قانوني)\)\s*/i, "");
 
-  // Prefer text after the last known outcome token (table column before Remarks).
   for (const token of OUTCOME_TOKENS) {
     const idx = text.toUpperCase().lastIndexOf(token);
     if (idx >= 0) {
@@ -80,18 +95,59 @@ function extractRemarkFromSegment(segment) {
     }
   }
 
-  // Or after a trailing date / Never column.
   const afterDate = text.match(/(?:Never|\d{4}-\d{2}-\d{2}(?:\s*FAR)?)\s+(.+)$/i);
   if (afterDate?.[1] && afterDate[1].length > text.length * 0.35) {
     text = afterDate[1].trim();
   }
 
-  // Strip leftover money / day noise at the start.
   text = text
     .replace(/^(?:[\d,]+\.\d{2}\s*)+/g, "")
     .replace(/^\d{1,4}\s+/g, "")
     .replace(/^(?:Never|FAR|-)\s+/gi, "")
     .trim();
+
+  return isNoiseRemark(text) ? "" : text;
+}
+
+function extractRemarkFromBillsSegment(segment) {
+  const raw = String(segment || "");
+  if (!raw.trim()) return "";
+
+  const cue = raw.search(REMARK_CUE_RE);
+  if (cue >= 0) {
+    const fromCue = cleanCollectionRemarkText(raw.slice(cue));
+    if (!isNoiseRemark(fromCue)) return fromCue;
+  }
+
+  let text = raw
+    .replace(BILL_DATE_RE, " ")
+    .replace(BILL_REF_RE, " ")
+    .replace(BILL_STATE_RE, " ")
+    .replace(BILL_MONEY_RE, " ");
+
+  // Drop leading party/company name tokens until we hit likely free-text remark.
+  text = cleanCollectionRemarkText(text);
+  const moneyEnd = [...String(segment).matchAll(BILL_MONEY_RE)].pop();
+  if (moneyEnd) {
+    let afterMoney = cleanCollectionRemarkText(String(segment).slice(moneyEnd.index + moneyEnd[0].length));
+    // Strip 1–4 salesman name tokens (Title Case / ALL CAPS).
+    afterMoney = afterMoney.replace(
+      /^(?:[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.']*){0,3})\s+(?=[a-z\u0600-\u06FF(])/,
+      "",
+    );
+    afterMoney = afterMoney.replace(
+      /^(?:[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.']*){0,3})$/,
+      "",
+    );
+    if (!isNoiseRemark(afterMoney)) return afterMoney;
+  }
+
+  // Fallback: last chunk with lowercase letters.
+  const lowerChunk = text.match(/[a-z][a-zA-Z0-9 .,/&'%-]{4,}$/);
+  if (lowerChunk) {
+    const candidate = cleanCollectionRemarkText(lowerChunk[0]);
+    if (!isNoiseRemark(candidate)) return candidate;
+  }
 
   return isNoiseRemark(text) ? "" : text;
 }
@@ -111,6 +167,63 @@ function buildRow(customerCode, remark, source = "ocr") {
   };
 }
 
+function upsertRemarkRow(rowsByCode, row) {
+  if (!row?.customerCode) return;
+  const existing = rowsByCode.get(row.customerCode);
+  if (!existing) {
+    rowsByCode.set(row.customerCode, row);
+    return;
+  }
+  if (row.remark.length > existing.remark.length) {
+    rowsByCode.set(row.customerCode, { ...existing, ...row });
+    return;
+  }
+  if (row.remark && !existing.remark.toLowerCase().includes(row.remark.toLowerCase())) {
+    rowsByCode.set(row.customerCode, {
+      ...existing,
+      remark: `${existing.remark} | ${row.remark}`,
+      visitOutcome: suggestCollectionRemarkVisitOutcome(`${existing.remark} | ${row.remark}`),
+      paymentStatus: suggestCollectionRemarkPaymentStatus(
+        suggestCollectionRemarkVisitOutcome(`${existing.remark} | ${row.remark}`),
+      ),
+    });
+  }
+}
+
+/**
+ * Bills Receivable / Pending Bills OCR: party code + name, remarks on the right.
+ */
+export function parseBillsReceivableOcrText(ocrText = "") {
+  const text = String(ocrText || "").replace(/\r/g, "\n");
+  if (!text.trim()) return [];
+
+  const matches = [...text.matchAll(CUSTOMER_CODE_RE)];
+  if (!matches.length) return [];
+
+  const rowsByCode = new Map();
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
+    if (!code) continue;
+    const codePos = text.toUpperCase().indexOf(code, match.index);
+    const anchor = codePos >= 0 ? codePos : match.index;
+    const nextMatch = matches[index + 1];
+    const nextCode = nextMatch
+      ? String(nextMatch[1] || nextMatch[2] || nextMatch[3] || "").toUpperCase()
+      : "";
+    const nextPos = nextMatch
+      ? text.toUpperCase().indexOf(nextCode, nextMatch.index)
+      : -1;
+    const end = nextPos >= 0 ? nextPos : text.length;
+    const segment = text.slice(anchor + code.length, end);
+    const remark = extractRemarkFromBillsSegment(segment);
+    const row = buildRow(code, remark, "ocr-bills");
+    if (row) upsertRemarkRow(rowsByCode, row);
+  }
+
+  return [...rowsByCode.values()];
+}
+
 /**
  * Walk OCR text: split on customer codes and take the trailing remark for each.
  */
@@ -118,17 +231,22 @@ export function parseCollectionRemarkOcrText(ocrText = "") {
   const text = String(ocrText || "").replace(/\r/g, "\n");
   if (!text.trim()) return [];
 
+  if (looksLikeBillsReceivableText(text)) {
+    const billRows = parseBillsReceivableOcrText(text);
+    if (billRows.length) return billRows;
+  }
+
   const matches = [...text.matchAll(CUSTOMER_CODE_RE)];
-  if (!matches.length) return [];
+  if (!matches.length) {
+    // Last resort: treat as bills-style party rows even without header keywords.
+    return parseBillsReceivableOcrText(text);
+  }
 
-  const rows = [];
-  const seen = new Set();
-
+  const rowsByCode = new Map();
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index];
     const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
     if (!code) continue;
-    // Locate the actual code token inside the match (line-start pattern may include newline).
     const codePos = text.toUpperCase().indexOf(code, match.index);
     const anchor = codePos >= 0 ? codePos : match.index;
     const start = anchor + code.length;
@@ -141,20 +259,23 @@ export function parseCollectionRemarkOcrText(ocrText = "") {
       : -1;
     const end = nextPos >= 0 ? nextPos : text.length;
     const segment = text.slice(anchor, end);
-    const remark = extractRemarkFromSegment(segment) || extractRemarkFromSegment(text.slice(start, end));
+    const remark = extractRemarkFromSegment(segment)
+      || extractRemarkFromSegment(text.slice(start, end))
+      || extractRemarkFromBillsSegment(text.slice(start, end));
     const row = buildRow(code, remark, "ocr");
-    if (!row || seen.has(row.customerCode)) continue;
-    seen.add(row.customerCode);
-    rows.push(row);
+    if (row) upsertRemarkRow(rowsByCode, row);
   }
 
-  return rows;
+  if (!rowsByCode.size) {
+    return parseBillsReceivableOcrText(text);
+  }
+
+  return [...rowsByCode.values()];
 }
 
 function splitDelimitedLine(line) {
   if (line.includes("\t")) return line.split("\t").map((part) => part.trim());
   if (line.includes("|")) return line.split("|").map((part) => part.trim());
-  // CSV with simple quotes
   if (/,/.test(line)) {
     const parts = [];
     let current = "";
@@ -183,11 +304,11 @@ function headerLooksLikeRemark(header) {
 }
 
 function headerLooksLikeCustomer(header) {
-  return /customer|code|عميل|كود/i.test(String(header || ""));
+  return /customer|code|party|عميل|كود|اسم/i.test(String(header || ""));
 }
 
 /**
- * Parse pasted TSV/CSV/pipe tables. Prefers Customer + Remarks columns when headers exist.
+ * Parse pasted TSV/CSV/pipe tables. Prefers Customer/Party + Remarks columns when headers exist.
  */
 export function parseCollectionRemarkTableText(tableText = "") {
   const lines = String(tableText || "")
@@ -214,8 +335,7 @@ export function parseCollectionRemarkTableText(tableText = "") {
     customerIndex = 0;
   }
 
-  const rows = [];
-  const seen = new Set();
+  const rowsByCode = new Map();
   dataLines.forEach((line) => {
     const parts = splitDelimitedLine(line);
     if (!parts.length) return;
@@ -224,12 +344,10 @@ export function parseCollectionRemarkTableText(tableText = "") {
       ? (parts[Math.min(remarkIndex, parts.length - 1)] || "")
       : parts.slice(1).join(" ");
     const row = buildRow(customerCell, remarkCell, "paste");
-    if (!row || seen.has(row.customerCode)) return;
-    seen.add(row.customerCode);
-    rows.push(row);
+    if (row) upsertRemarkRow(rowsByCode, row);
   });
 
-  return rows;
+  return [...rowsByCode.values()];
 }
 
 export function parseCollectionRemarkImportText(rawText = "", { prefer = "auto" } = {}) {
@@ -282,4 +400,16 @@ export function normalizeCollectionRemarkImportRows(rows = []) {
 
 export function isValidCollectionRemarkCustomerCode(value) {
   return CUSTOMER_CODE_ONLY_RE.test(String(value || "").trim());
+}
+
+export function formatCollectionRemarkActorLabel(profile = {}) {
+  const name = String(profile.salesman_name || "").trim();
+  const code = String(profile.salesman_code || "").trim();
+  const email = String(profile.email || "").trim();
+  const role = String(profile.role || "").trim();
+  if (name && code) return `${name} (${code})`;
+  if (name) return name;
+  if (code) return code;
+  if (email) return email;
+  return role || String(profile.id || "").slice(0, 8);
 }

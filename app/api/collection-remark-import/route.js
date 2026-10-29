@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ocrImageBuffer } from "../../lib/extractCustomerDocumentText.js";
 import {
+  formatCollectionRemarkActorLabel,
   normalizeCollectionRemarkImportRows,
   parseCollectionRemarkImportText,
   suggestCollectionRemarkPaymentStatus,
@@ -37,7 +38,7 @@ async function requireManagementUser(admin, request) {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id,role,salesman_code")
+    .select("id,role,salesman_code,salesman_name,email")
     .eq("id", user.id)
     .single();
 
@@ -71,7 +72,6 @@ async function resolveExistingCustomerCodes(admin, codes) {
 
   const found = new Set((data || []).map((row) => String(row.customer_code || "").trim().toUpperCase()).filter(Boolean));
 
-  // Also try case-insensitive match for codes that differ only by casing.
   const missing = unique.filter((code) => !found.has(code));
   if (missing.length) {
     const orFilter = missing.map((code) => `customer_code.ilike.${code}`).join(",");
@@ -88,6 +88,67 @@ async function resolveExistingCustomerCodes(admin, codes) {
   return found;
 }
 
+async function loadActorOptions(admin) {
+  let query = admin
+    .from("profiles")
+    .select("id,salesman_code,salesman_name,role,email,is_active")
+    .order("salesman_name", { ascending: true });
+
+  let { data, error } = await query;
+  if (error && /is_active/i.test(error.message || "")) {
+    ({ data, error } = await admin
+      .from("profiles")
+      .select("id,salesman_code,salesman_name,role,email")
+      .order("salesman_name", { ascending: true }));
+  }
+  if (error) throw Object.assign(new Error(error.message || "Unable to load users."), { status: 500 });
+
+  return (data || [])
+    .filter((row) => row?.is_active !== false)
+    .map((row) => ({
+      id: row.id,
+      label: formatCollectionRemarkActorLabel(row),
+      salesmanCode: String(row.salesman_code || "").trim(),
+      salesmanName: String(row.salesman_name || "").trim(),
+      role: String(row.role || "").trim(),
+      email: String(row.email || "").trim(),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+async function resolveCreatedByUserId(admin, requestedId, fallbackUserId) {
+  const requested = String(requestedId || "").trim();
+  if (!requested) return fallbackUserId;
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("id", requested)
+    .maybeSingle();
+  if (error) throw Object.assign(new Error(error.message || "Unable to validate save-as user."), { status: 500 });
+  if (!data?.id) {
+    throw Object.assign(new Error("Selected save-as user was not found."), { status: 400 });
+  }
+  return data.id;
+}
+
+export async function GET(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Supabase is not configured." }, { status: 500 });
+    }
+    const admin = adminClient();
+    const { user } = await requireManagementUser(admin, request);
+    const actors = await loadActorOptions(admin);
+    return NextResponse.json({
+      success: true,
+      currentUserId: user.id,
+      actors,
+    });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
+
 export async function POST(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -102,11 +163,13 @@ export async function POST(request) {
     let pastedText = "";
     let imageBuffer = null;
     let commitRows = [];
+    let createdByUserId = "";
 
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       action = String(form.get("action") || "parse").trim().toLowerCase() || "parse";
       pastedText = String(form.get("text") || form.get("pastedText") || "");
+      createdByUserId = String(form.get("createdByUserId") || form.get("created_by") || "");
       const file = form.get("file") || form.get("image") || form.get("screenshot");
       if (file && typeof file === "object" && typeof file.arrayBuffer === "function") {
         const bytes = Buffer.from(await file.arrayBuffer());
@@ -124,17 +187,28 @@ export async function POST(request) {
       const body = await request.json().catch(() => ({}));
       action = String(body?.action || "parse").trim().toLowerCase() || "parse";
       pastedText = String(body?.text || body?.pastedText || "");
+      createdByUserId = String(body?.createdByUserId || body?.created_by || "");
       commitRows = Array.isArray(body?.rows) ? body.rows : [];
     }
 
     if (action === "parse") {
       let ocrText = "";
+      let ocrError = "";
       if (imageBuffer) {
-        ocrText = await ocrImageBuffer(imageBuffer);
+        try {
+          ocrText = await ocrImageBuffer(imageBuffer);
+        } catch (error) {
+          ocrError = error?.message || "OCR failed.";
+        }
       }
       const combined = [pastedText, ocrText].filter((part) => String(part || "").trim()).join("\n");
       if (!combined.trim()) {
-        throw Object.assign(new Error("Upload a screenshot or paste table text to parse."), { status: 400 });
+        throw Object.assign(
+          new Error(ocrError
+            ? `Could not read the screenshot (${ocrError}). Paste the Remarks table instead.`
+            : "Upload a screenshot or paste table text to parse."),
+          { status: 400 },
+        );
       }
 
       const parsed = parseCollectionRemarkImportText(combined, {
@@ -152,6 +226,10 @@ export async function POST(request) {
         action: "parse",
         rowCount: enriched.length,
         ocrText: ocrText || "",
+        ocrError: ocrError || "",
+        hint: enriched.length
+          ? ""
+          : "No customer remarks matched. For Bills Receivable screenshots, paste Party + Remarks columns if OCR is messy.",
         rows: enriched,
       });
     }
@@ -171,6 +249,7 @@ export async function POST(request) {
         );
       }
 
+      const actorId = await resolveCreatedByUserId(admin, createdByUserId, user.id);
       const store = madibaStoreLocation();
       const today = getKsaDateString();
       const defaultNextVisit = addKsaCalendarDays(today, 7);
@@ -197,7 +276,7 @@ export async function POST(request) {
           latitude: store.latitude,
           longitude: store.longitude,
           gps_accuracy_meters: 20,
-          created_by: user.id,
+          created_by: actorId,
           saved_at: savedAt,
         };
       });
@@ -205,7 +284,7 @@ export async function POST(request) {
       const { data, error } = await admin
         .from("collection_visits")
         .insert(inserts)
-        .select("id,customer_code,visit_outcome,payment_status,remark_english,saved_at,latitude,longitude");
+        .select("id,customer_code,visit_outcome,payment_status,remark_english,saved_at,latitude,longitude,created_by");
 
       if (error) {
         throw Object.assign(new Error(error.message || "Unable to save collection visits."), { status: 500 });
@@ -215,6 +294,7 @@ export async function POST(request) {
         success: true,
         action: "commit",
         savedCount: (data || []).length,
+        createdByUserId: actorId,
         visits: data || [],
       });
     }

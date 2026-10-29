@@ -254,6 +254,95 @@ export function sumFilteredKpiPaceEstimates(
   return estimates;
 }
 
+/**
+ * Pace-estimate vs last month's actual for one KPI.
+ * Delta and % are estimate − prior; direction is up / down / flat.
+ */
+export function compareKpiEstimateToPriorMonth(estimate, priorActual) {
+  if (estimate == null || estimate === "") return null;
+  const value = Number(estimate);
+  if (!Number.isFinite(value)) return null;
+  const prior = Number(priorActual || 0) || 0;
+  const delta = value - prior;
+  const percent = prior > 0
+    ? (delta / prior) * 100
+    : (value === 0 ? 0 : null);
+  return {
+    estimate: value,
+    priorActual: prior,
+    delta,
+    percent,
+    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+  };
+}
+
+/** Sum last-month actuals for the same filtered (non-team) salesmen. */
+export function sumFilteredPriorMonthActuals(
+  rows = [],
+  priorActualsByCode = {},
+  columns = PERFORMANCE_DISPLAY_KPI_KEYS,
+) {
+  const keys = new Set(columns || []);
+  if (keys.has("totalCashCollected")) {
+    keys.add("collection");
+    keys.add("cashCollection");
+  }
+  const totals = {};
+  keys.forEach((key) => {
+    totals[key] = 0;
+  });
+  let matched = false;
+  (rows || []).forEach((row) => {
+    if (row?.isTeam) return;
+    const code = normalizeSalesmanCode(row?.salesmanCode);
+    if (!code) return;
+    const actuals = priorActualsByCode?.[code]
+      || priorActualsByCode?.[String(code).toUpperCase()]
+      || null;
+    if (!actuals || typeof actuals !== "object") return;
+    matched = true;
+    keys.forEach((key) => {
+      if (key === "totalCashCollected") return;
+      if (key === "totalSales") {
+        const total = actuals.totalSales != null
+          ? Number(actuals.totalSales || 0) || 0
+          : (Number(actuals.officeSupplies || 0) || 0)
+            + (Number(actuals.localItemSales || 0) || 0)
+            + (Number(actuals.otherSales || 0) || 0);
+        totals.totalSales = (totals.totalSales || 0) + total;
+        return;
+      }
+      totals[key] = (totals[key] || 0) + (Number(actuals[key] || 0) || 0);
+    });
+  });
+  if (keys.has("totalCashCollected")) {
+    totals.totalCashCollected = (Number(totals.collection) || 0)
+      + (Number(totals.cashCollection) || 0);
+  }
+  return matched ? totals : null;
+}
+
+export function sumFilteredKpiEstimateVsPriorMonth(
+  rows = [],
+  columns = PERFORMANCE_DISPLAY_KPI_KEYS,
+  estimates = {},
+  priorActualsByCode = {},
+) {
+  const priorTotals = sumFilteredPriorMonthActuals(rows, priorActualsByCode, columns);
+  const comparisons = {};
+  (columns || []).forEach((key) => {
+    if (!priorTotals) {
+      comparisons[key] = null;
+      return;
+    }
+    comparisons[key] = compareKpiEstimateToPriorMonth(
+      estimates?.[key]?.estimate,
+      priorTotals[key],
+    );
+  });
+  return comparisons;
+}
+
 export function hasExplicitTargets(targets = {}) {
   const normalized = normalizePerformanceTargets(targets);
   return PERFORMANCE_DISPLAY_KPI_KEYS.some((key) => Number(normalized[key] || 0) > 0);

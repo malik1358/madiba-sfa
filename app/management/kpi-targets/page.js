@@ -16,6 +16,7 @@ import {
   filterKpiTargetRows,
   NO_BOSS_KEY,
   sumFilteredKpiColumns,
+  sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
   sumKpiActuals,
   teamMemberRows,
@@ -29,6 +30,7 @@ import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession"
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { formatKsaDateOnly, getKsaDateString } from "../../lib/workdayActivity";
+import { formatGrowthPercent } from "../../lib/categoryGrowth";
 import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
@@ -63,6 +65,15 @@ const TEXT = {
     en: "Sales: each salesman's last-3-month pace to the latest sales date. Collection: KSA workdays (Sat on, Fri off) to the latest receipt date",
     ar: "المبيعات: مسار آخر 3 أشهر حتى آخر تاريخ مبيعات. التحصيل: أيام العمل (السبت عمل، الجمعة عطلة) حتى آخر تاريخ تحصيل",
   },
+  vsLastMonth: { en: "vs last month", ar: "مقابل الشهر الماضي" },
+  vsLastMonthHint: {
+    en: "Pace estimate minus last month's actual for the same filtered salesmen",
+    ar: "تقدير المسار ناقص فعلي الشهر الماضي لنفس المندوبين المصفّين",
+  },
+  higherThanLastMonth: { en: "higher than last month", ar: "أعلى من الشهر الماضي" },
+  lowerThanLastMonth: { en: "lower than last month", ar: "أقل من الشهر الماضي" },
+  sameAsLastMonth: { en: "same as last month", ar: "مثل الشهر الماضي" },
+  lastMonthActual: { en: "last month", ar: "الشهر الماضي" },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
   otherSales: { en: "Others", ar: "أخرى" },
@@ -148,6 +159,8 @@ export default function KpiTargetsPage() {
   const [rows, setRows] = useState([]);
   const [lastTransactionDate, setLastTransactionDate] = useState("");
   const [lastReceiptDate, setLastReceiptDate] = useState("");
+  const [priorMonth, setPriorMonth] = useState("");
+  const [priorMonthActualsByCode, setPriorMonthActualsByCode] = useState({});
   const [selectedSalesmen, setSelectedSalesmen] = useState([]);
   const [selectedBosses, setSelectedBosses] = useState([]);
 
@@ -186,6 +199,12 @@ export default function KpiTargetsPage() {
       ).slice(0, 10);
       setLastTransactionDate(/^\d{4}-\d{2}-\d{2}$/.test(salesAsOfDate) ? salesAsOfDate : "");
       setLastReceiptDate(/^\d{4}-\d{2}-\d{2}$/.test(receiptAsOfDate) ? receiptAsOfDate : "");
+      setPriorMonth(String(payload.priorMonth || "").slice(0, 7));
+      setPriorMonthActualsByCode(
+        payload.priorMonthActualsByCode && typeof payload.priorMonthActualsByCode === "object"
+          ? payload.priorMonthActualsByCode
+          : {},
+      );
       const people = (payload.rows || []).map(emptyDraft);
       const teams = (payload.teamTargets || []).map((team) => emptyDraft({
         salesmanCode: team.salesmanCode,
@@ -330,6 +349,16 @@ export default function KpiTargetsPage() {
       receiptAsOfDate,
     }),
     [columns, month, receiptAsOfDate, salesAsOfDate, visibleRows],
+  );
+
+  const estimateVsPriorMonth = useMemo(
+    () => sumFilteredKpiEstimateVsPriorMonth(
+      visibleRows,
+      columns,
+      paceEstimates,
+      priorMonthActualsByCode,
+    ),
+    [columns, paceEstimates, priorMonthActualsByCode, visibleRows],
   );
 
   const individualVisibleCount = visibleRows.filter((row) => !row.isTeam).length;
@@ -618,6 +647,32 @@ export default function KpiTargetsPage() {
                         );
                       })}
                     </tr>
+                    <tr className="moduleKpiVsLastMonthRow">
+                      <td className="moduleKpiSalesmanCell">
+                        <strong>{t("vsLastMonth")}</strong>
+                        <div className="moduleKpiMeta">
+                          {t("vsLastMonthHint")}
+                          {priorMonth ? ` (${priorMonth})` : ""}
+                        </div>
+                      </td>
+                      <td className="moduleKpiBossCell"></td>
+                      {columns.map((key) => {
+                        const comparison = estimateVsPriorMonth[key];
+                        return (
+                          <KpiVsLastMonthCells
+                            key={key}
+                            comparison={comparison}
+                            kpiKey={key}
+                            labels={{
+                              higher: t("higherThanLastMonth"),
+                              lower: t("lowerThanLastMonth"),
+                              same: t("sameAsLastMonth"),
+                              lastMonth: t("lastMonthActual"),
+                            }}
+                          />
+                        );
+                      })}
+                    </tr>
                   </tfoot>
                 ) : null}
               </table>
@@ -744,6 +799,54 @@ function KpiTargetCells({
             {expected ? <span className="moduleKpiAchExpected">{expected}</span> : null}
           </>
         )}
+      </td>
+    </>
+  );
+}
+
+function formatSignedKpiDelta(kpiKey, delta) {
+  const amount = Number(delta || 0) || 0;
+  const absText = formatPerformanceKpiValue(kpiKey, Math.abs(amount));
+  if (amount > 0) return `+${absText}`;
+  if (amount < 0) return `−${absText}`;
+  return absText;
+}
+
+function KpiVsLastMonthCells({ comparison, kpiKey, labels }) {
+  if (!comparison) {
+    return (
+      <>
+        <td>—</td>
+        <td></td>
+        <td className="moduleKpiAchCell">—</td>
+      </>
+    );
+  }
+  const toneClass = comparison.direction === "up"
+    ? "moduleBiMonthCell--up"
+    : comparison.direction === "down"
+      ? "moduleBiMonthCell--down"
+      : "";
+  const directionLabel = comparison.direction === "up"
+    ? labels.higher
+    : comparison.direction === "down"
+      ? labels.lower
+      : labels.same;
+  const percentText = comparison.percent == null
+    ? "—"
+    : formatGrowthPercent(comparison.percent);
+  return (
+    <>
+      <td className={toneClass}>
+        <strong>{formatSignedKpiDelta(kpiKey, comparison.delta)}</strong>
+        <div className="moduleKpiMeta">
+          {labels.lastMonth}: {formatPerformanceKpiValue(kpiKey, comparison.priorActual)}
+        </div>
+      </td>
+      <td></td>
+      <td className={`moduleKpiAchCell ${toneClass}`.trim()}>
+        <strong className="moduleKpiAchDone">{percentText}</strong>
+        <span className="moduleKpiAchHint">{directionLabel}</span>
       </td>
     </>
   );

@@ -2362,6 +2362,45 @@ test("two credit notes on 2384 still leave next-day reissue 2397 open", () => {
   const reversed = (ledger.reversedInvoices || []).map((row) => row.voucher_number);
   assert.deepEqual(reversed, ["2384"]);
   assert.equal(ledger.invoices.some((row) => row.voucher_number === "2397"), true);
+
+  const dec31 = ledger.datewise.find((row) => row.date === "2025-12-31");
+  const cnStatus = Object.fromEntries(
+    (dec31?.credit_notes || []).map((row) => [row.voucher_number, row.status]),
+  );
+  assert.equal(cnStatus["0131"], "Reverses 2384");
+  // Leftover named twin is not an immediate reversal — keep it on the ledger.
+  assert.match(String(cnStatus["121"] || ""), /^(Applied to|Ref|Credit Note)/);
+  assert.equal(/^Reverses\b/i.test(String(cnStatus["121"] || "")), false);
+});
+
+test("customer 1224 leftover CN 121 stays on ledger so closing matches open AR", async () => {
+  const { flattenLedgerLinesExcludingReversed, openSettlementInvoices } = await import("../app/lib/datewiseLines.js");
+  const { buildBalanceConfirmationLedgerRows } = await import("../app/lib/customerLedgerPdf.js");
+
+  const prior = { item_code: "P-OLD", quantity: 1, category: "Paper", sales_amount: 18026.2 };
+  const item = { item_code: "P-200", quantity: 6, category: "Paper", sales_amount: 18026.2 };
+  const credit = { ...item, sales_amount: -18026.2, quantity: -6, voucher_type: "Credit Note", reference: "2384" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2025-11-15", voucher_number: "1737", voucher_type: "Sales", ...prior },
+      { transaction_date: "2025-12-31", voucher_number: "2384", voucher_type: "Sales", ...item },
+      { transaction_date: "2025-12-31", voucher_number: "0131", ...credit },
+      { transaction_date: "2025-12-31", voucher_number: "121", ...credit },
+      { transaction_date: "2026-01-01", voucher_number: "2397", voucher_type: "Sales", ...item },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-10-29",
+  });
+
+  const openSum = openSettlementInvoices(ledger.invoices)
+    .reduce((total, row) => total + Number(row.remaining || 0), 0);
+  const lines = flattenLedgerLinesExcludingReversed(ledger.datewise || []);
+  const statement = buildBalanceConfirmationLedgerRows(lines);
+
+  assert.equal(lines.some((row) => row.voucher === "121"), true);
+  assert.equal(lines.some((row) => row.voucher === "0131"), false);
+  assert.ok(Math.abs(statement.closingBalance - openSum) <= 0.02);
 });
 
 test("a credit note that already voided its named bill does not take a later identical sale", () => {

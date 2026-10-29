@@ -2672,11 +2672,42 @@ export function buildPaymentSettlementLedger({
       status: "Reversed",
     });
   });
+  // Only CNs that actually voided a sale are "Reverses …". A leftover named twin
+  // (1224 credit note 121 after 0131 voided 2384) FIFO-settles other bills and must
+  // stay on the balance-confirmation ledger — tagging it Reverses drops the credit
+  // and inflates closing vs Machine Open / outstanding.
+  const voidedInvoiceByCreditNoteKey = new Map();
+  (Array.isArray(reversedInvoices) ? reversedInvoices : []).forEach((row) => {
+    const key = invoiceKey(row.credit_note_date, row.credit_note_voucher);
+    if (!key || voidedInvoiceByCreditNoteKey.has(key)) return;
+    voidedInvoiceByCreditNoteKey.set(key, String(row.voucher_number || "").trim());
+  });
+  const fifoTargetsByCreditNoteKey = new Map();
+  creditNoteAllocations.forEach((row) => {
+    const key = invoiceKey(row.credit_date, row.credit_voucher);
+    if (!key) return;
+    const voucher = String(row.voucher_number || "").trim();
+    if (!voucher) return;
+    const list = fifoTargetsByCreditNoteKey.get(key) || [];
+    if (!list.includes(voucher)) list.push(voucher);
+    fifoTargetsByCreditNoteKey.set(key, list);
+  });
   buildCreditNotes(transactions).forEach((note) => {
     if (!note.credit_date) return;
     const current = ensureSalesDay(note.credit_date);
     const excl = toNumber(note.amount_excl_vat);
     const incl = toNumber(note.amount);
+    const noteKey = invoiceKey(note.credit_date, note.voucher_number);
+    const voidedVoucher = voidedInvoiceByCreditNoteKey.get(noteKey) || "";
+    const appliedTargets = fifoTargetsByCreditNoteKey.get(noteKey) || [];
+    let status = note.kind || "Credit Note";
+    if (voidedVoucher) {
+      status = `Reverses ${voidedVoucher}`;
+    } else if (appliedTargets.length) {
+      status = `Applied to ${appliedTargets.join(", ")}`;
+    } else if (note.reference) {
+      status = `Ref ${note.reference}`;
+    }
     current.sales_excl_vat -= excl;
     current.sales_incl_vat = roundMoney(current.sales_incl_vat - incl);
     current.credit_notes.push({
@@ -2685,7 +2716,7 @@ export function buildPaymentSettlementLedger({
       amount_excl_vat: -excl,
       amount_incl_vat: -incl,
       remaining: 0,
-      status: note.reference ? ("Reverses " + note.reference) : (note.kind || "Credit Note"),
+      status,
       kind: note.kind || "Credit Note",
     });
   });

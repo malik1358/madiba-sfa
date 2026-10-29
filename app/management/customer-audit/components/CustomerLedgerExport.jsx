@@ -141,7 +141,8 @@ export default function CustomerLedgerExport({
         customer,
         ledger,
         asOfDate: getKsaDateString(),
-        lines: visibleLedgerLines,
+        // Full ledger only — on-screen column filters must not change the PDF totals.
+        lines: ledgerLines,
         outstandingCustomer,
         outstandingBucketLabels,
       });

@@ -1392,6 +1392,44 @@ export function buildOutstandingPdfBucketRows(customer, labels = []) {
   ];
 }
 
+/**
+ * Age Machine Open invoice residuals into the standard outstanding buckets.
+ * Balance-confirmation PDF uses this so Total outstanding equals Schedule A /
+ * ledger closing (not a separate Tally upload total that can diverge).
+ */
+export function buildMachineOpenOutstandingCustomer(openInvoices = [], labels = DEFAULT_OUTSTANDING_BUCKET_LABELS) {
+  const baseLabels = (Array.isArray(labels) && labels.length)
+    ? sortBucketLabels(labels)
+    : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+  const buckets = Object.fromEntries(baseLabels.map((label) => [label, 0]));
+  let total = 0;
+  let openCount = 0;
+
+  (Array.isArray(openInvoices) ? openInvoices : []).forEach((invoice) => {
+    const remaining = toNumber(invoice?.remaining);
+    if (remaining <= 0.009) return;
+    openCount += 1;
+    total += remaining;
+    const label = bucketLabelForAgingDays(invoice?.open_days);
+    if (Object.prototype.hasOwnProperty.call(buckets, label)) {
+      buckets[label] += remaining;
+    } else {
+      const fallback = baseLabels[baseLabels.length - 1] || ">120";
+      buckets[fallback] = toNumber(buckets[fallback]) + remaining;
+    }
+  });
+
+  Object.keys(buckets).forEach((label) => {
+    buckets[label] = Math.round(toNumber(buckets[label]) * 100) / 100;
+  });
+
+  return emptyOutstandingCustomer({
+    buckets,
+    open_invoices: openCount,
+    total_outstanding: Math.round(total * 100) / 100,
+  });
+}
+
 export function visibleOutstandingBucketLabels(labels, buckets) {
   const sortedLabels = sortBucketLabels(labels);
   let lastNonZeroIndex = -1;

@@ -3,7 +3,11 @@ import {
   flattenLedgerLinesExcludingReversed,
   openSettlementInvoices,
 } from "./datewiseLines.js";
-import { buildOutstandingPdfBucketRows } from "./outstanding.js";
+import {
+  buildMachineOpenOutstandingCustomer,
+  buildOutstandingPdfBucketRows,
+  DEFAULT_OUTSTANDING_BUCKET_LABELS,
+} from "./outstanding.js";
 import { installArabicPdfText, registerArabicPdfFont } from "./pdfArabicText.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
@@ -399,11 +403,32 @@ export function buildCustomerLedgerPdfModel({
   const dates = statement.rows.map((row) => row.date).filter(Boolean).sort();
   const statementDate = String(asOfDate || getKsaDateString() || "").trim();
   const openTotal = roundMoney(openInvoices.reduce((total, row) => total + Number(row.remaining || 0), 0));
-  const closing = statement.closingBalance;
+  // Closing balance and Total outstanding are the same figure: Machine Open
+  // (Schedule A). The running ledger should already equal that after leftover
+  // non-voiding CNs stay on the statement; if it still drifts, prefer open AR.
+  const ledgerClosing = statement.closingBalance;
+  const closing = Math.abs(ledgerClosing - openTotal) <= 0.02 ? ledgerClosing : openTotal;
+  const agingLabels = (Array.isArray(outstandingBucketLabels) && outstandingBucketLabels.length)
+    ? outstandingBucketLabels
+    : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+  const machineOpenOutstanding = buildMachineOpenOutstandingCustomer(openInvoices, agingLabels);
+  const tallyTotal = roundMoney(Number(outstandingCustomer?.total_outstanding || 0));
+  const agingCustomer = openTotal > 0.009 || tallyTotal <= 0.009
+    ? { ...machineOpenOutstanding, total_outstanding: closing }
+    : {
+      ...(outstandingCustomer || machineOpenOutstanding),
+      total_outstanding: closing,
+    };
   const bucketRows = buildOutstandingPdfBucketRows(
-    outstandingCustomer,
-    outstandingBucketLabels,
-  ).filter((row) => row.kind === "bucket" || row.kind === "total");
+    agingCustomer,
+    agingLabels,
+  ).filter((row) => row.kind === "bucket" || row.kind === "total")
+    .map((row) => (row.kind === "total" ? { ...row, amount: closing } : row));
+  const years = (statement.years || []).map((section, index, list) => {
+    if (index !== list.length - 1) return section;
+    if (Math.abs(Number(section.closingBalance || 0) - closing) <= 0.02) return section;
+    return { ...section, closingBalance: closing };
+  });
 
   return {
     companyName: LEDGER_COMPANY_NAME,
@@ -416,7 +441,11 @@ export function buildCustomerLedgerPdfModel({
     statementDate,
     periodFrom: dates[0] || "",
     periodTo: dates[dates.length - 1] || statementDate,
-    ledger: statement,
+    ledger: {
+      ...statement,
+      years,
+      closingBalance: closing,
+    },
     outstandingBuckets: bucketRows,
     openInvoices: openInvoices.map((row) => ({
       invoice_date: row.invoice_date || "",

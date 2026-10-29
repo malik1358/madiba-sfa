@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
-import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode, PERFORMANCE_KPI_LABELS } from "../../../lib/performanceKpis.js";
+import {
+  emptyPerformanceActuals,
+  isMissingSchemaColumn,
+  monthStartDate,
+  normalizePerformanceTargets,
+  normalizeSalesmanCode,
+  PERFORMANCE_KPI_LABELS,
+  withDerivedKpiActuals,
+} from "../../../lib/performanceKpis.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
 import { isKpiTargetProfile, isTeamTargetSalesmanCode, mergeKpiTargetProfiles, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
 import { changedKpiTargetKeys } from "../../../lib/kpiTargetsEmail.js";
 import { runKpiTargetsEmailCycle } from "../../../lib/kpiTargetsEmailServer.js";
 import { enqueueDeferredTeamEmail } from "../../../lib/deferredTeamEmail.js";
-import { isWithinTeamEmailWindow, teamEmailWindowHoldMessage } from "../../../lib/workdayActivity.js";
+import { isWithinTeamEmailWindow, teamEmailWindowHoldMessage, getKsaDateString } from "../../../lib/workdayActivity.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { normalizeReportSalesmanCode } from "../../../lib/salesmanReportIdentity.js";
-import { getKsaDateString } from "../../../lib/workdayActivity.js";
+import { previousMonthKey } from "../../../lib/categoryGrowth.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -113,13 +121,24 @@ export async function GET(request) {
     const url = new URL(request.url);
     const reportDate = parseReportDate(url.searchParams.get("month") || url.searchParams.get("date"));
     const salesmen = await attachBosses(admin, await listFieldSalesmen(admin));
-    const snapshots = await loadPerformanceSnapshotsForSalesmen(admin, {
-      salesmen: salesmen.map((row) => ({
-        salesmanCode: row.salesman_code,
-        salesmanName: row.salesman_name,
-      })),
-      reportDate,
-    });
+    const salesmanPayload = salesmen.map((row) => ({
+      salesmanCode: row.salesman_code,
+      salesmanName: row.salesman_name,
+    }));
+    const priorMonth = previousMonthKey(String(monthStartDate(reportDate) || reportDate).slice(0, 7));
+    const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
+    const [snapshots, priorSnapshots] = await Promise.all([
+      loadPerformanceSnapshotsForSalesmen(admin, {
+        salesmen: salesmanPayload,
+        reportDate,
+      }),
+      priorReportDate
+        ? loadPerformanceSnapshotsForSalesmen(admin, {
+          salesmen: salesmanPayload,
+          reportDate: priorReportDate,
+        })
+        : Promise.resolve([]),
+    ]);
     const bossByCode = new Map(
       salesmen.map((row) => [normalizeSalesmanCode(row.salesman_code), row]),
     );
@@ -144,11 +163,22 @@ export async function GET(request) {
     const receiptAsOfDate = String(
       snapshots.find((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.receiptAsOfDate || "").slice(0, 10)))?.receiptAsOfDate || "",
     ).slice(0, 10);
+    const priorMonthActualsByCode = {};
+    (priorSnapshots || []).forEach((snapshot) => {
+      const code = normalizeSalesmanCode(snapshot?.salesmanCode);
+      if (!code) return;
+      priorMonthActualsByCode[code] = withDerivedKpiActuals({
+        ...emptyPerformanceActuals(),
+        ...(snapshot.actuals || {}),
+      });
+    });
 
     return NextResponse.json({
       success: true,
       month: monthStartDate(reportDate),
       reportDate,
+      priorMonth: priorMonth || "",
+      priorMonthActualsByCode,
       salesAsOfDate,
       receiptAsOfDate,
       rows,

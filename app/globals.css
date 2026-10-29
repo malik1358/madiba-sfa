@@ -4804,18 +4804,37 @@ th:has(.moduleTableColumnFilterInput) {
   background: #dff0f3;
 }
 
+.moduleKpiTargetsTable .moduleKpiVsLastMonthRow td {
+  background: #f4f8f9;
+  font-weight: 700;
+}
+
+.moduleKpiTargetsTable .moduleKpiVsLastMonthRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiVsLastMonthRow .moduleKpiBossCell {
+  background: #f4f8f9;
+}
+
+.moduleKpiTargetsTable .moduleKpiVsLastMonthRow td.moduleBiMonthCell--up,
+.moduleKpiTargetsTable .moduleKpiVsLastMonthRow td.moduleBiMonthCell--down {
+  font-weight: 700;
+}
+
 .moduleKpiTargetsTable tfoot td {
   position: sticky;
   z-index: 4;
   box-shadow: 0 -2px 8px rgba(6, 47, 58, 0.08);
 }
 
-.moduleKpiTargetsTable tfoot .moduleKpiPaceEstimateRow td {
+.moduleKpiTargetsTable tfoot .moduleKpiVsLastMonthRow td {
   bottom: 0;
 }
 
+.moduleKpiTargetsTable tfoot .moduleKpiPaceEstimateRow td {
+  bottom: 5.5rem;
+}
+
 .moduleKpiTargetsTable tfoot .moduleKpiTotalsRow td {
-  bottom: 3.75rem;
+  bottom: 11rem;
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiSalesmanCell {

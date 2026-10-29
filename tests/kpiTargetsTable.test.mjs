@@ -9,8 +9,11 @@ import {
   isTeamTargetSalesmanCode,
   mergeKpiTargetProfiles,
   rowMatchesKpiFilters,
+  compareKpiEstimateToPriorMonth,
   sumFilteredKpiColumns,
+  sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
+  sumFilteredPriorMonthActuals,
   teamMemberRows,
   teamRowLabel,
   teamTargetSalesmanCode,
@@ -219,6 +222,59 @@ test("total cash collected pace estimate is collection plus cash collection", ()
     estimates.totalCashCollected.estimate,
     (Number(estimates.collection.estimate) || 0) + (Number(estimates.cashCollection.estimate) || 0),
   );
+});
+
+test("pace estimate vs last month shows value and percent direction", () => {
+  assert.deepEqual(compareKpiEstimateToPriorMonth(120, 100), {
+    estimate: 120,
+    priorActual: 100,
+    delta: 20,
+    percent: 20,
+    direction: "up",
+  });
+  assert.equal(compareKpiEstimateToPriorMonth(80, 100).direction, "down");
+  assert.equal(compareKpiEstimateToPriorMonth(80, 100).delta, -20);
+  assert.equal(compareKpiEstimateToPriorMonth(80, 100).percent, -20);
+  assert.equal(compareKpiEstimateToPriorMonth(100, 100).direction, "flat");
+  assert.equal(compareKpiEstimateToPriorMonth(50, 0).percent, null);
+  assert.equal(compareKpiEstimateToPriorMonth(null, 100), null);
+
+  const rows = [{
+    ...ahmed,
+    kpis: ahmed.kpis.map((kpi) => (
+      kpi.key === "collection" ? { ...kpi, actual: 1_000_000 } : kpi
+    )),
+  }];
+  const prior = {
+    AHMED: {
+      officeSupplies: 0,
+      localItemSales: 0,
+      otherSales: 0,
+      totalSales: 0,
+      collection: 800_000,
+      cashCollection: 100_000,
+      newCustomers: 0,
+      repeatCustomers: 0,
+    },
+  };
+  assert.equal(sumFilteredPriorMonthActuals(rows, prior, ["collection", "totalCashCollected"]).collection, 800_000);
+  assert.equal(sumFilteredPriorMonthActuals(rows, prior, ["collection", "totalCashCollected"]).totalCashCollected, 900_000);
+
+  const estimates = {
+    collection: { estimate: 1_000_000 },
+    totalCashCollected: { estimate: 1_100_000 },
+  };
+  const comparisons = sumFilteredKpiEstimateVsPriorMonth(
+    rows,
+    ["collection", "totalCashCollected"],
+    estimates,
+    prior,
+  );
+  assert.equal(comparisons.collection.delta, 200_000);
+  assert.equal(comparisons.collection.percent, 25);
+  assert.equal(comparisons.collection.direction, "up");
+  assert.equal(comparisons.totalCashCollected.delta, 200_000);
+  assert.ok(Math.abs(comparisons.totalCashCollected.percent - (200_000 / 900_000) * 100) < 0.0001);
 });
 
 test("month-end pace estimate scales actual by expected pace, not target gap", () => {

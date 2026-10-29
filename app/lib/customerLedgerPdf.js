@@ -156,7 +156,7 @@ const COPY = {
     openDays: (n) => `مفتوح ${n} يوم`,
     dr: "مدين",
     cr: "دائن",
-    months: ["ينا", "فبر", "مار", "أبر", "ماي", "يون", "يول", "أغس", "سبت", "أكت", "نوف", "ديس"],
+    months: ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"],
     bucketDays: (label) => `${label} يوم`,
     openInvoicesCount: "عدد الفواتير المفتوحة",
     totalOutstanding: "إجمالي المستحق",
@@ -174,27 +174,38 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-export function formatLedgerMoney(value) {
-  return Number(value || 0).toLocaleString("en-US", {
+/** Western 0-9 → Eastern Arabic-Indic ٠-٩ for Arabic PDF sections. */
+export function toEasternDigits(value) {
+  return String(value ?? "").replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+}
+
+export function localizeLedgerDigits(value, lang = "en") {
+  const text = String(value ?? "");
+  return lang === "ar" ? toEasternDigits(text) : text;
+}
+
+export function formatLedgerMoney(value, lang = "en") {
+  const formatted = Number(value || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  return localizeLedgerDigits(formatted, lang);
 }
 
 export function formatBalanceSide(value, lang = "en") {
   const copy = COPY[lang] || COPY.en;
   const amount = roundMoney(value);
-  if (Math.abs(amount) <= 0.009) return "0.00";
-  const abs = formatLedgerMoney(Math.abs(amount));
+  if (Math.abs(amount) <= 0.009) return localizeLedgerDigits("0.00", lang);
+  const abs = formatLedgerMoney(Math.abs(amount), lang);
   return amount > 0 ? `${abs} ${copy.dr}` : `${abs} ${copy.cr}`;
 }
 
 export function formatDisplayDate(isoDate, lang = "en") {
   const copy = COPY[lang] || COPY.en;
   const raw = String(isoDate || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw || "—";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return localizeLedgerDigits(raw || "—", lang);
   const [year, month, day] = raw.split("-");
-  return `${day}-${copy.months[Number(month) - 1]}-${year}`;
+  return localizeLedgerDigits(`${day}-${copy.months[Number(month) - 1]}-${year}`, lang);
 }
 
 export function yearKeyFromDate(isoDate) {
@@ -270,8 +281,8 @@ export function ledgerLineParticulars(row, lang = "en") {
 
 function localizeOpenDays(row, lang = "en") {
   const copy = COPY[lang] || COPY.en;
-  if (row?.payment_days != null) return String(row.payment_days);
-  if (row?.open_days > 0) return copy.openDays(row.open_days);
+  if (row?.payment_days != null) return localizeLedgerDigits(row.payment_days, lang);
+  if (row?.open_days > 0) return localizeLedgerDigits(copy.openDays(row.open_days), lang);
   return "—";
 }
 
@@ -289,8 +300,8 @@ function localizeBucketLabel(bucket, lang = "en") {
   if (bucket.kind === "count") return copy.openInvoicesCount;
   const raw = String(bucket.label || "").trim();
   const match = raw.match(/^(.+?)\s+days$/i);
-  if (match) return copy.bucketDays(match[1]);
-  return raw;
+  if (match) return localizeLedgerDigits(copy.bucketDays(match[1]), lang);
+  return localizeLedgerDigits(raw, lang);
 }
 
 /**
@@ -435,7 +446,7 @@ export function buildCustomerLedgerPdfModel({
     }),
     confirmationTextAr: COPY.ar.confirmation({
       name,
-      code,
+      code: localizeLedgerDigits(code, "ar"),
       balance: formatBalanceSide(closing, "ar"),
       date: formatDisplayDate(statementDate, "ar"),
     }),
@@ -460,8 +471,8 @@ function drawCellText(doc, text, x, y, width, { align = "left", color = COLORS.b
   }
 }
 
-function moneyOrBlank(value) {
-  return Number(value || 0) > 0.009 ? formatLedgerMoney(value) : "";
+function moneyOrBlank(value, lang = "en") {
+  return Number(value || 0) > 0.009 ? formatLedgerMoney(value, lang) : "";
 }
 
 function drawLedgerTableHeader(doc, marginX, contentWidth, ledgerCols, headerHeight, ensureSpace, cursorRef) {
@@ -534,8 +545,8 @@ function drawYearTotalRow(doc, {
   let totalX = marginX;
   [
     { text: label, width: 62 + 190 + 70, align: "left" },
-    { text: formatLedgerMoney(totalDebit), width: 68, align: "right" },
-    { text: formatLedgerMoney(totalCredit), width: 68, align: "right" },
+    { text: formatLedgerMoney(totalDebit, lang), width: 68, align: "right" },
+    { text: formatLedgerMoney(totalCredit, lang), width: 68, align: "right" },
     { text: formatBalanceSide(closingBalance, lang), width: ledgerCols[5].width, align: "right" },
   ].forEach((cell) => {
     drawCellText(doc, cell.text, totalX, cursorRef.y + 11, cell.width, { align: cell.align });
@@ -544,14 +555,29 @@ function drawYearTotalRow(doc, {
   cursorRef.y += rowHeight;
 }
 
+/**
+ * Draw text line-by-line. Passing a string[] to jsPDF.text bypasses the Arabic
+ * font shim and produces mojibake — always feed one string per call.
+ */
+function drawWrappedText(doc, text, x, y, {
+  align = "left",
+  maxWidth = 0,
+  lineHeight = 11,
+} = {}) {
+  const source = String(text ?? "");
+  const lines = maxWidth > 0
+    ? doc.splitTextToSize(source, maxWidth)
+    : source.split(/\r?\n/);
+  const list = (Array.isArray(lines) ? lines : [String(lines || "")]).map((line) => String(line ?? ""));
+  const opts = align === "right" ? { align: "right" } : undefined;
+  list.forEach((line, index) => {
+    doc.text(line, x, y + index * lineHeight, opts);
+  });
+  return list.length || 1;
+}
+
 function drawBlockText(doc, text, x, y, { align = "left", maxWidth = 0 } = {}) {
-  if (maxWidth > 0) {
-    const lines = doc.splitTextToSize(String(text || ""), maxWidth);
-    doc.text(lines, x, y, align === "right" ? { align: "right" } : undefined);
-    return Array.isArray(lines) ? lines.length : 1;
-  }
-  doc.text(String(text || ""), x, y, align === "right" ? { align: "right" } : undefined);
-  return 1;
+  return drawWrappedText(doc, text, x, y, { align, maxWidth, lineHeight: 12 });
 }
 
 /**
@@ -633,10 +659,13 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
   drawBlockText(doc, copy.party, textStart, cursorRef.y, { align: textAlign });
   doc.setFont(undefined, "normal");
   const partyMax = contentWidth - 50;
-  const partyLines = doc.splitTextToSize(model.customerLabel || "—", partyMax);
   const partyX = rtl ? marginX + contentWidth - 42 : marginX + 42;
-  doc.text(partyLines, partyX, cursorRef.y, rtl ? { align: "right" } : undefined);
-  cursorRef.y += Math.max(18, partyLines.length * 12 + 8);
+  const partyLineCount = drawWrappedText(doc, model.customerLabel || "—", partyX, cursorRef.y, {
+    align: textAlign,
+    maxWidth: partyMax,
+    lineHeight: 12,
+  });
+  cursorRef.y += Math.max(18, partyLineCount * 12 + 8);
 
   const ledgerCols = [
     { key: "date", label: copy.date, width: 62, align: "left" },
@@ -680,7 +709,13 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
       doc.setFont(undefined, "bold");
       doc.setFontSize(10);
       doc.setTextColor(...COLORS.accent);
-      drawBlockText(doc, `${copy.year} ${section.year}`, textStart, cursorRef.y, { align: textAlign });
+      drawBlockText(
+        doc,
+        `${copy.year} ${localizeLedgerDigits(section.year, lang)}`,
+        textStart,
+        cursorRef.y,
+        { align: textAlign },
+      );
       cursorRef.y += 14;
     }
 
@@ -699,7 +734,9 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
         row: {
           bold: true,
           values: {
-            date: section.year ? `01-${copy.months[0]}-${section.year}` : "",
+            date: section.year
+              ? localizeLedgerDigits(`01-${copy.months[0]}-${section.year}`, lang)
+              : "",
             particulars: copy.openingBalance,
             voucher: "",
             debit: "",
@@ -731,9 +768,9 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
           values: {
             date: formatDisplayDate(row.date, lang),
             particulars: ledgerLineParticulars(row, lang),
-            voucher: row.voucher,
-            debit: moneyOrBlank(row.debit),
-            credit: moneyOrBlank(row.credit),
+            voucher: localizeLedgerDigits(row.voucher, lang),
+            debit: moneyOrBlank(row.debit, lang),
+            credit: moneyOrBlank(row.credit, lang),
             balance: formatBalanceSide(row.balance, lang),
           },
         },
@@ -746,7 +783,9 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
       contentWidth,
       ledgerCols,
       rowHeight,
-      label: section.year ? `${copy.total} ${section.year}` : copy.total,
+      label: section.year
+        ? `${copy.total} ${localizeLedgerDigits(section.year, lang)}`
+        : copy.total,
       totalDebit: section.totalDebit,
       totalCredit: section.totalCredit,
       closingBalance: section.closingBalance,
@@ -828,7 +867,7 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
     drawCellText(doc, localizeBucketLabel(bucket, lang), marginX, cursorRef.y + 11, bucketCols[0].width, { align: "left" });
     drawCellText(
       doc,
-      formatLedgerMoney(bucket.amount),
+      formatLedgerMoney(bucket.amount, lang),
       marginX + bucketCols[0].width,
       cursorRef.y + 11,
       bucketCols[1].width,
@@ -838,22 +877,12 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
   });
   cursorRef.y += 16;
 
-  ensureSpace(90);
-  doc.setDrawColor(...COLORS.accent);
-  doc.setLineWidth(0.8);
-  doc.roundedRect(marginX, cursorRef.y, contentWidth, 78, 3, 3);
-  doc.setFont(undefined, "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...COLORS.bodyText);
-  drawBlockText(doc, copy.balanceConfirmation, rtl ? marginX + contentWidth - 10 : marginX + 10, cursorRef.y + 16, {
-    align: textAlign,
-  });
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
   const confirmation = lang === "ar"
     ? (model.confirmationTextAr || copy.confirmation({
       name: model.customerName,
-      code: model.customerCode,
+      code: localizeLedgerDigits(model.customerCode, "ar"),
       balance: formatBalanceSide(model.ledger.closingBalance, "ar"),
       date: formatDisplayDate(model.statementDate, "ar"),
     }))
@@ -863,14 +892,33 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
       balance: formatBalanceSide(model.ledger.closingBalance, "en"),
       date: formatDisplayDate(model.statementDate, "en"),
     }));
-  const confirmLines = doc.splitTextToSize(confirmation, contentWidth - 20);
-  doc.text(
-    confirmLines,
+  const confirmLines = doc.splitTextToSize(String(confirmation || ""), contentWidth - 20);
+  const confirmLineCount = Array.isArray(confirmLines) ? confirmLines.length : 1;
+  const confirmHeight = Math.max(78, 28 + confirmLineCount * 11 + 14);
+  ensureSpace(confirmHeight + 16);
+  doc.setDrawColor(...COLORS.accent);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(marginX, cursorRef.y, contentWidth, confirmHeight, 3, 3);
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...COLORS.bodyText);
+  drawBlockText(doc, copy.balanceConfirmation, rtl ? marginX + contentWidth - 10 : marginX + 10, cursorRef.y + 16, {
+    align: textAlign,
+  });
+  doc.setFont(undefined, "normal");
+  doc.setFontSize(8);
+  drawWrappedText(
+    doc,
+    confirmation,
     rtl ? marginX + contentWidth - 10 : marginX + 10,
     cursorRef.y + 32,
-    rtl ? { align: "right" } : undefined,
+    {
+      align: textAlign,
+      maxWidth: contentWidth - 20,
+      lineHeight: 11,
+    },
   );
-  cursorRef.y += 94;
+  cursorRef.y += confirmHeight + 16;
 
   ensureSpace(70);
   const sigWidth = (contentWidth - 24) / 3;
@@ -946,10 +994,10 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
     doc.setFontSize(8);
     const values = {
       invoice_date: formatDisplayDate(row.invoice_date, lang),
-      voucher_number: row.voucher_number,
-      amount_incl_vat: formatLedgerMoney(row.amount_incl_vat),
-      paid_amount: formatLedgerMoney(row.paid_amount),
-      remaining: formatLedgerMoney(row.remaining),
+      voucher_number: localizeLedgerDigits(row.voucher_number, lang),
+      amount_incl_vat: formatLedgerMoney(row.amount_incl_vat, lang),
+      paid_amount: formatLedgerMoney(row.paid_amount, lang),
+      remaining: formatLedgerMoney(row.remaining, lang),
       status: localizeStatus(row.status, lang),
       days: localizeOpenDays(row, lang),
     };
@@ -971,7 +1019,7 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
   doc.setFont(undefined, "bold");
   doc.setFontSize(8);
   drawCellText(doc, copy.totalOpen, marginX, cursorRef.y + 11, 140, { align: "left" });
-  drawCellText(doc, formatLedgerMoney(model.openTotal), marginX + 286, cursorRef.y + 11, 68, {
+  drawCellText(doc, formatLedgerMoney(model.openTotal, lang), marginX + 286, cursorRef.y + 11, 68, {
     align: "right",
     color: COLORS.open,
   });
@@ -1036,11 +1084,11 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
     doc.setFontSize(8);
     const values = {
       invoice_date: formatDisplayDate(row.invoice_date, lang),
-      voucher_number: row.voucher_number,
-      amount_incl_vat: formatLedgerMoney(row.amount_incl_vat),
+      voucher_number: localizeLedgerDigits(row.voucher_number, lang),
+      amount_incl_vat: formatLedgerMoney(row.amount_incl_vat, lang),
       credit_note_date: formatDisplayDate(row.credit_note_date, lang),
-      credit_note_voucher: row.credit_note_voucher,
-      credit_note_amount: formatLedgerMoney(row.credit_note_amount),
+      credit_note_voucher: localizeLedgerDigits(row.credit_note_voucher, lang),
+      credit_note_amount: formatLedgerMoney(row.credit_note_amount, lang),
     };
     let colX = marginX;
     revCols.forEach((col) => {

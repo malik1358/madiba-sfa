@@ -11,7 +11,7 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 - Supabase JS (`@supabase/supabase-js`). `@supabase/ssr` is listed in `package.json` but app code does not import it. The browser client in `app/lib/supabase.js` uses `createClient` from `@supabase/supabase-js`.
 - No global `middleware.js`. No ORM. SQL is written by hand.
 - PDF: `jspdf`, `pdf-parse`, `pdfjs-dist`. Excel: `xlsx`. Images: `sharp`. Optional OCR: `tesseract.js`.
-- Email: `nodemailer` (SMTP) or Resend via `app/lib/mailer.js`, including optional PDF attachments. Team and team-leader mail is limited to 08:30–22:00 Asia/Riyadh, Saturday–Thursday (`isWithinTeamEmailWindow`). Held invoice, KPI, supplier-order, matched-receipt, and visit-plan messages sit in `system_settings.deferred_team_emails_v1` and leave on the inactivity cron. Push: `firebase-admin`.
+- Email: `nodemailer` (SMTP) or Resend via `app/lib/mailer.js`, including optional PDF attachments. Team and team-leader mail is limited to 08:30–22:00 Asia/Riyadh, Saturday–Thursday (`isWithinTeamEmailWindow`). Held invoice, KPI, supplier-order, matched-receipt, and visit-plan messages sit in `system_settings.deferred_team_emails_v1` and leave on the inactivity cron. Sales/receipt uploads schedule a debounced KPI Targets footer summary (`kpi_upload_summary_email_pending_v1`, flushed on the same inactivity cron). Push: `firebase-admin`.
 - Android: Capacitor 8 (`android/`, `capacitor.config.js`).
 
 `next.config.mjs` marks `tesseract.js`, `pdfjs-dist`, `@napi-rs/canvas`, and `sharp` as server external packages and raises the server-action body limit to 20mb. It also injects `NEXT_PUBLIC_BUILD_TIME` so the shell can show which deploy is running.
@@ -267,7 +267,7 @@ The collections UI was split so a background queue refresh does not remount the 
 
 ## Scheduled work
 
-Vercel deploys production from `main` only (`vercel.json` `git.deploymentEnabled`); Preview deployments are intentionally off. Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes. GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
+Vercel deploys production from `main` only (`vercel.json` `git.deploymentEnabled`); Preview deployments are intentionally off. Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes (also flushes deferred team mail and due KPI upload summary emails). GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Manual KPI upload summary force: `/api/cron/kpi-upload-summary-email`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
 
 ## Patterns to copy
 

@@ -21,6 +21,7 @@ import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
+import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -293,9 +294,12 @@ export async function POST(request) {
 
       try {
         if (!supabaseUrl || !serviceKey) return;
-        await rebuildPerformanceKpiCache(createClient(supabaseUrl, serviceKey, {
+        const kpiAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
-        }));
+        });
+        await rebuildPerformanceKpiCache(kpiAdmin);
+        const scheduled = await scheduleKpiUploadSummaryEmail(kpiAdmin, { trigger: "receipt-upload" });
+        console.info("KPI upload summary email scheduled after receipt upload:", scheduled);
       } catch (cacheError) {
         console.error("Performance KPI cache rebuild after receipt upload failed:", cacheError);
       }
@@ -310,12 +314,12 @@ export async function POST(request) {
             kind: "matched_receipt_upload",
             uploadDates: parsed.dates,
           });
-          return;
+        } else {
+          await runMatchedReceiptEmailCycle(mailAdmin, {
+            uploadDates: parsed.dates,
+            env: process.env,
+          });
         }
-        await runMatchedReceiptEmailCycle(mailAdmin, {
-          uploadDates: parsed.dates,
-          env: process.env,
-        });
       } catch (matchedReceiptEmailError) {
         console.error("Matched receipt email after receipt upload failed:", matchedReceiptEmailError);
       }

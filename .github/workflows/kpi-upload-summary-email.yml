@@ -1,0 +1,42 @@
+name: KPI Upload Summary Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Send now (skip debounce / unchanged check)."
+        required: false
+        type: boolean
+        default: true
+      to:
+        description: "Optional test recipient override (sets KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO on the server only if configured there; pass trigger only here)."
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger KPI upload summary email endpoint
+        env:
+          KPI_UPLOAD_SUMMARY_EMAIL_URL: ${{ secrets.KPI_UPLOAD_SUMMARY_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          DEFAULT_URL='https://madiba-sfa.vercel.app/api/cron/kpi-upload-summary-email'
+          URL="$(printf '%s' "$KPI_UPLOAD_SUMMARY_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -z "$URL" || ! "$URL" =~ /api/cron/kpi-upload-summary-email([/?].*)?$ ]]; then URL="$DEFAULT_URL"; fi
+          if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
+          FORCE="$(printf '%s' "$INPUT_FORCE" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$FORCE" == "true" || "$FORCE" == "1" ]]; then FORCE_JSON=true; else FORCE_JSON=false; fi
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          status_code="$(curl -sS -L --max-time 360 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" \
+            --data "{\"force\":$FORCE_JSON,\"trigger\":\"manual-test\"}")"
+          cat response.json
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "KPI upload summary email returned HTTP $status_code"
+            exit 1
+          fi

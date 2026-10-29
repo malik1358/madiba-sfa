@@ -10,6 +10,7 @@ import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
+import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
 import {
   describePartialDateOverwrites,
   detectPartialDateOverwrites,
@@ -1305,6 +1306,8 @@ export async function POST(request) {
           salesmanCount: Object.keys(cache.actualsBySalesman).length,
           reportMonth: cache.reportMonth,
         });
+        const scheduled = await scheduleKpiUploadSummaryEmail(kpiAdmin, { trigger: "sales-upload" });
+        console.info("KPI upload summary email scheduled after sales upload:", scheduled);
       } catch (kpiError) {
         console.error("Performance KPI cache rebuild after sales upload failed:", kpiError);
       }

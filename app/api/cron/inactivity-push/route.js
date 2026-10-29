@@ -4,6 +4,7 @@ import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { runInactivityEmailCycle } from "../../../lib/inactivityEmailServer.js";
 import { runInactivityPushCycle } from "../../../lib/inactivityPushServer.js";
 import { flushDeferredTeamEmails } from "../../../lib/deferredTeamEmail.js";
+import { runKpiUploadSummaryEmailCycle } from "../../../lib/kpiUploadSummaryEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -31,6 +32,16 @@ async function handleRequest(request) {
       deferred = await flushDeferredTeamEmails(admin);
     } catch (error) {
       deferred = { skipped: false, sent: 0, kept: 0, error: String(error?.message || error) };
+    }
+    let kpiUploadSummary = { skipped: true, reason: "not_run", sentCount: 0 };
+    try {
+      kpiUploadSummary = await runKpiUploadSummaryEmailCycle(admin, { trigger: "inactivity-cron" });
+    } catch (error) {
+      kpiUploadSummary = {
+        skipped: false,
+        sentCount: 0,
+        error: String(error?.message || error),
+      };
     }
     console.info("inactivity-email-cycle", JSON.stringify({
       reportDate: email?.reportDate || null,
@@ -72,6 +83,7 @@ async function handleRequest(request) {
       email,
       push,
       deferred,
+      kpiUploadSummary,
     });
   } catch (error) {
     const message = error.message || "Inactivity push cycle failed.";

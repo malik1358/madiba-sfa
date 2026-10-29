@@ -3,12 +3,14 @@
  * Customer master `current_salesman_code` is the source of truth.
  */
 
+import { applySalesmanSpellingAliasesToUpper } from "./salesmanSpellingAliases.js";
+
 export function normalizeCustomerCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 export function normalizeSalesmanCode(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim()).replace(/\s+/g, " ");
 }
 
 /**

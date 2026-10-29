@@ -9,6 +9,7 @@ import { mergeSalesSnapshots } from "../../lib/salesHistory";
 import {
   customerHasMatchingSalesman,
   exactSalesmanCodesFromPairs,
+  identitySearchPatternsFor,
   loadActiveSalesmanPairs,
 } from "../../lib/salesmanIdentityMatch.js";
 import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
@@ -94,12 +95,6 @@ function namesLooselyMatch(left, right) {
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
-}
-
-function identitySearchPattern(value) {
-  return normalizeCode(value)
-    .replace(/[^A-Z0-9]+/g, "%")
-    .replace(/^%+|%+$/g, "");
 }
 
 function isSalesTeamRole(role) {
@@ -487,7 +482,7 @@ async function resolveScope(admin, token) {
     ...mutualGroupCodes,
   ])];
   const identitySearchPatterns = [...new Set(
-    visibleSalesmanCodes.map(identitySearchPattern).filter(Boolean),
+    visibleSalesmanCodes.flatMap((code) => identitySearchPatternsFor(code)),
   )];
 
   return {

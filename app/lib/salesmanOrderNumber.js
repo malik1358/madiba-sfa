@@ -8,13 +8,13 @@
  * Legacy hyphen form PARVEZ-0042 is still parsed for older queued rows.
  */
 
+import { applySalesmanSpellingAliasesToUpper } from "./salesmanSpellingAliases.js";
+
 const SEQ_PAD = 2;
 
 /** Letters-only key from a salesman code/name (AHMED NABIL → AHMEDNABIL). */
 export function normalizeSalesmanLetters(salesmanCode = "") {
-  return String(salesmanCode || "")
-    .trim()
-    .toUpperCase()
+  return applySalesmanSpellingAliasesToUpper(String(salesmanCode || "").trim())
     .replace(/[^A-Z]/g, "");
 }
 

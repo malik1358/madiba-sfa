@@ -88,12 +88,14 @@ test("Moinudin and Junaid can see Mohammed Mubeen customers without sharing back
   const mubeen = { id: "mubeen", salesman_code: "MOHAMMED MUBEEN", salesman_name: "Mohammed Mubeen" };
   const moinudin = { id: "moinudin", salesman_code: "MOINUDIN", salesman_name: "Moinudin Khaja (MOINUDIN)" };
   const moinudinFull = { id: "moinudin-full", salesman_code: "MOINUDIN KHAJA", salesman_name: "Moinudin Khaja" };
+  const moinuddinSpelling = { id: "moinuddin", salesman_code: "MOINUDDIN", salesman_name: "Moinuddin Khaja" };
   const junaid = { id: "j1", salesman_code: "JUNAID", salesman_name: "Junaid" };
   const parvez = { id: "p1", salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" };
   const profiles = [mubeen, moinudin, junaid, parvez];
 
   assert.equal(resolveSharedBookProfiles(profiles, moinudin).some((row) => row.id === "mubeen"), true);
   assert.equal(resolveSharedBookProfiles(profiles, moinudinFull).some((row) => row.id === "mubeen"), true);
+  assert.equal(resolveSharedBookProfiles(profiles, moinuddinSpelling).some((row) => row.id === "mubeen"), true);
   assert.equal(resolveSharedBookProfiles(profiles, junaid).some((row) => row.id === "mubeen"), true);
   assert.deepEqual(resolveSharedBookProfiles(profiles, mubeen), []);
   assert.deepEqual(resolveSharedBookProfiles(profiles, parvez), []);

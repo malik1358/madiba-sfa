@@ -5,6 +5,7 @@ import {
   isCreditNoteTransaction,
   matchPaymentsFifo,
 } from "./paymentBehavior.js";
+import { applySalesmanSpellingAliasesToUpper } from "./salesmanSpellingAliases.js";
 import { isKsaOrderDay, KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
@@ -136,7 +137,7 @@ export function splitSalesActuals(rows = []) {
 }
 
 export function normalizeSalesmanCode(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim()).replace(/\s+/g, " ");
 }
 
 export function monthStartDate(reportDate) {

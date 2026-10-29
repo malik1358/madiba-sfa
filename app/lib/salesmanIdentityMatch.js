@@ -1,3 +1,9 @@
+import {
+  applySalesmanSpellingAliases,
+  expandSalesmanSpellingComparableVariants,
+  SALESMAN_SPELLING_CANONICAL_BY_TOKEN,
+} from "./salesmanSpellingAliases.js";
+
 export function isMissingRpcError(error) {
   const message = String(error?.message || error?.details || error?.hint || "").toLowerCase();
   const code = String(error?.code || "");
@@ -8,13 +14,49 @@ export function isMissingRpcError(error) {
     || (message.includes("function") && message.includes("does not exist"));
 }
 
-/** Same pattern as the customer-list and customer-history access checks. */
-export function identitySearchPattern(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
+function comparableIdentityForSearch(value) {
+  return applySalesmanSpellingAliases(
+    String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function patternFromComparable(comparable) {
+  return String(comparable || "")
     .replace(/[^A-Z0-9]+/g, "%")
     .replace(/^%+|%+$/g, "");
+}
+
+/** Same pattern as the customer-list and customer-history access checks. */
+export function identitySearchPattern(value) {
+  return patternFromComparable(comparableIdentityForSearch(value));
+}
+
+/** Canonical pattern plus spelling variants (Moinudin / Moinuddin) for ILIKE filters. */
+export function identitySearchPatternsFor(value) {
+  const comparable = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!comparable) return [];
+  return [...new Set(
+    expandSalesmanSpellingComparableVariants(comparable)
+      .map(patternFromComparable)
+      .filter(Boolean),
+  )];
+}
+
+function canonicalizeIdentityPattern(pattern) {
+  return String(pattern || "").replace(/[A-Za-z]+/g, (word) => {
+    const upper = word.toUpperCase();
+    return SALESMAN_SPELLING_CANONICAL_BY_TOKEN[upper] || word;
+  });
 }
 
 /**
@@ -22,13 +64,20 @@ export function identitySearchPattern(value) {
  * % matches any length, including empty. Matching is case-insensitive.
  */
 export function valueMatchesIdentityPattern(value, pattern) {
-  const source = String(pattern || "");
+  const source = canonicalizeIdentityPattern(pattern);
   if (!source) return false;
   const expression = source
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     .replace(/%/g, ".*")
     .replace(/_/g, ".");
-  return new RegExp(expression, "i").test(String(value ?? ""));
+  const regex = new RegExp(expression, "i");
+  const raw = String(value ?? "");
+  if (regex.test(raw)) return true;
+  // Spelling aliases: Moinuddin must match a Moinudin pattern and vice versa.
+  const canonicalValue = applySalesmanSpellingAliases(
+    raw.trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim(),
+  );
+  return Boolean(canonicalValue) && regex.test(canonicalValue);
 }
 
 export function rowMatchesSalesmanIdentity(row, patterns) {

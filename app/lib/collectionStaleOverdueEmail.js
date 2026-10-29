@@ -3,6 +3,10 @@ import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./paymentCollections.js";
 import {
+  applySalesmanSpellingAliases,
+  canonicalizeSalesmanDisplayText,
+} from "./salesmanSpellingAliases.js";
+import {
   addKsaCalendarDays,
   getKsaDateString,
   isKsaOrderDay,
@@ -39,12 +43,14 @@ function mergeEmailList(defaults, extraValue) {
 }
 
 export function comparableSalesmanIdentity(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return applySalesmanSpellingAliases(
+    String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 export function collectSalesmanIdentities(source = {}) {
@@ -299,15 +305,17 @@ export function filterCollectionStaleOverdueRowsForProfile(rows = [], profile = 
 }
 
 export function collectionStaleOverdueGroupKey(row = {}) {
-  const name = String(getCollectionSalesmanLabel(row) || "").trim().toUpperCase();
+  const name = comparableSalesmanIdentity(getCollectionSalesmanLabel(row));
   if (name) return `name:${name}`;
-  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim().toUpperCase();
+  const code = comparableSalesmanIdentity(row?.salesman_code || row?.current_salesman_code);
   if (code) return `code:${code}`;
   return "unknown";
 }
 
 export function collectionStaleOverdueSalesmanDisplay(row = {}) {
-  return String(getCollectionSalesmanLabel(row) || "").trim() || "Unknown salesman";
+  return canonicalizeSalesmanDisplayText(
+    String(getCollectionSalesmanLabel(row) || "").trim(),
+  ) || "Unknown salesman";
 }
 
 export function groupCollectionStaleOverdueBySalesman(rows = []) {

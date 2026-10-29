@@ -16,6 +16,10 @@ import {
   findLegalTransferForCustomer,
   isExcludedCollectionQueueSalesman,
 } from "./paymentCollections.js";
+import {
+  applySalesmanSpellingAliasesToUpper,
+  canonicalizeSalesmanDisplayText,
+} from "./salesmanSpellingAliases.js";
 
 const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
 
@@ -71,8 +75,8 @@ export function laterVisitAt(...values) {
 }
 
 export function formatSalesmanDisplay(code, name) {
-  const salesmanCode = String(code || "").trim();
-  const salesmanName = String(name || "").trim();
+  const salesmanCode = canonicalizeSalesmanDisplayText(String(code || "").trim());
+  const salesmanName = canonicalizeSalesmanDisplayText(String(name || "").trim());
   if (salesmanName && salesmanCode && salesmanName.toUpperCase() !== salesmanCode.toUpperCase()) {
     return `${salesmanName} (${salesmanCode})`;
   }
@@ -80,7 +84,7 @@ export function formatSalesmanDisplay(code, name) {
 }
 
 export function normalizeSalesmanFilter(value) {
-  return String(value || "").trim().toUpperCase();
+  return applySalesmanSpellingAliasesToUpper(String(value || "").trim());
 }
 
 export function customerHasExcludedOutstandingNoGpsSalesman(row) {
@@ -118,7 +122,7 @@ export function customerMatchesSalesmanFilter(row, salesmanFilter) {
     row?.salesman_display,
     row?.outstanding_salesman,
   ]
-    .map((value) => String(value || "").trim().toUpperCase())
+    .map((value) => applySalesmanSpellingAliasesToUpper(String(value || "").trim()))
     .filter(Boolean)
     .join(" ");
 

@@ -14,6 +14,7 @@ import {
 } from "./customerSalesmanAssignment.js";
 import { customerMatchesSharedCodeSet } from "./customerShares.js";
 import { activeScheduledVisitDate } from "./nextVisitDate.js";
+import { canonicalizeSalesmanDisplayText } from "./salesmanSpellingAliases.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -229,22 +230,24 @@ export function getCollectionSalesmanLabel(row) {
   const name = String(row?.salesman_name || "").trim();
   const code = String(row?.salesman_code || row?.current_salesman_code || "").trim();
 
+  let label = "";
   if (name && !isPlaceholderSalesmanValue(name)) {
     if (
       code
       && !isPlaceholderSalesmanValue(code)
       && normalizeCode(code) !== normalizeCode(name)
     ) {
-      return `${code} - ${name}`;
+      label = `${code} - ${name}`;
+    } else {
+      label = name;
     }
-    return name;
+  } else {
+    const fromInvoices = pickOutstandingSalesmanName(row?.invoices);
+    if (fromInvoices) label = fromInvoices;
+    else if (code && !isPlaceholderSalesmanValue(code)) label = code;
   }
 
-  const fromInvoices = pickOutstandingSalesmanName(row?.invoices);
-  if (fromInvoices) return fromInvoices;
-
-  if (code && !isPlaceholderSalesmanValue(code)) return code;
-  return "";
+  return canonicalizeSalesmanDisplayText(label);
 }
 
 export function buildCollectionSalesmanOptions(rows) {

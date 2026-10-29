@@ -15,6 +15,7 @@ import {
 import { attachRecentSalesValues } from "../../../lib/recentSalesAggregate.js";
 import {
   exactSalesmanCodesFromPairs,
+  identitySearchPatternsFor,
   loadActiveSalesmanPairs,
 } from "../../../lib/salesmanIdentityMatch.js";
 import {
@@ -71,12 +72,6 @@ function normalizeRole(value) {
 function isProductPromoterRole(role) {
   const normalized = normalizeRole(role);
   return normalized === "product-promoter" || normalized === "product_promoter";
-}
-
-function identitySearchPattern(value) {
-  return normalizeCode(value)
-    .replace(/[^A-Z0-9]+/g, "%")
-    .replace(/^%+|%+$/g, "");
 }
 
 function isSalesTeamRole(role) {
@@ -225,7 +220,7 @@ async function resolveScopeForUser(admin, user) {
     ...mutualGroupCodes,
   ])];
   const identitySearchPatterns = [...new Set(
-    visibleSalesmanCodes.map(identitySearchPattern).filter(Boolean),
+    visibleSalesmanCodes.flatMap((code) => identitySearchPatternsFor(code)),
   )];
 
   return {

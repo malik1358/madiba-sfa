@@ -3,6 +3,11 @@
  * Cost and margin % stay out of the SFA; only GP amount, rate, qty, and sales are shown.
  */
 
+import {
+  applySalesmanSpellingAliasesToUpper,
+  canonicalizeSalesmanDisplayText,
+} from "./salesmanSpellingAliases.js";
+
 export const ITEMS_SOLD_AT_LOSS_SELECT = [
   "transaction_date",
   "voucher_number",
@@ -60,8 +65,8 @@ export function mapItemsSoldAtLossRow(row = {}) {
     voucherNumber: String(row?.voucher_number || "").trim(),
     voucherType: String(row?.voucher_type || "").trim(),
     reference: String(row?.reference || "").trim(),
-    salesmanCode: String(row?.salesman_code || "").trim().toUpperCase(),
-    salesmanName: String(row?.salesman_name || "").trim(),
+    salesmanCode: applySalesmanSpellingAliasesToUpper(String(row?.salesman_code || "").trim()),
+    salesmanName: canonicalizeSalesmanDisplayText(String(row?.salesman_name || "").trim()),
     customerCode: String(row?.customer_code || "").trim().toUpperCase(),
     customerName: String(row?.customer_name || "").trim(),
     itemCode: String(row?.item_code || "").trim().toUpperCase(),
@@ -106,12 +111,14 @@ export function summarizeItemsSoldAtLoss(rows = []) {
 export function groupItemsSoldAtLossBySalesman(rows = []) {
   const groups = new Map();
   (rows || []).forEach((row) => {
-    const label = String(row.salesmanName || row.salesmanCode || "").trim() || "Unassigned";
-    const key = label.toUpperCase();
+    const label = canonicalizeSalesmanDisplayText(
+      String(row.salesmanName || row.salesmanCode || "").trim(),
+    ) || "Unassigned";
+    const key = applySalesmanSpellingAliasesToUpper(label);
     if (!groups.has(key)) {
       groups.set(key, {
         salesman: label,
-        salesmanCode: row.salesmanCode || "",
+        salesmanCode: applySalesmanSpellingAliasesToUpper(row.salesmanCode || ""),
         rows: [],
       });
     }

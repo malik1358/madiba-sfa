@@ -104,6 +104,30 @@ test("summary table transposes footer rows into columns for total sales and coll
   assert.equal(summary.rows[1].totalFiltered.actual, 300_000);
 });
 
+test("summary table reads nested snapshot targets like the KPI Targets page", () => {
+  const summary = buildKpiUploadSummaryTable({
+    rows: [{
+      salesmanCode: "AHMED",
+      salesmanName: "Ahmed",
+      targets: {
+        officeSupplies: 100_000,
+        localItemSales: 50_000,
+        otherSales: 50_000,
+        totalSales: 200_000,
+        collection: 400_000,
+      },
+      kpis: [
+        { key: "totalSales", actual: 180_000 },
+        { key: "collection", actual: 300_000 },
+      ],
+    }],
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+  });
+  assert.equal(summary.rows[0].totalFiltered.target, 200_000);
+  assert.equal(summary.rows[1].totalFiltered.target, 400_000);
+});
+
 test("email HTML uses transposed header labels", () => {
   const summary = buildKpiUploadSummaryTable({
     rows: [ahmed],

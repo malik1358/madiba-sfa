@@ -12,6 +12,10 @@ export const DEFAULT_OUTSTANDING_RECONCILE_EMAIL_TO = [
   "malik@pinasz.com",
 ];
 
+export const DEFAULT_OUTSTANDING_RECONCILE_EMAIL_CC = [
+  "kelwani@noorshukran.com",
+];
+
 const DEFAULT_APP_ORIGIN = "https://madiba-sfa.vercel.app";
 const MAX_EMAIL_ROWS = 200;
 
@@ -46,7 +50,7 @@ export function resolveOutstandingReconcileEmailRecipients(env = process.env) {
 
 export function resolveOutstandingReconcileEmailCc(env = process.env, to = []) {
   const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
-  return mergeEmailList([], env.OUTSTANDING_RECONCILE_EMAIL_CC)
+  return mergeEmailList(DEFAULT_OUTSTANDING_RECONCILE_EMAIL_CC, env.OUTSTANDING_RECONCILE_EMAIL_CC)
     .filter((email) => !recipients.has(email));
 }
 

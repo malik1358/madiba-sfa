@@ -8,7 +8,10 @@ import {
   resolveOutstandingReconcileEmailCc,
   resolveOutstandingReconcileEmailRecipients,
 } from "./outstandingReconcileEmail.js";
-import { rebuildOutstandingReconcileDataset } from "./outstandingReconcileServer.js";
+import {
+  readOutstandingReconcileDataset,
+  rebuildOutstandingReconcileDataset,
+} from "./outstandingReconcileServer.js";
 
 export const OUTSTANDING_RECONCILE_EMAIL_LAST_SENT_KEY = "outstanding_reconcile_email_last_sent";
 
@@ -113,6 +116,28 @@ export async function runOutstandingReconcileCycle(admin, {
   }
 
   return { ...base, skipped: false, sentCount: 1, to, cc };
+}
+
+/**
+ * Force-sends the differences email (bypasses dedupe). Default uses the saved
+ * reconcile dataset so a test does not wait for a full rebuild.
+ */
+export async function sendOutstandingReconcileEmailNow(admin, {
+  trigger = "manual-test",
+  rebuildSaved = true,
+  env = process.env,
+  send = sendEmail,
+} = {}) {
+  return runOutstandingReconcileCycle(admin, {
+    trigger,
+    env,
+    send,
+    force: true,
+    sendWhenEmpty: true,
+    rebuild: rebuildSaved
+      ? async () => readOutstandingReconcileDataset(admin)
+      : rebuildOutstandingReconcileDataset,
+  });
 }
 
 function summarize(dataset) {

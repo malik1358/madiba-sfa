@@ -17,7 +17,12 @@ import {
   summarizeOutstandingBillMismatches,
   summarizeOutstandingReconcileRows,
 } from "../app/lib/outstandingReconcile.js";
-import { buildOutstandingReconcileEmail } from "../app/lib/outstandingReconcileEmail.js";
+import {
+  buildOutstandingReconcileEmail,
+  DEFAULT_OUTSTANDING_RECONCILE_EMAIL_CC,
+  resolveOutstandingReconcileEmailCc,
+  resolveOutstandingReconcileEmailRecipients,
+} from "../app/lib/outstandingReconcileEmail.js";
 import { outstandingReconcileSignature, runOutstandingReconcileCycle } from "../app/lib/outstandingReconcileEmailServer.js";
 import { outstandingInvoicesForAccount } from "../app/lib/outstandingReconcileServer.js";
 import { buildPaymentSettlementLedger } from "../app/lib/paymentBehavior.js";
@@ -180,6 +185,20 @@ test("cycle skips email when every gap is 10 SAR or less", async () => {
   assert.equal(sent.length, 0);
 });
 
+test("reconcile email defaults include Kelwani on CC", () => {
+  const to = resolveOutstandingReconcileEmailRecipients({});
+  const cc = resolveOutstandingReconcileEmailCc({}, to);
+  assert.ok(DEFAULT_OUTSTANDING_RECONCILE_EMAIL_CC.includes("kelwani@noorshukran.com"));
+  assert.ok(cc.includes("kelwani@noorshukran.com"));
+  assert.equal(cc.includes("malik@pinasz.com"), false);
+
+  const withExtra = resolveOutstandingReconcileEmailCc({
+    OUTSTANDING_RECONCILE_EMAIL_CC: "ops-cc@example.com",
+  }, to);
+  assert.ok(withExtra.includes("kelwani@noorshukran.com"));
+  assert.ok(withExtra.includes("ops-cc@example.com"));
+});
+
 test("cycle emails differences once and skips an unchanged rebuild", async () => {
   const rows = [{ customer_code: "C01", difference: 150, invoice_gap_count: 0 }];
   const dataset = { builtAt: "2026-09-28T06:00:00.000Z", rows, summary: {}, scannedCount: 3, failedCount: 0 };
@@ -198,6 +217,7 @@ test("cycle emails differences once and skips an unchanged rebuild", async () =>
   assert.equal(first.sentCount, 1);
   assert.equal(first.differenceCount, 1);
   assert.ok(sent[0].to.includes("ops@example.com"));
+  assert.ok(sent[0].cc.includes("kelwani@noorshukran.com"));
 
   const second = await runOutstandingReconcileCycle({}, { ...options, trigger: "receipt-upload" });
   assert.equal(second.sentCount, 0);

@@ -127,7 +127,11 @@ export async function POST(request) {
     if (withEmail) {
       after(async () => {
         try {
-          await runOutstandingReconcileCycle(adminClient(), { trigger: "manual", sendWhenEmpty: true });
+          await runOutstandingReconcileCycle(adminClient(), {
+            trigger: "manual",
+            sendWhenEmpty: true,
+            force: true,
+          });
         } catch (error) {
           console.error("Outstanding reconcile email cycle failed:", error);
         }

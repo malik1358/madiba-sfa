@@ -1,0 +1,42 @@
+name: Outstanding Reconcile Email Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: "Set true to rebuild the reconcile dataset before emailing (slower)."
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force-send Tally vs SFA outstanding differences email
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_REBUILD: ${{ github.event.inputs.rebuild }}
+        run: |
+          BASE='https://madiba-sfa.vercel.app/api/cron/outstanding-reconcile-email'
+          if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
+          REBUILD_VALUE="$(printf '%s' "$INPUT_REBUILD" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ "$REBUILD_VALUE" == "true" ]]; then
+            URL="${BASE}?rebuild=1&trigger=manual-test"
+          else
+            URL="${BASE}?trigger=manual-test"
+          fi
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          status_code="$(curl -sS -L --max-time 300 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" -d '{}')"
+          cat response.json
+          echo
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Outstanding reconcile email test returned HTTP $status_code"
+            exit 1
+          fi

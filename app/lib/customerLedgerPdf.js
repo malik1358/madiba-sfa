@@ -222,6 +222,28 @@ export function monthKeyFromDate(isoDate) {
   return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
 }
 
+/** Safe path segment for the downloaded PDF name (keeps the full party name readable). */
+export function ledgerPdfFilenamePart(value = "") {
+  return String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function buildLedgerPdfFilename({
+  customerCode = "",
+  customerName = "",
+  statementDate = "",
+} = {}) {
+  const code = ledgerPdfFilenamePart(customerCode) || "customer";
+  const name = ledgerPdfFilenamePart(customerName);
+  const date = ledgerPdfFilenamePart(statementDate) || "statement";
+  return name
+    ? `balance-confirmation-${code}-${name}-${date}`
+    : `balance-confirmation-${code}-${date}`;
+}
+
 /**
  * Map one datewise ledger line to party-ledger Debit / Credit.
  * Customer AR: sales debit; receipts / CN / purchase settlements credit;
@@ -480,7 +502,11 @@ export function buildCustomerLedgerPdfModel({
       date: formatDisplayDate(statementDate, "ar"),
     }),
     languages: [...LEDGER_PDF_LANGUAGES],
-    filename: `balance-confirmation-${code || "customer"}-${statementDate || "statement"}`,
+    filename: buildLedgerPdfFilename({
+      customerCode: code,
+      customerName: name,
+      statementDate,
+    }),
   };
 }
 

@@ -162,7 +162,34 @@ test("resolveDayRouteWorkingHours does not extend past the last near visit into 
   assert.equal(hours.value, "3h");
 });
 
-test("resolveDayRouteWorkingHours ignores visits after lunch out when lunch in was not punched", () => {
+test("resolveDayRouteWorkingHours auto lunch-in from first near stop after lunch out", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T08:00:00.000Z", transactionType: "COLLECTION_VISIT" },
+    { savedAt: "2026-09-07T10:00:00.000Z", transactionType: "ORDER_SUBMITTED" },
+    { savedAt: "2026-09-07T12:00:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "VISIT_REPORT" },
+    { savedAt: "2026-09-07T17:00:00.000Z", transactionType: "COLLECTION_VISIT" },
+  ]);
+
+  // Morning 08:00→10:00 (2h) + afternoon auto lunch-in 15:00→17:00 (2h)
+  assert.equal(hours.value, "4h");
+  assert.equal(hours.minutes, 240);
+});
+
+test("resolveDayRouteWorkingHours does not auto lunch-in from a far stop after lunch out", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T08:00:00.000Z", transactionType: "COLLECTION_VISIT" },
+    { savedAt: "2026-09-07T10:00:00.000Z", transactionType: "ORDER_SUBMITTED" },
+    { savedAt: "2026-09-07T12:00:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T14:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
+    { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
+  ]);
+
+  // Morning 08:00→10:00 only; far afternoon stops never trigger auto lunch-in
+  assert.equal(hours.value, "2h");
+});
+
+test("resolveDayRouteWorkingHours needs two near afternoon stops for auto lunch-in segment", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T08:00:00.000Z", transactionType: "COLLECTION_VISIT" },
     { savedAt: "2026-09-07T10:00:00.000Z", transactionType: "ORDER_SUBMITTED" },
@@ -170,7 +197,7 @@ test("resolveDayRouteWorkingHours ignores visits after lunch out when lunch in w
     { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "VISIT_REPORT" },
   ]);
 
-  // Morning 08:00→10:00 only; 15:00 ignored without lunch in
+  // Morning only; one near after lunch out is not a measurable afternoon segment
   assert.equal(hours.value, "2h");
 });
 

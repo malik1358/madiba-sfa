@@ -327,7 +327,8 @@ function excludeLongIdleBreaks(ranges = [], idleGaps = []) {
  * - morning: first near → last near strictly before lunch out
  * - afternoon: first near strictly after lunch in → last near of the day
  * Without lunch out: first near → last near of the day.
- * Without lunch in: morning segment only (visits after lunch out are ignored).
+ * Without lunch in: auto lunch-in at the first non-far stop after lunch out
+ *   (afternoon = first→last near after lunch out). Far stops never trigger it.
  */
 function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
   if (!near.length) return { applied: false, minutes: null };
@@ -346,9 +347,11 @@ function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
   }
 
   const beforeLunch = near.filter((item) => item.ts < lunchOut);
+  // Explicit lunch in: stops after that punch. Missing lunch in: first near after
+  // lunch out counts as auto lunch-in, so afternoon includes that stop onward.
   const afterLunch = Number.isFinite(lunchIn)
     ? near.filter((item) => item.ts > lunchIn)
-    : [];
+    : near.filter((item) => item.ts > lunchOut);
 
   if (!beforeLunch.length && !afterLunch.length) {
     return { applied: false, minutes: null };

@@ -4,9 +4,12 @@ import {
   openSettlementInvoices,
 } from "./datewiseLines.js";
 import { buildOutstandingPdfBucketRows } from "./outstanding.js";
+import { installArabicPdfText, registerArabicPdfFont } from "./pdfArabicText.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 export const LEDGER_COMPANY_NAME = "Noor Shukran Trading Company";
+export const LEDGER_COMPANY_NAME_AR = "شركة نور شكران للتجارة";
+export const LEDGER_PDF_LANGUAGES = ["ar", "en"];
 
 const COLORS = {
   headerBg: [15, 76, 92],
@@ -20,6 +23,153 @@ const COLORS = {
   open: [180, 35, 24],
 };
 
+const COPY = {
+  en: {
+    companyName: LEDGER_COMPANY_NAME,
+    title: "Customer Account Statement",
+    subtitle: "Balance Confirmation",
+    statementDate: "Statement date",
+    period: "Period",
+    periodTo: "to",
+    party: "Party",
+    accountLedger: "Account Ledger",
+    noMovements: "No ledger movements for this customer.",
+    year: "Year",
+    openingBalance: "Opening Balance",
+    total: "Total",
+    closingBalanceYear: (year, amount) => `Closing balance ${year}: SAR ${amount}`,
+    closingBalance: (amount) => `Closing balance: SAR ${amount}`,
+    closingAsOn: (date, amount) => `Closing balance as on ${date}: SAR ${amount}`,
+    outstandingBuckets: "Outstanding by aging bucket",
+    bucket: "Bucket",
+    amount: "Amount",
+    noBuckets: "No outstanding bucket row for this customer.",
+    balanceConfirmation: "Balance Confirmation",
+    preparedBy: "Prepared by",
+    authorisedSignatory: "Authorised signatory",
+    customerConfirmation: "Customer confirmation",
+    scheduleA: "Schedule A — Open Invoices",
+    scheduleAHint: "Bills still open as per FIFO settlement (excluded reversals not listed here).",
+    noOpen: "No open invoices.",
+    totalOpen: "Total open",
+    scheduleB: "Schedule B — Reversed Invoices (excluded from ledger)",
+    scheduleBHint: "Same-day / next-day full credit-note reversals. Not included in the account ledger above.",
+    noReversed: "No reversed invoices.",
+    date: "Date",
+    particulars: "Particulars",
+    voucher: "Voucher",
+    debit: "Debit",
+    credit: "Credit",
+    balance: "Balance",
+    salesInclVat: "Sales incl VAT",
+    paid: "Paid",
+    open: "Open",
+    status: "Status",
+    days: "Days",
+    salesDate: "Sales Date",
+    invoice: "Invoice",
+    cnDate: "CN Date",
+    cnVoucher: "CN Voucher",
+    cnAmount: "CN Amount",
+    languageBanner: "Arabic section follows first; English section starts on a new page.",
+    sectionBanner: "English",
+    receipt: "Receipt",
+    payment: "Payment",
+    purchase: "Purchase",
+    salesPrefix: "Sales",
+    creditNote: "Credit Note",
+    salesReturn: "Sales Return",
+    entry: "Entry",
+    openStatus: "Open",
+    openDays: (n) => `Open ${n}d`,
+    dr: "Dr",
+    cr: "Cr",
+    months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    bucketDays: (label) => `${label} days`,
+    openInvoicesCount: "Open invoices",
+    totalOutstanding: "Total outstanding",
+    confirmation: ({ name, code, balance, date }) => [
+      `As per our books, the account of ${name || code || "the customer"}`,
+      `(Code ${code || "—"}) shows a closing balance of SAR ${balance}`,
+      `as on ${date}.`,
+      "Immediate credit-note reversals are excluded from this ledger and listed separately.",
+      "Kindly confirm that this balance agrees with your records and return a signed copy.",
+    ].join(" "),
+  },
+  ar: {
+    companyName: LEDGER_COMPANY_NAME_AR,
+    title: "كشف حساب العميل",
+    subtitle: "تأكيد الرصيد",
+    statementDate: "تاريخ الكشف",
+    period: "الفترة",
+    periodTo: "إلى",
+    party: "الحساب",
+    accountLedger: "دفتر حساب العميل",
+    noMovements: "لا توجد حركات في دفتر هذا العميل.",
+    year: "سنة",
+    openingBalance: "رصيد افتتاحي",
+    total: "الإجمالي",
+    closingBalanceYear: (year, amount) => `رصيد إغلاق ${year}: ${amount} ر.س`,
+    closingBalance: (amount) => `رصيد الإغلاق: ${amount} ر.س`,
+    closingAsOn: (date, amount) => `رصيد الإغلاق كما في ${date}: ${amount} ر.س`,
+    outstandingBuckets: "المستحق حسب فترات التقادم",
+    bucket: "الفترة",
+    amount: "المبلغ",
+    noBuckets: "لا توجد بيانات تقادم مستحق لهذا العميل.",
+    balanceConfirmation: "تأكيد الرصيد",
+    preparedBy: "أعده",
+    authorisedSignatory: "التوقيع المعتمد",
+    customerConfirmation: "تأكيد العميل",
+    scheduleA: "الملحق أ — الفواتير المفتوحة",
+    scheduleAHint: "الفواتير المفتوحة حسب تسوية الوارد أولاً صادر أولاً (المعكوسات مستبعدة من هذا الجدول).",
+    noOpen: "لا توجد فواتير مفتوحة.",
+    totalOpen: "إجمالي المفتوح",
+    scheduleB: "الملحق ب — الفواتير المعكوسة (مستبعدة من الدفتر)",
+    scheduleBHint: "عكس كامل بإشعار دائن في نفس اليوم أو اليوم التالي. غير مدرجة في دفتر الحساب أعلاه.",
+    noReversed: "لا توجد فواتير معكوسة.",
+    date: "التاريخ",
+    particulars: "البيان",
+    voucher: "السند",
+    debit: "مدين",
+    credit: "دائن",
+    balance: "الرصيد",
+    salesInclVat: "المبيعات شامل الضريبة",
+    paid: "المدفوع",
+    open: "المفتوح",
+    status: "الحالة",
+    days: "الأيام",
+    salesDate: "تاريخ البيع",
+    invoice: "الفاتورة",
+    cnDate: "تاريخ الإشعار",
+    cnVoucher: "سند الإشعار",
+    cnAmount: "مبلغ الإشعار",
+    languageBanner: "القسم العربي أولاً؛ القسم الإنجليزي يبدأ في صفحة جديدة.",
+    sectionBanner: "عربي",
+    receipt: "قبض",
+    payment: "دفع",
+    purchase: "مشتريات",
+    salesPrefix: "مبيعات",
+    creditNote: "إشعار دائن",
+    salesReturn: "مردود مبيعات",
+    entry: "قيد",
+    openStatus: "مفتوح",
+    openDays: (n) => `مفتوح ${n} يوم`,
+    dr: "مدين",
+    cr: "دائن",
+    months: ["ينا", "فبر", "مار", "أبر", "ماي", "يون", "يول", "أغس", "سبت", "أكت", "نوف", "ديس"],
+    bucketDays: (label) => `${label} يوم`,
+    openInvoicesCount: "عدد الفواتير المفتوحة",
+    totalOutstanding: "إجمالي المستحق",
+    confirmation: ({ name, code, balance, date }) => [
+      `حسب دفاترنا، يظهر حساب ${name || code || "العميل"}`,
+      `(الرمز ${code || "—"}) رصيد إغلاق بمبلغ ${balance} ر.س`,
+      `كما في ${date}.`,
+      "تم استبعاد العكوسات الفورية بإشعار دائن من هذا الدفتر وإدراجها بشكل منفصل.",
+      "يرجى التأكيد بأن هذا الرصيد يطابق سجلاتكم وإعادة نسخة موقعة.",
+    ].join(" "),
+  },
+};
+
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
@@ -31,19 +181,20 @@ export function formatLedgerMoney(value) {
   });
 }
 
-export function formatBalanceSide(value) {
+export function formatBalanceSide(value, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
   const amount = roundMoney(value);
   if (Math.abs(amount) <= 0.009) return "0.00";
   const abs = formatLedgerMoney(Math.abs(amount));
-  return amount > 0 ? `${abs} Dr` : `${abs} Cr`;
+  return amount > 0 ? `${abs} ${copy.dr}` : `${abs} ${copy.cr}`;
 }
 
-function formatDisplayDate(isoDate) {
+export function formatDisplayDate(isoDate, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
   const raw = String(isoDate || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw || "—";
   const [year, month, day] = raw.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${day}-${months[Number(month) - 1]}-${year}`;
+  return `${day}-${copy.months[Number(month) - 1]}-${year}`;
 }
 
 export function yearKeyFromDate(isoDate) {
@@ -93,14 +244,53 @@ export function ledgerLineDebitCredit(row) {
  * Balance-confirmation particulars stay short.
  * Receipt / Payment do not repeat applied invoice numbers or amounts.
  */
-export function ledgerLineParticulars(row) {
+export function ledgerLineParticulars(row, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
   const kind = String(row?.kind || "Entry").trim() || "Entry";
-  if (kind === "Receipt" || kind === "Payment") return kind;
-  if (kind === "Purchase") return "Purchase";
+  if (kind === "Receipt") return copy.receipt;
+  if (kind === "Payment") return copy.payment;
+  if (kind === "Purchase") return copy.purchase;
   const detail = String(row?.detail || "").trim();
-  if (!detail || detail === "—") return kind;
-  if (kind === "Invoice") return `Sales — ${detail}`;
+  if (kind === "Invoice") {
+    if (!detail || detail === "—") return copy.salesPrefix;
+    const localizedDetail = /^open$/i.test(detail) ? copy.openStatus : detail;
+    return `${copy.salesPrefix} — ${localizedDetail}`;
+  }
+  if (/credit note/i.test(kind)) {
+    if (!detail || detail === "—") return copy.creditNote;
+    return `${copy.creditNote} — ${detail}`;
+  }
+  if (/sales return|return/i.test(kind)) {
+    if (!detail || detail === "—") return copy.salesReturn;
+    return `${copy.salesReturn} — ${detail}`;
+  }
+  if (!detail || detail === "—") return kind === "Entry" ? copy.entry : kind;
   return `${kind} — ${detail}`;
+}
+
+function localizeOpenDays(row, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
+  if (row?.payment_days != null) return String(row.payment_days);
+  if (row?.open_days > 0) return copy.openDays(row.open_days);
+  return "—";
+}
+
+function localizeStatus(status, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
+  const raw = String(status || "Open").trim();
+  if (/^open$/i.test(raw)) return copy.openStatus;
+  return raw;
+}
+
+function localizeBucketLabel(bucket, lang = "en") {
+  const copy = COPY[lang] || COPY.en;
+  if (!bucket) return "";
+  if (bucket.kind === "total") return copy.totalOutstanding;
+  if (bucket.kind === "count") return copy.openInvoicesCount;
+  const raw = String(bucket.label || "").trim();
+  const match = raw.match(/^(.+?)\s+days$/i);
+  if (match) return copy.bucketDays(match[1]);
+  return raw;
 }
 
 /**
@@ -124,7 +314,9 @@ export function buildBalanceConfirmationLedgerRows(lines = []) {
       date: line.date || "",
       year: yearKeyFromDate(line.date),
       month: monthKeyFromDate(line.date),
-      particulars: ledgerLineParticulars(line),
+      kind: String(line?.kind || "").trim(),
+      detail: String(line?.detail || "").trim(),
+      particulars: ledgerLineParticulars(line, "en"),
       voucher: line.voucher || "—",
       debit,
       credit,
@@ -204,8 +396,9 @@ export function buildCustomerLedgerPdfModel({
 
   return {
     companyName: LEDGER_COMPANY_NAME,
-    title: "Customer Account Statement",
-    subtitle: "Balance Confirmation",
+    companyNameAr: LEDGER_COMPANY_NAME_AR,
+    title: COPY.en.title,
+    subtitle: COPY.en.subtitle,
     customerCode: code,
     customerName: name,
     customerLabel: name ? `${code} — ${name}` : code,
@@ -221,9 +414,9 @@ export function buildCustomerLedgerPdfModel({
       paid_amount: roundMoney(row.paid_amount),
       remaining: roundMoney(row.remaining),
       status: row.status || "Open",
-      days: row.payment_days != null
-        ? String(row.payment_days)
-        : (row.open_days > 0 ? `Open ${row.open_days}d` : "—"),
+      open_days: row.open_days,
+      payment_days: row.payment_days,
+      days: localizeOpenDays(row, "en"),
     })),
     openTotal,
     reversedInvoices: reversedInvoices.map((row) => ({
@@ -234,13 +427,19 @@ export function buildCustomerLedgerPdfModel({
       credit_note_voucher: row.credit_note_voucher || "—",
       credit_note_amount: roundMoney(row.credit_note_amount),
     })),
-    confirmationText: [
-      `As per our books, the account of ${name || code || "the customer"}`,
-      `(Code ${code || "—"}) shows a closing balance of SAR ${formatBalanceSide(closing)}`,
-      `as on ${formatDisplayDate(statementDate)}.`,
-      "Immediate credit-note reversals are excluded from this ledger and listed separately.",
-      "Kindly confirm that this balance agrees with your records and return a signed copy.",
-    ].join(" "),
+    confirmationText: COPY.en.confirmation({
+      name,
+      code,
+      balance: formatBalanceSide(closing, "en"),
+      date: formatDisplayDate(statementDate, "en"),
+    }),
+    confirmationTextAr: COPY.ar.confirmation({
+      name,
+      code,
+      balance: formatBalanceSide(closing, "ar"),
+      date: formatDisplayDate(statementDate, "ar"),
+    }),
+    languages: [...LEDGER_PDF_LANGUAGES],
     filename: `balance-confirmation-${code || "customer"}-${statementDate || "statement"}`,
   };
 }
@@ -292,9 +491,6 @@ function drawLedgerDataRow(doc, {
   cursorRef,
 }) {
   ensureSpace(rowHeight + 2);
-  if (cursorRef.y <= 42) {
-    // Page just started — caller redraws header when needed.
-  }
   if (zebra) {
     doc.setFillColor(...COLORS.zebraBg);
     doc.rect(marginX, cursorRef.y, contentWidth, rowHeight, "F");
@@ -325,6 +521,7 @@ function drawYearTotalRow(doc, {
   totalDebit,
   totalCredit,
   closingBalance,
+  lang,
   ensureSpace,
   cursorRef,
 }) {
@@ -339,7 +536,7 @@ function drawYearTotalRow(doc, {
     { text: label, width: 62 + 190 + 70, align: "left" },
     { text: formatLedgerMoney(totalDebit), width: 68, align: "right" },
     { text: formatLedgerMoney(totalCredit), width: 68, align: "right" },
-    { text: formatBalanceSide(closingBalance), width: ledgerCols[5].width, align: "right" },
+    { text: formatBalanceSide(closingBalance, lang), width: ledgerCols[5].width, align: "right" },
   ].forEach((cell) => {
     drawCellText(doc, cell.text, totalX, cursorRef.y + 11, cell.width, { align: cell.align });
     totalX += cell.width;
@@ -347,20 +544,32 @@ function drawYearTotalRow(doc, {
   cursorRef.y += rowHeight;
 }
 
+function drawBlockText(doc, text, x, y, { align = "left", maxWidth = 0 } = {}) {
+  if (maxWidth > 0) {
+    const lines = doc.splitTextToSize(String(text || ""), maxWidth);
+    doc.text(lines, x, y, align === "right" ? { align: "right" } : undefined);
+    return Array.isArray(lines) ? lines.length : 1;
+  }
+  doc.text(String(text || ""), x, y, align === "right" ? { align: "right" } : undefined);
+  return 1;
+}
+
 /**
- * Render a professional balance-confirmation PDF (A4) and return the jsPDF doc.
+ * Render one complete language section (Arabic or English). Do not mix languages.
  */
-export async function createCustomerLedgerPdfDoc(model) {
-  if (!model) throw new Error("Customer ledger PDF model is required.");
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const marginX = 36;
-  const contentWidth = pageWidth - marginX * 2;
-  const rowHeight = 15;
-  const headerHeight = 17;
-  const cursorRef = { y: 40 };
+export function renderCustomerLedgerLanguageSection(doc, model, lang, {
+  marginX,
+  contentWidth,
+  pageHeight,
+  rowHeight,
+  headerHeight,
+  cursorRef,
+  startFreshPage = false,
+} = {}) {
+  const copy = COPY[lang] || COPY.en;
+  const rtl = lang === "ar";
+  const textStart = rtl ? marginX + contentWidth : marginX;
+  const textAlign = rtl ? "right" : "left";
 
   const ensureSpace = (needed) => {
     if (cursorRef.y + needed <= pageHeight - 42) return;
@@ -368,8 +577,15 @@ export async function createCustomerLedgerPdfDoc(model) {
     cursorRef.y = 40;
   };
 
-  // Title block — company may wrap to two lines.
-  const companyLines = doc.splitTextToSize(model.companyName || LEDGER_COMPANY_NAME, contentWidth - 200);
+  if (startFreshPage) {
+    doc.addPage();
+    cursorRef.y = 40;
+  }
+
+  const companyName = lang === "ar"
+    ? (model.companyNameAr || LEDGER_COMPANY_NAME_AR)
+    : (model.companyName || LEDGER_COMPANY_NAME);
+  const companyLines = doc.splitTextToSize(companyName, contentWidth - 200);
   const titleBlockHeight = 70 + Math.max(0, (companyLines.length - 1) * 14);
   doc.setDrawColor(...COLORS.accent);
   doc.setLineWidth(1.2);
@@ -377,51 +593,65 @@ export async function createCustomerLedgerPdfDoc(model) {
   doc.setFont(undefined, "bold");
   doc.setFontSize(14);
   doc.setTextColor(...COLORS.accent);
-  doc.text(companyLines, marginX + 14, cursorRef.y + 22);
+  drawBlockText(doc, companyLines.join("\n"), rtl ? marginX + contentWidth - 14 : marginX + 14, cursorRef.y + 22, {
+    align: textAlign,
+  });
   const afterCompanyY = cursorRef.y + 22 + companyLines.length * 14;
   doc.setFontSize(12);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text(model.title, marginX + 14, afterCompanyY + 4);
+  drawBlockText(doc, copy.title, rtl ? marginX + contentWidth - 14 : marginX + 14, afterCompanyY + 4, {
+    align: textAlign,
+  });
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text(model.subtitle, marginX + 14, afterCompanyY + 20);
+  drawBlockText(doc, copy.subtitle, rtl ? marginX + contentWidth - 14 : marginX + 14, afterCompanyY + 20, {
+    align: textAlign,
+  });
 
   doc.setFont(undefined, "normal");
   doc.setFontSize(9);
   doc.setTextColor(...COLORS.bodyText);
-  const rightX = marginX + contentWidth - 14;
-  doc.text(`Statement date: ${formatDisplayDate(model.statementDate)}`, rightX, cursorRef.y + 22, { align: "right" });
+  const metaX = rtl ? marginX + 14 : marginX + contentWidth - 14;
+  const metaAlign = rtl ? "left" : "right";
   doc.text(
-    `Period: ${formatDisplayDate(model.periodFrom)} to ${formatDisplayDate(model.periodTo)}`,
-    rightX,
+    `${copy.statementDate}: ${formatDisplayDate(model.statementDate, lang)}`,
+    metaX,
+    cursorRef.y + 22,
+    { align: metaAlign },
+  );
+  doc.text(
+    `${copy.period}: ${formatDisplayDate(model.periodFrom, lang)} ${copy.periodTo} ${formatDisplayDate(model.periodTo, lang)}`,
+    metaX,
     cursorRef.y + 38,
-    { align: "right" },
+    { align: metaAlign },
   );
   cursorRef.y += titleBlockHeight + 16;
 
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Party", marginX, cursorRef.y);
+  drawBlockText(doc, copy.party, textStart, cursorRef.y, { align: textAlign });
   doc.setFont(undefined, "normal");
-  const partyLines = doc.splitTextToSize(model.customerLabel || "—", contentWidth - 50);
-  doc.text(partyLines, marginX + 42, cursorRef.y);
+  const partyMax = contentWidth - 50;
+  const partyLines = doc.splitTextToSize(model.customerLabel || "—", partyMax);
+  const partyX = rtl ? marginX + contentWidth - 42 : marginX + 42;
+  doc.text(partyLines, partyX, cursorRef.y, rtl ? { align: "right" } : undefined);
   cursorRef.y += Math.max(18, partyLines.length * 12 + 8);
 
   const ledgerCols = [
-    { key: "date", label: "Date", width: 62, align: "left" },
-    { key: "particulars", label: "Particulars", width: 190, align: "left" },
-    { key: "voucher", label: "Voucher", width: 70, align: "left" },
-    { key: "debit", label: "Debit", width: 68, align: "right" },
-    { key: "credit", label: "Credit", width: 68, align: "right" },
-    { key: "balance", label: "Balance", width: contentWidth - (62 + 190 + 70 + 68 + 68), align: "right" },
+    { key: "date", label: copy.date, width: 62, align: "left" },
+    { key: "particulars", label: copy.particulars, width: 190, align: "left" },
+    { key: "voucher", label: copy.voucher, width: 70, align: "left" },
+    { key: "debit", label: copy.debit, width: 68, align: "right" },
+    { key: "credit", label: copy.credit, width: 68, align: "right" },
+    { key: "balance", label: copy.balance, width: contentWidth - (62 + 190 + 70 + 68 + 68), align: "right" },
   ];
 
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
   ensureSpace(24);
-  doc.text("Account Ledger", marginX, cursorRef.y);
+  drawBlockText(doc, copy.accountLedger, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 16;
 
   const yearSections = Array.isArray(model.ledger?.years) && model.ledger.years.length
@@ -440,7 +670,7 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No ledger movements for this customer.", marginX + 4, cursorRef.y + 11);
+    drawBlockText(doc, copy.noMovements, textStart, cursorRef.y + 11, { align: textAlign });
     cursorRef.y += rowHeight + 10;
   }
 
@@ -450,7 +680,7 @@ export async function createCustomerLedgerPdfDoc(model) {
       doc.setFont(undefined, "bold");
       doc.setFontSize(10);
       doc.setTextColor(...COLORS.accent);
-      doc.text(`Year ${section.year}`, marginX, cursorRef.y);
+      drawBlockText(doc, `${copy.year} ${section.year}`, textStart, cursorRef.y, { align: textAlign });
       cursorRef.y += 14;
     }
 
@@ -469,12 +699,12 @@ export async function createCustomerLedgerPdfDoc(model) {
         row: {
           bold: true,
           values: {
-            date: section.year ? `01-Jan-${section.year}` : "",
-            particulars: "Opening Balance",
+            date: section.year ? `01-${copy.months[0]}-${section.year}` : "",
+            particulars: copy.openingBalance,
             voucher: "",
             debit: "",
             credit: "",
-            balance: formatBalanceSide(section.openingBalance),
+            balance: formatBalanceSide(section.openingBalance, lang),
           },
         },
       });
@@ -499,12 +729,12 @@ export async function createCustomerLedgerPdfDoc(model) {
         cursorRef,
         row: {
           values: {
-            date: formatDisplayDate(row.date),
-            particulars: row.particulars,
+            date: formatDisplayDate(row.date, lang),
+            particulars: ledgerLineParticulars(row, lang),
             voucher: row.voucher,
             debit: moneyOrBlank(row.debit),
             credit: moneyOrBlank(row.credit),
-            balance: formatBalanceSide(row.balance),
+            balance: formatBalanceSide(row.balance, lang),
           },
         },
       });
@@ -516,10 +746,11 @@ export async function createCustomerLedgerPdfDoc(model) {
       contentWidth,
       ledgerCols,
       rowHeight,
-      label: section.year ? `Total ${section.year}` : "Total",
+      label: section.year ? `${copy.total} ${section.year}` : copy.total,
       totalDebit: section.totalDebit,
       totalCredit: section.totalCredit,
       closingBalance: section.closingBalance,
+      lang,
       ensureSpace,
       cursorRef,
     });
@@ -528,13 +759,10 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "bold");
     doc.setFontSize(9);
     doc.setTextColor(...COLORS.bodyText);
-    doc.text(
-      section.year
-        ? `Closing balance ${section.year}: SAR ${formatBalanceSide(section.closingBalance)}`
-        : `Closing balance: SAR ${formatBalanceSide(section.closingBalance)}`,
-      marginX,
-      cursorRef.y + 12,
-    );
+    const yearClosing = section.year
+      ? copy.closingBalanceYear(section.year, formatBalanceSide(section.closingBalance, lang))
+      : copy.closingBalance(formatBalanceSide(section.closingBalance, lang));
+    drawBlockText(doc, yearClosing, textStart, cursorRef.y + 12, { align: textAlign });
     cursorRef.y += 22;
   });
 
@@ -542,23 +770,27 @@ export async function createCustomerLedgerPdfDoc(model) {
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text(
-    `Closing balance as on ${formatDisplayDate(model.statementDate)}: SAR ${formatBalanceSide(model.ledger.closingBalance)}`,
-    marginX,
+  drawBlockText(
+    doc,
+    copy.closingAsOn(
+      formatDisplayDate(model.statementDate, lang),
+      formatBalanceSide(model.ledger.closingBalance, lang),
+    ),
+    textStart,
     cursorRef.y,
+    { align: textAlign },
   );
   cursorRef.y += 18;
 
-  // Bucket-wise outstanding under closing balance
   ensureSpace(40);
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
-  doc.text("Outstanding by aging bucket", marginX, cursorRef.y);
+  drawBlockText(doc, copy.outstandingBuckets, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 12;
 
   const bucketCols = [
-    { key: "label", label: "Bucket", width: contentWidth - 120, align: "left" },
-    { key: "amount", label: "Amount", width: 120, align: "right" },
+    { key: "label", label: copy.bucket, width: contentWidth - 120, align: "left" },
+    { key: "amount", label: copy.amount, width: 120, align: "right" },
   ];
   ensureSpace(headerHeight + rowHeight);
   fillHeader(doc, marginX, cursorRef.y, contentWidth, headerHeight);
@@ -580,7 +812,7 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No outstanding bucket row for this customer.", marginX + 4, cursorRef.y + 11);
+    drawBlockText(doc, copy.noBuckets, textStart, cursorRef.y + 11, { align: textAlign });
     cursorRef.y += rowHeight;
   }
   buckets.forEach((bucket, index) => {
@@ -593,7 +825,7 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
     doc.setFont(undefined, bucket.kind === "total" ? "bold" : "normal");
     doc.setFontSize(8);
-    drawCellText(doc, bucket.label, marginX, cursorRef.y + 11, bucketCols[0].width, { align: "left" });
+    drawCellText(doc, localizeBucketLabel(bucket, lang), marginX, cursorRef.y + 11, bucketCols[0].width, { align: "left" });
     drawCellText(
       doc,
       formatLedgerMoney(bucket.amount),
@@ -606,7 +838,6 @@ export async function createCustomerLedgerPdfDoc(model) {
   });
   cursorRef.y += 16;
 
-  // Confirmation
   ensureSpace(90);
   doc.setDrawColor(...COLORS.accent);
   doc.setLineWidth(0.8);
@@ -614,48 +845,67 @@ export async function createCustomerLedgerPdfDoc(model) {
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Balance Confirmation", marginX + 10, cursorRef.y + 16);
+  drawBlockText(doc, copy.balanceConfirmation, rtl ? marginX + contentWidth - 10 : marginX + 10, cursorRef.y + 16, {
+    align: textAlign,
+  });
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
-  const confirmLines = doc.splitTextToSize(model.confirmationText, contentWidth - 20);
-  doc.text(confirmLines, marginX + 10, cursorRef.y + 32);
+  const confirmation = lang === "ar"
+    ? (model.confirmationTextAr || copy.confirmation({
+      name: model.customerName,
+      code: model.customerCode,
+      balance: formatBalanceSide(model.ledger.closingBalance, "ar"),
+      date: formatDisplayDate(model.statementDate, "ar"),
+    }))
+    : (model.confirmationText || copy.confirmation({
+      name: model.customerName,
+      code: model.customerCode,
+      balance: formatBalanceSide(model.ledger.closingBalance, "en"),
+      date: formatDisplayDate(model.statementDate, "en"),
+    }));
+  const confirmLines = doc.splitTextToSize(confirmation, contentWidth - 20);
+  doc.text(
+    confirmLines,
+    rtl ? marginX + contentWidth - 10 : marginX + 10,
+    cursorRef.y + 32,
+    rtl ? { align: "right" } : undefined,
+  );
   cursorRef.y += 94;
 
-  // Signatures
   ensureSpace(70);
   const sigWidth = (contentWidth - 24) / 3;
-  ["Prepared by", "Authorised signatory", "Customer confirmation"].forEach((label, index) => {
+  const sigLabels = [copy.preparedBy, copy.authorisedSignatory, copy.customerConfirmation];
+  sigLabels.forEach((label, index) => {
     const x = marginX + index * (sigWidth + 12);
     doc.setDrawColor(...COLORS.border);
     doc.line(x, cursorRef.y + 36, x + sigWidth, cursorRef.y + 36);
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text(label, x, cursorRef.y + 50);
+    drawBlockText(doc, label, rtl ? x + sigWidth : x, cursorRef.y + 50, { align: textAlign });
   });
   cursorRef.y += 70;
 
-  // Open invoices schedule
   ensureSpace(40);
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Schedule A — Open Invoices", marginX, cursorRef.y);
+  drawBlockText(doc, copy.scheduleA, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 14;
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text("Bills still open as per FIFO settlement (excluded reversals not listed here).", marginX, cursorRef.y);
+  drawBlockText(doc, copy.scheduleAHint, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 12;
 
   const openCols = [
-    { key: "invoice_date", label: "Date", width: 62, align: "left" },
-    { key: "voucher_number", label: "Voucher", width: 78, align: "left" },
-    { key: "amount_incl_vat", label: "Sales incl VAT", width: 78, align: "right" },
-    { key: "paid_amount", label: "Paid", width: 68, align: "right" },
-    { key: "remaining", label: "Open", width: 68, align: "right" },
-    { key: "status", label: "Status", width: 56, align: "left" },
-    { key: "days", label: "Days", width: contentWidth - (62 + 78 + 78 + 68 + 68 + 56), align: "right" },
+    { key: "invoice_date", label: copy.date, width: 62, align: "left" },
+    { key: "voucher_number", label: copy.voucher, width: 78, align: "left" },
+    { key: "amount_incl_vat", label: copy.salesInclVat, width: 78, align: "right" },
+    { key: "paid_amount", label: copy.paid, width: 68, align: "right" },
+    { key: "remaining", label: copy.open, width: 68, align: "right" },
+    { key: "status", label: copy.status, width: 56, align: "left" },
+    { key: "days", label: copy.days, width: contentWidth - (62 + 78 + 78 + 68 + 68 + 56), align: "right" },
   ];
 
   const drawOpenHeader = () => {
@@ -680,7 +930,7 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No open invoices.", marginX + 4, cursorRef.y + 11);
+    drawBlockText(doc, copy.noOpen, textStart, cursorRef.y + 11, { align: textAlign });
     cursorRef.y += rowHeight;
   }
   model.openInvoices.forEach((row, index) => {
@@ -695,13 +945,13 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     const values = {
-      invoice_date: formatDisplayDate(row.invoice_date),
+      invoice_date: formatDisplayDate(row.invoice_date, lang),
       voucher_number: row.voucher_number,
       amount_incl_vat: formatLedgerMoney(row.amount_incl_vat),
       paid_amount: formatLedgerMoney(row.paid_amount),
       remaining: formatLedgerMoney(row.remaining),
-      status: row.status,
-      days: row.days,
+      status: localizeStatus(row.status, lang),
+      days: localizeOpenDays(row, lang),
     };
     let colX = marginX;
     openCols.forEach((col) => {
@@ -720,33 +970,32 @@ export async function createCustomerLedgerPdfDoc(model) {
   doc.rect(marginX, cursorRef.y, contentWidth, rowHeight);
   doc.setFont(undefined, "bold");
   doc.setFontSize(8);
-  drawCellText(doc, "Total open", marginX, cursorRef.y + 11, 140, { align: "left" });
+  drawCellText(doc, copy.totalOpen, marginX, cursorRef.y + 11, 140, { align: "left" });
   drawCellText(doc, formatLedgerMoney(model.openTotal), marginX + 286, cursorRef.y + 11, 68, {
     align: "right",
     color: COLORS.open,
   });
   cursorRef.y += rowHeight + 18;
 
-  // Reversed schedule
   ensureSpace(40);
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.bodyText);
-  doc.text("Schedule B — Reversed Invoices (excluded from ledger)", marginX, cursorRef.y);
+  drawBlockText(doc, copy.scheduleB, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 14;
   doc.setFont(undefined, "normal");
   doc.setFontSize(8);
   doc.setTextColor(...COLORS.mutedText);
-  doc.text("Same-day / next-day full credit-note reversals. Not included in the account ledger above.", marginX, cursorRef.y);
+  drawBlockText(doc, copy.scheduleBHint, textStart, cursorRef.y, { align: textAlign });
   cursorRef.y += 12;
 
   const revCols = [
-    { key: "invoice_date", label: "Sales Date", width: 62, align: "left" },
-    { key: "voucher_number", label: "Invoice", width: 72, align: "left" },
-    { key: "amount_incl_vat", label: "Sales incl VAT", width: 78, align: "right" },
-    { key: "credit_note_date", label: "CN Date", width: 62, align: "left" },
-    { key: "credit_note_voucher", label: "CN Voucher", width: 72, align: "left" },
-    { key: "credit_note_amount", label: "CN Amount", width: contentWidth - (62 + 72 + 78 + 62 + 72), align: "right" },
+    { key: "invoice_date", label: copy.salesDate, width: 62, align: "left" },
+    { key: "voucher_number", label: copy.invoice, width: 72, align: "left" },
+    { key: "amount_incl_vat", label: copy.salesInclVat, width: 78, align: "right" },
+    { key: "credit_note_date", label: copy.cnDate, width: 62, align: "left" },
+    { key: "credit_note_voucher", label: copy.cnVoucher, width: 72, align: "left" },
+    { key: "credit_note_amount", label: copy.cnAmount, width: contentWidth - (62 + 72 + 78 + 62 + 72), align: "right" },
   ];
 
   const drawRevHeader = () => {
@@ -771,7 +1020,7 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.mutedText);
-    doc.text("No reversed invoices.", marginX + 4, cursorRef.y + 11);
+    drawBlockText(doc, copy.noReversed, textStart, cursorRef.y + 11, { align: textAlign });
     cursorRef.y += rowHeight;
   }
   model.reversedInvoices.forEach((row, index) => {
@@ -786,10 +1035,10 @@ export async function createCustomerLedgerPdfDoc(model) {
     doc.setFont(undefined, "normal");
     doc.setFontSize(8);
     const values = {
-      invoice_date: formatDisplayDate(row.invoice_date),
+      invoice_date: formatDisplayDate(row.invoice_date, lang),
       voucher_number: row.voucher_number,
       amount_incl_vat: formatLedgerMoney(row.amount_incl_vat),
-      credit_note_date: formatDisplayDate(row.credit_note_date),
+      credit_note_date: formatDisplayDate(row.credit_note_date, lang),
       credit_note_voucher: row.credit_note_voucher,
       credit_note_amount: formatLedgerMoney(row.credit_note_amount),
     };
@@ -799,6 +1048,41 @@ export async function createCustomerLedgerPdfDoc(model) {
       colX += col.width;
     });
     cursorRef.y += rowHeight;
+  });
+}
+
+/**
+ * Render a professional balance-confirmation PDF (A4): full Arabic section, then full English.
+ */
+export async function createCustomerLedgerPdfDoc(model) {
+  if (!model) throw new Error("Customer ledger PDF model is required.");
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const { ARABIC_FONT_BASE64 } = await import("./pdfArabicFontData.js");
+  registerArabicPdfFont(doc, ARABIC_FONT_BASE64);
+  installArabicPdfText(doc);
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 36;
+  const contentWidth = pageWidth - marginX * 2;
+  const rowHeight = 15;
+  const headerHeight = 17;
+  const cursorRef = { y: 40 };
+  const languages = Array.isArray(model.languages) && model.languages.length
+    ? model.languages
+    : LEDGER_PDF_LANGUAGES;
+
+  languages.forEach((lang, index) => {
+    renderCustomerLedgerLanguageSection(doc, model, lang, {
+      marginX,
+      contentWidth,
+      pageHeight,
+      rowHeight,
+      headerHeight,
+      cursorRef,
+      startFreshPage: index > 0,
+    });
   });
 
   addPdfBuildFooter(doc, getClientBuildId());

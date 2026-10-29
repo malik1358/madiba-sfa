@@ -7,8 +7,10 @@ import {
   BILL_MISMATCH_REVERSED,
   buildOutstandingReconcileRow,
   classifyOutstandingBillMismatch,
+  filterOutstandingReconcileEmailRows,
   formatOutstandingCompareDelta,
   hasOutstandingCompareMoneyDifference,
+  isOutstandingCompareMaterialMoneyDifference,
   isOutstandingCompareSmallDifference,
   normalizeOutstandingReconcileDataset,
   sortOutstandingReconcileRows,
@@ -86,6 +88,20 @@ test("Ignore differences of 10 SAR or less hides either side of a 10 SAR gap", (
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: 0.004 }), false);
   assert.equal(isOutstandingCompareSmallDifference({ open_delta: null }), false);
   assert.equal(isOutstandingCompareSmallDifference({ difference: 40 }), false);
+
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: 10 }), false);
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: -10 }), false);
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: 9.99 }), false);
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: 10.01 }), true);
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: -189.75 }), true);
+  assert.equal(isOutstandingCompareMaterialMoneyDifference({ difference: 0 }), false);
+
+  const emailed = filterOutstandingReconcileEmailRows([
+    { customer_code: "SMALL", difference: 5, invoice_gap_count: 1 },
+    { customer_code: "EDGE", difference: 10, invoice_gap_count: 0 },
+    { customer_code: "KEEP", difference: -189.75, invoice_gap_count: 1 },
+  ]);
+  assert.deepEqual(emailed.map((row) => row.customer_code), ["KEEP"]);
 });
 
 test("summarize and sort rank rows by absolute difference", () => {
@@ -119,8 +135,14 @@ test("email lists only difference rows and links each customer to settlement", (
   const message = buildOutstandingReconcileEmail({
     rows: [
       { customer_code: "C01", customer_name: "Alpha", difference: 150, tally_outstanding: 1000, sfa_outstanding: 1150, invoice_gap_count: 1 },
+      { customer_code: "C02", customer_name: "Noise", difference: 5, tally_outstanding: 100, sfa_outstanding: 105, invoice_gap_count: 1 },
+      { customer_code: "C03", customer_name: "Ten", difference: -10, tally_outstanding: 110, sfa_outstanding: 100, invoice_gap_count: 0 },
     ],
-    summary: summarizeOutstandingReconcileRows([{ difference: 150, tally_outstanding: 1000, sfa_outstanding: 1150, invoice_gap_count: 1 }]),
+    summary: summarizeOutstandingReconcileRows([
+      { difference: 150, tally_outstanding: 1000, sfa_outstanding: 1150, invoice_gap_count: 1 },
+      { difference: 5, tally_outstanding: 100, sfa_outstanding: 105, invoice_gap_count: 1 },
+      { difference: -10, tally_outstanding: 110, sfa_outstanding: 100, invoice_gap_count: 0 },
+    ]),
     builtAt: "2026-09-28T06:00:00.000Z",
     env: {},
   });
@@ -128,7 +150,34 @@ test("email lists only difference rows and links each customer to settlement", (
   assert.match(message.subject, /1 customer\(s\) differ/);
   assert.match(message.html, /payment-settlement\?customer_code=C01#invoices-settlement/);
   assert.match(message.html, /Alpha/);
+  assert.doesNotMatch(message.html, /Noise/);
+  assert.doesNotMatch(message.html, /customer_code=C02/);
+  assert.doesNotMatch(message.html, /customer_code=C03/);
+  assert.match(message.html, /more than 10 SAR/);
   assert.equal(message.rowCount, 1);
+});
+
+test("cycle skips email when every gap is 10 SAR or less", async () => {
+  const sent = [];
+  const result = await runOutstandingReconcileCycle({}, {
+    env: EMAIL_ENV,
+    rebuild: async () => ({
+      builtAt: "2026-10-28T09:33:45.000Z",
+      rows: [
+        { customer_code: "C02", difference: 5, invoice_gap_count: 1 },
+        { customer_code: "C03", difference: -10, invoice_gap_count: 0 },
+      ],
+      summary: {},
+    }),
+    send: async (message) => { sent.push(message); },
+    loadMarker: async () => ({}),
+    saveMarker: async () => {},
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "no_differences");
+  assert.equal(result.differenceCount, 0);
+  assert.equal(sent.length, 0);
 });
 
 test("cycle emails differences once and skips an unchanged rebuild", async () => {

@@ -240,7 +240,7 @@ export default function OutstandingComparePage() {
   const [autoCode, setAutoCode] = useState("");
   const [deltaByCode, setDeltaByCode] = useState({});
   const [differencesOnly, setDifferencesOnly] = useState(true);
-  const [ignoreWithinOneSar, setIgnoreWithinOneSar] = useState(false);
+  const [ignoreWithinOneSar, setIgnoreWithinOneSar] = useState(true);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
   const savedMetaRef = useRef(null);

@@ -100,6 +100,38 @@ async function listKpiUploadSummarySalesmen(admin) {
   return mergeKpiTargetProfiles((data || []).filter(isKpiTargetProfile));
 }
 
+/**
+ * Read a saved monthly KPI actuals cache without rebuilding or stamp checks.
+ * Used for prior-month vs-last-month so the email does not scan active_sales again.
+ */
+async function loadStoredKpiActualsByCode(admin, reportDate) {
+  const month = String(monthStartDate(reportDate) || reportDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(month)) return {};
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", `performance_kpi_actuals_v2:${month}`)
+    .maybeSingle();
+  if (error) throw error;
+  try {
+    const cache = JSON.parse(String(data?.setting_value || "null"));
+    const source = cache?.actualsBySalesman;
+    if (!source || typeof source !== "object") return {};
+    const byCode = {};
+    Object.entries(source).forEach(([code, actuals]) => {
+      const key = String(code || "").trim().toUpperCase();
+      if (!key || !actuals || typeof actuals !== "object") return;
+      byCode[key] = withDerivedKpiActuals({
+        ...emptyPerformanceActuals(),
+        ...actuals,
+      });
+    });
+    return byCode;
+  } catch {
+    return {};
+  }
+}
+
 export async function loadKpiUploadSummaryPayload(admin, {
   reportDate = "",
 } = {}) {
@@ -114,28 +146,15 @@ export async function loadKpiUploadSummaryPayload(admin, {
   }));
   const priorMonth = previousMonthKey(String(monthStartDate(monthDate) || monthDate).slice(0, 7));
   const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
-  const [snapshots, priorSnapshots] = await Promise.all([
+  const [snapshots, priorMonthActualsByCode] = await Promise.all([
     loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmanPayload,
       reportDate: monthDate,
     }),
     priorReportDate
-      ? loadPerformanceSnapshotsForSalesmen(admin, {
-        salesmen: salesmanPayload,
-        reportDate: priorReportDate,
-      })
-      : Promise.resolve([]),
+      ? loadStoredKpiActualsByCode(admin, priorReportDate)
+      : Promise.resolve({}),
   ]);
-
-  const priorMonthActualsByCode = {};
-  (priorSnapshots || []).forEach((snapshot) => {
-    const code = String(snapshot?.salesmanCode || "").trim().toUpperCase();
-    if (!code) return;
-    priorMonthActualsByCode[code] = withDerivedKpiActuals({
-      ...emptyPerformanceActuals(),
-      ...(snapshot.actuals || {}),
-    });
-  });
 
   const salesAsOfDate = String(
     snapshots.find((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.salesAsOfDate || "").slice(0, 10)))?.salesAsOfDate || "",

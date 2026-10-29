@@ -141,12 +141,16 @@ export async function GET(request) {
     const salesAsOfDate = String(
       snapshots.find((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.salesAsOfDate || "").slice(0, 10)))?.salesAsOfDate || "",
     ).slice(0, 10);
+    const receiptAsOfDate = String(
+      snapshots.find((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.receiptAsOfDate || "").slice(0, 10)))?.receiptAsOfDate || "",
+    ).slice(0, 10);
 
     return NextResponse.json({
       success: true,
       month: monthStartDate(reportDate),
       reportDate,
       salesAsOfDate,
+      receiptAsOfDate,
       rows,
       teamTargets: bosses.map((boss) => {
         const stored = teamTargetsByCode.get(teamTargetSalesmanCode(boss.bossCode));

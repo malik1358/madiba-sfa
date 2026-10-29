@@ -179,7 +179,7 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
 export function sumFilteredKpiPaceEstimates(
   rows = [],
   columns = PERFORMANCE_DISPLAY_KPI_KEYS,
-  { reportDate, todayIso, salesAsOfDate } = {},
+  { reportDate, todayIso, salesAsOfDate, receiptAsOfDate } = {},
 ) {
   const totals = sumFilteredKpiColumns(rows, columns);
   const estimates = {};
@@ -198,13 +198,16 @@ export function sumFilteredKpiPaceEstimates(
       const target = rowTargetValue(row, key);
       const kpi = (row.kpis || []).find((item) => item.key === key);
       const actual = Number(kpi?.actual || 0) || 0;
+      const rowSalesAsOf = row?.salesAsOfDate ?? salesAsOfDate;
+      const rowReceiptAsOf = row?.receiptAsOfDate ?? receiptAsOfDate;
       const liveKpi = buildPerformanceKpi(key, {
         actual,
         target,
         reportDate,
         todayIso,
         paceShares: row?.paceShares || null,
-        salesAsOfDate: row?.salesAsOfDate ?? salesAsOfDate,
+        salesAsOfDate: rowSalesAsOf,
+        receiptAsOfDate: rowReceiptAsOf,
       });
       const expected = liveKpi.expected != null
         ? liveKpi.expected
@@ -212,7 +215,8 @@ export function sumFilteredKpiPaceEstimates(
           reportDate,
           todayIso,
           paceShares: row?.paceShares || null,
-          salesAsOfDate: row?.salesAsOfDate ?? salesAsOfDate,
+          salesAsOfDate: rowSalesAsOf,
+          receiptAsOfDate: rowReceiptAsOf,
         });
       const estimate = monthEndPaceEstimate({
         actual,

@@ -33,7 +33,8 @@ import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
-  lastTransactionDate: { en: "Last transaction date", ar: "آخر تاريخ معاملة" },
+  lastTransactionDate: { en: "Last sales date", ar: "آخر تاريخ مبيعات" },
+  lastReceiptDate: { en: "Last receipt date", ar: "آخر تاريخ تحصيل" },
   subtitle: {
     en: "Ach. % is actual vs the full month target. Expected pace is that salesman's own average share of monthly sales by this date over the last 6 months, or working days if he has no history.",
     ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. المسار المتوقع هو متوسط حصة المندوب نفسه من مبيعات الشهر حتى هذا التاريخ خلال آخر 6 أشهر، أو أيام العمل إن لم يوجد تاريخ.",
@@ -59,8 +60,8 @@ const TEXT = {
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
   paceEstimateHint: {
-    en: "Each salesman's month-end from their own last-3-month pace, measured to the latest uploaded sales date, then added up",
-    ar: "نهاية الشهر لكل مندوب من مساره لآخر 3 أشهر حتى آخر تاريخ مبيعات مرفوع، ثم يُجمع",
+    en: "Sales: each salesman's last-3-month pace to the latest sales date. Collection: KSA workdays (Sat on, Fri off) to the latest receipt date",
+    ar: "المبيعات: مسار آخر 3 أشهر حتى آخر تاريخ مبيعات. التحصيل: أيام العمل (السبت عمل، الجمعة عطلة) حتى آخر تاريخ تحصيل",
   },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   localItemSales: { en: "Local item sales", ar: "مبيعات الأصناف المحلية" },
@@ -109,6 +110,7 @@ function emptyDraft(snapshot) {
     kpis: snapshot.kpis || [],
     paceShares: snapshot.paceShares || null,
     salesAsOfDate: snapshot.salesAsOfDate,
+    receiptAsOfDate: snapshot.receiptAsOfDate,
     todayIso: snapshot.todayIso || null,
     reportDate: snapshot.reportDate || null,
   };
@@ -145,6 +147,7 @@ export default function KpiTargetsPage() {
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState([]);
   const [lastTransactionDate, setLastTransactionDate] = useState("");
+  const [lastReceiptDate, setLastReceiptDate] = useState("");
   const [selectedSalesmen, setSelectedSalesmen] = useState([]);
   const [selectedBosses, setSelectedBosses] = useState([]);
 
@@ -176,7 +179,13 @@ export default function KpiTargetsPage() {
         || (payload.rows || []).find((row) => row?.salesAsOfDate)?.salesAsOfDate
         || "",
       ).slice(0, 10);
+      const receiptAsOfDate = String(
+        payload.receiptAsOfDate
+        || (payload.rows || []).find((row) => row?.receiptAsOfDate)?.receiptAsOfDate
+        || "",
+      ).slice(0, 10);
       setLastTransactionDate(/^\d{4}-\d{2}-\d{2}$/.test(salesAsOfDate) ? salesAsOfDate : "");
+      setLastReceiptDate(/^\d{4}-\d{2}-\d{2}$/.test(receiptAsOfDate) ? receiptAsOfDate : "");
       const people = (payload.rows || []).map(emptyDraft);
       const teams = (payload.teamTargets || []).map((team) => emptyDraft({
         salesmanCode: team.salesmanCode,
@@ -309,14 +318,18 @@ export default function KpiTargetsPage() {
   );
 
   const salesAsOfDate = visibleRows.find((row) => row.salesAsOfDate != null)?.salesAsOfDate;
+  const receiptAsOfDate = visibleRows.find((row) => row.receiptAsOfDate != null)?.receiptAsOfDate
+    || lastReceiptDate
+    || undefined;
 
   const paceEstimates = useMemo(
     () => sumFilteredKpiPaceEstimates(visibleRows, columns, {
       reportDate: `${month}-01`,
       todayIso: getKsaDateString(),
       salesAsOfDate,
+      receiptAsOfDate,
     }),
-    [columns, month, salesAsOfDate, visibleRows],
+    [columns, month, receiptAsOfDate, salesAsOfDate, visibleRows],
   );
 
   const individualVisibleCount = visibleRows.filter((row) => !row.isTeam).length;
@@ -365,6 +378,8 @@ export default function KpiTargetsPage() {
                 {!loading ? (
                   <span className="moduleKpiLastTransaction">
                     {t("lastTransactionDate")}: {formatKsaDateOnly(lastTransactionDate)}
+                    {" · "}
+                    {t("lastReceiptDate")}: {formatKsaDateOnly(lastReceiptDate)}
                   </span>
                 ) : null}
               </h1>
@@ -496,6 +511,7 @@ export default function KpiTargetsPage() {
                           todayIso: row.todayIso || getKsaDateString(),
                           paceShares: row.paceShares,
                           salesAsOfDate: row.salesAsOfDate ?? salesAsOfDate,
+                          receiptAsOfDate: row.receiptAsOfDate ?? receiptAsOfDate,
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
@@ -548,6 +564,7 @@ export default function KpiTargetsPage() {
                           reportDate: `${month}-01`,
                           todayIso: getKsaDateString(),
                           salesAsOfDate,
+                          receiptAsOfDate,
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);

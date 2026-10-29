@@ -21,6 +21,9 @@ import {
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
   resolveKpiPaceDate,
+  isKsaWorkday,
+  latestReceiptDateInRange,
+  resolveReceiptPaceAsOfDate,
   resolveSalesPaceAsOfDate,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
@@ -114,6 +117,27 @@ test("KPI status compares actual/target with expected pace by today", () => {
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
 });
 
+test("KSA KPI workdays include Saturday and exclude Friday", () => {
+  assert.equal(isKsaWorkday("2026-10-29"), true); // Thursday
+  assert.equal(isKsaWorkday("2026-10-30"), false); // Friday
+  assert.equal(isKsaWorkday("2026-10-31"), true); // Saturday
+  // October 2026 ends on Saturday, so workday pace is not 100% until that day.
+  assert.ok(ksaWorkdayProgressRatio("2026-10-29") < 1);
+  assert.equal(ksaWorkdayProgressRatio("2026-10-31"), 1);
+});
+
+test("collection pace stops at the latest receipt date", () => {
+  assert.equal(resolveReceiptPaceAsOfDate("2026-10-01", "2026-10-29", "2026-10-28"), "2026-10-28");
+  assert.equal(
+    latestReceiptDateInRange(
+      new Map([["A", [{ receipt_date: "2026-10-26" }, { receipt_date: "2026-10-28" }]]]),
+      "2026-10-01",
+      "2026-10-31",
+    ),
+    "2026-10-28",
+  );
+});
+
 test("open-month sales pace stops at the latest uploaded sales date", () => {
   assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", "2026-10-19"), "2026-10-19");
   assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", "2026-10-20"), "2026-10-20");
@@ -149,6 +173,19 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
     salesAsOfDate: "2026-10-19",
   });
   assert.equal(collection.expected, ksaWorkdayProgressRatio("2026-10-20") * 100);
+
+  const collectionReceiptLag = buildPerformanceKpi("collection", {
+    actual: 10,
+    target: 100,
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-29",
+    receiptAsOfDate: "2026-10-28",
+  });
+  assert.equal(
+    collectionReceiptLag.expected,
+    ksaWorkdayProgressRatio("2026-10-28") * 100,
+  );
+  assert.ok(collectionReceiptLag.expected < 100);
 
   const closed = kpiStatus({
     actual: 40,
@@ -590,9 +627,10 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 7,
+    version: 8,
     receiptStamp: "stamp-1",
     salesAsOfDate: "2026-09-08",
+    receiptAsOfDate: "2026-09-07",
     batchId: "42",
     actualsBySalesman: {
       SM001: {

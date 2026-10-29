@@ -6,6 +6,7 @@ import {
   emptyPerformanceActuals,
   emptyPerformanceTargets,
   isMissingSchemaColumn,
+  latestReceiptDateInRange,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
   averageCumulativeDayShares,
@@ -32,7 +33,7 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 7;
+const PERFORMANCE_KPI_CACHE_VERSION = 8;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
@@ -221,6 +222,20 @@ export async function loadCurrentMonthLastSalesDate(admin, { reportDate } = {}) 
   }
 }
 
+export async function loadCurrentMonthLastReceiptDate(admin, {
+  reportDate,
+  receiptsByCustomer = null,
+} = {}) {
+  const { from, to } = monthWindow(reportDate);
+  try {
+    const map = receiptsByCustomer || await loadReceiptRowsByCustomer(admin);
+    return latestReceiptDateInRange(map, from, to);
+  } catch (error) {
+    if (!isMissingColumnError(error) && !isMissingTableError(error)) throw error;
+    return "";
+  }
+}
+
 export function paceSharesForSalesman(pace, salesmanCode) {
   return pickSalesmanPaceShares(pace, salesmanCode);
 }
@@ -400,11 +415,12 @@ export async function loadPerformanceSnapshot(admin, {
   paceShares = null,
 } = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
-  const [salesActuals, collectionActuals, loadedPace, salesAsOfDate] = await Promise.all([
+  const [salesActuals, collectionActuals, loadedPace, salesAsOfDate, receiptAsOfDate] = await Promise.all([
     loadSalesActuals(admin, { salesmanCode: code, reportDate }),
     loadCollectionActual(admin, { salesmanCode: code, reportDate }),
     paceShares ? Promise.resolve(null) : loadSalesPaceShares(admin, { reportDate }),
     loadCurrentMonthLastSalesDate(admin, { reportDate }),
+    loadCurrentMonthLastReceiptDate(admin, { reportDate }),
   ]);
   const classified = classifyBuyingCustomers(
     salesActuals.monthCustomerCodes,
@@ -439,6 +455,7 @@ export async function loadPerformanceSnapshot(admin, {
     todayIso,
     paceShares: paceSharesForSalesman(resolvedPace, code),
     salesAsOfDate,
+    receiptAsOfDate,
   });
 }
 
@@ -479,6 +496,7 @@ async function readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp 
       || !cache.actualsBySalesman
       || typeof cache.actualsBySalesman !== "object"
       || !Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
+      || !Object.prototype.hasOwnProperty.call(cache, "receiptAsOfDate")
     ) return null;
     return cache;
   } catch {
@@ -518,6 +536,10 @@ async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, bat
     loadReceiptRowsByCustomer(admin),
     readReceiptRegisterStamp(admin),
   ]);
+  const receiptAsOfDate = await loadCurrentMonthLastReceiptDate(admin, {
+    reportDate,
+    receiptsByCustomer,
+  });
   const entries = await Promise.all((salesmen || []).map(async (salesman) => {
     const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
     if (!code) return null;
@@ -536,6 +558,7 @@ async function buildPerformanceKpiSourceCache(admin, { salesmen, reportDate, bat
     actualsBySalesman: Object.fromEntries(entries.filter(Boolean)),
     paceBySalesman: Object.fromEntries([...pace.bySalesman.entries()]),
     salesAsOfDate,
+    receiptAsOfDate,
   };
 }
 
@@ -632,6 +655,7 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
         ...refreshed.paceBySalesman,
       },
       salesAsOfDate: refreshed.salesAsOfDate ?? sourceCache?.salesAsOfDate ?? "",
+      receiptAsOfDate: refreshed.receiptAsOfDate ?? sourceCache?.receiptAsOfDate ?? "",
       receiptStamp,
     };
     await writePerformanceKpiCache(admin, reportDate, sourceCache);
@@ -652,6 +676,7 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
       todayIso,
       paceShares: paceSharesForSalesman(pace, code),
       salesAsOfDate: sourceCache.salesAsOfDate ?? "",
+      receiptAsOfDate: sourceCache.receiptAsOfDate ?? "",
     });
   }));
 }

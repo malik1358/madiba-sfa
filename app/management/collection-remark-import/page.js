@@ -78,7 +78,7 @@ export default function CollectionRemarkImportPage() {
 
   async function authHeaders() {
     const session = await resolveAuthSession(supabase);
-    if (!session?.access_token) throw new Error(t.login);
+    if (!session?.access_token) throw new Error(t("login"));
     return { Authorization: `Bearer ${session.access_token}` };
   }
 
@@ -100,7 +100,7 @@ export default function CollectionRemarkImportPage() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || t.parseError);
+        throw new Error(payload.error || t("parseError"));
       }
       setRows((payload.rows || []).map((row, index) => ({
         ...row,
@@ -108,10 +108,10 @@ export default function CollectionRemarkImportPage() {
         selected: row.customerExists !== false,
       })));
       setOcrPreview(String(payload.ocrText || "").trim());
-      if (!(payload.rows || []).length) setError(t.noRows);
+      if (!(payload.rows || []).length) setError(t("noRows"));
     } catch (err) {
       setRows([]);
-      setError(err?.message || t.parseError);
+      setError(err?.message || t("parseError"));
     } finally {
       setBusy("");
     }
@@ -137,16 +137,16 @@ export default function CollectionRemarkImportPage() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || t.commitError);
+        throw new Error(payload.error || t("commitError"));
       }
-      setSuccess(`${t.saved}: ${payload.savedCount}`);
+      setSuccess(`${t("saved")}: ${payload.savedCount}`);
       setRows((prev) => prev.map((row) => (
         row.selected
           ? { ...row, selected: false, saved: true }
           : row
       )));
     } catch (err) {
-      setError(err?.message || t.commitError);
+      setError(err?.message || t("commitError"));
     } finally {
       setBusy("");
     }
@@ -170,8 +170,8 @@ export default function CollectionRemarkImportPage() {
     return (
       <MorningAttendanceGate requireMorningAttendance={false}>
         <main className="modulePage" dir={dir}>
-          <p className="moduleError">{t.denied}</p>
-          <Link href="/management">{t.back}</Link>
+          <p className="moduleError">{t("denied")}</p>
+          <Link href="/management">{t("back")}</Link>
         </main>
       </MorningAttendanceGate>
     );
@@ -183,18 +183,18 @@ export default function CollectionRemarkImportPage() {
         <header className="moduleHeader">
           <div>
             <p className="moduleEyebrow">
-              <Link href="/management">{t.back}</Link>
+              <Link href="/management">{t("back")}</Link>
             </p>
-            <h1>{t.title}</h1>
-            <p className="moduleMuted" style={{ maxWidth: 720 }}>{t.intro}</p>
-            <p className="moduleMuted">{t.farNote}</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleMuted" style={{ maxWidth: 720 }}>{t("intro")}</p>
+            <p className="moduleMuted">{t("farNote")}</p>
           </div>
           <AppLanguageSwitch language={language} setLanguage={setLanguage} />
         </header>
 
         <form className="moduleCard" onSubmit={handleParse} style={{ display: "grid", gap: 12, marginBottom: 16 }}>
           <label className="moduleField">
-            <span>{t.screenshot}</span>
+            <span>{t("screenshot")}</span>
             <input
               type="file"
               accept="image/*,.png,.jpg,.jpeg,.webp"
@@ -202,7 +202,7 @@ export default function CollectionRemarkImportPage() {
             />
           </label>
           <label className="moduleField">
-            <span>{t.paste}</span>
+            <span>{t("paste")}</span>
             <textarea
               rows={5}
               value={pastedText}
@@ -210,15 +210,15 @@ export default function CollectionRemarkImportPage() {
               placeholder={"Customer\tRemarks\n1054C\tcase is currently with court…"}
               style={{ width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 13 }}
             />
-            <small className="moduleMuted">{t.pasteHint}</small>
+            <small className="moduleMuted">{t("pasteHint")}</small>
           </label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="submit" className="modulePrimaryBtn" disabled={Boolean(busy)}>
-              {busy === "parse" ? t.parsing : t.parse}
+          <div className="moduleActionRow" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="submit" className="modulePrimaryButton" disabled={Boolean(busy)}>
+              {busy === "parse" ? t("parsing") : t("parse")}
             </button>
             <button
               type="button"
-              className="moduleSecondaryBtn"
+              className="moduleInlineButton"
               disabled={Boolean(busy)}
               onClick={() => {
                 setFile(null);
@@ -229,7 +229,7 @@ export default function CollectionRemarkImportPage() {
                 setSuccess("");
               }}
             >
-              {t.clear}
+              {t("clear")}
             </button>
           </div>
         </form>
@@ -239,21 +239,21 @@ export default function CollectionRemarkImportPage() {
 
         {rows.length ? (
           <section className="moduleCard" style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <strong>{selectedCount} / {rows.length} {t.rows}</strong>
-              <button type="button" className="moduleSecondaryBtn" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: true })))}>
-                {t.selectAll}
+            <div className="moduleActionRow" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <strong>{selectedCount} / {rows.length} {t("rows")}</strong>
+              <button type="button" className="moduleInlineButton" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: true })))}>
+                {t("selectAll")}
               </button>
-              <button type="button" className="moduleSecondaryBtn" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: false })))}>
-                {t.selectNone}
+              <button type="button" className="moduleInlineButton" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: false })))}>
+                {t("selectNone")}
               </button>
               <button
                 type="button"
-                className="modulePrimaryBtn"
+                className="modulePrimaryButton"
                 disabled={Boolean(busy) || selectedCount === 0}
                 onClick={handleCommit}
               >
-                {busy === "commit" ? t.committing : t.commit}
+                {busy === "commit" ? t("committing") : t("commit")}
               </button>
             </div>
 
@@ -261,11 +261,11 @@ export default function CollectionRemarkImportPage() {
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>{t.selected}</th>
-                    <th>{t.customer}</th>
-                    <th>{t.exists}</th>
-                    <th>{t.outcome}</th>
-                    <th>{t.remark}</th>
+                    <th>{t("selected")}</th>
+                    <th>{t("customer")}</th>
+                    <th>{t("exists")}</th>
+                    <th>{t("outcome")}</th>
+                    <th>{t("remark")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -288,7 +288,7 @@ export default function CollectionRemarkImportPage() {
                         />
                       </td>
                       <td style={{ color: row.customerExists === false ? "#b91c1c" : "#15803d" }}>
-                        {row.customerExists === false ? t.no : t.yes}
+                        {row.customerExists === false ? t("no") : t("yes")}
                       </td>
                       <td>
                         <select

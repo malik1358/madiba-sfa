@@ -17,8 +17,8 @@ const COPY = {
   "bad-debts": {
     title: { en: "Potential Bad Debts", ar: "ديون محتملة معدومة" },
     subtitle: {
-      en: "Customers with outstanding older than 120 days and no Funds Received in the last 10 days.",
-      ar: "عملاء لديهم مستحقات أقدم من 120 يوماً ولم يُستلم منهم مبلغ خلال آخر 10 أيام.",
+      en: "Customers with outstanding older than 120 days and no Funds Received in the last 10 days. Pink rows with no Tally last payment are highest risk.",
+      ar: "عملاء لديهم مستحقات أقدم من 120 يوماً ولم يُستلم منهم مبلغ خلال آخر 10 أيام. الصفوف الوردية بلا آخر دفعة في تالي هي الأعلى خطورة.",
     },
     filename: "potential-bad-debts",
     sheet: "Potential bad debts",
@@ -68,12 +68,21 @@ const TEXT = {
   shown: { en: "shown", ar: "ظاهر" },
   asOf: { en: "As of", ar: "حتى" },
   noRows: { en: "No customers match this report.", ar: "لا يوجد عملاء في هذا التقرير." },
+  noPayment: { en: "No payment", ar: "بلا دفعة" },
+  noPaymentHint: {
+    en: "Pink rows have no Tally receipt on file (highest risk).",
+    ar: "الصفوف الوردية بلا سند قبض في تالي (أعلى خطورة).",
+  },
   accessDenied: {
     en: "Only admin, manager, or invoice maker can open this report.",
     ar: "هذا التقرير للمدير أو الأدمن أو معد الفواتير.",
   },
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
 };
+
+function hasNoLastPayment(row) {
+  return !String(row?.lastPaymentDate || "").trim();
+}
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -158,7 +167,8 @@ export default function DebtReportView({ view = "bad-debts" }) {
     total: totals.total + Number(row.totalOutstanding || 0),
     received: totals.received + Number(row.receivedLast10Days || 0),
     legal: totals.legal + (row.transferredToLegal ? 1 : 0),
-  }), { above120: 0, total: 0, received: 0, legal: 0 }), [visibleRows]);
+    noPayment: totals.noPayment + (hasNoLastPayment(row) ? 1 : 0),
+  }), { above120: 0, total: 0, received: 0, legal: 0, noPayment: 0 }), [visibleRows]);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -248,6 +258,10 @@ export default function DebtReportView({ view = "bad-debts" }) {
                   {" · "}
                   {t("totalOutstanding")}: {formatAmount(summary.totalOutstanding)}
                   {view === "bad-debts" ? ` · ${t("legal")}: ${summary.transferredToLegal}` : ""}
+                  {" · "}
+                  {t("noPayment")}: {visibleSummary.noPayment}
+                  {" · "}
+                  {t("noPaymentHint")}
                 </p>
               ) : null}
               {error && !denied && !signedOut ? <p className="moduleHint">{error}</p> : null}
@@ -283,16 +297,28 @@ export default function DebtReportView({ view = "bad-debts" }) {
                     </thead>
                     <tbody>
                       {visibleRows.map((row) => (
-                        <tr key={`${row.customerCode}-${row.transferredAt}`}>
+                        <tr
+                          key={`${row.customerCode}-${row.transferredAt}`}
+                          className={hasNoLastPayment(row) ? "debtReportRow-no-payment" : undefined}
+                        >
                           <td>{row.customerCode}</td>
-                          <td>{row.customerName}</td>
+                          <td>
+                            {row.customerName}
+                            {hasNoLastPayment(row) ? (
+                              <span className="debtReportNoPaymentBadge">{t("noPayment")}</span>
+                            ) : null}
+                          </td>
                           <td>{row.salesman || "-"}</td>
                           <td>{row.cityArea || "-"}</td>
                           <td className="moduleBiTotalCol moduleBiMonthCell--down">{formatAmount(row.outstandingAbove120)}</td>
                           <td className="moduleBiTotalCol">{formatAmount(row.totalOutstanding)}</td>
                           <td>{formatAmount(row.receivedLast10Days)}</td>
-                          <td>{formatDate(row.lastPaymentDate)}</td>
-                          <td>{String(row.lastPaymentDate || "").trim() ? formatAmount(row.lastPaymentAmount) : "-"}</td>
+                          <td className={hasNoLastPayment(row) ? "moduleBiMonthCell--down" : undefined}>
+                            {formatDate(row.lastPaymentDate)}
+                          </td>
+                          <td className={hasNoLastPayment(row) ? "moduleBiMonthCell--down" : undefined}>
+                            {String(row.lastPaymentDate || "").trim() ? formatAmount(row.lastPaymentAmount) : "-"}
+                          </td>
                           <td>{row.oldestInvoiceDays || "-"}</td>
                           <td>{formatDate(row.lastVisitDate)}</td>
                           <td>{row.lastVisitPerson || "-"}</td>

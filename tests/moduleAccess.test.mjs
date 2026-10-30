@@ -378,7 +378,6 @@ test("role access matrix defaults match built-in module flags", () => {
 
 test("role module matrix overrides grant and revoke page access", () => {
   const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
-  matrix.salesman.businessDashboard = true;
   matrix.manager.upload = false;
 
   const salesman = buildModuleAccess({
@@ -393,6 +392,22 @@ test("role module matrix overrides grant and revoke page access", () => {
     roleModuleMatrix: matrix,
   });
   assert.equal(manager.canAccess("upload"), false);
+});
+
+test("stored role matrix cannot hide Business Intelligence from salesmen", () => {
+  const matrix = normalizeRoleModuleMatrix({
+    salesman: { businessDashboard: false, myPerformance: true },
+  });
+  assert.equal(matrix.salesman.businessDashboard, true);
+
+  const salesman = buildModuleAccess({
+    role: "salesman",
+    salesmanCode: "PARVEZ",
+    roleModuleMatrix: {
+      salesman: { businessDashboard: false, myPerformance: true },
+    },
+  });
+  assert.equal(salesman.canAccess("businessDashboard"), true);
 });
 
 test("admin and report-user cannot lose Role Access via matrix", () => {

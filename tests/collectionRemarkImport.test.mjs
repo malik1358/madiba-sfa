@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   expandCollectionRemarkCustomerCodeCandidates,
+  looksLikeLedgerPartyNameAfterCode,
   normalizeCollectionRemarkCustomerCode,
   normalizeCollectionRemarkImportRows,
   parseBillsReceivableOcrText,
@@ -152,6 +153,7 @@ Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Rem
 15-Jul-26 NFD/199 1053 AL RABEE ARABIYA TRADING Co. Riyadh 1,100.00 15-Jul-26 105 1,100.00 ABDALLA ANTHANATH follow up / dealyed due to wrong credit note..
 01-Aug-26 NFD/210 1005 Abdullah bin mousa al kabbi Trading Est. Riyadh 800.00 01-Aug-26 88 800.00 Ahmed Nabil Blanace confirmation today / payment 1st Nov. if not then legal
 10-Aug-26 NFD/220 1062 AL TAWFEER TRADING COMPANY Riyadh 400.00 10-Aug-26 79 400.00 Ahmed Nabil Shop closed so write off this amount / an email is shared
+16-Sep-26 NFD/301 1468_Bahr Al-Takhfid Trading Company Riyadh 900.00 16-Sep-26 40 900.00 Ahmed Nabil sunday 1st Nov. expected
 `;
   const rows = parseBillsReceivableOcrText(ocr);
   const byCode = Object.fromEntries(rows.map((row) => [row.customerCode, row]));
@@ -163,6 +165,25 @@ Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Rem
   assert.equal(byCode["1005"].visitOutcome, "TRANSFER_TO_LEGAL");
   assert.match(byCode["1062"].remark, /Shop closed/i);
   assert.equal(byCode["1062"].visitOutcome, "TRANSFER_TO_LEGAL");
+  assert.equal(byCode["1468"].remark, "sunday 1st Nov. expected");
+  assert.match(byCode["1468"].partyName || "", /Bahr Al-Takhfid/i);
+});
+
+test("parseBillsReceivableOcrText ignores invoice numbers before salesman names", () => {
+  assert.equal(looksLikeLedgerPartyNameAfterCode("Ahmed Nabil sunday 1st Nov. expected"), false);
+  assert.equal(looksLikeLedgerPartyNameAfterCode("Al -Rowad Wholesale Trading Est."), true);
+  assert.equal(normalizeCollectionRemarkCustomerCode("1468_Bahr Al-Takhfid Trading Company"), "1468");
+
+  const ocr = `
+Pending Bills
+RNFD/045 1058 Al -Rowad Wholesale Trading Est. Riyadh 2,500.00 124 7258 Ahmed Nabil good return in next 2 days
+NFD/199 1468_Bahr Al-Takhfid Trading Company Riyadh 900.00 40 1939 ABDALLA ANTHANATH sunday 1st Nov. expected
+`;
+  const rows = parseBillsReceivableOcrText(ocr);
+  const codes = rows.map((row) => row.customerCode).sort();
+  assert.deepEqual(codes, ["1058", "1468"]);
+  assert.equal(rows.find((row) => row.customerCode === "1058")?.remark, "good return in next 2 days");
+  assert.doesNotMatch(codes.join(","), /7258|1939|124/);
 });
 
 test("parseCollectionRemarkOcrText auto-detects bills receivable layout", () => {

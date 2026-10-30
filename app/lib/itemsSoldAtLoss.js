@@ -1,5 +1,6 @@
 /**
- * Items sold at a loss: active_sales lines where imported profit_amount is negative.
+ * Items sold at a loss: active_sales lines where imported profit_amount is negative
+ * and quantity is positive (sales returns use negative qty and are excluded).
  * Cost and margin % stay out of the SFA; only GP amount, rate, qty, and sales are shown.
  */
 
@@ -53,6 +54,12 @@ export function isLossSaleProfit(value) {
   return Number.isFinite(amount) && amount < 0;
 }
 
+/** Positive qty only — negative qty is a sales return, not a sale at loss. */
+export function isPositiveSaleQuantity(value) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) && quantity > 0;
+}
+
 export function normalizeItemsSoldAtLossDate(value) {
   const text = String(value || "").trim().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
@@ -83,7 +90,7 @@ export function mapItemsSoldAtLossRow(row = {}) {
 
 export function buildItemsSoldAtLossRows(sourceRows = []) {
   return (sourceRows || [])
-    .filter((row) => isLossSaleProfit(row?.profit_amount))
+    .filter((row) => isLossSaleProfit(row?.profit_amount) && isPositiveSaleQuantity(row?.quantity))
     .map(mapItemsSoldAtLossRow)
     .sort((left, right) => (
       String(right.transactionDate).localeCompare(String(left.transactionDate))

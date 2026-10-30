@@ -8,6 +8,7 @@ import {
   buildItemsSoldAtLossReport,
   groupItemsSoldAtLossBySalesman,
   isLossSaleProfit,
+  isPositiveSaleQuantity,
   summarizeItemsSoldAtLoss,
 } from "../app/lib/itemsSoldAtLoss.js";
 import {
@@ -45,7 +46,14 @@ test("loss detection requires negative profit", () => {
   assert.equal(isLossSaleProfit("x"), false);
 });
 
-test("report keeps only negative GP lines and totals loss", () => {
+test("positive qty excludes sales returns", () => {
+  assert.equal(isPositiveSaleQuantity(1), true);
+  assert.equal(isPositiveSaleQuantity(0), false);
+  assert.equal(isPositiveSaleQuantity(-40), false);
+  assert.equal(isPositiveSaleQuantity("x"), false);
+});
+
+test("report keeps only negative GP positive-qty sales and totals loss", () => {
   const report = buildItemsSoldAtLossReport({
     sourceRows: [
       lossRow(),
@@ -58,6 +66,21 @@ test("report keeps only negative GP lines and totals loss", () => {
         sales_amount: 20,
         quantity: 2,
       }),
+      // Sales return: negative qty must not count as sold at loss.
+      lossRow({
+        voucher_number: "707",
+        item_code: "RET1",
+        quantity: -2000,
+        sales_amount: -5000,
+        profit_amount: -609.05,
+      }),
+      lossRow({
+        voucher_number: "729",
+        item_code: "RET2",
+        quantity: 0,
+        sales_amount: 0,
+        profit_amount: -1,
+      }),
     ],
     dateFrom: "2026-10-01",
     dateTo: "2026-10-26",
@@ -66,6 +89,8 @@ test("report keeps only negative GP lines and totals loss", () => {
   assert.equal(report.totals.lineCount, 2);
   assert.equal(report.totals.profitAmount, -15.5);
   assert.equal(report.totals.salesAmount, 70);
+  assert.equal(report.totals.quantity, 12);
+  assert.ok(report.rows.every((row) => row.quantity > 0));
   assert.deepEqual(groupItemsSoldAtLossBySalesman(report.rows).map((g) => g.salesman), [
     "Ahmed Nabil",
     "Saleh",

@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-30** — Import Collection Remarks parser `ocr-ref-split-v2`: ASCII-safe Ref→party regex (Vercel/SWC), `extractPartyCodesAfterBillRefs` for `NFD/986 [1468…`, parse response includes `parserVersion`. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-30** — Import Collection Remarks splits Bills OCR rows on **Ref. No.** (survives mangled dates) and accepts bracket OCR (`NFD/986 [1468 Bohr…` → `1468`). No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-30** — Import Collection Remarks never treats **Ref. No.** digits (`NFD/986`) as the customer; it takes the Party's Name code after the ref (`1468_Bahr…`). No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-30** — Import Collection Remarks collects **ledger + invoice-style** code candidates per Bills Receivable row and keeps whichever exists in the customer master (ledger preferred). No migration. See `docs/BUSINESS_RULES.md`.

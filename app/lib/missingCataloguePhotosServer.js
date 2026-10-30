@@ -12,20 +12,19 @@ async function readAll(admin, table, columns, orderColumn) {
   }
 }
 
-export async function loadMissingCataloguePhotoReport(admin) {
+export async function loadMissingCataloguePhotoReport(admin, { now = Date.now() } = {}) {
   const [master, cacheResult] = await Promise.all([
     readAll(admin, "items_master", "item_code,item_name,category,is_active", "item_code"),
     admin.from("price_catalog_cache").select("sheet_items,price_map").eq("cache_key", "default").maybeSingle(),
   ]);
   if (cacheResult.error) throw cacheResult.error;
 
-  let photoCodes = [];
+  let photos = [];
   let photosReady = true;
   try {
-    const photos = [];
     for (let start = 0; ; start += 1000) {
       const result = await admin.from("attachments")
-        .select("entity_id")
+        .select("entity_id,created_at")
         .eq("category", ATTACHMENT_CATEGORIES.productCataloguePhoto)
         .order("id")
         .range(start, start + 999);
@@ -33,7 +32,6 @@ export async function loadMissingCataloguePhotoReport(admin) {
       photos.push(...(result.data || []));
       if ((result.data || []).length < 1000) break;
     }
-    photoCodes = photos.map((photo) => photo.entity_id);
   } catch (photoError) {
     if (!isMissingRelationError(photoError)) throw photoError;
     photosReady = false;
@@ -45,7 +43,8 @@ export async function loadMissingCataloguePhotoReport(admin) {
       master,
       sheet: Array.isArray(cacheResult.data?.sheet_items) ? cacheResult.data.sheet_items : [],
       priceMap: cacheResult.data?.price_map || {},
-      photoCodes,
+      photos,
+      now,
     }),
   };
 }

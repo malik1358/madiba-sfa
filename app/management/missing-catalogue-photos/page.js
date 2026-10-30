@@ -25,6 +25,8 @@ const TEXT = {
   total: { en: "Total", ar: "الإجمالي" },
   withPhotos: { en: "Already have photos", ar: "لها صور" },
   excluded: { en: "Building materials excluded", ar: "مواد البناء المستثناة" },
+  uploadedLast24h: { en: "Photos uploaded in the last 24 hours", ar: "صور رُفعت خلال آخر 24 ساعة" },
+  itemsUploadedLast24h: { en: "items", ar: "أصناف" },
   noRows: { en: "Every included item already has a photo.", ar: "كل الأصناف المشمولة لها صورة." },
   accessDenied: { en: "Only admin, manager, or invoice maker can open this report.", ar: "هذا التقرير للمدير أو الأدمن أو معد الفواتير." },
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
@@ -123,6 +125,9 @@ export default function MissingCataloguePhotosPage() {
             {summary && (
               <p className="moduleHint">
                 {t("withPhotos")}: {summary.withPhotos} · {t("excluded")}: {summary.excludedBuilding}
+                {" · "}
+                {t("uploadedLast24h")}: {summary.uploadedLast24h || 0}
+                {" "}({summary.itemsUploadedLast24h || 0} {t("itemsUploadedLast24h")})
               </p>
             )}
             {!photosReady && <p className="moduleHint">{t("photosNotReady")}</p>}

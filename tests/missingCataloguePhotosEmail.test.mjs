@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildMissingCataloguePhotoEmail,
+  missingCataloguePhotoEmailCc,
   missingCataloguePhotoEmailRecipients,
 } from "../app/lib/missingCataloguePhotosEmail.js";
 import { runMissingCataloguePhotoEmailCycle } from "../app/lib/missingCataloguePhotosEmailServer.js";
@@ -13,7 +14,13 @@ const report = {
     { code: "A000001", name: "Baby <Oil>", category: "Baby Care" },
     { code: "A000005", name: "Shampoo", category: "Body Care" },
   ],
-  summary: { missing: 2, withPhotos: 4, excludedBuilding: 3 },
+  summary: {
+    missing: 2,
+    withPhotos: 4,
+    excludedBuilding: 3,
+    uploadedLast24h: 5,
+    itemsUploadedLast24h: 3,
+  },
 };
 
 function options(extra = {}) {
@@ -33,6 +40,24 @@ test("missing catalogue photo email goes to Malik and Swami", () => {
   assert.deepEqual(missingCataloguePhotoEmailRecipients({ MISSING_CATALOGUE_PHOTOS_EMAIL_TO: "ops@example.com" }), ["ops@example.com"]);
 });
 
+test("missing catalogue photo email CCs Jigar by default", () => {
+  assert.deepEqual(
+    missingCataloguePhotoEmailCc({}, ["malik@pinasz.com", "swami@pinasz.com"]),
+    ["jigar.wadiya@noorshukran.com"],
+  );
+  assert.deepEqual(
+    missingCataloguePhotoEmailCc(
+      { MISSING_CATALOGUE_PHOTOS_EMAIL_CC: "ops-cc@example.com" },
+      ["malik@pinasz.com"],
+    ),
+    ["jigar.wadiya@noorshukran.com", "ops-cc@example.com"],
+  );
+  assert.deepEqual(
+    missingCataloguePhotoEmailCc({}, ["jigar.wadiya@noorshukran.com"]),
+    [],
+  );
+});
+
 test("missing catalogue photo email lists priced catalogue items and escapes names", () => {
   const email = buildMissingCataloguePhotoEmail({ date: "2026-10-17", ...report });
   assert.match(email.subject, /Missing catalogue photos - 2026-10-17 \(2\)/);
@@ -41,8 +66,10 @@ test("missing catalogue photo email lists priced catalogue items and escapes nam
   assert.match(email.html, /Baby &lt;Oil&gt;/);
   assert.doesNotMatch(email.html, /No price/);
   assert.match(email.html, />Total</);
+  assert.match(email.html, /Photos uploaded in the last 24 hours: 5 \(3 items\)/);
   assert.match(email.text, /A000001 \| Baby <Oil> \| Baby Care/);
   assert.match(email.text, /Total: 2/);
+  assert.match(email.text, /Photos uploaded in the last 24 hours: 5 \(3 items\)/);
 });
 
 test("daily missing catalogue photo email sends once and skips a second claim", async () => {
@@ -50,7 +77,10 @@ test("daily missing catalogue photo email sends once and skips a second claim", 
   const result = await runMissingCataloguePhotoEmailCycle({}, options({ send: async (message) => messages.push(message) }));
   assert.equal(result.date, "2026-10-17");
   assert.equal(result.sentCount, 1);
+  assert.equal(result.uploadedLast24h, 5);
+  assert.equal(result.itemsUploadedLast24h, 3);
   assert.deepEqual(messages[0].to, ["malik@pinasz.com", "swami@pinasz.com"]);
+  assert.deepEqual(messages[0].cc, ["jigar.wadiya@noorshukran.com"]);
   assert.match(messages[0].subject, /Missing catalogue photos/);
 
   const skipped = await runMissingCataloguePhotoEmailCycle({}, options({

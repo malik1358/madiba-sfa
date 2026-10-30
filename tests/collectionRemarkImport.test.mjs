@@ -204,6 +204,21 @@ Pending Bills
   assert.equal(Boolean(byCode["2026"]), false);
 });
 
+test("parseCollectionRemarkImportText prefers Bills OCR over pipe-noise table path", () => {
+  // Real WhatsApp OCR: many `|` chars make looksTabular true; must still take 1468 not Ref 986.
+  const ocr = `
+ABC LTD Bills Receivable Pending Bills
+Date -[RefNo-[PartysName ~~ -[Salesperson fgRemarks
+131un-26_[NFD/986 [1468 Bohr AlTakhfid Trading Company [Riyadh [9315 |AhmedNabil______|sunday 1st Nov. expected
+23-Apr-26 [NFD/478 [1435 Toot AlNoor Trading Establishment [Riyadh |ABDALLAANTHANATH _|sunday 1st Nov. expected
+`;
+  const rows = parseCollectionRemarkImportText(ocr, { prefer: "auto" });
+  const codes = rows.map((row) => row.customerCode);
+  assert.ok(codes.includes("1468"), `expected 1468, got ${codes.join(",")}`);
+  assert.equal(codes.includes("986"), false);
+  assert.equal(rows.find((row) => row.customerCode === "1468")?.source, "ocr-bills");
+});
+
 test("parseBillsReceivableOcrText keeps ledger primary and invoice candidates", () => {
   assert.equal(looksLikeLedgerPartyNameAfterCode("Ahmed Nabil sunday 1st Nov. expected"), false);
   assert.equal(looksLikeLedgerPartyNameAfterCode("Al -Rowad Wholesale Trading Est."), true);

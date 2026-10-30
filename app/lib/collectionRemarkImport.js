@@ -364,16 +364,65 @@ function extractRemarkFromBillsSegment(segment) {
   return isNoiseRemark(text) ? "" : text;
 }
 
-function buildRow(customerCode, remark, source = "ocr", partyName = "") {
+function mergeCodeCandidates(...lists) {
+  const out = [];
+  const seen = new Set();
+  lists.flat().forEach((value) => {
+    const code = normalizeCollectionRemarkCustomerCode(value);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    out.push(code);
+  });
+  return out;
+}
+
+/**
+ * Collect every code-like token on a Bills Receivable row:
+ * ledger/Party's Name first, then Invoice/Overdue-style numbers (incl. before salesman).
+ * Server keeps whichever candidate exists in the customer master.
+ */
+export function extractBillRowCodeCandidates(segment = "", { primaryCode = "" } = {}) {
+  const text = String(segment || "");
+  const ledger = [];
+  const other = [];
+
+  for (const match of text.matchAll(LEDGER_PARTY_CODE_RE)) {
+    const code = String(match[1] || "").toUpperCase();
+    if (!code) continue;
+    const after = textAfterAnchor(text, match.index, code);
+    if (looksLikeLedgerPartyNameAfterCode(after)) ledger.push(code);
+    else other.push(code);
+  }
+
+  // Invoice / overdue / amount fragments before a name (salesman or otherwise).
+  for (const match of text.matchAll(/(?<![,\d.])(\d{3,5}C?)(?=\s+[A-Za-z\u0600-\u06FF])/gi)) {
+    const code = String(match[1] || "").toUpperCase();
+    if (code) other.push(code);
+  }
+
+  // Bare codes after Ref. No.
+  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)\b/gi)) {
+    const code = String(match[1] || "").toUpperCase();
+    if (code) other.push(code);
+  }
+
+  return mergeCodeCandidates([primaryCode], ledger, other);
+}
+
+function buildRow(customerCode, remark, source = "ocr", partyName = "", extraCandidates = []) {
   const code = normalizeCollectionRemarkCustomerCode(customerCode);
   const cleaned = sanitizeCollectionRemarkComment(remark, { customerCode: code });
-  if (!code || isNoiseRemark(cleaned)) return null;
+  if ((!code && !extraCandidates?.length) || isNoiseRemark(cleaned)) return null;
   const visitOutcome = suggestCollectionRemarkVisitOutcome(cleaned);
   const ledgerName = extractLedgerPartyNameAfterCode(partyName) || extractLedgerPartyNameAfterCode(
     String(partyName || "").replace(new RegExp(`^${code}\\b[_\-\\s—–]*`, "i"), ""),
   );
+  const customerCodeCandidates = mergeCodeCandidates([code], extraCandidates);
+  const primary = code || customerCodeCandidates[0] || "";
+  if (!primary) return null;
   return {
-    customerCode: code,
+    customerCode: primary,
+    customerCodeCandidates,
     partyName: ledgerName,
     remark: cleaned,
     visitOutcome,
@@ -390,20 +439,42 @@ function upsertRemarkRow(rowsByCode, row) {
     rowsByCode.set(row.customerCode, row);
     return;
   }
+  const mergedCandidates = mergeCodeCandidates(
+    existing.customerCodeCandidates,
+    row.customerCodeCandidates,
+    [existing.customerCode, row.customerCode],
+  );
+  const partyName = row.partyName?.length > (existing.partyName?.length || 0)
+    ? row.partyName
+    : existing.partyName;
   if (row.remark.length > existing.remark.length) {
-    rowsByCode.set(row.customerCode, { ...existing, ...row });
+    rowsByCode.set(row.customerCode, {
+      ...existing,
+      ...row,
+      customerCodeCandidates: mergedCandidates,
+      partyName,
+    });
     return;
   }
   if (row.remark && !existing.remark.toLowerCase().includes(row.remark.toLowerCase())) {
+    const combinedRemark = `${existing.remark} | ${row.remark}`;
     rowsByCode.set(row.customerCode, {
       ...existing,
-      remark: `${existing.remark} | ${row.remark}`,
-      visitOutcome: suggestCollectionRemarkVisitOutcome(`${existing.remark} | ${row.remark}`),
+      remark: combinedRemark,
+      customerCodeCandidates: mergedCandidates,
+      partyName,
+      visitOutcome: suggestCollectionRemarkVisitOutcome(combinedRemark),
       paymentStatus: suggestCollectionRemarkPaymentStatus(
-        suggestCollectionRemarkVisitOutcome(`${existing.remark} | ${row.remark}`),
+        suggestCollectionRemarkVisitOutcome(combinedRemark),
       ),
     });
+    return;
   }
+  rowsByCode.set(row.customerCode, {
+    ...existing,
+    customerCodeCandidates: mergedCandidates,
+    partyName,
+  });
 }
 
 function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = false } = {}) {
@@ -426,44 +497,74 @@ function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = fals
     .sort((left, right) => left.anchor - right.anchor);
 }
 
+function splitBillsReceivableRowSegments(text = "") {
+  const source = String(text || "");
+  // Only bill-row start dates (line start / after newline), never the Due-on date mid-row.
+  const dateStarts = [...source.matchAll(/(?:^|[\n\r])\s*(\d{1,2}-[A-Za-z]{3}-\d{2})\b/gi)]
+    .map((match) => {
+      const full = match[0] || "";
+      const date = match[1] || "";
+      const offset = full.indexOf(date);
+      return match.index + Math.max(0, offset);
+    })
+    .filter((index) => Number.isInteger(index));
+  if (dateStarts.length >= 2) {
+    return dateStarts.map((start, index) => {
+      const end = index + 1 < dateStarts.length ? dateStarts[index + 1] : source.length;
+      return source.slice(start, end);
+    }).filter((segment) => segment.trim());
+  }
+
+  const ledgerAnchors = collectCustomerCodeMatchAnchors(source, LEDGER_PARTY_CODE_RE, {
+    requireLedgerName: true,
+  });
+  const refAnchors = collectCustomerCodeMatchAnchors(source, BILL_REF_PARTY_CODE_RE, {
+    requireLedgerName: true,
+  });
+  const fallbackAnchors = ledgerAnchors.length
+    ? ledgerAnchors
+    : (refAnchors.length
+      ? refAnchors
+      : collectCustomerCodeMatchAnchors(source, CUSTOMER_CODE_RE, { requireLedgerName: false }));
+  if (!fallbackAnchors.length) return source.trim() ? [source] : [];
+
+  return fallbackAnchors.map((entry, index) => {
+    const end = index + 1 < fallbackAnchors.length ? fallbackAnchors[index + 1].anchor : source.length;
+    return source.slice(entry.anchor, end);
+  }).filter((segment) => segment.trim());
+}
+
 /**
- * Bills Receivable / Pending Bills OCR: take the code from Party's Name / ledger text only.
- * Never treat Invoice→Sales person (`7258 Ahmed Nabil`) as a party code.
+ * Bills Receivable / Pending Bills OCR.
+ * Per row, collect ledger Party's Name codes AND Invoice/overdue-style numbers;
+ * the API keeps whichever candidate exists in the customer master.
  */
 export function parseBillsReceivableOcrText(ocrText = "") {
   const text = String(ocrText || "").replace(/\r/g, "\n");
   if (!text.trim()) return [];
 
-  const ledgerAnchors = collectCustomerCodeMatchAnchors(text, LEDGER_PARTY_CODE_RE, {
-    requireLedgerName: true,
-  });
-  const refAnchors = collectCustomerCodeMatchAnchors(text, BILL_REF_PARTY_CODE_RE, {
-    requireLedgerName: true,
-  });
-  // Prefer ledger/Party's Name anchors; Ref anchors fill gaps only.
-  const byAnchor = new Map();
-  [...ledgerAnchors, ...refAnchors].forEach((entry) => {
-    const key = `${entry.code}@${entry.anchor}`;
-    if (!byAnchor.has(key)) byAnchor.set(key, entry);
-  });
-  let matches = [...byAnchor.values()].sort((left, right) => left.anchor - right.anchor);
-
-  // Last resort: generic 4-digit-before-letter, still filtered to ledger-like names.
-  if (!matches.length) {
-    matches = collectCustomerCodeMatchAnchors(text, CUSTOMER_CODE_RE, { requireLedgerName: true });
-  }
-  if (!matches.length) return [];
+  const segments = splitBillsReceivableRowSegments(text);
+  if (!segments.length) return [];
 
   const rowsByCode = new Map();
-  for (let index = 0; index < matches.length; index += 1) {
-    const { code, anchor, partyName } = matches[index];
-    const next = matches[index + 1];
-    const end = next ? next.anchor : text.length;
-    const segment = text.slice(anchor + code.length, end);
+  segments.forEach((segment) => {
+    const ledgerAnchors = collectCustomerCodeMatchAnchors(segment, LEDGER_PARTY_CODE_RE, {
+      requireLedgerName: true,
+    });
+    const primaryCode = ledgerAnchors[0]?.code || "";
+    const partyName = ledgerAnchors[0]?.partyName || extractLedgerPartyNameAfterCode(segment);
+    const candidates = extractBillRowCodeCandidates(segment, { primaryCode });
+    if (!candidates.length) return;
     const remark = extractRemarkFromBillsSegment(segment);
-    const row = buildRow(code, remark, "ocr-bills", partyName || segment);
+    const row = buildRow(
+      primaryCode || candidates[0],
+      remark,
+      "ocr-bills",
+      partyName || segment,
+      candidates,
+    );
     if (row) upsertRemarkRow(rowsByCode, row);
-  }
+  });
 
   return [...rowsByCode.values()];
 }
@@ -615,15 +716,20 @@ export function normalizeCollectionRemarkImportRows(rows = []) {
   const out = [];
   (Array.isArray(rows) ? rows : []).forEach((row, index) => {
     const customerCode = normalizeCollectionRemarkCustomerCode(row?.customerCode || row?.customer_code);
+    const customerCodeCandidates = mergeCodeCandidates(
+      [customerCode],
+      row?.customerCodeCandidates || row?.customer_code_candidates || [],
+    );
     const partyName = extractLedgerPartyNameAfterCode(row?.partyName || row?.party_name || "")
       || extractLedgerPartyNameAfterCode(String(row?.customerCode || row?.customer_code || ""));
     const remark = sanitizeCollectionRemarkComment(
       row?.remark || row?.remark_english || row?.remarks,
       { customerCode },
     );
-    if (!customerCode || !remark || isNoiseRemark(remark)) return;
-    if (seen.has(customerCode)) return;
-    seen.add(customerCode);
+    const primary = customerCode || customerCodeCandidates[0] || "";
+    if (!primary || !remark || isNoiseRemark(remark)) return;
+    if (seen.has(primary)) return;
+    seen.add(primary);
 
     let visitOutcome = String(row?.visitOutcome || row?.visit_outcome || "").trim().toUpperCase();
     if (!COLLECTION_REMARK_IMPORT_OUTCOMES.includes(visitOutcome)) {
@@ -635,8 +741,9 @@ export function normalizeCollectionRemarkImportRows(rows = []) {
       || suggestCollectionRemarkPaymentStatus(visitOutcome);
 
     out.push({
-      id: String(row?.id || `${customerCode}-${index}`),
-      customerCode,
+      id: String(row?.id || `${primary}-${index}`),
+      customerCode: primary,
+      customerCodeCandidates,
       partyName,
       remark,
       visitOutcome,

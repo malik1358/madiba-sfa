@@ -28,11 +28,25 @@ const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
  * Example: `1058 Al -Rowad…`, `1468_Bahr Al-Takhfid…`, `1297C Zahrat…`.
  */
 const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
-/** Bills Receivable row: Ref. No. then party code then party name. */
+/**
+ * Bills Receivable: Ref. No. then Party's Name code (space or underscore).
+ * Example: `NFD/986 1468_Bahr Al-Takhfid…` → party `1468` (not ref `986`).
+ */
 const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
+
+/** True when a digit run is the numeric tail of a Ref. No. like NFD/986 — never a customer code. */
+export function isBillRefNumberFragment(text = "", index = 0) {
+  const before = String(text || "").slice(Math.max(0, Number(index) - 12), Math.max(0, Number(index)));
+  return /(?:^|[^A-Z0-9])[A-Z]{1,8}\/$/i.test(before);
+}
+
+/** Blank out Ref. No. tokens so their digits cannot be mistaken for Party's Name codes. */
+export function stripBillRefNumbers(text = "") {
+  return String(text || "").replace(/\b[A-Z]{2,8}\/\d{2,5}\b/gi, " ");
+}
 const BILL_MONEY_RE = /\b\d{1,3}(?:,\d{3})*\.\d{2}\b/g;
 const BILL_STATE_RE = /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf)\b/gi;
 const REMARK_CUE_RE = /\b(good return|follow[\s/-]?up|sunday|expected|blanace|balance\s+confirmation|stock\s+returns?|shop\s+closed|write\s*off|payment\s+\d|goods\s+will|if\s+not\s+then\s+legal|dealyed|delayed|wrong\s+credit|an\s+email|aproximately|approximately|taken\s+back|case\s+is|court\s+has|purchas|fallwing|following\s+up|client'?s?\s+file)\b/i;
@@ -378,35 +392,49 @@ function mergeCodeCandidates(...lists) {
 
 /**
  * Collect every code-like token on a Bills Receivable row:
- * ledger/Party's Name first, then Invoice/Overdue-style numbers (incl. before salesman).
+ * Party's Name after Ref. No. first, then other ledger/invoice-style numbers.
+ * Never treat Ref. No. digits (NFD/986 → 986) as a customer code.
  * Server keeps whichever candidate exists in the customer master.
  */
 export function extractBillRowCodeCandidates(segment = "", { primaryCode = "" } = {}) {
   const text = String(segment || "");
+  const withoutRefs = stripBillRefNumbers(text);
+  const afterRef = [];
   const ledger = [];
   const other = [];
 
-  for (const match of text.matchAll(LEDGER_PARTY_CODE_RE)) {
+  // Strongest signal: number immediately after Ref. No. that starts the party/ledger name.
+  for (const match of text.matchAll(BILL_REF_PARTY_CODE_RE)) {
+    const code = String(match[1] || "").toUpperCase();
+    if (code) afterRef.push(code);
+  }
+  // Underscore party forms where \b after the code fails (1468_Bahr).
+  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)(?=[_\-])/gi)) {
+    const code = String(match[1] || "").toUpperCase();
+    if (code) afterRef.push(code);
+  }
+
+  for (const match of withoutRefs.matchAll(LEDGER_PARTY_CODE_RE)) {
     const code = String(match[1] || "").toUpperCase();
     if (!code) continue;
-    const after = textAfterAnchor(text, match.index, code);
+    // Map match index back roughly via search in original when possible.
+    const codePos = text.toUpperCase().indexOf(code);
+    if (codePos >= 0 && isBillRefNumberFragment(text, codePos)) continue;
+    const after = textAfterAnchor(withoutRefs, match.index, code);
     if (looksLikeLedgerPartyNameAfterCode(after)) ledger.push(code);
     else other.push(code);
   }
 
-  // Invoice / overdue / amount fragments before a name (salesman or otherwise).
-  for (const match of text.matchAll(/(?<![,\d.])(\d{3,5}C?)(?=\s+[A-Za-z\u0600-\u06FF])/gi)) {
+  // Invoice / overdue fragments before a name — still ignore Ref. No. tails.
+  for (const match of withoutRefs.matchAll(/(?<![,\d.])(\d{3,5}C?)(?=\s+[A-Za-z\u0600-\u06FF])/gi)) {
     const code = String(match[1] || "").toUpperCase();
-    if (code) other.push(code);
+    if (!code) continue;
+    const codePos = text.toUpperCase().indexOf(code);
+    if (codePos >= 0 && isBillRefNumberFragment(text, codePos)) continue;
+    other.push(code);
   }
 
-  // Bare codes after Ref. No.
-  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)\b/gi)) {
-    const code = String(match[1] || "").toUpperCase();
-    if (code) other.push(code);
-  }
-
-  return mergeCodeCandidates([primaryCode], ledger, other);
+  return mergeCodeCandidates([primaryCode], afterRef, ledger, other);
 }
 
 function buildRow(customerCode, remark, source = "ocr", partyName = "", extraCandidates = []) {
@@ -482,6 +510,11 @@ function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = fals
     .map((match) => {
       const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
       if (!code) return null;
+      // For Ref→party patterns, group 1 is already the party code (after NFD/986).
+      // For bare ledger matches, skip digits that are the Ref. No. tail itself.
+      const codeInMatch = String(match[0] || "").toUpperCase().indexOf(code);
+      const absoluteCodeIndex = match.index + Math.max(0, codeInMatch);
+      if (isBillRefNumberFragment(text, absoluteCodeIndex)) return null;
       const codePos = String(text).toUpperCase().indexOf(code, match.index);
       const anchor = codePos >= 0 ? codePos : match.index;
       const after = textAfterAnchor(text, anchor, code);
@@ -548,11 +581,31 @@ export function parseBillsReceivableOcrText(ocrText = "") {
 
   const rowsByCode = new Map();
   segments.forEach((segment) => {
-    const ledgerAnchors = collectCustomerCodeMatchAnchors(segment, LEDGER_PARTY_CODE_RE, {
+    const refPartyAnchors = collectCustomerCodeMatchAnchors(segment, BILL_REF_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
-    const primaryCode = ledgerAnchors[0]?.code || "";
-    const partyName = ledgerAnchors[0]?.partyName || extractLedgerPartyNameAfterCode(segment);
+    // Also catch `NFD/986 1468_Bahr…` where underscore breaks the letter lookahead variant.
+    const refUnderscore = [...segment.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)_(?=[A-Za-z\u0600-\u06FF])/gi)]
+      .map((match) => {
+        const code = String(match[1] || "").toUpperCase();
+        if (!code) return null;
+        const codePos = segment.toUpperCase().indexOf(code, match.index);
+        const anchor = codePos >= 0 ? codePos : match.index;
+        if (isBillRefNumberFragment(segment, anchor)) return null;
+        return {
+          code,
+          anchor,
+          partyName: extractLedgerPartyNameAfterCode(textAfterAnchor(segment, anchor, code)),
+        };
+      })
+      .filter(Boolean);
+
+    const ledgerAnchors = collectCustomerCodeMatchAnchors(stripBillRefNumbers(segment), LEDGER_PARTY_CODE_RE, {
+      requireLedgerName: true,
+    });
+    const preferred = refPartyAnchors[0] || refUnderscore[0] || ledgerAnchors[0] || null;
+    const primaryCode = preferred?.code || "";
+    const partyName = preferred?.partyName || extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
     const candidates = extractBillRowCodeCandidates(segment, { primaryCode });
     if (!candidates.length) return;
     const remark = extractRemarkFromBillsSegment(segment);

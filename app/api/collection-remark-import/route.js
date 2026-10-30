@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ocrImageBuffer } from "../../lib/extractCustomerDocumentText.js";
 import {
+  COLLECTION_REMARK_PARSER_VERSION,
   expandCollectionRemarkCustomerCodeCandidates,
   formatCollectionRemarkActorLabel,
   normalizeCollectionRemarkImportRows,
@@ -347,6 +348,7 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         action: "parse",
+        parserVersion: COLLECTION_REMARK_PARSER_VERSION,
         rowCount: enriched.length,
         ocrText: ocrText || String(pastedText || "").trim() || "",
         ocrError: ocrError || "",

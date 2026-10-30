@@ -27,14 +27,16 @@ const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
  * Ledger / Party's Name cell: code then space/underscore/hyphen then the trading name.
  * Example: `1058 Al -Rowad…`, `1468_Bahr Al-Takhfid…`, `1297C Zahrat…`.
  */
-const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
+const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /**
  * Bills Receivable: Ref. No. then Party's Name code.
  * OCR often inserts brackets/pipes: `NFD/986 [1468 Bohr AlTakhfid…` → party `1468` (not ref `986`).
+ * ASCII-only character classes (unicode dashes break under some Vercel/SWC minifiers).
  */
-const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_\-—–]+(\d{3,5}C?)(?:[_\-\s—–\[]+)(?=[A-Za-z\u0600-\u06FF])/gi;
+const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?:[_\-\s\[]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /** Year-like tokens from OCR headers (1-Jan-26 to 28-Oct-26) are not party codes. */
 const YEAR_LIKE_CODE_RE = /^20[2-3]\d(?:C)?$/i;
+export const COLLECTION_REMARK_PARSER_VERSION = "ocr-ref-split-v2";
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -407,6 +409,24 @@ function mergeCodeCandidates(...lists) {
 }
 
 /**
+ * After each Ref. No., take the next account code that is not the ref's own digits.
+ * Handles OCR: `NFD/986 [1468 Bohr…`, `NFD/986 1468_Bahr…`.
+ */
+export function extractPartyCodesAfterBillRefs(segment = "") {
+  const text = String(segment || "");
+  const out = [];
+  for (const match of text.matchAll(/\b[A-Z]{2,8}\/(\d{2,5})\b([\s\S]{0,48})/gi)) {
+    const refDigits = String(match[1] || "").toUpperCase();
+    const after = String(match[2] || "");
+    const party = after.match(/^[\s\[\|_-]+(\d{3,5}C?)(?=$|[^A-Z0-9])/i);
+    const code = String(party?.[1] || "").toUpperCase();
+    if (!code || code === refDigits || YEAR_LIKE_CODE_RE.test(code)) continue;
+    out.push(code);
+  }
+  return out;
+}
+
+/**
  * Collect every code-like token on a Bills Receivable row:
  * Party's Name after Ref. No. first, then other ledger/invoice-style numbers.
  * Never treat Ref. No. digits (NFD/986 → 986) as a customer code.
@@ -415,7 +435,7 @@ function mergeCodeCandidates(...lists) {
 export function extractBillRowCodeCandidates(segment = "", { primaryCode = "" } = {}) {
   const text = String(segment || "");
   const withoutRefs = stripBillRefNumbers(text);
-  const afterRef = [];
+  const afterRef = extractPartyCodesAfterBillRefs(text);
   const ledger = [];
   const other = [];
 
@@ -611,31 +631,24 @@ export function parseBillsReceivableOcrText(ocrText = "") {
 
   const rowsByCode = new Map();
   segments.forEach((segment) => {
+    const afterRefCodes = extractPartyCodesAfterBillRefs(segment);
     const refPartyAnchors = collectCustomerCodeMatchAnchors(segment, BILL_REF_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
-    // Also catch `NFD/986 [1468 Bohr…` / `1468_Bahr…` OCR forms.
-    const refUnderscore = [...segment.matchAll(/\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?=[_\-\s\[]*[A-Za-z\u0600-\u06FF])/gi)]
-      .map((match) => {
-        const code = String(match[1] || "").toUpperCase();
-        if (!code || YEAR_LIKE_CODE_RE.test(code)) return null;
-        const codePos = segment.toUpperCase().indexOf(code, match.index);
-        const anchor = codePos >= 0 ? codePos : match.index;
-        if (isBillRefNumberFragment(segment, anchor)) return null;
-        return {
-          code,
-          anchor,
-          partyName: extractLedgerPartyNameAfterCode(textAfterAnchor(segment, anchor, code)),
-        };
-      })
-      .filter(Boolean);
-
     const ledgerAnchors = collectCustomerCodeMatchAnchors(stripBillRefNumbers(segment), LEDGER_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
-    const preferred = refPartyAnchors[0] || refUnderscore[0] || ledgerAnchors[0] || null;
-    const primaryCode = preferred?.code || "";
-    const partyName = preferred?.partyName || extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
+    const primaryCode = afterRefCodes[0] || refPartyAnchors[0]?.code || ledgerAnchors[0]?.code || "";
+    const partyName = (() => {
+      if (!primaryCode) {
+        return extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
+      }
+      const idx = segment.toUpperCase().indexOf(primaryCode);
+      if (idx >= 0) return extractLedgerPartyNameAfterCode(textAfterAnchor(segment, idx, primaryCode));
+      return refPartyAnchors[0]?.partyName
+        || ledgerAnchors[0]?.partyName
+        || extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
+    })();
     const candidates = extractBillRowCodeCandidates(segment, { primaryCode });
     if (!candidates.length) return;
     const remark = extractRemarkFromBillsSegment(segment);

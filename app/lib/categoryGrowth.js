@@ -453,6 +453,8 @@ export function ingestCategoryGrowthRows(acc, rows = [], options = {}) {
   const catalogs = options.catalogs;
   const measure = options.measure || "sales";
 
+  const catalogMatchedOnly = options.catalogMatchedOnly === true;
+
   (rows || []).forEach((row) => {
     const dateKey = salesDateKey(row.transaction_date);
     const month = monthKeyFromDateKey(dateKey);
@@ -462,8 +464,11 @@ export function ingestCategoryGrowthRows(acc, rows = [], options = {}) {
     if (!Number.isFinite(amount)) return;
 
     acc.sourceRowCount += 1;
-    if (catalogs) addRowToGrowthCatalogs(catalogs, row);
-    if (!rowMatchesGrowthFilters(row, filters)) return;
+    const matches = rowMatchesGrowthFilters(row, filters);
+    if (catalogs && (!catalogMatchedOnly || matches)) {
+      addRowToGrowthCatalogs(catalogs, row);
+    }
+    if (!matches) return;
 
     const label = dimensionValue(row, groupBy);
     const entry = ensureGroup(acc, label, dateKey);

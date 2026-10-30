@@ -249,7 +249,7 @@ export function buildModuleAccess(context = {}) {
       userActivity: hasManagementReportAccess || isCollector,
       workingHours: hasManagementReportAccess || isCollector,
       monthlyAttendance: hasManagementReportAccess || isCollector || (isSalesman && !isCollector),
-      businessDashboard: hasManagementReportAccess,
+      businessDashboard: hasManagementReportAccess || (isSalesman && !isCollector),
       salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
       promoterCoverage: true,
       customerMaster: isAdmin || isManager,

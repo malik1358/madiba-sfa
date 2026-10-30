@@ -20,6 +20,8 @@ import {
   probeGpsLocationWithRetries,
   resolveGpsCapturePlatform,
 } from "../lib/geo";
+import { isAtHomeDeskLocation } from "../lib/deskMode";
+import { evaluateDeskModeForMissingAttendance } from "../lib/deskModeClient";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
 import { getSupabaseClient } from "../lib/supabase";
 import { useAppPopup } from "./AppPopupProvider";
@@ -38,6 +40,10 @@ const REDIRECT_TEXT = {
   inlineMessage: {
     en: "Tap Morning Attendance to start your day before recording collections.",
     ar: "اضغط حضور الصباح لبدء يومك قبل تسجيل التحصيلات.",
+  },
+  homeBlocked: {
+    en: "Morning Attendance (field Login) cannot be recorded within 500 m of your saved home. You can keep working from home; punch Login after you leave home.",
+    ar: "لا يمكن تسجيل حضور الصباح (دخول الميدان) ضمن 500 م من موقع المنزل المحفوظ. يمكنك متابعة العمل من المنزل؛ سجّل الحضور بعد مغادرة المنزل.",
   },
   gpsHint: {
     en: "Phone GPS can be on while Safari still blocks this website. Allow Location for madiba-sfa.vercel.app, then tap again.",
@@ -60,6 +66,9 @@ export default function MorningAttendanceRedirect() {
   const [attendanceHome, setAttendanceHome] = useState(MY_DAY_PATH);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [deskModeActive, setDeskModeActive] = useState(false);
+  const [homeLatitude, setHomeLatitude] = useState(null);
+  const [homeLongitude, setHomeLongitude] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,13 +92,14 @@ export default function MorningAttendanceRedirect() {
           if (!cancelled) {
             setRequired(false);
             setAttendanceComplete(true);
+            setDeskModeActive(false);
           }
           return;
         }
 
         const { data: profile } = await supabase
           .from("profiles")
-          .select("role,salesman_code")
+          .select("role,salesman_code,home_latitude,home_longitude")
           .eq("id", userId)
           .maybeSingle();
 
@@ -103,23 +113,47 @@ export default function MorningAttendanceRedirect() {
           setRequired(needsAttendance);
           setRole(profile?.role || "");
           setAttendanceHome(home);
+          setHomeLatitude(profile?.home_latitude ?? null);
+          setHomeLongitude(profile?.home_longitude ?? null);
         }
 
         if (!needsAttendance) {
-          if (!cancelled) setAttendanceComplete(true);
+          if (!cancelled) {
+            setAttendanceComplete(true);
+            setDeskModeActive(false);
+          }
           return;
         }
 
         const cached = userId ? readGateReadyState(userId) : null;
         if (cached?.attendanceComplete) {
-          if (!cancelled) setAttendanceComplete(true);
+          if (!cancelled) {
+            setAttendanceComplete(true);
+            setDeskModeActive(false);
+          }
           return;
         }
 
         const complete = await hasMorningAttendanceToday(supabase, userId);
         if (!cancelled) setAttendanceComplete(complete);
 
-        if (!complete && !canAccessWithoutMorningAttendance(pathname)) {
+        if (complete) {
+          if (!cancelled) setDeskModeActive(false);
+          return;
+        }
+
+        const desk = await evaluateDeskModeForMissingAttendance({
+          userId,
+          homeLatitude: profile?.home_latitude,
+          homeLongitude: profile?.home_longitude,
+        });
+        if (!cancelled) setDeskModeActive(Boolean(desk.allowDeskMode));
+
+        if (desk.allowDeskMode) {
+          return;
+        }
+
+        if (!canAccessWithoutMorningAttendance(pathname)) {
           if (home === MY_DAY_PATH) {
             showPopup({
               title: REDIRECT_TEXT.title[language] || REDIRECT_TEXT.title.en,
@@ -141,6 +175,7 @@ export default function MorningAttendanceRedirect() {
 
     function handleAttendanceComplete() {
       setAttendanceComplete(true);
+      setDeskModeActive(false);
     }
 
     window.addEventListener(MORNING_ATTENDANCE_COMPLETE_EVENT, handleAttendanceComplete);
@@ -151,11 +186,11 @@ export default function MorningAttendanceRedirect() {
   }, [language, pathname, router, showPopup]);
 
   useEffect(() => {
-    if (checking || !required || attendanceComplete) return;
+    if (checking || !required || attendanceComplete || deskModeActive) return;
     if (canAccessWithoutMorningAttendance(pathname)) return;
     const search = typeof window !== "undefined" ? window.location.search : "";
     router.replace(resolveMorningAttendanceRedirectPath(pathname, search, attendanceHome));
-  }, [attendanceComplete, attendanceHome, checking, pathname, required, router]);
+  }, [attendanceComplete, attendanceHome, checking, deskModeActive, pathname, required, router]);
 
   async function handleMorningAttendance() {
     const supabase = getSupabaseClient();
@@ -173,6 +208,12 @@ export default function MorningAttendanceRedirect() {
         } catch (gpsError) {
           throw new Error(formatGpsFailureMessage(gpsError, language));
         }
+        if (isAtHomeDeskLocation(location, {
+          latitude: homeLatitude,
+          longitude: homeLongitude,
+        })) {
+          throw new Error(REDIRECT_TEXT.homeBlocked[language] || REDIRECT_TEXT.homeBlocked.en);
+        }
       }
       const platform = await resolveGpsCapturePlatform();
       const note = buildGpsActivityNote("MORNING_ATTENDANCE", location, { note: null, platform });
@@ -186,6 +227,7 @@ export default function MorningAttendanceRedirect() {
       }
       writeGateReadyState(session.user.id, true);
       setAttendanceComplete(true);
+      setDeskModeActive(false);
       notifyMorningAttendanceComplete();
     } catch (err) {
       setSaveError(err?.message || REDIRECT_TEXT.failed[language] || REDIRECT_TEXT.failed.en);
@@ -194,7 +236,8 @@ export default function MorningAttendanceRedirect() {
     }
   }
 
-  if (checking || !required || attendanceComplete || !isInlineMorningAttendancePath(pathname)) {
+  // At home without field Login: allow Collections viewing; do not force the punch overlay.
+  if (checking || !required || attendanceComplete || deskModeActive || !isInlineMorningAttendancePath(pathname)) {
     return null;
   }
 

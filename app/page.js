@@ -14,7 +14,7 @@ import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from ".
 import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
 import { probeGpsLocationWithRetries } from "./lib/geo";
-import { isAtHomeLocation } from "./lib/homeLocation";
+import { isAtHomeDeskLocation, writeDeskModeState, clearDeskModeState, readDeskModeState, isDeskModeCacheFresh, isDeskModeSignInGraceActive } from "./lib/deskMode";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
@@ -126,7 +126,10 @@ export default function Home() {
         return;
       }
       if (event === "SIGNED_OUT") {
-        setUser(null);
+        setUser((current) => {
+          if (current?.id) clearDeskModeState(current.id);
+          return null;
+        });
         setProfile(null);
         setProfileError("");
       }
@@ -292,23 +295,18 @@ export default function Home() {
           return;
         }
 
+        let signedInAtHome = false;
         try {
           const location = await probeGpsLocationWithRetries({ attempts: 3 });
-          if (isAtHomeLocation(location, {
+          signedInAtHome = isAtHomeDeskLocation(location, {
             latitude: profileData.home_latitude,
             longitude: profileData.home_longitude,
-          })) {
-            await supabase.auth.signOut();
-            setUser(null);
-            setProfile(null);
-            showPopup({
-              message: ar
-                ? "لا يمكن تسجيل الدخول من موقع المنزل المحفوظ. انتقل إلى موقع آخر وحاول مرة أخرى."
-                : "Login is not allowed within 500 m of your saved home location. Move elsewhere and try again.",
-              variant: "warning",
-            });
-            setLoginLoading(false);
-            return;
+          });
+          if (signedInAtHome) {
+            // Auth session only — does not create MORNING_ATTENDANCE (field Login).
+            writeDeskModeState(data.user.id, { atHome: true, fromSignIn: true });
+          } else {
+            clearDeskModeState(data.user.id);
           }
         } catch {
           await supabase.auth.signOut();
@@ -323,6 +321,36 @@ export default function Home() {
           setLoginLoading(false);
           return;
         }
+
+        setUser(data.user);
+        const sessionLimit = await postSinglePlatformSession({
+          accessToken: data.session?.access_token,
+          platform: (await isNativeAndroidPlatform()) ? "android" : "web",
+        }).catch(() => ({ revoked: 0 }));
+        const signedOutOthers = Number(sessionLimit?.revoked || 0) > 0;
+        showPopup({
+          title: signedInAtHome
+            ? (ar ? "تم الدخول للعمل من المنزل" : "Signed in for desk work")
+            : (ar ? "تم تسجيل الدخول" : "Signed in"),
+          message: [
+            ar
+              ? `مرحباً ${profileData?.salesman_name || data.user.email || ""}`.trim()
+              : `Welcome, ${profileData?.salesman_name || data.user.email || "back"}!`,
+            signedInAtHome
+              ? (ar
+                ? "هذا ليس تسجيل حضور الميدان. يمكنك العمل من المنزل الآن؛ عند الخروج من المنزل سجّل حضور الصباح أولاً."
+                : "This is not field Login. You can work from home now; when you leave home, tap Morning Attendance (Login) first.")
+              : "",
+            signedOutOthers
+              ? (ar
+                ? "تم إنهاء تسجيلات الدخول الأخرى على نفس نوع الجهاز."
+                : "Other sign-ins on this same platform were signed out.")
+              : "",
+          ].filter(Boolean).join(" "),
+          variant: "success",
+        });
+        setLoginLoading(false);
+        return;
       }
       setUser(data.user);
       const sessionLimit = await postSinglePlatformSession({
@@ -380,6 +408,11 @@ export default function Home() {
         const attendanceComplete = await hasMorningAttendanceToday(supabase, user.id);
         if (cancelled) return;
         if (!attendanceComplete) {
+          // At home: stay on the dashboard for desk work (auth only, not field Login).
+          const desk = readDeskModeState(user.id);
+          if (isDeskModeCacheFresh(desk) || isDeskModeSignInGraceActive(desk)) {
+            return;
+          }
           router.replace("/management/my-day");
           return;
         }
@@ -490,6 +523,18 @@ export default function Home() {
         </header>
 
         <section className="dashboardContent">
+
+          {(() => {
+            const desk = user?.id ? readDeskModeState(user.id) : null;
+            if (!isDeskModeCacheFresh(desk) && !isDeskModeSignInGraceActive(desk)) return null;
+            return (
+              <div className="moduleHint" style={{ marginBottom: 12 }}>
+                {ar
+                  ? "أنت في وضع العمل من المنزل (ليس حضور الميدان). عند مغادرة المنزل سجّل حضور الصباح أولاً."
+                  : "Desk work at home (not field Login). When you leave home, tap Morning Attendance first."}
+              </div>
+            );
+          })()}
 
           <div className="dashboardWelcome">
 

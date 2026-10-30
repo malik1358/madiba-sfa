@@ -80,6 +80,12 @@ import {
   readGateReadyState,
   todayAttendanceBounds,
 } from "../../lib/morningAttendance";
+import {
+  isAtHomeDeskLocation,
+  isDeskModeCacheFresh,
+  isDeskModeSignInGraceActive,
+  readDeskModeState,
+} from "../../lib/deskMode";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -116,6 +122,14 @@ const PAGE_TEXT = {
   },
   workdayLocked: { en: "Complete morning attendance to unlock today's work.", ar: "أكمل حضور الصباح لفتح عمل اليوم." },
   morningAttendanceDone: { en: "Morning attendance recorded for today.", ar: "تم تسجيل حضور الصباح اليوم." },
+  deskModeHint: {
+    en: "You are signed in for desk work at home. This is not field Login. Morning Attendance and Logout stay blocked within 500 m of home — punch Login after you leave for the field.",
+    ar: "أنت مسجّل للعمل من المنزل. هذا ليس دخول الميدان. حضور الصباح وتسجيل الخروج محظوران ضمن 500 م من المنزل — سجّل الحضور بعد مغادرة المنزل للعمل الميداني.",
+  },
+  homeAttendanceBlocked: {
+    en: "Login or logout cannot be recorded within 500 m of your saved home location. Keep working from home, then punch when you leave.",
+    ar: "لا يمكن تسجيل الدخول أو الخروج ضمن 500 م من موقع المنزل المحفوظ. تابع العمل من المنزل، ثم سجّل عند المغادرة.",
+  },
   attendance: { en: "Attendance", ar: "الحضور" },
   morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
   lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
@@ -623,7 +637,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
           fetchSalesScope(),
           supabase
             .from("profiles")
-            .select("id,salesman_code,salesman_name,role")
+            .select("id,salesman_code,salesman_name,role,home_latitude,home_longitude")
             .eq("id", session.user.id)
             .single(),
           detectTable(supabase, "daily_activity_logs"),
@@ -1159,6 +1173,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      if (
+        (entryType === "MORNING_ATTENDANCE" || entryType === "END_OF_DAY")
+        && isAtHomeDeskLocation(location, {
+          latitude: profile?.home_latitude,
+          longitude: profile?.home_longitude,
+        })
+      ) {
+        throw new Error(t("homeAttendanceBlocked"));
+      }
       const platform = await resolveGpsCapturePlatform();
 
       const payload = {
@@ -2372,6 +2395,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
             <h2>{t("attendance")}</h2>
             <span>{profile?.salesman_name || profile?.salesman_code || ""}</span>
           </div>
+          {!morningAttendanceComplete && (() => {
+            const desk = currentUserId ? readDeskModeState(currentUserId) : null;
+            if (!isDeskModeCacheFresh(desk) && !isDeskModeSignInGraceActive(desk)) return null;
+            return <div className="moduleHint">{t("deskModeHint")}</div>;
+          })()}
           <div className="moduleActionRow">
             {morningAttendanceComplete ? (
               <div className="moduleHint" style={{ margin: 0 }}>{t("morningAttendanceDone")}</div>

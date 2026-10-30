@@ -223,11 +223,11 @@ test("managers still get background GPS like other field users", () => {
   assert.equal(shouldEnableBackgroundGps("invoice-maker"), false);
 });
 
-test("business dashboard is available to management report viewers", () => {
+test("business dashboard is available to management report viewers and salesmen", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("businessDashboard"), true);
-  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), false);
+  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
 });
 

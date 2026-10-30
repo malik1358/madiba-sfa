@@ -1,8 +1,17 @@
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { canViewManagementReports } from "../../../lib/moduleAccess.js";
 import { loadBiOverviewBundle, rebuildSalesBiCube } from "../../../lib/categoryGrowthServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
+import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
+import {
+  applyBiSalesmanScope,
+  buildBiViewerMeta,
+  canViewBusinessDashboard,
+  canViewBiProfit,
+  emptyCategoryGrowthPayload,
+  isBiTeamScopedViewer,
+  stripBiProfit,
+} from "../../../lib/businessDashboardAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -39,8 +48,15 @@ async function getProfile(admin, userId) {
   return data;
 }
 
-function canViewDashboard(profile) {
-  return canViewManagementReports(profile?.role);
+function stripBundleProfit(bundle) {
+  if (!bundle || typeof bundle !== "object") return bundle;
+  return {
+    ...bundle,
+    growth: stripBiProfit(bundle.growth),
+    customer: stripBiProfit(bundle.customer),
+    item: stripBiProfit(bundle.item),
+    salesman: stripBiProfit(bundle.salesman),
+  };
 }
 
 async function buildResponse(request, filters) {
@@ -53,12 +69,39 @@ async function buildResponse(request, filters) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const profile = await getProfile(admin, user.id);
-  if (!canViewDashboard(profile)) {
-    throw new Error("Only admin and manager users can view the business dashboard.");
+  if (!canViewBusinessDashboard(profile)) {
+    throw new Error("You do not have access to Business Intelligence.");
   }
 
+  const scope = await resolveSalesScopeForUserId(admin, user.id);
+  const viewer = buildBiViewerMeta(profile);
+  const allowProfit = canViewBiProfit(profile);
+  const teamScoped = isBiTeamScopedViewer(profile);
+  const { filters: scopedFilters, empty } = applyBiSalesmanScope(filters, scope, profile);
   const asOfDate = getKsaDateString();
-  const bundle = await loadBiOverviewBundle(admin, { asOfDate, filters });
+
+  if (empty) {
+    const emptyReport = emptyCategoryGrowthPayload({ asOfDate, filters: scopedFilters });
+    return Response.json({
+      success: true,
+      timezone: "Asia/Riyadh",
+      asOfDate,
+      viewer,
+      growth: emptyReport,
+      customer: emptyReport,
+      item: emptyReport,
+      salesman: emptyReport,
+      catalogs: emptyReport.catalogs,
+      meta: emptyReport.meta,
+    });
+  }
+
+  const bundle = await loadBiOverviewBundle(admin, {
+    asOfDate,
+    filters: scopedFilters,
+    catalogMatchedOnly: teamScoped,
+    includeProfit: allowProfit,
+  });
 
   if (bundle?.meta?.stale) {
     after(async () => {
@@ -70,11 +113,14 @@ async function buildResponse(request, filters) {
     });
   }
 
+  const payload = allowProfit ? bundle : stripBundleProfit(bundle);
+
   return Response.json({
     success: true,
     timezone: "Asia/Riyadh",
     asOfDate,
-    ...bundle,
+    viewer,
+    ...payload,
   });
 }
 
@@ -84,7 +130,7 @@ export async function GET(request) {
   } catch (error) {
     console.error("Error building BI overview:", error);
     return Response.json(
-      { success: false, error: error.message || "Unable to load BI overview." },
+      { success: false, error: error.message || "Unable to load business dashboard." },
       { status: 400 },
     );
   }
@@ -97,7 +143,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error building BI overview:", error);
     return Response.json(
-      { success: false, error: error.message || "Unable to load BI overview." },
+      { success: false, error: error.message || "Unable to load business dashboard." },
       { status: 400 },
     );
   }

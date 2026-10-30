@@ -171,6 +171,10 @@ export default function BusinessDashboardPage() {
   const [salesMixDraft, setSalesMixDraft] = useState(() => emptyGrowthFilters());
   const [salesMixApplied, setSalesMixApplied] = useState(() => emptyGrowthFilters());
   const [amountMeasure, setAmountMeasure] = useState("sales");
+  const [viewer, setViewer] = useState({ canViewProfit: true, scoped: false });
+  const canViewProfit = viewer?.canViewProfit !== false;
+  const teamScoped = Boolean(viewer?.scoped);
+  const effectiveMeasure = canViewProfit ? amountMeasure : "sales";
   const [reportPeriod, setReportPeriod] = useState(DEFAULT_BI_REPORT_PERIOD);
   const [customPeriodFrom, setCustomPeriodFrom] = useState("");
   const [customPeriodTo, setCustomPeriodTo] = useState("");
@@ -191,21 +195,32 @@ export default function BusinessDashboardPage() {
   );
   const periodRangeLabel = formatBiReportPeriodRange(periodRange);
   const visibleGrowthReport = useMemo(
-    () => pickBiMeasure(growthReport, amountMeasure),
-    [growthReport, amountMeasure],
+    () => pickBiMeasure(growthReport, effectiveMeasure),
+    [growthReport, effectiveMeasure],
   );
   const visibleSalesmanReport = useMemo(
-    () => pickBiMeasure(salesmanReport, amountMeasure),
-    [salesmanReport, amountMeasure],
+    () => pickBiMeasure(salesmanReport, effectiveMeasure),
+    [salesmanReport, effectiveMeasure],
   );
   const visibleCustomerReport = useMemo(
-    () => pickBiMeasure(customerReport, amountMeasure),
-    [customerReport, amountMeasure],
+    () => pickBiMeasure(customerReport, effectiveMeasure),
+    [customerReport, effectiveMeasure],
   );
   const visibleItemReport = useMemo(
-    () => pickBiMeasure(itemReport, amountMeasure),
-    [itemReport, amountMeasure],
+    () => pickBiMeasure(itemReport, effectiveMeasure),
+    [itemReport, effectiveMeasure],
   );
+
+  function applyViewerMeta(payload) {
+    if (!payload?.viewer || typeof payload.viewer !== "object") return;
+    setViewer({
+      canViewProfit: payload.viewer.canViewProfit !== false,
+      scoped: Boolean(payload.viewer.scoped),
+    });
+    if (payload.viewer.canViewProfit === false) {
+      setAmountMeasure("sales");
+    }
+  }
 
   usePopupMessages({ error });
 
@@ -238,7 +253,10 @@ export default function BusinessDashboardPage() {
     if (!isAdminViewer && view === "items-sold-at-loss") {
       setView("overview");
     }
-  }, [isAdminViewer, view]);
+    if (teamScoped && view === "receivable-days") {
+      setView("overview");
+    }
+  }, [isAdminViewer, teamScoped, view]);
 
   useEffect(() => {
     if (!reportFocus || view === "overview") return;
@@ -310,6 +328,7 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load business dashboard.");
         }
 
+        applyViewerMeta(payload);
         setDashboard(payload);
       } catch (err) {
         if (cancelled) return;
@@ -394,6 +413,7 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load BI dashboard.");
         }
 
+        applyViewerMeta(payload);
         if (payload.growth) {
           setGrowthReport(payload.growth);
           growthCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
@@ -522,6 +542,7 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load category growth.");
         }
 
+        applyViewerMeta(payload);
         setGrowthReport(payload);
         // Tab fetches can replace the overview category payload; force overview to refresh next time.
         overviewCacheKeyRef.current = "";
@@ -780,6 +801,7 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load salesman performance.");
         }
 
+        applyViewerMeta(payload);
         setSalesmanReport(payload);
         salesmanCacheKeyRef.current = requestKey;
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
@@ -954,15 +976,17 @@ export default function BusinessDashboardPage() {
               >
                 {t("salesMix")}
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === "receivable-days"}
-                className={`moduleBiTab${view === "receivable-days" ? " isActive" : ""}`}
-                onClick={() => setView("receivable-days")}
-              >
-                {t("receivableDays")}
-              </button>
+              {!teamScoped ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "receivable-days"}
+                  className={`moduleBiTab${view === "receivable-days" ? " isActive" : ""}`}
+                  onClick={() => setView("receivable-days")}
+                >
+                  {t("receivableDays")}
+                </button>
+              ) : null}
               <button
                 type="button"
                 role="tab"
@@ -1066,7 +1090,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
                 {periodRangeLabel ? <em className="moduleBiPeriodRange">{periodRangeLabel}</em> : null}
-                {view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" ? (
+                {canViewProfit && view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" ? (
                   <>
                     <span>{t("measure")}</span>
                     <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
@@ -1088,7 +1112,7 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
               </div>
-              {view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
+              {canViewProfit && view !== "sales-mix" && view !== "receivable-days" && view !== "items-sold-at-loss" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
             </section>
           ) : null}
 
@@ -1115,7 +1139,7 @@ export default function BusinessDashboardPage() {
             <CategoryGrowthReport
               language={language}
               loading={growthLoading}
-              measure={amountMeasure}
+              measure={effectiveMeasure}
               report={visibleGrowthReport}
               draft={growthDraft}
               catalogs={growthCatalogs}
@@ -1180,8 +1204,8 @@ export default function BusinessDashboardPage() {
               <CategoryGrowthReport
                 language={language}
                 loading={growthLoading}
-                measure={amountMeasure}
-                title={`${t("madiba")} · ${brandApplied.groupBy === "item" ? t("madibaItems") : t("madibaCategories")} · ${amountMeasure === "profit" ? t("profit") : t("sales")}`}
+                measure={effectiveMeasure}
+                title={`${t("madiba")} · ${brandApplied.groupBy === "item" ? t("madibaItems") : t("madibaCategories")} · ${effectiveMeasure === "profit" ? t("profit") : t("sales")}`}
                 emptyMessage={t("madibaEmpty")}
                 showGpPercent={brandApplied.groupBy === "category"}
                 report={visibleGrowthReport}
@@ -1213,7 +1237,7 @@ export default function BusinessDashboardPage() {
             <CategoryGrowthReport
               language={language}
               loading={customerLoading}
-              measure={amountMeasure}
+              measure={effectiveMeasure}
               report={visibleCustomerReport}
               draft={customerDraft}
               catalogs={growthCatalogs}
@@ -1241,7 +1265,7 @@ export default function BusinessDashboardPage() {
             <CategoryGrowthReport
               language={language}
               loading={itemLoading}
-              measure={amountMeasure}
+              measure={effectiveMeasure}
               report={visibleItemReport}
               draft={itemDraft}
               catalogs={growthCatalogs}
@@ -1268,7 +1292,7 @@ export default function BusinessDashboardPage() {
             <SalesmanMomReport
               language={language}
               loading={salesmanLoading}
-              measure={amountMeasure}
+              measure={effectiveMeasure}
               report={visibleSalesmanReport}
               draft={salesmanDraft}
               catalogs={growthCatalogs}

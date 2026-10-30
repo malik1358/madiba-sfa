@@ -81,12 +81,19 @@ function reportFromRows(rows, {
   includeCohorts = true,
   includeSalesMix = true,
   includeCatalogs = true,
+  catalogMatchedOnly = false,
+  includeProfit = true,
 } = {}) {
   const applied = alignDates ? monthAlignGrowthFilters(filters) : filters;
   function build(measure) {
     const acc = createCategoryGrowthAccumulator();
     const catalogs = includeCatalogs ? createGrowthCatalogs() : null;
-    ingestCategoryGrowthRows(acc, rows, { filters: applied, catalogs, measure });
+    ingestCategoryGrowthRows(acc, rows, {
+      filters: applied,
+      catalogs,
+      measure,
+      catalogMatchedOnly,
+    });
     return packReport(acc, {
       asOfDate,
       filters,
@@ -99,7 +106,11 @@ function reportFromRows(rows, {
     });
   }
   const sales = build("sales");
-  const profit = build("profit");
+  const measures = { sales: measureSlice(sales) };
+  if (includeProfit) {
+    const profit = build("profit");
+    measures.profit = measureSlice(profit);
+  }
   return {
     ...sales,
     ...(includeCohorts && filters.groupBy === "customer" ? {
@@ -108,10 +119,7 @@ function reportFromRows(rows, {
       customerBimonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "bimonth" }),
     } : {}),
     ...(includeSalesMix ? { salesMix: buildSalesMixReport(rows, applied) } : {}),
-    measures: {
-      sales: measureSlice(sales),
-      profit: measureSlice(profit),
-    },
+    measures,
   };
 }
 
@@ -123,6 +131,8 @@ function reportFromFacts(facts, {
   includeCohorts = true,
   includeSalesMix = true,
   includeCatalogs = true,
+  catalogMatchedOnly = false,
+  includeProfit = true,
 } = {}) {
   const growthRows = applyCustomerSalesmanOwnershipToRows(
     (facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
@@ -139,10 +149,18 @@ function reportFromFacts(facts, {
     includeCohorts,
     includeSalesMix,
     includeCatalogs,
+    catalogMatchedOnly,
+    includeProfit,
   });
 }
 
-async function reportFromLiveSales(admin, { asOfDate, filters, ownershipMap = null }) {
+async function reportFromLiveSales(admin, {
+  asOfDate,
+  filters,
+  ownershipMap = null,
+  catalogMatchedOnly = false,
+  includeProfit = true,
+}) {
   let lastError = null;
 
   for (const select of SALES_SELECTS) {
@@ -155,6 +173,8 @@ async function reportFromLiveSales(admin, { asOfDate, filters, ownershipMap = nu
         report: reportFromRows(rows, {
           asOfDate,
           filters,
+          catalogMatchedOnly,
+          includeProfit,
           extraMeta: {
             missingTable: false,
             source: "active_sales",
@@ -233,6 +253,8 @@ export async function loadCategoryGrowthReport(admin, {
   includeCohorts = true,
   includeSalesMix = true,
   includeCatalogs = true,
+  catalogMatchedOnly = false,
+  includeProfit = true,
 } = {}) {
   const normalized = normalizeGrowthFilters(filters);
   let report;
@@ -263,6 +285,8 @@ export async function loadCategoryGrowthReport(admin, {
           includeCohorts,
           includeSalesMix,
           includeCatalogs,
+          catalogMatchedOnly,
+          includeProfit,
           extraMeta: cubeExtraMeta(cube),
         });
       }
@@ -276,6 +300,8 @@ export async function loadCategoryGrowthReport(admin, {
       asOfDate,
       filters: normalized,
       ownershipMap,
+      catalogMatchedOnly,
+      includeProfit,
     });
     report = live.report;
     sourceRows = live.rows || [];
@@ -300,7 +326,12 @@ export async function loadCategoryGrowthReport(admin, {
   return report;
 }
 
-export async function loadBiOverviewBundle(admin, { asOfDate = "", filters = {} } = {}) {
+export async function loadBiOverviewBundle(admin, {
+  asOfDate = "",
+  filters = {},
+  catalogMatchedOnly = false,
+  includeProfit = true,
+} = {}) {
   const base = normalizeGrowthFilters(filters);
   const ownershipMap = await loadCustomerSalesmanOwnershipMap(admin).catch((error) => {
     console.error("Customer salesman ownership unavailable for BI overview:", error);
@@ -343,6 +374,8 @@ export async function loadBiOverviewBundle(admin, { asOfDate = "", filters = {} 
           includeCohorts: false,
           includeSalesMix: groupBy === "category",
           includeCatalogs: groupBy === "category",
+          catalogMatchedOnly,
+          includeProfit,
           ...options,
         });
       }
@@ -356,6 +389,8 @@ export async function loadBiOverviewBundle(admin, { asOfDate = "", filters = {} 
       asOfDate,
       filters: normalizeGrowthFilters({ ...base, groupBy: "category" }),
       ownershipMap,
+      catalogMatchedOnly,
+      includeProfit,
     });
     sourceRows = live.rows || [];
     cubeMeta = { source: "active_sales", preparedAt: null, stale: false };
@@ -366,6 +401,8 @@ export async function loadBiOverviewBundle(admin, { asOfDate = "", filters = {} 
       includeCohorts: false,
       includeSalesMix: groupBy === "category",
       includeCatalogs: groupBy === "category",
+      catalogMatchedOnly,
+      includeProfit,
       ...options,
     });
   }

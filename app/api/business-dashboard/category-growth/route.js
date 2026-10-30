@@ -1,8 +1,17 @@
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { canViewManagementReports } from "../../../lib/moduleAccess.js";
 import { loadCategoryGrowthReport, rebuildSalesBiCube } from "../../../lib/categoryGrowthServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
+import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
+import {
+  applyBiSalesmanScope,
+  buildBiViewerMeta,
+  canViewBusinessDashboard,
+  canViewBiProfit,
+  emptyCategoryGrowthPayload,
+  isBiTeamScopedViewer,
+  stripBiProfit,
+} from "../../../lib/businessDashboardAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -39,10 +48,6 @@ async function getProfile(admin, userId) {
   return data;
 }
 
-function canViewDashboard(profile) {
-  return canViewManagementReports(profile?.role);
-}
-
 async function buildResponse(request, filters) {
   if (!supabaseUrl || !serviceKey) {
     return Response.json({ success: false, error: "Server configuration is incomplete" }, { status: 500 });
@@ -53,12 +58,35 @@ async function buildResponse(request, filters) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const profile = await getProfile(admin, user.id);
-  if (!canViewDashboard(profile)) {
-    throw new Error("Only admin and manager users can view category growth.");
+  if (!canViewBusinessDashboard(profile)) {
+    throw new Error("You do not have access to Business Intelligence.");
   }
 
+  const scope = await resolveSalesScopeForUserId(admin, user.id);
+  const viewer = buildBiViewerMeta(profile);
+  const allowProfit = canViewBiProfit(profile);
+  const teamScoped = isBiTeamScopedViewer(profile);
+  const { filters: scopedFilters, empty } = applyBiSalesmanScope(filters, scope, profile);
+
   const asOfDate = getKsaDateString();
-  const report = await loadCategoryGrowthReport(admin, { asOfDate, filters });
+
+  if (empty) {
+    const emptyReport = emptyCategoryGrowthPayload({ asOfDate, filters: scopedFilters });
+    return Response.json({
+      success: true,
+      timezone: "Asia/Riyadh",
+      asOfDate,
+      viewer,
+      ...emptyReport,
+    });
+  }
+
+  const report = await loadCategoryGrowthReport(admin, {
+    asOfDate,
+    filters: scopedFilters,
+    catalogMatchedOnly: teamScoped,
+    includeProfit: allowProfit,
+  });
 
   if (report?.meta?.stale) {
     after(async () => {
@@ -70,11 +98,14 @@ async function buildResponse(request, filters) {
     });
   }
 
+  const payload = allowProfit ? report : stripBiProfit(report);
+
   return Response.json({
     success: true,
     timezone: "Asia/Riyadh",
     asOfDate,
-    ...report,
+    viewer,
+    ...payload,
   });
 }
 

@@ -52,8 +52,8 @@ const TEXT = {
   salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   itemsSoldAtLoss: { en: "Items sold at loss", ar: "أصناف بيعت بخسارة" },
   itemsSoldAtLossSubtitle: {
-    en: "Admin only. Active sales lines where imported GP is negative. Every column has an Excel filter. Cost is not stored in SFA.",
-    ar: "للأدمن فقط. أسطر المبيعات النشطة حيث الربح المستورد سالب. كل عمود له تصفية Excel. التكلفة غير مخزنة في النظام.",
+    en: "Admin only. Active sales lines where imported GP is negative and qty is positive (returns excluded). Every column has an Excel filter. Cost is not stored in SFA.",
+    ar: "للأدمن فقط. أسطر المبيعات النشطة حيث الربح المستورد سالب والكمية موجبة (المرتجعات مستبعدة). كل عمود له تصفية Excel. التكلفة غير مخزنة في النظام.",
   },
   itemsSoldAtLossAccessDenied: {
     en: "Items sold at loss is available to admin only.",

@@ -36,7 +36,7 @@ const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s]+)(?=[A-Za-z\u0600-\u06FF])
 const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?:[_\-\s\[]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /** Year-like tokens from OCR headers (1-Jan-26 to 28-Oct-26) are not party codes. */
 const YEAR_LIKE_CODE_RE = /^20[2-3]\d(?:C)?$/i;
-export const COLLECTION_REMARK_PARSER_VERSION = "ocr-ref-split-v2";
+export const COLLECTION_REMARK_PARSER_VERSION = "ocr-bills-before-pipes-v3";
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -794,6 +794,13 @@ export function parseCollectionRemarkTableText(tableText = "") {
 export function parseCollectionRemarkImportText(rawText = "", { prefer = "auto" } = {}) {
   const text = String(rawText || "");
   if (!text.trim()) return [];
+
+  // WhatsApp Bills OCR fills rows with `|` noise (`|AhmedNabil______|sunday…`).
+  // That must NOT route through the paste-table parser (it grabs Ref. No. digits like 986).
+  if (prefer !== "table" && looksLikeBillsReceivableText(text)) {
+    const billRows = parseBillsReceivableOcrText(text);
+    if (billRows.length) return billRows;
+  }
 
   const looksTabular = /\t/.test(text)
     || text.split(/\n/).filter(Boolean).some((line) => (line.match(/\|/g) || []).length >= 2)

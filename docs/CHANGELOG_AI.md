@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-30** — Import Collection Remarks resolves OCR party codes against the customer master (C-suffix / leading-1 / zero-pad when unique), prefers Ref→party 4-digit codes on Bills Receivable OCR, and blocks Select-all/save of unknown codes. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-30** — KPI upload summary email default CC includes `fazlur.rahiman@noorshukran.com` (`KPI_UPLOAD_SUMMARY_EMAIL_CC` for extras). No migration.
 - **2026-10-30** — Import Collection Remarks also strips **glued** salesman names with underscore padding from OCR (`AhmedNabil_______ sunday…` → `sunday…`). No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-10-30** — KPI upload summary email adds **Total cash collected** beside Total sales and Collection so the mail matches the live KPI Targets footer the user compares. Prior-month vs-last-month uses derived totals (ignores cache `totalSales: 0`) and Thamer report-alias collapse via shared `loadStoredKpiActualsByCode`. No migration. See `docs/BUSINESS_RULES.md`.

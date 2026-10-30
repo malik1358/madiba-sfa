@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  expandCollectionRemarkCustomerCodeCandidates,
   normalizeCollectionRemarkCustomerCode,
   normalizeCollectionRemarkImportRows,
   parseBillsReceivableOcrText,
   parseCollectionRemarkImportText,
   parseCollectionRemarkOcrText,
   parseCollectionRemarkTableText,
+  resolveCollectionRemarkCustomerCodeFromKnown,
   sanitizeCollectionRemarkComment,
   suggestCollectionRemarkVisitOutcome,
 } from "../app/lib/collectionRemarkImport.js";
@@ -48,6 +50,30 @@ The court has ruled in our favor, and enforcement proceedings are currently unde
   assert.match(rows[2].remark, /fallwing up with this clint/i);
   assert.doesNotMatch(rows[2].remark, /Ahmed\s+hadyah/i);
   assert.equal(rows[2].visitOutcome, "ASKED_COME_LATER");
+});
+
+test("resolveCollectionRemarkCustomerCodeFromKnown remaps OCR variants", () => {
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("1058", ["1058C", "1059"]),
+    "1058C",
+  );
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("478", ["1478", "1479"]),
+    "1478",
+  );
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("055", ["1055", "1155"]),
+    "1055",
+  );
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("103", ["1030", "1035C", "1103"]),
+    "1103",
+  );
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("986", ["1058", "1457"]),
+    "",
+  );
+  assert.ok(expandCollectionRemarkCustomerCodeCandidates("055").includes("1055"));
 });
 
 test("sanitizeCollectionRemarkComment drops salesman and customer names", () => {

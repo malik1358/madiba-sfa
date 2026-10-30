@@ -17,9 +17,14 @@ const OUTCOME_TOKENS = [
   "NO_DUE_AS_PER_CUSTOMER",
 ];
 
-/** Prefer codes with C suffix, or bare digits that introduce a customer/party name. */
-const CUSTOMER_CODE_RE = /(?<![,\d])(\d{3,5}C)(?![A-Z0-9])|(?:^|[\n\r])\s*(\d{3,5})(?=\s*[—\-–:])|(?<![,\d.])(\d{3,5})(?=\s+[A-Za-z\u0600-\u06FF])/gi;
+/**
+ * Prefer 4-digit party codes (Madiba master is almost entirely 4 digits ± C).
+ * Keep `\d{3,5}C` so 1054C still matches; bare digits require 4 to avoid overdue-day noise.
+ */
+const CUSTOMER_CODE_RE = /(?<![,\d])(\d{3,5}C)(?![A-Z0-9])|(?:^|[\n\r])\s*(\d{4})(?=\s*[—\-–:])|(?<![,\d.])(\d{4})(?=\s+[A-Za-z\u0600-\u06FF])/gi;
 const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
+/** Bills Receivable row: Ref. No. then party code then party name. */
+const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}\s+(\d{4}C?)\s+(?=[A-Za-z\u0600-\u06FF])/gi;
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -49,6 +54,90 @@ export function normalizeCollectionRemarkCustomerCode(value) {
   if (fromPrefix) return fromPrefix[1].toUpperCase();
   const anywhere = raw.match(/\b(\d{3,5}C?)\b/);
   return anywhere ? anywhere[1].toUpperCase() : "";
+}
+
+/**
+ * OCR often drops a leading 1 or pads zeros (055 → 1055, 478 → 1478).
+ * Expand lookup candidates without inventing codes that are not in the master.
+ */
+export function expandCollectionRemarkCustomerCodeCandidates(value) {
+  const raw = normalizeCollectionRemarkCustomerCode(value);
+  if (!raw) return [];
+
+  const hasC = /C$/i.test(raw);
+  const digits = raw.replace(/C$/i, "");
+  const stem = digits.replace(/^0+/, "") || digits;
+  const out = new Set();
+
+  const add = (code) => {
+    const normalized = String(code || "").trim().toUpperCase();
+    if (/^\d{3,5}C?$/.test(normalized)) out.add(normalized);
+  };
+
+  add(raw);
+  add(digits);
+  add(stem);
+  add(`${stem}C`);
+  if (hasC) add(`${digits}C`);
+
+  // Common OCR miss: leading 1 dropped from a 4-digit Madiba code.
+  if (stem.length === 3) {
+    add(`1${stem}`);
+    add(`1${stem}C`);
+  }
+  if (/^0\d{3}$/.test(digits)) {
+    add(`1${digits.slice(1)}`);
+    add(`1${digits.slice(1)}C`);
+  }
+  if (/^0\d{2}$/.test(digits)) {
+    add(`1${digits}`);
+    add(`1${digits}C`);
+    add(`1${stem}`);
+    add(`1${stem}C`);
+  }
+
+  return [...out];
+}
+
+/**
+ * Pick a unique known master code that matches the OCR/parsed value.
+ * Prefers exact, then C-suffix, then longer canonical forms.
+ */
+export function resolveCollectionRemarkCustomerCodeFromKnown(value, knownCodes = []) {
+  const candidates = expandCollectionRemarkCustomerCodeCandidates(value);
+  if (!candidates.length) return "";
+
+  const known = [...new Set(
+    (knownCodes || [])
+      .map((code) => String(code || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+  if (!known.length) return "";
+
+  const exact = candidates.find((code) => known.includes(code));
+  if (exact) return exact;
+
+  const matches = known.filter((knownCode) => {
+    const knownStem = knownCode.replace(/C$/i, "").replace(/^0+/, "") || knownCode;
+    return candidates.some((candidate) => {
+      const candidateStem = candidate.replace(/C$/i, "").replace(/^0+/, "") || candidate;
+      if (knownCode === candidate || knownStem === candidateStem) return true;
+      // 1058 ↔ 1058C
+      if (knownStem === candidateStem && (/C$/i.test(knownCode) || /C$/i.test(candidate))) return true;
+      return false;
+    });
+  });
+
+  if (matches.length === 1) return matches[0];
+  if (!matches.length) return "";
+
+  // Prefer bare/C forms that equal a candidate; else longest canonical code.
+  const preferred = matches.find((code) => candidates.includes(code));
+  if (preferred) return preferred;
+  return matches.slice().sort((left, right) => {
+    if (right.length !== left.length) return right.length - left.length;
+    return left.localeCompare(right);
+  })[0] || "";
 }
 
 export function cleanCollectionRemarkText(value) {
@@ -259,31 +348,37 @@ function upsertRemarkRow(rowsByCode, row) {
   }
 }
 
+function collectCustomerCodeMatchAnchors(text, regex) {
+  return [...String(text || "").matchAll(regex)]
+    .map((match) => {
+      const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
+      if (!code) return null;
+      const codePos = String(text).toUpperCase().indexOf(code, match.index);
+      const anchor = codePos >= 0 ? codePos : match.index;
+      return { code, anchor, index: match.index };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.anchor - right.anchor);
+}
+
 /**
  * Bills Receivable / Pending Bills OCR: party code + name, remarks on the right.
+ * Prefer Ref. No. → party code anchors so overdue days / amounts are not treated as codes.
  */
 export function parseBillsReceivableOcrText(ocrText = "") {
   const text = String(ocrText || "").replace(/\r/g, "\n");
   if (!text.trim()) return [];
 
-  const matches = [...text.matchAll(CUSTOMER_CODE_RE)];
+  const refAnchors = collectCustomerCodeMatchAnchors(text, BILL_REF_PARTY_CODE_RE);
+  const genericAnchors = collectCustomerCodeMatchAnchors(text, CUSTOMER_CODE_RE);
+  const matches = refAnchors.length ? refAnchors : genericAnchors;
   if (!matches.length) return [];
 
   const rowsByCode = new Map();
   for (let index = 0; index < matches.length; index += 1) {
-    const match = matches[index];
-    const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
-    if (!code) continue;
-    const codePos = text.toUpperCase().indexOf(code, match.index);
-    const anchor = codePos >= 0 ? codePos : match.index;
-    const nextMatch = matches[index + 1];
-    const nextCode = nextMatch
-      ? String(nextMatch[1] || nextMatch[2] || nextMatch[3] || "").toUpperCase()
-      : "";
-    const nextPos = nextMatch
-      ? text.toUpperCase().indexOf(nextCode, nextMatch.index)
-      : -1;
-    const end = nextPos >= 0 ? nextPos : text.length;
+    const { code, anchor } = matches[index];
+    const next = matches[index + 1];
+    const end = next ? next.anchor : text.length;
     const segment = text.slice(anchor + code.length, end);
     const remark = extractRemarkFromBillsSegment(segment);
     const row = buildRow(code, remark, "ocr-bills");

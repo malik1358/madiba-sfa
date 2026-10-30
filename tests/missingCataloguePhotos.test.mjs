@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { missingCataloguePhotoReport } from "../app/lib/missingCataloguePhotos.js";
+import {
+  countCataloguePhotosUploadedSince,
+  missingCataloguePhotoReport,
+} from "../app/lib/missingCataloguePhotos.js";
 
 test("missing catalogue photo report keeps priced catalogue products and drops the rest", () => {
   const report = missingCataloguePhotoReport({
@@ -34,6 +37,8 @@ test("missing catalogue photo report keeps priced catalogue products and drops t
   assert.equal(report.summary.missing, 2);
   assert.equal(report.summary.withPhotos, 0);
   assert.equal(report.summary.excludedBuilding, 2);
+  assert.equal(report.summary.uploadedLast24h, 0);
+  assert.equal(report.summary.itemsUploadedLast24h, 0);
 });
 
 test("a priced catalogue item that already has a photo is counted and not listed", () => {
@@ -48,4 +53,32 @@ test("a priced catalogue item that already has a photo is counted and not listed
   assert.deepEqual(report.rows, []);
   assert.equal(report.summary.withPhotos, 1);
   assert.equal(report.summary.missing, 0);
+});
+
+test("catalogue photo upload counts cover the last 24 hours only", () => {
+  const now = Date.parse("2026-10-30T06:00:00Z");
+  const counts = countCataloguePhotosUploadedSince([
+    { entity_id: "A000001", created_at: "2026-10-30T05:00:00Z" },
+    { entity_id: "A000001", created_at: "2026-10-30T04:00:00Z" },
+    { entity_id: "A000002", created_at: "2026-10-29T07:00:00Z" },
+    { entity_id: "A000003", created_at: "2026-10-28T06:00:00Z" },
+    { entity_id: "A000004", created_at: "not-a-date" },
+  ], now - 24 * 60 * 60 * 1000);
+
+  assert.equal(counts.uploadedLast24h, 3);
+  assert.equal(counts.itemsUploadedLast24h, 2);
+
+  const report = missingCataloguePhotoReport({
+    master: [{ item_code: "A000001", item_name: "Baby Oil", category: "Baby Care", is_active: true }],
+    priceMap: { A000001: "12.5" },
+    photos: [
+      { entity_id: "A000001", created_at: "2026-10-30T05:00:00Z" },
+      { entity_id: "A000002", created_at: "2026-10-29T07:00:00Z" },
+    ],
+    now,
+  });
+  assert.equal(report.summary.withPhotos, 1);
+  assert.equal(report.summary.missing, 0);
+  assert.equal(report.summary.uploadedLast24h, 2);
+  assert.equal(report.summary.itemsUploadedLast24h, 2);
 });

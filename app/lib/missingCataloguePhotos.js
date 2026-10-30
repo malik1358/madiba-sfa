@@ -45,14 +45,35 @@ function rememberItem(byCode, row, { fromSheet = false } = {}) {
   if (fromSheet) existing.active = true;
 }
 
+export function countCataloguePhotosUploadedSince(photos = [], sinceMs = Date.now() - 24 * 60 * 60 * 1000) {
+  let uploadedLast24h = 0;
+  const items = new Set();
+  for (const photo of photos) {
+    const createdMs = Date.parse(String(photo?.created_at || ""));
+    if (!Number.isFinite(createdMs) || createdMs < sinceMs) continue;
+    uploadedLast24h += 1;
+    const code = String(photo?.entity_id || photo?.code || "").trim().toUpperCase();
+    if (code) items.add(code);
+  }
+  return {
+    uploadedLast24h,
+    itemsUploadedLast24h: items.size,
+  };
+}
+
 export function missingCataloguePhotoReport({
   master = [],
   sheet = [],
   priceMap = {},
   photoCodes = [],
+  photos = [],
+  now = Date.now(),
 } = {}) {
   const priced = positivePriceCodes(priceMap);
-  const photos = new Set(photoCodes.map((code) => String(code || "").trim().toUpperCase()).filter(Boolean));
+  const codes = photoCodes.length
+    ? photoCodes
+    : photos.map((photo) => photo?.entity_id || photo?.code);
+  const photoSet = new Set(codes.map((code) => String(code || "").trim().toUpperCase()).filter(Boolean));
   const byCode = new Map();
   for (const row of master) rememberItem(byCode, row);
   for (const row of sheet) rememberItem(byCode, row, { fromSheet: true });
@@ -71,7 +92,7 @@ export function missingCataloguePhotoReport({
       excludedBuilding += 1;
       continue;
     }
-    if (photos.has(item.code)) {
+    if (photoSet.has(item.code)) {
       withPhotos += 1;
       continue;
     }
@@ -82,12 +103,15 @@ export function missingCataloguePhotoReport({
     });
   }
   rows.sort((a, b) => a.category.localeCompare(b.category) || a.code.localeCompare(b.code));
+  const uploaded = countCataloguePhotosUploadedSince(photos, Number(now) - 24 * 60 * 60 * 1000);
   return {
     rows,
     summary: {
       missing: rows.length,
       withPhotos,
       excludedBuilding,
+      uploadedLast24h: uploaded.uploadedLast24h,
+      itemsUploadedLast24h: uploaded.itemsUploadedLast24h,
     },
   };
 }

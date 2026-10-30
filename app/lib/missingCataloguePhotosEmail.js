@@ -1,6 +1,7 @@
-import { parseEmailList } from "./mailer.js";
+import { isLikelyEmail, parseEmailList } from "./mailer.js";
 
 export const DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_TO = "malik@pinasz.com,swami@pinasz.com";
+export const DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_CC = ["jigar.wadiya@noorshukran.com"];
 export const MISSING_CATALOGUE_PHOTOS_EMAIL_KEY_PREFIX = "missing_catalogue_photos_email:";
 
 function escapeHtml(value) {
@@ -9,10 +10,33 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function mergeEmailList(defaults, extraValue) {
+  const extras = parseEmailList(extraValue);
+  const base = (defaults || [])
+    .flatMap((value) => parseEmailList(value))
+    .filter((email) => isLikelyEmail(email));
+  return [...new Set([...base, ...extras])];
+}
+
 export function missingCataloguePhotoEmailRecipients(env = {}) {
   const testTo = String(env.MISSING_CATALOGUE_PHOTOS_EMAIL_TEST_TO || "").trim();
   const override = String(env.MISSING_CATALOGUE_PHOTOS_EMAIL_TO || "").trim();
   return [...new Set(parseEmailList(testTo || override || DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_TO))];
+}
+
+export function missingCataloguePhotoEmailCc(env = {}, to = []) {
+  const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
+  return mergeEmailList(DEFAULT_MISSING_CATALOGUE_PHOTOS_EMAIL_CC, env.MISSING_CATALOGUE_PHOTOS_EMAIL_CC)
+    .filter((email) => !recipients.has(email));
+}
+
+function summaryLine(summary = {}) {
+  const missing = Number(summary.missing) || 0;
+  const withPhotos = Number(summary.withPhotos) || 0;
+  const excludedBuilding = Number(summary.excludedBuilding) || 0;
+  const uploadedLast24h = Number(summary.uploadedLast24h) || 0;
+  const itemsUploadedLast24h = Number(summary.itemsUploadedLast24h) || 0;
+  return `Priced catalogue items with no photo: ${missing}. Already have photos: ${withPhotos}. Building materials excluded: ${excludedBuilding}. Photos uploaded in the last 24 hours: ${uploadedLast24h} (${itemsUploadedLast24h} items).`;
 }
 
 export function buildMissingCataloguePhotoEmail({ date, rows = [], summary = {} } = {}) {
@@ -28,11 +52,12 @@ export function buildMissingCataloguePhotoEmail({ date, rows = [], summary = {} 
     return `<tr style="background:${background}">${cells.map((cell) => `<td style="padding:8px;border:1px solid #d7e4e8">${cell}</td>`).join("")}</tr>`;
   }).join("");
   const empty = '<tr><td colspan="3" style="padding:12px">Every included item already has a photo.</td></tr>';
+  const line = summaryLine({ ...summary, missing });
   return {
     subject: `Missing catalogue photos - ${date} (${missing})`,
     html: `<div style="font-family:Arial,sans-serif;color:#14323a">
       <h2 style="margin:0 0 8px">Missing catalogue photos - ${escapeHtml(date)}</h2>
-      <p style="margin:0 0 12px">Priced catalogue items with no photo: ${missing}. Already have photos: ${Number(summary.withPhotos) || 0}. Building materials excluded: ${Number(summary.excludedBuilding) || 0}.</p>
+      <p style="margin:0 0 12px">${line}</p>
       <table style="border-collapse:collapse;width:100%;font-size:13px">
         <thead><tr style="background:#0f4c5c;color:#ffffff">${headers.map((header) => `<th style="padding:10px;text-align:left">${header}</th>`).join("")}</tr></thead>
         <tbody>${body || empty}</tbody>
@@ -42,7 +67,7 @@ export function buildMissingCataloguePhotoEmail({ date, rows = [], summary = {} 
     </div>`,
     text: [
       `Missing catalogue photos - ${date}: ${missing}`,
-      `Priced catalogue items with no photo: ${missing}. Already have photos: ${Number(summary.withPhotos) || 0}. Building materials excluded: ${Number(summary.excludedBuilding) || 0}.`,
+      line,
       headers.join(" | "),
       ...rows.map((row) => [row.code, row.name, row.category].join(" | ")),
       ...(rows.length ? [] : ["Every included item already has a photo."]),

@@ -73,6 +73,9 @@ async function requireManager(admin, request) {
   return { user, profile, role };
 }
 
+const KPI_BOSS_MAP_KEY = "kpi_targets_boss_map_v1";
+const KPI_BOSS_MAP_TTL_MS = 30 * 60 * 1000;
+
 async function listFieldSalesmen(admin) {
   const { data, error } = await admin
     .from("profiles")
@@ -84,26 +87,68 @@ async function listFieldSalesmen(admin) {
   return mergeKpiTargetProfiles((data || []).filter(isKpiTargetProfile));
 }
 
-async function attachBosses(admin, salesmen) {
+async function loadBossAttachmentByUserId(admin) {
+  const { data: cachedRow, error: cachedError } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", KPI_BOSS_MAP_KEY)
+    .maybeSingle();
+  if (cachedError) throw cachedError;
+  try {
+    const cached = JSON.parse(String(cachedRow?.setting_value || "null"));
+    const builtAtMs = Date.parse(cached?.builtAt || "");
+    if (
+      cached?.version === 1
+      && Number.isFinite(builtAtMs)
+      && (Date.now() - builtAtMs) < KPI_BOSS_MAP_TTL_MS
+      && cached.byUserId
+      && typeof cached.byUserId === "object"
+    ) {
+      return cached.byUserId;
+    }
+  } catch {
+    // Rebuild below.
+  }
+
   const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (usersRes.error) throw usersRes.error;
 
-  const authById = new Map((usersRes.data?.users || []).map((user) => [user.id, user]));
   const { data: profiles, error } = await admin
     .from("profiles")
     .select("id,salesman_code,salesman_name");
   if (error) throw error;
 
-  return (salesmen || []).map((row) => {
-    const auth = authById.get(row.id);
-    const metadata = auth?.user_metadata || auth?.app_metadata || {};
+  const byUserId = {};
+  (usersRes.data?.users || []).forEach((user) => {
+    const metadata = user?.user_metadata || user?.app_metadata || {};
     const head = findHeadProfile(metadata, profiles || []);
     const bossCode = normalizeSalesmanCode(head?.salesman_code || metadata.head_salesman_code);
     const bossName = String(head?.salesman_name || metadata.head_salesman_name || "").trim();
-    return {
-      ...row,
+    byUserId[user.id] = {
       bossCode,
       bossName: bossName || bossCode || "",
+    };
+  });
+
+  await admin.from("system_settings").upsert({
+    setting_key: KPI_BOSS_MAP_KEY,
+    setting_value: JSON.stringify({
+      version: 1,
+      builtAt: new Date().toISOString(),
+      byUserId,
+    }),
+  }, { onConflict: "setting_key" });
+
+  return byUserId;
+}
+
+function attachBossesFromMap(salesmen, bossByUserId) {
+  return (salesmen || []).map((row) => {
+    const boss = bossByUserId?.[row.id] || {};
+    return {
+      ...row,
+      bossCode: boss.bossCode || "",
+      bossName: boss.bossName || "",
     };
   });
 }
@@ -122,14 +167,15 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const reportDate = parseReportDate(url.searchParams.get("month") || url.searchParams.get("date"));
-    const salesmen = await attachBosses(admin, await listFieldSalesmen(admin));
-    const salesmanPayload = salesmen.map((row) => ({
+    const fieldSalesmen = await listFieldSalesmen(admin);
+    const salesmanPayload = fieldSalesmen.map((row) => ({
       salesmanCode: row.salesman_code,
       salesmanName: row.salesman_name,
     }));
     const priorMonth = previousMonthKey(String(monthStartDate(reportDate) || reportDate).slice(0, 7));
     const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
-    const [snapshots, priorMonthActualsByCode] = await Promise.all([
+    const [salesmen, snapshots, priorMonthActualsByCode] = await Promise.all([
+      loadBossAttachmentByUserId(admin).then((bossByUserId) => attachBossesFromMap(fieldSalesmen, bossByUserId)),
       loadPerformanceSnapshotsForSalesmen(admin, {
         salesmen: salesmanPayload,
         reportDate,

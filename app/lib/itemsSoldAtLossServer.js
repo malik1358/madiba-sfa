@@ -20,6 +20,7 @@ async function fetchLossPages(admin, { dateFrom, dateTo, select }) {
       .from("active_sales")
       .select(select)
       .lt("profit_amount", 0)
+      .gt("quantity", 0)
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false })
       .range(from, from + PAGE_SIZE - 1);

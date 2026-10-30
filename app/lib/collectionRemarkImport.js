@@ -29,10 +29,12 @@ const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
  */
 const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /**
- * Bills Receivable: Ref. No. then Party's Name code (space or underscore).
- * Example: `NFD/986 1468_Bahr Al-Takhfid…` → party `1468` (not ref `986`).
+ * Bills Receivable: Ref. No. then Party's Name code.
+ * OCR often inserts brackets/pipes: `NFD/986 [1468 Bohr AlTakhfid…` → party `1468` (not ref `986`).
  */
-const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
+const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_\-—–]+(\d{3,5}C?)(?:[_\-\s—–\[]+)(?=[A-Za-z\u0600-\u06FF])/gi;
+/** Year-like tokens from OCR headers (1-Jan-26 to 28-Oct-26) are not party codes. */
+const YEAR_LIKE_CODE_RE = /^20[2-3]\d(?:C)?$/i;
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -77,7 +79,7 @@ function textAfterAnchor(text, anchor, code, length = 100) {
  */
 export function looksLikeLedgerPartyNameAfterCode(after = "") {
   const snippet = cleanCollectionRemarkText(after)
-    .replace(/^(?:[_\-\s—–]+)/, "")
+    .replace(/^(?:[_\-\s—–\[\|]+)/, "")
     .slice(0, 120);
   if (!snippet) return false;
 
@@ -104,12 +106,15 @@ export function looksLikeLedgerPartyNameAfterCode(after = "") {
 
 /** Pull the human ledger/party label that follows a leading account code. */
 export function extractLedgerPartyNameAfterCode(after = "") {
-  const snippet = cleanCollectionRemarkText(after).replace(/^(?:[_\-\s—–]+)/, "");
+  const snippet = cleanCollectionRemarkText(after).replace(/^(?:[_\-\s—–\[\|]+)/, "");
   if (!snippet) return "";
   const cut = snippet.split(
-    /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf|\d{1,3}(?:,\d{3})*\.\d{2}|Never|FAR)\b/i,
+    /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf|Rivach|Riyach|\d{1,3}(?:,\d{3})*\.\d{2}|Never|FAR)\b/i,
   )[0] || snippet;
-  const name = cleanCollectionRemarkText(cut).replace(/\s+/g, " ").trim();
+  const name = cleanCollectionRemarkText(cut)
+    .replace(/[\[\]|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!name || knownSalesmanNameRe("i").test(name) || name.length < 4) return "";
   return name.slice(0, 120);
 }
@@ -335,13 +340,22 @@ function extractRemarkFromSegment(segment) {
   return isNoiseRemark(text) ? "" : text;
 }
 
+function trimRemarkRowBleed(text = "") {
+  return cleanCollectionRemarkText(text)
+    .replace(/\s+\d{1,2}[-_/]?[A-Za-z]{0,3}[-_/]?\d{0,2}\s*[\[|_].*$/i, "")
+    .replace(/\s+\d{1,2}-[A-Za-z]{3}-\d{2}\b.*$/i, "")
+    .replace(/\s+\b[A-Z]{2,8}\/\d{2,5}\b.*$/i, "")
+    .replace(/\s*\[[\s|_]*$/g, "")
+    .trim();
+}
+
 function extractRemarkFromBillsSegment(segment) {
   const raw = String(segment || "");
   if (!raw.trim()) return "";
 
   const cue = raw.search(REMARK_CUE_RE);
   if (cue >= 0) {
-    const fromCue = cleanCollectionRemarkText(raw.slice(cue));
+    const fromCue = trimRemarkRowBleed(raw.slice(cue));
     if (!isNoiseRemark(fromCue)) return fromCue;
   }
 
@@ -371,11 +385,12 @@ function extractRemarkFromBillsSegment(segment) {
   // Fallback: last chunk with lowercase letters.
   const lowerChunk = text.match(/[a-z][a-zA-Z0-9 .,/&'%-]{4,}$/);
   if (lowerChunk) {
-    const candidate = cleanCollectionRemarkText(lowerChunk[0]);
+    const candidate = trimRemarkRowBleed(lowerChunk[0]);
     if (!isNoiseRemark(candidate)) return candidate;
   }
 
-  return isNoiseRemark(text) ? "" : text;
+  const cleaned = trimRemarkRowBleed(text);
+  return isNoiseRemark(cleaned) ? "" : cleaned;
 }
 
 function mergeCodeCandidates(...lists) {
@@ -384,6 +399,7 @@ function mergeCodeCandidates(...lists) {
   lists.flat().forEach((value) => {
     const code = normalizeCollectionRemarkCustomerCode(value);
     if (!code || seen.has(code)) return;
+    if (YEAR_LIKE_CODE_RE.test(code)) return;
     seen.add(code);
     out.push(code);
   });
@@ -408,8 +424,8 @@ export function extractBillRowCodeCandidates(segment = "", { primaryCode = "" } 
     const code = String(match[1] || "").toUpperCase();
     if (code) afterRef.push(code);
   }
-  // Underscore party forms where \b after the code fails (1468_Bahr).
-  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)(?=[_\-])/gi)) {
+  // Underscore / bracket party forms: NFD/986 [1468 Bohr… or 1468_Bahr…
+  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?=[_\-\s\[]*[A-Za-z\u0600-\u06FF])/gi)) {
     const code = String(match[1] || "").toUpperCase();
     if (code) afterRef.push(code);
   }
@@ -532,6 +548,20 @@ function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = fals
 
 function splitBillsReceivableRowSegments(text = "") {
   const source = String(text || "");
+  // OCR mangledates (`131un-26`) often; Ref. No. (NFD/986) survives and is the best row splitter.
+  const refStarts = [...source.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\b/gi)]
+    .map((match) => match.index)
+    .filter((index) => Number.isInteger(index));
+  if (refStarts.length >= 1) {
+    return refStarts.map((start, index) => {
+      const end = index + 1 < refStarts.length ? refStarts[index + 1] : source.length;
+      const lookBehind = source.slice(Math.max(0, start - 18), start);
+      const prefix = lookBehind.match(/(\d{1,2}[-_/]?[A-Za-z]{0,3}[-_/]?\d{0,2}|[A-Za-z]{1,3}\d{1,2})[\s\[|_]*$/);
+      const segStart = prefix ? start - prefix[0].length : start;
+      return source.slice(Math.max(0, segStart), end);
+    }).filter((segment) => segment.trim());
+  }
+
   // Only bill-row start dates (line start / after newline), never the Due-on date mid-row.
   const dateStarts = [...source.matchAll(/(?:^|[\n\r])\s*(\d{1,2}-[A-Za-z]{3}-\d{2})\b/gi)]
     .map((match) => {
@@ -584,11 +614,11 @@ export function parseBillsReceivableOcrText(ocrText = "") {
     const refPartyAnchors = collectCustomerCodeMatchAnchors(segment, BILL_REF_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
-    // Also catch `NFD/986 1468_Bahr…` where underscore breaks the letter lookahead variant.
-    const refUnderscore = [...segment.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)_(?=[A-Za-z\u0600-\u06FF])/gi)]
+    // Also catch `NFD/986 [1468 Bohr…` / `1468_Bahr…` OCR forms.
+    const refUnderscore = [...segment.matchAll(/\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?=[_\-\s\[]*[A-Za-z\u0600-\u06FF])/gi)]
       .map((match) => {
         const code = String(match[1] || "").toUpperCase();
-        if (!code) return null;
+        if (!code || YEAR_LIKE_CODE_RE.test(code)) return null;
         const codePos = segment.toUpperCase().indexOf(code, match.index);
         const anchor = codePos >= 0 ? codePos : match.index;
         if (isBillRefNumberFragment(segment, anchor)) return null;

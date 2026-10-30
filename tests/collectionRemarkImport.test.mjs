@@ -188,6 +188,22 @@ test("parseBillsReceivableOcrText uses party code after Ref. No. not NFD/986", (
   assert.doesNotMatch(rows[0].customerCodeCandidates.join(","), /\b986\b/);
 });
 
+test("parseBillsReceivableOcrText handles WhatsApp OCR brackets and mangled dates", () => {
+  const ocr = `
+Pending Bills
+131un-26_[NFD/986 [1468 Bohr AlTakhfid Trading Company [Riyadh [9315 [13Jui26 [107 [157  |AhmedNabil______|sunday 1st Nov. expected
+23-Apr-26 [NFD/478 [1435 Toot AlNoor Trading Establishment [Riyadh [531 [23-May-26 [158 [188 |ABDALLAANTHANATH _|sunday 1st Nov. expected
+1-Jun-26[NFD/901 [1313 Halima Hassan Ali Al-Zubaidi General Contracting Establishment_|Riyadh [733 [1-Ju-26 [119 [149 |ABDALLAANTHANATH _|sunday 1st Nov. expected
+`;
+  const rows = parseBillsReceivableOcrText(ocr);
+  const byCode = Object.fromEntries(rows.map((row) => [row.customerCode, row]));
+  assert.equal(byCode["1468"]?.remark, "sunday 1st Nov. expected");
+  assert.equal(byCode["1435"]?.remark, "sunday 1st Nov. expected");
+  assert.equal(byCode["1313"]?.customerCode, "1313");
+  assert.equal(Boolean(byCode["986"]), false);
+  assert.equal(Boolean(byCode["2026"]), false);
+});
+
 test("parseBillsReceivableOcrText keeps ledger primary and invoice candidates", () => {
   assert.equal(looksLikeLedgerPartyNameAfterCode("Ahmed Nabil sunday 1st Nov. expected"), false);
   assert.equal(looksLikeLedgerPartyNameAfterCode("Al -Rowad Wholesale Trading Est."), true);

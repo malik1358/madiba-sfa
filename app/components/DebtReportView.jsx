@@ -52,6 +52,8 @@ const TEXT = {
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
   received: { en: "Received last 10 days", ar: "المستلم آخر 10 أيام" },
   oldestInvoiceDays: { en: "Oldest invoice days", ar: "أقدم فاتورة بالأيام" },
+  lastPaymentDate: { en: "Last payment date", ar: "تاريخ آخر دفعة" },
+  lastPaymentAmount: { en: "Last payment amt", ar: "مبلغ آخر دفعة" },
   lastVisit: { en: "Last visit", ar: "آخر زيارة" },
   visitPerson: { en: "Visit person", ar: "اسم الزائر" },
   remarks: { en: "Remarks", ar: "الملاحظات" },
@@ -88,7 +90,22 @@ function formatDate(value) {
 }
 
 function filterKeysFor(view) {
-  const keys = ["code", "customer", "salesman", "cityArea", "above120", "totalOutstanding", "received", "oldestInvoiceDays", "lastVisit", "visitPerson", "remarks", "legal"];
+  const keys = [
+    "code",
+    "customer",
+    "salesman",
+    "cityArea",
+    "above120",
+    "totalOutstanding",
+    "received",
+    "lastPaymentDate",
+    "lastPaymentAmount",
+    "oldestInvoiceDays",
+    "lastVisit",
+    "visitPerson",
+    "remarks",
+    "legal",
+  ];
   if (view === "legal") keys.push("transferredOn", "transferredBy", "note");
   else keys.push("transferredOn", "note");
   return keys;
@@ -102,6 +119,10 @@ function rowFilterValue(row, key, yesLabel, noLabel) {
   if (key === "above120") return formatAmount(row.outstandingAbove120);
   if (key === "totalOutstanding") return formatAmount(row.totalOutstanding);
   if (key === "received") return formatAmount(row.receivedLast10Days);
+  if (key === "lastPaymentDate") return formatDate(row.lastPaymentDate);
+  if (key === "lastPaymentAmount") {
+    return String(row.lastPaymentDate || "").trim() ? formatAmount(row.lastPaymentAmount) : "-";
+  }
   if (key === "oldestInvoiceDays") return row.oldestInvoiceDays ? String(row.oldestInvoiceDays) : "-";
   if (key === "lastVisit") return formatDate(row.lastVisitDate);
   if (key === "visitPerson") return excelFilterCellText(row.lastVisitPerson || "-");
@@ -246,6 +267,8 @@ export default function DebtReportView({ view = "bad-debts" }) {
                         <BiExcelHead label={t("above120")} filterKey="above120" options={options} filters={filters} onChange={setFilter} className="moduleBiTotalCol" />
                         <BiExcelHead label={t("totalOutstanding")} filterKey="totalOutstanding" options={options} filters={filters} onChange={setFilter} className="moduleBiTotalCol" />
                         <BiExcelHead label={t("received")} filterKey="received" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("lastPaymentDate")} filterKey="lastPaymentDate" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("lastPaymentAmount")} filterKey="lastPaymentAmount" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("oldestInvoiceDays")} filterKey="oldestInvoiceDays" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("lastVisit")} filterKey="lastVisit" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("visitPerson")} filterKey="visitPerson" options={options} filters={filters} onChange={setFilter} />
@@ -268,6 +291,8 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td className="moduleBiTotalCol moduleBiMonthCell--down">{formatAmount(row.outstandingAbove120)}</td>
                           <td className="moduleBiTotalCol">{formatAmount(row.totalOutstanding)}</td>
                           <td>{formatAmount(row.receivedLast10Days)}</td>
+                          <td>{formatDate(row.lastPaymentDate)}</td>
+                          <td>{String(row.lastPaymentDate || "").trim() ? formatAmount(row.lastPaymentAmount) : "-"}</td>
                           <td>{row.oldestInvoiceDays || "-"}</td>
                           <td>{formatDate(row.lastVisitDate)}</td>
                           <td>{row.lastVisitPerson || "-"}</td>
@@ -282,7 +307,7 @@ export default function DebtReportView({ view = "bad-debts" }) {
                       ))}
                       {visibleRows.length === 0 ? (
                         <tr>
-                          <td colSpan={view === "legal" ? 15 : 14}>{t("noRows")}</td>
+                          <td colSpan={view === "legal" ? 17 : 16}>{t("noRows")}</td>
                         </tr>
                       ) : null}
                     </tbody>
@@ -296,6 +321,8 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td className="moduleBiTotalCol"><strong>{formatAmount(visibleSummary.above120)}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(visibleSummary.total)}</strong></td>
                           <td><strong>{formatAmount(visibleSummary.received)}</strong></td>
+                          <td />
+                          <td />
                           <td />
                           <td />
                           <td />

@@ -1,3 +1,4 @@
+import { lookupByCustomerCode, resolveLastPayment } from "./collectionAvgDays.js";
 import {
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
@@ -208,12 +209,22 @@ function visitColumns(record, customerCode, { visits = [], actorNames = {} } = {
   };
 }
 
+function paymentColumns(customerCode, receiptsByCustomer) {
+  if (!receiptsByCustomer) return { lastPaymentDate: "", lastPaymentAmount: 0 };
+  const payment = resolveLastPayment(lookupByCustomerCode(receiptsByCustomer, customerCode));
+  return {
+    lastPaymentDate: payment.date || "",
+    lastPaymentAmount: positiveMoney(payment.amount),
+  };
+}
+
 function reportRow(record, {
   fundsIndex,
   transfer = null,
   actorNames = {},
   customer = null,
   visits = [],
+  receiptsByCustomer = null,
   todayIso = new Date().toISOString(),
 } = {}) {
   const code = String(record?.customer_code || transfer?.customer_code || customer?.customer_code || "").trim();
@@ -232,6 +243,7 @@ function reportRow(record, {
     transferredBy: transferred ? String(actorNames[actorId] || "").trim() : "",
     legalNote: transferred ? String(transfer?.note || "").trim() : "",
     oldestInvoiceDays: oldestOpenInvoiceDays(record, todayIso),
+    ...paymentColumns(code, receiptsByCustomer),
     ...visitColumns(record, code, { visits, actorNames }),
   };
 }
@@ -252,6 +264,7 @@ export function buildPotentialBadDebtRows(records = [], {
   transfers = [],
   actorNames = {},
   visits = [],
+  receiptsByCustomer = null,
   todayKey = getKsaDateString(),
   todayIso = "",
   lookbackDays = POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
@@ -267,6 +280,7 @@ export function buildPotentialBadDebtRows(records = [], {
       transfer: legal.find((transfer) => customerAccountCodesMatch(transfer.customer_code, record.customer_code)) || null,
       actorNames,
       visits,
+      receiptsByCustomer,
       todayIso: asOfIso,
     }))
     .sort((left, right) => (
@@ -283,6 +297,7 @@ export function buildLegalTransferRows({
   fundsReceived = [],
   actorNames = {},
   visits = [],
+  receiptsByCustomer = null,
   todayKey = getKsaDateString(),
   todayIso = "",
   lookbackDays = POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
@@ -297,6 +312,7 @@ export function buildLegalTransferRows({
         transfer,
         actorNames,
         visits,
+        receiptsByCustomer,
         todayIso: asOfIso,
         customer: findMatchingCustomer(customers, transfer.customer_code),
       },

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   attachAvgDaysToPayToRecords,
   resolveCollectionAvgDaysToPay,
+  resolveLastPayment,
   resolveLastReceiptDate,
 } from "../app/lib/collectionAvgDays.js";
 
@@ -29,6 +30,16 @@ test("resolveLastReceiptDate returns the latest receipt date", () => {
     { receipt_date: "2026-02-20", amount: 50 },
   ]), "2026-03-02");
   assert.equal(resolveLastReceiptDate([]), "");
+});
+
+test("resolveLastPayment sums positive amounts on the latest receipt date", () => {
+  assert.deepEqual(resolveLastPayment([
+    { receipt_date: "2026-01-10", amount: 100 },
+    { receipt_date: "2026-02-01", amount: 40 },
+    { receipt_date: "2026-02-01", amount: 10 },
+    { receipt_date: "2026-02-01", amount: -5 },
+  ]), { date: "2026-02-01", amount: 50 });
+  assert.deepEqual(resolveLastPayment([]), { date: "", amount: 0 });
 });
 
 test("attachAvgDaysToPayToRecords fills avg_days_to_pay and last_receipt_date", () => {

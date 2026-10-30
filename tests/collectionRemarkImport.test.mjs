@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   expandCollectionRemarkCustomerCodeCandidates,
   extractBillRowCodeCandidates,
+  isBillRefNumberFragment,
   looksLikeLedgerPartyNameAfterCode,
   normalizeCollectionRemarkCustomerCode,
   normalizeCollectionRemarkImportRows,
@@ -168,6 +169,23 @@ Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Rem
   assert.equal(byCode["1062"].visitOutcome, "TRANSFER_TO_LEGAL");
   assert.equal(byCode["1468"].remark, "sunday 1st Nov. expected");
   assert.match(byCode["1468"].partyName || "", /Bahr Al-Takhfid/i);
+});
+
+test("parseBillsReceivableOcrText uses party code after Ref. No. not NFD/986", () => {
+  const row = "13-Jun-26 NFD/986 1468_Bahr Al-Takhfid Trading Company Riyadh 9,315.00 13-Jul-26 107 137 Ahmed Nabil sunday 1st Nov. expected";
+  assert.equal(isBillRefNumberFragment(row, row.indexOf("986")), true);
+  assert.equal(isBillRefNumberFragment(row, row.indexOf("1468")), false);
+
+  const candidates = extractBillRowCodeCandidates(row);
+  assert.ok(candidates.includes("1468"));
+  assert.equal(candidates.includes("986"), false);
+
+  const rows = parseBillsReceivableOcrText(`Pending Bills\n${row}`);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].customerCode, "1468");
+  assert.match(rows[0].partyName || "", /Bahr Al-Takhfid/i);
+  assert.equal(rows[0].remark, "sunday 1st Nov. expected");
+  assert.doesNotMatch(rows[0].customerCodeCandidates.join(","), /\b986\b/);
 });
 
 test("parseBillsReceivableOcrText keeps ledger primary and invoice candidates", () => {

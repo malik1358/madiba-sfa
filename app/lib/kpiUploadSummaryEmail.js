@@ -26,8 +26,15 @@ export const KPI_UPLOAD_SUMMARY_ROW_LABELS = {
   vsLastMonth: "vs last month",
 };
 
-/** Match the Total sales + Collection columns shown in the KPI Targets footer. */
-export const KPI_UPLOAD_SUMMARY_KPI_KEYS = ["totalSales", "collection"];
+/**
+ * Match the KPI Targets footer columns the live page uses for upload summary:
+ * Total sales, Collection (has a target), and Total cash collected (Collection + cash info).
+ */
+export const KPI_UPLOAD_SUMMARY_KPI_KEYS = [
+  "totalSales",
+  "collection",
+  "totalCashCollected",
+];
 
 export const KPI_UPLOAD_SUMMARY_PENDING_KEY = "kpi_upload_summary_email_pending_v1";
 export const KPI_UPLOAD_SUMMARY_LAST_SENT_KEY = "kpi_upload_summary_email_last_sent";
@@ -248,15 +255,16 @@ function formatSignedPercent(value) {
 function totalFilteredHtml(row) {
   const cell = row.totalFiltered || {};
   const actual = formatPerformanceKpiValue(row.key, cell.actual);
-  const target = Number(cell.target) > 0
+  const hasTarget = Number(cell.target) > 0;
+  const target = hasTarget
     ? formatPerformanceKpiValue(row.key, cell.target)
     : "—";
   const achievement = formatAchievementPercent(cell.achievement);
   const status = String(cell.statusLabel || "No target");
   return `
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(actual)}</div>
-    <div style="color:#64748b;font-size:12px;margin-top:2px;">Target ${escapeHtml(target)}</div>
-    <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>
+    ${hasTarget ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">Target ${escapeHtml(target)}</div>
+    <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : `<div style="color:#64748b;font-size:12px;margin-top:2px;">Information only</div>`}
     <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#fee2e2;color:${toneColor(cell.statusTone)};font-size:11px;font-weight:600;">
       ${escapeHtml(status)}
     </div>
@@ -269,10 +277,11 @@ function paceEstimateHtml(row) {
     return `<div style="color:#94a3b8;">—</div>`;
   }
   const estimate = formatPerformanceKpiValue(row.key, cell.estimate);
+  const hasTarget = Number(cell.target) > 0;
   const achievement = formatAchievementPercent(cell.achievement);
   return `
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(estimate)}</div>
-    <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>
+    ${hasTarget ? `<div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : ""}
     <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:11px;font-weight:600;">
       Estimate at current pace
     </div>
@@ -303,22 +312,26 @@ function vsLastMonthHtml(row, priorMonth) {
 
 function totalFilteredText(row) {
   const cell = row.totalFiltered || {};
+  const hasTarget = Number(cell.target) > 0;
   return [
     formatPerformanceKpiValue(row.key, cell.actual),
-    `target ${Number(cell.target) > 0 ? formatPerformanceKpiValue(row.key, cell.target) : "—"}`,
-    `${formatAchievementPercent(cell.achievement)} of target`,
+    hasTarget
+      ? `target ${formatPerformanceKpiValue(row.key, cell.target)}`
+      : "information only",
+    hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     cell.statusLabel || "No target",
-  ].join("; ");
+  ].filter(Boolean).join("; ");
 }
 
 function paceEstimateText(row) {
   const cell = row.paceEstimate || {};
   if (cell.estimate == null) return "—";
+  const hasTarget = Number(cell.target) > 0;
   return [
     formatPerformanceKpiValue(row.key, cell.estimate),
-    `${formatAchievementPercent(cell.achievement)} of target`,
+    hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     "Estimate at current pace",
-  ].join("; ");
+  ].filter(Boolean).join("; ");
 }
 
 function vsLastMonthText(row, priorMonth) {

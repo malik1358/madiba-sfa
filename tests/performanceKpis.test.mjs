@@ -791,6 +791,22 @@ test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", 
         newCustomers: 0,
         repeatCustomers: 1,
       },
+      THAMER: {
+        officeSupplies: 50,
+        localItemSales: 0,
+        otherSales: 10,
+        totalSales: 0,
+        collection: 0,
+        cashCollection: 0,
+      },
+      SM002: {
+        officeSupplies: 50,
+        localItemSales: 0,
+        otherSales: 10,
+        totalSales: 0,
+        collection: 0,
+        cashCollection: 0,
+      },
     },
   };
   const admin = {
@@ -808,6 +824,9 @@ test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", 
   assert.equal(stored.salesAsOfDate, "2026-09-30");
   assert.equal(byCode.SM001.totalSales, 40);
   assert.equal(byCode.SM001.totalCashCollected, 10);
+  // Thamer aliases collapse to SM002 once (not summed).
+  assert.equal(byCode.SM002.totalSales, 60);
+  assert.equal(byCode.THAMER, undefined);
 });
 
 test("does not move Others target into office supplies after save", () => {

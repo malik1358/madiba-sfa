@@ -257,7 +257,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `missing-catalogue-photos-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To `malik@pinasz.com` and `swami@pinasz.com`. Default CC `jigar.wadiya@noorshukran.com`. Optional `MISSING_CATALOGUE_PHOTOS_EMAIL_TO` / `MISSING_CATALOGUE_PHOTOS_EMAIL_CC`. | `/api/cron/missing-catalogue-photos-email` |
 | `bad-debt-report-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To Malik, Fazlur, and Soyeb. Optional `BAD_DEBT_REPORT_EMAIL_TO`. | `/api/cron/bad-debt-report-email` |
 | `items-sold-at-loss-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Previous KSA day negative-GP sales. Default To `malik@pinasz.com`. Optional `ITEMS_SOLD_AT_LOSS_EMAIL_TO`. | `/api/cron/items-sold-at-loss-email` |
-| `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection). Normal sends are scheduled 18 minutes after sales/receipt uploads and flushed by `/api/cron/inactivity-push`. | `/api/cron/kpi-upload-summary-email` |
+| `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection + Total cash collected). Normal sends are scheduled 18 minutes after sales/receipt uploads and flushed by `/api/cron/inactivity-push`. | `/api/cron/kpi-upload-summary-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `catalogue-drive-photos.yml` | `0 */8 * * *` | Every 8 hours (03:00, 11:00, 19:00 KSA). Uses existing `CRON_SECRET`. Optional `CATALOGUE_DRIVE_PHOTOS_URL`. | `/api/cron/catalogue-drive-photos` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |

@@ -517,18 +517,40 @@ export async function readStoredPerformanceKpiCache(admin, reportDate) {
 /**
  * Flat prior-month (or any month) actuals from the stored cache only — never rebuilds.
  */
+/**
+ * Prefer the stronger of two derived actual rows when collapsing report aliases
+ * (e.g. SM002 / THAMER) so vs-last-month does not under- or over-count.
+ */
+function preferKpiActualsRow(current, candidate) {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  const score = (row) => (
+    Math.abs(Number(row?.totalSales || 0) || 0)
+    + Math.abs(Number(row?.collection || 0) || 0)
+    + Math.abs(Number(row?.cashCollection || 0) || 0)
+  );
+  return score(candidate) > score(current) ? candidate : current;
+}
+
+/**
+ * Soft-read monthly KPI actuals without stamp/batch rebuild checks.
+ * Keys are canonical report salesman codes; totalSales / totalCashCollected are derived.
+ */
 export async function loadStoredKpiActualsByCode(admin, reportDate) {
   const cache = await readStoredPerformanceKpiCache(admin, reportDate);
   const source = cache?.actualsBySalesman;
   if (!source || typeof source !== "object") return {};
   const byCode = {};
   Object.entries(source).forEach(([code, actuals]) => {
-    const key = normalizeSalesmanCode(code);
-    if (!key || !actuals || typeof actuals !== "object") return;
-    byCode[key] = withDerivedKpiActuals({
+    if (!actuals || typeof actuals !== "object") return;
+    const raw = normalizeSalesmanCode(code);
+    const key = normalizeReportSalesmanCode(raw) || raw;
+    if (!key) return;
+    const derived = withDerivedKpiActuals({
       ...emptyPerformanceActuals(),
       ...actuals,
     });
+    byCode[key] = preferKpiActualsRow(byCode[key], derived);
   });
   return byCode;
 }

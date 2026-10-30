@@ -66,7 +66,7 @@ test("next sendAfter uses 18 minute default", () => {
   );
 });
 
-test("summary table transposes footer rows into columns for total sales and collection", () => {
+test("summary table transposes footer rows into columns for sales, collection, and total cash", () => {
   const summary = buildKpiUploadSummaryTable({
     rows: [ahmed],
     reportDate: "2026-10-01",
@@ -81,7 +81,7 @@ test("summary table transposes footer rows into columns for total sales and coll
         officeSupplies: 0,
         localItemSales: 0,
         otherSales: 0,
-        cashCollection: 0,
+        cashCollection: 50_000,
       },
     },
   });
@@ -93,7 +93,7 @@ test("summary table transposes footer rows into columns for total sales and coll
     "paceEstimate",
     "vsLastMonth",
   ]);
-  assert.equal(summary.rows.length, 2);
+  assert.equal(summary.rows.length, 3);
   assert.equal(summary.rows[0].key, "totalSales");
   assert.equal(summary.rows[0].label, "Total sales");
   assert.equal(summary.rows[0].totalFiltered.actual, 200_000);
@@ -102,6 +102,10 @@ test("summary table transposes footer rows into columns for total sales and coll
   assert.ok(summary.rows[0].vsLastMonth);
   assert.equal(summary.rows[1].key, "collection");
   assert.equal(summary.rows[1].totalFiltered.actual, 300_000);
+  assert.equal(summary.rows[2].key, "totalCashCollected");
+  assert.equal(summary.rows[2].label, "Total cash collected");
+  assert.equal(summary.rows[2].totalFiltered.actual, 300_000);
+  assert.equal(summary.rows[2].vsLastMonth.priorActual, 250_000);
 });
 
 test("summary table reads nested snapshot targets like the KPI Targets page", () => {
@@ -151,6 +155,7 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /vs last month/);
   assert.match(message.html, /Total sales/);
   assert.match(message.html, /Collection/);
+  assert.match(message.html, /Total cash collected/);
   assert.match(message.html, /#0f4c5c/);
   assert.match(message.text, /Uploads: sales-upload, receipt-upload|sales-upload/);
 });

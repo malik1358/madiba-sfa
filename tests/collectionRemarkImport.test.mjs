@@ -8,6 +8,7 @@ import {
   parseCollectionRemarkImportText,
   parseCollectionRemarkOcrText,
   parseCollectionRemarkTableText,
+  sanitizeCollectionRemarkComment,
   suggestCollectionRemarkVisitOutcome,
 } from "../app/lib/collectionRemarkImport.js";
 
@@ -44,8 +45,33 @@ The court has ruled in our favor, and enforcement proceedings are currently unde
   assert.equal(rows[1].customerCode, "1086C");
   assert.match(rows[1].remark, /enforcement/i);
   assert.equal(rows[2].customerCode, "1164C");
-  assert.match(rows[2].remark, /Ahmed hadyah/i);
+  assert.match(rows[2].remark, /fallwing up with this clint/i);
+  assert.doesNotMatch(rows[2].remark, /Ahmed\s+hadyah/i);
   assert.equal(rows[2].visitOutcome, "ASKED_COME_LATER");
+});
+
+test("sanitizeCollectionRemarkComment drops salesman and customer names", () => {
+  assert.equal(
+    sanitizeCollectionRemarkComment(
+      "Ahmed Nabil good return in next 2 days",
+      { customerCode: "1058" },
+    ),
+    "good return in next 2 days",
+  );
+  assert.equal(
+    sanitizeCollectionRemarkComment(
+      "1058 Al -Rowad Wholesale Trading Est. ABDALLA ANTHANATH follow up / dealyed due to wrong credit note..",
+      { customerCode: "1058" },
+    ),
+    "follow up / dealyed due to wrong credit note..",
+  );
+  assert.doesNotMatch(
+    sanitizeCollectionRemarkComment(
+      "1457 — Hayat Al Shabab Trading company Ahmed Nabil sunday 1st Nov. expected",
+      { customerCode: "1457" },
+    ),
+    /Hayat|Ahmed Nabil/i,
+  );
 });
 
 test("parseCollectionRemarkTableText uses Customer and Remarks headers", () => {
@@ -94,9 +120,11 @@ Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Rem
 `;
   const rows = parseBillsReceivableOcrText(ocr);
   const byCode = Object.fromEntries(rows.map((row) => [row.customerCode, row]));
-  assert.equal(byCode["1058"].remark.includes("good return"), true);
-  assert.match(byCode["1053"].remark, /follow up/i);
+  assert.equal(byCode["1058"].remark, "good return in next 2 days");
+  assert.equal(byCode["1053"].remark, "follow up / dealyed due to wrong credit note..");
   assert.match(byCode["1005"].remark, /Blanace confirmation/i);
+  assert.doesNotMatch(byCode["1058"].remark, /Ahmed Nabil|Rowad|Trading/i);
+  assert.doesNotMatch(byCode["1053"].remark, /ABDALLA|RABEE/i);
   assert.equal(byCode["1005"].visitOutcome, "TRANSFER_TO_LEGAL");
   assert.match(byCode["1062"].remark, /Shop closed/i);
   assert.equal(byCode["1062"].visitOutcome, "TRANSFER_TO_LEGAL");
@@ -109,7 +137,8 @@ Pending Bills
 `);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].customerCode, "1457");
-  assert.match(rows[0].remark, /sunday 1st Nov/i);
+  assert.equal(rows[0].remark, "sunday 1st Nov. expected");
+  assert.doesNotMatch(rows[0].remark, /Hayat|Ahmed Nabil/i);
 });
 
 test("parseCollectionRemarkTableText accepts Party's Name header", () => {

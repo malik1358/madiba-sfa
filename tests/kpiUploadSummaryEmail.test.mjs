@@ -8,6 +8,7 @@ import {
   kpiUploadSummarySignature,
   mergeKpiUploadSummaryPending,
   nextKpiUploadSummarySendAfter,
+  resolveKpiUploadSummaryEmailCc,
   resolveKpiUploadSummaryEmailRecipients,
 } from "../app/lib/kpiUploadSummaryEmail.js";
 import { runKpiUploadSummaryEmailCycle } from "../app/lib/kpiUploadSummaryEmailServer.js";
@@ -169,6 +170,24 @@ test("recipients default to malik and accept overrides", () => {
   assert.deepEqual(
     resolveKpiUploadSummaryEmailRecipients({ KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO: "test@x.com" }),
     ["test@x.com"],
+  );
+});
+
+test("CC defaults to Fazlur and accepts extras without duplicating To", () => {
+  assert.deepEqual(
+    resolveKpiUploadSummaryEmailCc({}, ["malik@pinasz.com"]),
+    ["fazlur.rahiman@noorshukran.com"],
+  );
+  assert.deepEqual(
+    resolveKpiUploadSummaryEmailCc(
+      { KPI_UPLOAD_SUMMARY_EMAIL_CC: "extra@x.com" },
+      ["malik@pinasz.com"],
+    ),
+    ["fazlur.rahiman@noorshukran.com", "extra@x.com"],
+  );
+  assert.deepEqual(
+    resolveKpiUploadSummaryEmailCc({}, ["fazlur.rahiman@noorshukran.com"]),
+    [],
   );
 });
 

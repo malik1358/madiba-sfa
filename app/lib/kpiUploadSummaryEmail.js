@@ -43,6 +43,7 @@ export const KPI_UPLOAD_SUMMARY_LAST_SENT_KEY = "kpi_upload_summary_email_last_s
 export const KPI_UPLOAD_SUMMARY_DEBOUNCE_MS = 18 * 60 * 1000;
 
 export const DEFAULT_KPI_UPLOAD_SUMMARY_EMAIL_TO = "malik@pinasz.com";
+export const DEFAULT_KPI_UPLOAD_SUMMARY_EMAIL_CC = "fazlur.rahiman@noorshukran.com";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -70,8 +71,10 @@ export function resolveKpiUploadSummaryEmailRecipients(env = process.env) {
 
 export function resolveKpiUploadSummaryEmailCc(env = process.env, to = []) {
   const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
-  return mergeEmailList("", env.KPI_UPLOAD_SUMMARY_EMAIL_CC)
-    .filter((email) => !recipients.has(email.toLowerCase()));
+  return mergeEmailList(
+    DEFAULT_KPI_UPLOAD_SUMMARY_EMAIL_CC,
+    env.KPI_UPLOAD_SUMMARY_EMAIL_CC,
+  ).filter((email) => !recipients.has(email.toLowerCase()));
 }
 
 export function buildKpiUploadSummaryReportUrl(env = process.env) {

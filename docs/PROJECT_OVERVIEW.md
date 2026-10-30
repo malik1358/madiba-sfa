@@ -60,7 +60,7 @@ UI strings are English and Arabic through `app/lib/appLanguage.js`. `profiles.pr
 ## How a field day works
 
 1. User signs in with Supabase Auth.
-2. Every non-admin role must record `MORNING_ATTENDANCE` in `daily_activity_logs` for the current KSA date before using the app. Other routes redirect to My Day; collection routes show a blocking Morning Attendance overlay so collectors punch in there.
+2. Every non-admin role must record `MORNING_ATTENDANCE` in `daily_activity_logs` for the current KSA date before field use. Password sign-in at the saved home pin is desk mode only (not Login); modules stay open while GPS is at home, and Morning Attendance is required again after leaving home. Other routes otherwise redirect to My Day; collection routes show a blocking Morning Attendance overlay so collectors punch in there (skipped while desk mode is active).
 3. Visits, orders, prospects, and collections write activity rows. Those rows reset the 45-minute inactivity warning.
 4. GPS pings during an open work session are stored as `GPS_PING` notes. Customer coordinates are updated through the location API and `customer_gps_history`.
 5. Lunch is `LUNCH_BREAK_OUT` / `LUNCH_BREAK_IN`. End of day is `END_OF_DAY`. A cron auto-closes workdays that were left open.

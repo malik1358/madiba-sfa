@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../lib/authSession";
+import { clearDeskModeState } from "../lib/deskMode";
 import { NATIVE_WORKDAY_STOP_EVENT } from "../lib/nativeFieldTracking";
 import { getSupabaseClient } from "../lib/supabase";
 import { shareTextOnWhatsapp } from "../lib/whatsappShare";
@@ -85,6 +86,12 @@ export function useLogoutWithDaySummary() {
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(NATIVE_WORKDAY_STOP_EVENT));
+      }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) clearDeskModeState(session.user.id);
+      } catch {
+        // Desk-mode cleanup is best-effort before sign-out.
       }
       await supabase.auth.signOut();
       setOpen(false);

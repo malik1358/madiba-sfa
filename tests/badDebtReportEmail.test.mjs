@@ -48,6 +48,8 @@ test("salesman tables leave legal customers out and the legal table stays separa
       customerName: "Beta",
       salesman: "SALEH",
       outstandingAbove120: 800,
+      lastPaymentDate: "2026-09-12",
+      lastPaymentAmount: 1250.5,
       oldestInvoiceDays: 188,
       lastVisitDate: "2026-10-02",
       lastVisitPerson: "SALEH",
@@ -78,8 +80,13 @@ test("salesman tables leave legal customers out and the legal table stays separa
   assert.match(message.html, />New</);
   assert.match(message.html, /#fff4c2/);
   assert.match(message.html, /Oldest invoice days/);
+  assert.match(message.html, /Last payment date/);
+  assert.match(message.html, /Last payment amt/);
+  assert.match(message.html, /12\/09\/2026/);
+  assert.match(message.html, /1,250\.50/);
   assert.match(message.html, /Promised Friday/);
   assert.match(message.text, /oldest 188/);
+  assert.match(message.text, /last payment 12\/09\/2026 1,250\.50/);
   assert.match(message.text, /NEW 1002/);
   assert.match(message.text, /NEW 2001/);
   assert.equal(message.addedToday, 2);

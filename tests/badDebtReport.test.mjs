@@ -149,3 +149,20 @@ test("rows keep the oldest open invoice and the later visit", () => {
   assert.equal(rows[0].lastVisitPerson, "FAZLUR");
   assert.equal(rows[0].lastVisitRemark, "Shop closed");
 });
+
+test("rows show last Tally payment date and amount", () => {
+  const receiptsByCustomer = new Map([
+    ["1001", [
+      { receipt_date: "2026-08-01", amount: 200 },
+      { receipt_date: "2026-09-15", amount: 500 },
+      { receipt_date: "2026-09-15", amount: 50 },
+      { receipt_date: "2026-09-15", amount: -10 },
+    ]],
+  ]);
+  const rows = buildPotentialBadDebtRows([record()], {
+    todayKey,
+    receiptsByCustomer,
+  });
+  assert.equal(rows[0].lastPaymentDate, "2026-09-15");
+  assert.equal(rows[0].lastPaymentAmount, 550);
+});

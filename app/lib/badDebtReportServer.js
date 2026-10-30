@@ -1,3 +1,4 @@
+import { loadReceiptRowsByCustomer } from "./collectionAvgDays.js";
 import { formatCollectionUserDisplayName } from "./geo.js";
 import {
   POTENTIAL_BAD_DEBT_RECEIPT_LOOKBACK_DAYS,
@@ -194,10 +195,11 @@ export async function loadDebtReports(admin, {
     visibleSchedulerUserIds: null,
   };
 
-  const [records, transfers, fundsReceived] = await Promise.all([
+  const [records, transfers, fundsReceived, receiptsByCustomer] = await Promise.all([
     fetchRecords(admin, scope),
     loadLegalTransferRows(admin),
     loadFundsReceivedVisits(admin, { todayKey }),
+    loadReceiptRowsByCustomer(admin),
   ]);
 
   const reportRecords = Array.isArray(records) ? records : [];
@@ -223,6 +225,7 @@ export async function loadDebtReports(admin, {
     customers,
     actorNames,
     visits,
+    receiptsByCustomer,
     todayKey,
     todayIso,
   };

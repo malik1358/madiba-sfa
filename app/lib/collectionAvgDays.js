@@ -146,15 +146,30 @@ export function resolveCollectionAvgDaysToPay(options = {}) {
   return behavior?.avgDaysToPay ?? null;
 }
 
-/** Latest receipt_date (YYYY-MM-DD) from receipt register rows, or "". */
-export function resolveLastReceiptDate(receipts = []) {
-  let latest = "";
+/**
+ * Latest positive Tally receipt for a customer: date (YYYY-MM-DD) and
+ * the sum of positive amounts on that date. Empty date / 0 when none.
+ */
+export function resolveLastPayment(receipts = []) {
+  let latestDate = "";
+  let amountOnDate = 0;
   (Array.isArray(receipts) ? receipts : []).forEach((row) => {
     const date = String(row?.receipt_date || "").trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    if (!latest || date > latest) latest = date;
+    const amount = toNumber(row?.amount);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || amount <= 0) return;
+    if (!latestDate || date > latestDate) {
+      latestDate = date;
+      amountOnDate = amount;
+      return;
+    }
+    if (date === latestDate) amountOnDate += amount;
   });
-  return latest;
+  return { date: latestDate, amount: amountOnDate };
+}
+
+/** Latest receipt_date (YYYY-MM-DD) from receipt register rows, or "". */
+export function resolveLastReceiptDate(receipts = []) {
+  return resolveLastPayment(receipts).date;
 }
 
 function shiftIsoDays(isoDate, daysBack = 0) {

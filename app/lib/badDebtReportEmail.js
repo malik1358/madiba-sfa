@@ -130,12 +130,14 @@ export function buildPotentialBadDebtsSection({
     `Potential bad debts — ${who}`,
     ...(asOfLabel ? [`As of ${asOfLabel} (KSA)`] : []),
     "Outstanding older than 120 days · no Funds Received in the last 10 days · legal transfers omitted",
-    "Customer | City/Area | >120 | Total outstanding | Oldest invoice days | Last visit | Visit person | Remarks",
+    "Customer | City/Area | >120 | Total outstanding | Last payment date | Last payment amt | Oldest invoice days | Last visit | Visit person | Remarks",
     ...openRows.map((row) => [
       `${row.customerCode || ""} ${row.customerName || ""}`.trim(),
       row.cityArea || "-",
       formatMoney(row.outstandingAbove120),
       formatMoney(row.totalOutstanding),
+      formatDate(row.lastPaymentDate),
+      row.lastPaymentDate ? formatMoney(row.lastPaymentAmount) : "-",
       row.oldestInvoiceDays || "-",
       formatDate(row.lastVisitDate),
       row.lastVisitPerson || "-",
@@ -184,6 +186,13 @@ function moneyCell(value, emphasize = false) {
   return `<td style="padding:8px;border:1px solid #d7e4e8;text-align:right;${color}">${escapeHtml(formatMoney(value))}</td>`;
 }
 
+function paymentCells(row) {
+  const hasPayment = Boolean(String(row.lastPaymentDate || "").trim());
+  return `
+        <td style="padding:8px;border:1px solid #d7e4e8;">${escapeHtml(formatDate(row.lastPaymentDate))}</td>
+        <td style="padding:8px;border:1px solid #d7e4e8;text-align:right;">${escapeHtml(hasPayment ? formatMoney(row.lastPaymentAmount) : "-")}</td>`;
+}
+
 function activityCells(row) {
   return `
         <td style="padding:8px;border:1px solid #d7e4e8;text-align:right;">${escapeHtml(row.oldestInvoiceDays || "-")}</td>
@@ -200,16 +209,17 @@ function badDebtTable(rows) {
         <td style="padding:8px;border:1px solid #d7e4e8;">${escapeHtml(row.cityArea || "-")}</td>
         ${moneyCell(row.outstandingAbove120, true)}
         ${moneyCell(row.totalOutstanding)}
+        ${paymentCells(row)}
         ${activityCells(row)}
       </tr>`).join("")
-    : `<tr><td colspan="8" style="padding:12px;border:1px solid #d7e4e8;">No customers.</td></tr>`;
+    : `<tr><td colspan="10" style="padding:12px;border:1px solid #d7e4e8;">No customers.</td></tr>`;
   const footer = rows.length
     ? `<tr style="background:#0f4c5c;color:#ffffff;font-weight:700;">
         <td style="padding:10px 8px;border:1px solid #0a3a45;">Total (${totals.customers})</td>
         <td style="padding:10px 8px;border:1px solid #0a3a45;"></td>
         <td style="padding:10px 8px;border:1px solid #0a3a45;text-align:right;">${escapeHtml(formatMoney(totals.above120))}</td>
         <td style="padding:10px 8px;border:1px solid #0a3a45;text-align:right;">${escapeHtml(formatMoney(totals.total))}</td>
-        <td colspan="4" style="padding:10px 8px;border:1px solid #0a3a45;"></td>
+        <td colspan="6" style="padding:10px 8px;border:1px solid #0a3a45;"></td>
       </tr>`
     : "";
   return renderTable(
@@ -218,6 +228,8 @@ function badDebtTable(rows) {
       { label: "City / Area" },
       { label: ">120", align: "right" },
       { label: "Total outstanding", align: "right" },
+      { label: "Last payment date" },
+      { label: "Last payment amt", align: "right" },
       { label: "Oldest invoice days", align: "right" },
       { label: "Last visit" },
       { label: "Visit person" },
@@ -242,18 +254,19 @@ function legalTable(rows) {
         <td style="padding:8px;border:1px solid #d7e4e8;">${escapeHtml(row.cityArea || "-")}</td>
         ${moneyCell(row.outstandingAbove120, true)}
         ${moneyCell(row.totalOutstanding)}
+        ${paymentCells(row)}
         ${activityCells(row)}
         <td style="padding:8px;border:1px solid #d7e4e8;">${escapeHtml(formatDate(row.transferredAt))}</td>
         <td style="padding:8px;border:1px solid #d7e4e8;">${escapeHtml(row.legalNote || "-")}</td>
       </tr>`).join("")
-    : `<tr><td colspan="11" style="padding:12px;border:1px solid #d7e4e8;">No customers are transferred to legal.</td></tr>`;
+    : `<tr><td colspan="13" style="padding:12px;border:1px solid #d7e4e8;">No customers are transferred to legal.</td></tr>`;
   const footer = sorted.length
     ? `<tr style="background:#0f4c5c;color:#ffffff;font-weight:700;">
         <td style="padding:10px 8px;border:1px solid #0a3a45;">Total (${totals.customers})</td>
         <td colspan="2" style="padding:10px 8px;border:1px solid #0a3a45;"></td>
         <td style="padding:10px 8px;border:1px solid #0a3a45;text-align:right;">${escapeHtml(formatMoney(totals.above120))}</td>
         <td style="padding:10px 8px;border:1px solid #0a3a45;text-align:right;">${escapeHtml(formatMoney(totals.total))}</td>
-        <td colspan="6" style="padding:10px 8px;border:1px solid #0a3a45;"></td>
+        <td colspan="8" style="padding:10px 8px;border:1px solid #0a3a45;"></td>
       </tr>`
     : "";
   return renderTable(
@@ -263,6 +276,8 @@ function legalTable(rows) {
       { label: "City / Area" },
       { label: ">120", align: "right" },
       { label: "Total outstanding", align: "right" },
+      { label: "Last payment date" },
+      { label: "Last payment amt", align: "right" },
       { label: "Oldest invoice days", align: "right" },
       { label: "Last visit" },
       { label: "Visit person" },
@@ -313,10 +328,10 @@ export function buildBadDebtReportEmail({
       `Open customers: ${openTotals.customers}. Above 120: ${formatMoney(openTotals.above120)}. Transferred to legal: ${legalTotals.customers}. New today: ${addedToday}.`,
       ...groups.flatMap((group) => [
         `${group.salesman}`,
-        ...group.rows.map((row) => `${row.isNewToday ? "NEW " : ""}${row.customerCode} ${row.customerName} >120 ${formatMoney(row.outstandingAbove120)} oldest ${row.oldestInvoiceDays || "-"} last visit ${formatDate(row.lastVisitDate)} ${row.lastVisitPerson || "-"} ${row.lastVisitRemark || "-"}`),
+        ...group.rows.map((row) => `${row.isNewToday ? "NEW " : ""}${row.customerCode} ${row.customerName} >120 ${formatMoney(row.outstandingAbove120)} last payment ${formatDate(row.lastPaymentDate)} ${row.lastPaymentDate ? formatMoney(row.lastPaymentAmount) : "-"} oldest ${row.oldestInvoiceDays || "-"} last visit ${formatDate(row.lastVisitDate)} ${row.lastVisitPerson || "-"} ${row.lastVisitRemark || "-"}`),
       ]),
       "Transferred to legal",
-      ...legalRows.map((row) => `${row.isNewToday ? "NEW " : ""}${row.customerCode} ${row.customerName} ${row.salesman || ""} ${formatDate(row.transferredAt)} oldest ${row.oldestInvoiceDays || "-"} last visit ${formatDate(row.lastVisitDate)} ${row.lastVisitPerson || "-"}`),
+      ...legalRows.map((row) => `${row.isNewToday ? "NEW " : ""}${row.customerCode} ${row.customerName} ${row.salesman || ""} ${formatDate(row.transferredAt)} last payment ${formatDate(row.lastPaymentDate)} ${row.lastPaymentDate ? formatMoney(row.lastPaymentAmount) : "-"} oldest ${row.oldestInvoiceDays || "-"} last visit ${formatDate(row.lastVisitDate)} ${row.lastVisitPerson || "-"}`),
     ].join("\n"),
   };
 }

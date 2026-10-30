@@ -37,6 +37,8 @@ import {
   loadPerformanceSnapshotsForSalesmen,
   loadSalesActuals,
   loadSalesPaceShares,
+  loadStoredKpiActualsByCode,
+  readStoredPerformanceKpiCache,
 } from "../app/lib/performanceKpisServer.js";
 
 function activeSalesAdmin(rows) {
@@ -681,6 +683,131 @@ test("performance snapshots reuse source actuals cached for the active batch", a
   assert.equal(queriedTables.includes("active_sales"), false);
   assert.equal(queriedTables.includes("customers"), false);
   assert.equal(queriedTables.includes("collection_visits"), false);
+});
+
+test("allowRebuild false serves stored KPI cache even when receipt stamp differs", async () => {
+  const queriedTables = [];
+  const cache = {
+    version: 8,
+    receiptStamp: "old-stamp",
+    salesAsOfDate: "2026-10-08",
+    receiptAsOfDate: "2026-10-07",
+    batchId: "10",
+    actualsBySalesman: {
+      SM001: {
+        officeSupplies: 100,
+        localItemSales: 0,
+        otherSales: 50,
+        collection: 40,
+        cashCollection: 10,
+        newCustomers: 1,
+        repeatCustomers: 0,
+      },
+    },
+    paceBySalesman: {},
+  };
+  const admin = {
+    from(table) {
+      queriedTables.push(table);
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq: (key, value) => { filters[key] = value; return query; },
+        in: () => query,
+        maybeSingle: async () => ({
+          data: {
+            setting_value: filters.setting_key?.startsWith("performance_kpi_actuals_v2:")
+              ? JSON.stringify(cache)
+              : filters.setting_key === "active_sales_batch_id"
+                ? "99"
+                : filters.setting_key === "receipt_register_uploaded_at"
+                  ? "new-stamp"
+                  : null,
+          },
+          error: null,
+        }),
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return query;
+    },
+  };
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
+    reportDate: "2026-10-01",
+    allowRebuild: false,
+  });
+
+  assert.equal(snapshot.actuals.totalSales, 150);
+  assert.equal(snapshot.actuals.collection, 40);
+  assert.equal(queriedTables.includes("active_sales"), false);
+  assert.equal(queriedTables.includes("customers"), false);
+});
+
+test("allowRebuild false does not rebuild when KPI cache is missing", async () => {
+  const queriedTables = [];
+  let upsertCalled = false;
+  const admin = {
+    from(table) {
+      queriedTables.push(table);
+      const query = {
+        select: () => query,
+        eq: () => query,
+        in: () => query,
+        upsert: async () => {
+          upsertCalled = true;
+          return { error: null };
+        },
+        maybeSingle: async () => ({ data: null, error: null }),
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return query;
+    },
+  };
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
+    reportDate: "2026-10-01",
+    allowRebuild: false,
+  });
+
+  assert.equal(snapshot.actuals.totalSales, 0);
+  assert.equal(upsertCalled, false);
+  assert.equal(queriedTables.includes("active_sales"), false);
+});
+
+test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", async () => {
+  const cache = {
+    version: 8,
+    receiptStamp: "any",
+    salesAsOfDate: "2026-09-30",
+    receiptAsOfDate: "2026-09-29",
+    batchId: "1",
+    actualsBySalesman: {
+      SM001: {
+        officeSupplies: 20,
+        localItemSales: 5,
+        otherSales: 15,
+        collection: 8,
+        cashCollection: 2,
+        newCustomers: 0,
+        repeatCustomers: 1,
+      },
+    },
+  };
+  const admin = {
+    from() {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({ data: { setting_value: JSON.stringify(cache) }, error: null }),
+      };
+      return query;
+    },
+  };
+  const stored = await readStoredPerformanceKpiCache(admin, "2026-09-01");
+  const byCode = await loadStoredKpiActualsByCode(admin, "2026-09-01");
+  assert.equal(stored.salesAsOfDate, "2026-09-30");
+  assert.equal(byCode.SM001.totalSales, 40);
+  assert.equal(byCode.SM001.totalCashCollected, 10);
 });
 
 test("does not move Others target into office supplies after save", () => {

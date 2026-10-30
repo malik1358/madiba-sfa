@@ -20,7 +20,7 @@ import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmai
 import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer.js";
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
-import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
+import { warmPerformanceKpiCachesAfterUpload } from "../../lib/performanceKpisServer.js";
 import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
 
 export const runtime = "nodejs";
@@ -297,7 +297,7 @@ export async function POST(request) {
         const kpiAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
-        await rebuildPerformanceKpiCache(kpiAdmin);
+        await warmPerformanceKpiCachesAfterUpload(kpiAdmin);
         const scheduled = await scheduleKpiUploadSummaryEmail(kpiAdmin, { trigger: "receipt-upload" });
         console.info("KPI upload summary email scheduled after receipt upload:", scheduled);
       } catch (cacheError) {

@@ -284,7 +284,8 @@ export function buildPotentialBadDebtRows(records = [], {
       todayIso: asOfIso,
     }))
     .sort((left, right) => (
-      right.outstandingAbove120 - left.outstandingAbove120
+      Number(!String(right.lastPaymentDate || "").trim()) - Number(!String(left.lastPaymentDate || "").trim())
+      || right.outstandingAbove120 - left.outstandingAbove120
       || right.totalOutstanding - left.totalOutstanding
       || String(left.customerName || "").localeCompare(String(right.customerName || ""))
     ));
@@ -318,7 +319,8 @@ export function buildLegalTransferRows({
       },
     ))
     .sort((left, right) => (
-      String(right.transferredAt || "").localeCompare(String(left.transferredAt || ""))
+      Number(!String(right.lastPaymentDate || "").trim()) - Number(!String(left.lastPaymentDate || "").trim())
+      || String(right.transferredAt || "").localeCompare(String(left.transferredAt || ""))
       || right.outstandingAbove120 - left.outstandingAbove120
       || String(left.customerName || "").localeCompare(String(right.customerName || ""))
     ));

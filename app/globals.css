@@ -4585,6 +4585,24 @@ th:has(.moduleTableColumnFilterInput) {
   color: #b91c1c;
 }
 
+.moduleTable tbody tr.debtReportRow-no-payment td,
+.moduleTable tbody tr.debtReportRow-no-payment:nth-child(even) td,
+.moduleTable tbody tr.debtReportRow-no-payment:hover td {
+  background: #fecaca;
+}
+
+.debtReportNoPaymentBadge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #991b1b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 .moduleTable thead tr.moduleTableColumnFilterRow th {
   background: #f4fafb;
   font-weight: 600;

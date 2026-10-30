@@ -79,6 +79,9 @@ test("salesman tables leave legal customers out and the legal table stays separa
   assert.equal((message.html.match(/Legal Hold/g) || []).length, 1);
   assert.match(message.html, />New</);
   assert.match(message.html, /#fff4c2/);
+  assert.match(message.html, />No payment</);
+  assert.match(message.html, /#fecaca/);
+  assert.match(message.html, /No payment: /);
   assert.match(message.html, /Oldest invoice days/);
   assert.match(message.html, /Last payment date/);
   assert.match(message.html, /Last payment amt/);
@@ -87,9 +90,11 @@ test("salesman tables leave legal customers out and the legal table stays separa
   assert.match(message.html, /Promised Friday/);
   assert.match(message.text, /oldest 188/);
   assert.match(message.text, /last payment 12\/09\/2026 1,250\.50/);
+  assert.match(message.text, /NO PAYMENT /);
   assert.match(message.text, /NEW 1002/);
   assert.match(message.text, /NEW 2001/);
   assert.equal(message.addedToday, 2);
+  assert.ok(message.noPayment >= 1);
 });
 
 test("a customer already listed under a matching code is not new", () => {

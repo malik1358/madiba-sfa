@@ -110,6 +110,11 @@ test("sanitizeCollectionRemarkComment drops salesman and customer names", () => 
     sanitizeCollectionRemarkComment("ABDALLAANTHANATH _ sunday 1st Nov. expected"),
     "sunday 1st Nov. expected",
   );
+  // Invoice + OCR-typo salesman before remark (`[125 |ahmedNebil good…`).
+  assert.equal(
+    sanitizeCollectionRemarkComment("[125 |ahmedNebil good retuminnext 2 days"),
+    "good retuminnext 2 days",
+  );
 });
 
 test("parseCollectionRemarkTableText uses Customer and Remarks headers", () => {
@@ -217,6 +222,27 @@ Date -[RefNo-[PartysName ~~ -[Salesperson fgRemarks
   assert.ok(codes.includes("1468"), `expected 1468, got ${codes.join(",")}`);
   assert.equal(codes.includes("986"), false);
   assert.equal(rows.find((row) => row.customerCode === "1468")?.source, "ocr-bills");
+  assert.equal(rows.find((row) => row.customerCode === "1468")?.remark, "sunday 1st Nov. expected");
+});
+
+test("parseBillsReceivableOcrText keeps remark-only and invoice-only party rows", () => {
+  const ocr = `
+Pending Bills
+27-1un-26_|[RNFD/045 [1625 Al-muntaj Al-Ragi trading company [Rivach [5213 [>7ui26 [93 [125 |ahmedNebil good retuminnext 2 days
+1-Jun-26[NFD/901 [1313 Halima Hassan Ali Al-Zubaidi_|Riyadh |ABDALLAANTHANATH _|sunday 1st Nov. expected
+3Dec25 [2010 |1297C ZohvatAlTamauzTradingEst.____ [Riyadh [1152 |AhmedNabil [1st Nov. goods will be taken back
+27-Nov-25 [1939 [1295C shogretaltawfir _____ [Riyach |AhmedNabil ____|Blanace confirmation today / payment 1st Nov. if not then legal
+20-Nov-25 [1835 [1089C Beautyofsense  [Riyach |AhmedNebil _____|Blanace confirmation today / payment 1st Nov. if not then legal
+`;
+  const rows = parseCollectionRemarkImportText(ocr, { prefer: "auto" });
+  const byCode = Object.fromEntries(rows.map((row) => [row.customerCode, row]));
+  assert.equal(byCode["1625"]?.remark, "good retuminnext 2 days");
+  assert.doesNotMatch(byCode["1625"]?.remark || "", /125|ahmedNebil/i);
+  assert.equal(byCode["1313"]?.remark, "sunday 1st Nov. expected");
+  assert.equal(byCode["1297C"]?.remark, "1st Nov. goods will be taken back");
+  assert.match(byCode["1295C"]?.remark || "", /Blanace confirmation/i);
+  assert.match(byCode["1089C"]?.remark || "", /Blanace confirmation/i);
+  assert.ok(rows.length >= 5, `expected >=5 rows, got ${rows.length}: ${rows.map((r) => r.customerCode).join(",")}`);
 });
 
 test("parseBillsReceivableOcrText keeps ledger primary and invoice candidates", () => {

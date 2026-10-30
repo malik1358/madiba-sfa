@@ -360,6 +360,9 @@ export function normalizeRoleModuleMatrix(input, { fillDefaults = true } = {}) {
     if (ROLE_ACCESS_LOCKED_ROLES.includes(role) && Object.prototype.hasOwnProperty.call(row, "roleAccess")) {
       row.roleAccess = true;
     }
+    if (role === "salesman" && Object.prototype.hasOwnProperty.call(row, "businessDashboard")) {
+      row.businessDashboard = true;
+    }
     matrix[role] = row;
   }
 
@@ -401,6 +404,11 @@ function applyRoleModuleMatrixOverrides(access, context = {}) {
 
   if (ROLE_ACCESS_LOCKED_ROLES.includes(roleKey) && Object.prototype.hasOwnProperty.call(access.modules, "roleAccess")) {
     access.modules.roleAccess = true;
+  }
+
+  // Field salesmen always keep Business Intelligence (API still team-scopes sales-only, no GP).
+  if (roleKey === "salesman" && Object.prototype.hasOwnProperty.call(access.modules, "businessDashboard")) {
+    access.modules.businessDashboard = true;
   }
 
   // Per-user stock-take flag still grants Stock Take even when the role matrix is off.

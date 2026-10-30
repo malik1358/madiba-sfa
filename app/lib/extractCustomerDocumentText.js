@@ -40,8 +40,17 @@ async function normalizeImageForOcr(buffer) {
   try {
     const sharpMod = await import("sharp");
     const sharp = sharpMod.default || sharpMod;
+    // Downscale + greyscale keeps Tesseract under serverless time/memory limits.
     return await sharp(buffer, { failOn: "none" })
       .rotate()
+      .resize({
+        width: 2200,
+        height: 2200,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .grayscale()
+      .normalize()
       .png()
       .toBuffer();
   } catch {

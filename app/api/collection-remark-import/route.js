@@ -194,9 +194,13 @@ export async function POST(request) {
     if (action === "parse") {
       let ocrText = "";
       let ocrError = "";
-      if (imageBuffer) {
+      // Prefer browser-extracted / pasted text. Server OCR is fallback only (slow/fragile on Vercel).
+      if (imageBuffer && !String(pastedText || "").trim()) {
         try {
           ocrText = await ocrImageBuffer(imageBuffer);
+          if (!String(ocrText || "").trim()) {
+            ocrError = "Server OCR returned no text.";
+          }
         } catch (error) {
           ocrError = error?.message || "OCR failed.";
         }
@@ -205,7 +209,7 @@ export async function POST(request) {
       if (!combined.trim()) {
         throw Object.assign(
           new Error(ocrError
-            ? `Could not read the screenshot (${ocrError}). Paste the Remarks table instead.`
+            ? `Could not read the screenshot (${ocrError}). Paste Party/Customer + Remarks columns instead.`
             : "Upload a screenshot or paste table text to parse."),
           { status: 400 },
         );
@@ -225,7 +229,7 @@ export async function POST(request) {
         success: true,
         action: "parse",
         rowCount: enriched.length,
-        ocrText: ocrText || "",
+        ocrText: ocrText || String(pastedText || "").trim() || "",
         ocrError: ocrError || "",
         hint: enriched.length
           ? ""

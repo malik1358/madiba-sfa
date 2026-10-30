@@ -36,7 +36,7 @@ const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s]+)(?=[A-Za-z\u0600-\u06FF])
 const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}[\s\[\|_-]+(\d{3,5}C?)(?:[_\-\s\[]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /** Year-like tokens from OCR headers (1-Jan-26 to 28-Oct-26) are not party codes. */
 const YEAR_LIKE_CODE_RE = /^20[2-3]\d(?:C)?$/i;
-export const COLLECTION_REMARK_PARSER_VERSION = "ocr-bills-before-pipes-v3";
+export const COLLECTION_REMARK_PARSER_VERSION = "ocr-remark-pipe-v4";
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -53,10 +53,10 @@ export function stripBillRefNumbers(text = "") {
 }
 const BILL_MONEY_RE = /\b\d{1,3}(?:,\d{3})*\.\d{2}\b/g;
 const BILL_STATE_RE = /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf)\b/gi;
-const REMARK_CUE_RE = /\b(good return|follow[\s/-]?up|sunday|expected|blanace|balance\s+confirmation|stock\s+returns?|shop\s+closed|write\s*off|payment\s+\d|goods\s+will|if\s+not\s+then\s+legal|dealyed|delayed|wrong\s+credit|an\s+email|aproximately|approximately|taken\s+back|case\s+is|court\s+has|purchas|fallwing|following\s+up|client'?s?\s+file)\b/i;
+const REMARK_CUE_RE = /\b(good\s*retu[rm]n?|follow[\s/-]?up|sunday|blanace|balance\s+confirmation|stock\s+returns?|shop\s*closed|write\s*off|goods\s+will|if\s+not\s+then\s+legal|dealyed|delayed|wrong\s+credit|an\s+email|case\s+is|court\s+has|purchas|fallwing|following\s+up|client'?s?\s+file)\b/i;
 const COMPANY_NAME_RE = /\b(?:Trading(?:\s+Co\.?|\s+Company|\s+Est\.?)?|Company|Est\.?|Ltd\.?|Limited|Wholesale|Lemted)\b/i;
-/** Known field users / salesmen that OCR often bleeds into the Remarks column (spaced or glued). */
-const KNOWN_SALESMAN_NAME_PATTERN = String.raw`Ahmed\s*Nabil|ABDALLA\s*ANTHANATH|Abdulla\s*Anthanath|Abdul\s*Rehman|ABDUL\s*REHMAN|Moinudin(?:din)?|MOINUDIN(?:DIN)?|Parvez|PARVEZ|Junaid|JUNAID|Osama|OSAMA|Ahmed\s*Had(?:yah|ia|iya)|Ahmed\s*hadyah|Soyeb|Fazlur(?:\s*Rah(?:man|iman))?`;
+/** Known field users / salesmen that OCR often bleeds into the Remarks column (spaced, glued, or OCR-typo). */
+const KNOWN_SALESMAN_NAME_PATTERN = String.raw`Ahmed\s*Nab[ie]l|Ahmed\s*Neb[ie]l|Amed\s*Nob[ie]l|ABDALLA\s*ANT[RH]ANATH|Abdulla\s*Anthanath|ABDALLA\s*ANTRANATH|Abdul\s*Rehman|ABDUL\s*REHMAN|Moinudin(?:din)?|MOINUDIN(?:DIN)?|Parvez|PARVEZ|Junaid|JUNAID|Osama|OSAMA|Ahmed\s*Had(?:yah|ia|iya)|Ahmed\s*hadyah|Soyeb|Fazlur(?:\s*Rah(?:man|iman))?`;
 /** At least two Title-Case tokens (First Last) before lowercase remark prose. */
 const LEADING_PERSON_NAME_RE = /^(?:[A-Z][A-Za-z.'-]*)(?:\s+[A-Z][A-Za-z.']*){1,3}\s+(?=[a-z\u0600-\u06FF(])/;
 /** OCR often glues the salesman cell then pads with underscores before the remark. */
@@ -234,7 +234,10 @@ export function sanitizeCollectionRemarkComment(remark = "", { customerCode = ""
   if (code) {
     text = text.replace(new RegExp(`^${code}\\b\\s*[-—–:]?\\s*`, "i"), "");
   }
+  // Drop invoice / overdue / pipe junk OCR bleeds before the remark (`[125 |ahmedNebil…`).
+  text = text.replace(/^[\[\|\s]*\d{1,5}(?:C)?\b[\s\[\|:.-]*/i, "");
   text = text.replace(/^\d{3,5}C?\b\s*[-—–:]?\s*/i, "");
+  text = text.replace(/^[\[|\s]+/, "");
 
   // Drop "Name (Legal)" / party labels OCR leaves before the real comment.
   text = text.replace(LEADING_PARTY_NAME_RE, "");
@@ -242,8 +245,9 @@ export function sanitizeCollectionRemarkComment(remark = "", { customerCode = ""
   text = text.replace(/^[-—–:,./\s]+/, "");
 
   // Drop salesman column values at the start (known names, glued OCR, then Title Case).
+  // Require a separator so a name-only remark (`Osama`) is kept.
   text = text.replace(
-    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{0,20}`, "i"),
+    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{1,20}`, "i"),
     "",
   );
   text = text.replace(LEADING_GLUED_NAME_PAD_RE, "");
@@ -266,7 +270,7 @@ export function sanitizeCollectionRemarkComment(remark = "", { customerCode = ""
 
   // Final pass: strip a leading known salesman token (spaced or glued) if still present.
   text = text.replace(
-    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{0,20}`, "i"),
+    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{1,20}`, "i"),
     "",
   );
   text = text.replace(LEADING_GLUED_NAME_PAD_RE, "");
@@ -351,14 +355,67 @@ function trimRemarkRowBleed(text = "") {
     .trim();
 }
 
+/** Keep the primary bill line; drop trailing OCR orphans (`|27-avg26…`, `[Riyadh [3850…`). */
+function primaryBillRowText(segment = "") {
+  const lines = String(segment || "").split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (out.length) break;
+      continue;
+    }
+    if (
+      out.length
+      && /^[|\[]/.test(trimmed)
+      && !/\b[A-Z]{2,8}\/\d{2,5}\b/i.test(trimmed)
+      && !/\b\d{3,5}C\b/i.test(trimmed)
+    ) {
+      break;
+    }
+    out.push(line);
+    // Most Bills OCR rows are one physical line.
+    if (out.length >= 1) break;
+  }
+  return out.join("\n") || String(segment || "");
+}
+
 function extractRemarkFromBillsSegment(segment) {
-  const raw = String(segment || "");
+  const raw = primaryBillRowText(segment);
   if (!raw.trim()) return "";
+
+  // Remarks is the rightmost column. WhatsApp OCR often keeps `|salesperson|remark`
+  // or `|ahmedNebil good return…` — never keep invoice digits left of that pipe.
+  const pipeChunks = raw.split("|").map((part) => cleanCollectionRemarkText(part)).filter(Boolean);
+  if (pipeChunks.length >= 1 && raw.includes("|")) {
+    for (let i = pipeChunks.length - 1; i >= 0; i -= 1) {
+      const chunk = pipeChunks[i];
+      // Keep short name-only remarks (`|Osama`) before sanitize strips known salesman tokens.
+      if (/^[A-Za-z][A-Za-z.'-]{1,24}$/.test(chunk) && !isNoiseRemark(chunk)) {
+        return chunk;
+      }
+      const sanitized = sanitizeCollectionRemarkComment(chunk);
+      if (isNoiseRemark(sanitized)) continue;
+      if (knownSalesmanNameRe("i").test(sanitized)) continue;
+      return trimRemarkRowBleed(sanitized);
+    }
+  }
 
   const cue = raw.search(REMARK_CUE_RE);
   if (cue >= 0) {
-    const fromCue = trimRemarkRowBleed(raw.slice(cue));
+    const fromCue = sanitizeCollectionRemarkComment(trimRemarkRowBleed(raw.slice(cue)));
     if (!isNoiseRemark(fromCue)) return fromCue;
+  }
+
+  // After the last known salesman token (spaced or glued + underscore pad).
+  const salesmanHits = [...raw.matchAll(new RegExp(`(?:${KNOWN_SALESMAN_NAME_PATTERN})[_\\s|:\\-]*`, "gi"))];
+  const lastSalesman = salesmanHits[salesmanHits.length - 1];
+  if (lastSalesman) {
+    const afterSalesman = sanitizeCollectionRemarkComment(
+      raw.slice(lastSalesman.index + lastSalesman[0].length),
+    );
+    if (!isNoiseRemark(afterSalesman)) return trimRemarkRowBleed(afterSalesman);
   }
 
   let text = raw
@@ -367,31 +424,21 @@ function extractRemarkFromBillsSegment(segment) {
     .replace(BILL_STATE_RE, " ")
     .replace(BILL_MONEY_RE, " ");
 
-  // Drop leading party/company name tokens until we hit likely free-text remark.
   text = cleanCollectionRemarkText(text);
   const moneyEnd = [...String(segment).matchAll(BILL_MONEY_RE)].pop();
   if (moneyEnd) {
     let afterMoney = cleanCollectionRemarkText(String(segment).slice(moneyEnd.index + moneyEnd[0].length));
-    // Strip 1–4 salesman name tokens (Title Case / ALL CAPS).
-    afterMoney = afterMoney.replace(
-      /^(?:[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.']*){0,3})\s+(?=[a-z\u0600-\u06FF(])/,
-      "",
-    );
-    afterMoney = afterMoney.replace(
-      /^(?:[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.']*){0,3})$/,
-      "",
-    );
+    afterMoney = sanitizeCollectionRemarkComment(afterMoney);
     if (!isNoiseRemark(afterMoney)) return afterMoney;
   }
 
-  // Fallback: last chunk with lowercase letters.
   const lowerChunk = text.match(/[a-z][a-zA-Z0-9 .,/&'%-]{4,}$/);
   if (lowerChunk) {
-    const candidate = trimRemarkRowBleed(lowerChunk[0]);
+    const candidate = sanitizeCollectionRemarkComment(trimRemarkRowBleed(lowerChunk[0]));
     if (!isNoiseRemark(candidate)) return candidate;
   }
 
-  const cleaned = trimRemarkRowBleed(text);
+  const cleaned = sanitizeCollectionRemarkComment(trimRemarkRowBleed(text));
   return isNoiseRemark(cleaned) ? "" : cleaned;
 }
 
@@ -566,19 +613,49 @@ function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = fals
     .sort((left, right) => left.anchor - right.anchor);
 }
 
+function collectBillsReceivableRowStarts(source = "") {
+  const text = String(source || "");
+  const starts = [];
+
+  // Ref. No. rows: NFD/986 [1468… — include a short date look-behind when present.
+  for (const match of text.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\b/gi)) {
+    const start = match.index;
+    if (!Number.isInteger(start)) continue;
+    const lookBehind = text.slice(Math.max(0, start - 18), start);
+    const prefix = lookBehind.match(/(\d{1,2}[-_/]?[A-Za-z]{0,3}[-_/]?\d{0,2}|[A-Za-z]{1,3}\d{1,2})[\s\[|_]*$/);
+    starts.push(prefix ? start - prefix[0].length : start);
+  }
+
+  // Invoice-style rows with no Ref. No.: `3Dec25 [2010 |1297C Zohvat…`, `27-Nov-25 [1939 [1295C…`.
+  for (const match of text.matchAll(
+    /(?:^|[\n\r])[^\n\r]{0,28}?(?<![A-Z/])(\d{3,5}C)\b(?=[\s\[\|_-]*[A-Za-z\u0600-\u06FF])/gi,
+  )) {
+    const code = String(match[1] || "").toUpperCase();
+    if (!code || YEAR_LIKE_CODE_RE.test(code)) continue;
+    const full = match[0] || "";
+    const codeOffset = full.toUpperCase().lastIndexOf(code);
+    const abs = match.index + Math.max(0, codeOffset);
+    if (isBillRefNumberFragment(text, abs)) continue;
+    // Skip if this line already has a Ref. No. before the party code (handled above).
+    const lineStart = text.lastIndexOf("\n", abs) + 1;
+    const beforeCode = text.slice(lineStart, abs);
+    if (/\b[A-Z]{2,8}\/\d{2,5}\b/i.test(beforeCode)) continue;
+    starts.push(lineStart > 0 ? lineStart : abs);
+  }
+
+  return [...new Set(starts.filter((index) => Number.isInteger(index) && index >= 0))]
+    .sort((left, right) => left - right);
+}
+
 function splitBillsReceivableRowSegments(text = "") {
   const source = String(text || "");
   // OCR mangledates (`131un-26`) often; Ref. No. (NFD/986) survives and is the best row splitter.
-  const refStarts = [...source.matchAll(/\b[A-Z]{2,8}\/\d{2,5}\b/gi)]
-    .map((match) => match.index)
-    .filter((index) => Number.isInteger(index));
-  if (refStarts.length >= 1) {
-    return refStarts.map((start, index) => {
-      const end = index + 1 < refStarts.length ? refStarts[index + 1] : source.length;
-      const lookBehind = source.slice(Math.max(0, start - 18), start);
-      const prefix = lookBehind.match(/(\d{1,2}[-_/]?[A-Za-z]{0,3}[-_/]?\d{0,2}|[A-Za-z]{1,3}\d{1,2})[\s\[|_]*$/);
-      const segStart = prefix ? start - prefix[0].length : start;
-      return source.slice(Math.max(0, segStart), end);
+  // Also split invoice-only party rows (`1297C Zohvat…`) that have no Ref. No.
+  const rowStarts = collectBillsReceivableRowStarts(source);
+  if (rowStarts.length >= 1) {
+    return rowStarts.map((start, index) => {
+      const end = index + 1 < rowStarts.length ? rowStarts[index + 1] : source.length;
+      return source.slice(Math.max(0, start), end);
     }).filter((segment) => segment.trim());
   }
 
@@ -631,32 +708,33 @@ export function parseBillsReceivableOcrText(ocrText = "") {
 
   const rowsByCode = new Map();
   segments.forEach((segment) => {
-    const afterRefCodes = extractPartyCodesAfterBillRefs(segment);
-    const refPartyAnchors = collectCustomerCodeMatchAnchors(segment, BILL_REF_PARTY_CODE_RE, {
+    const rowText = primaryBillRowText(segment);
+    const afterRefCodes = extractPartyCodesAfterBillRefs(rowText);
+    const refPartyAnchors = collectCustomerCodeMatchAnchors(rowText, BILL_REF_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
-    const ledgerAnchors = collectCustomerCodeMatchAnchors(stripBillRefNumbers(segment), LEDGER_PARTY_CODE_RE, {
+    const ledgerAnchors = collectCustomerCodeMatchAnchors(stripBillRefNumbers(rowText), LEDGER_PARTY_CODE_RE, {
       requireLedgerName: true,
     });
     const primaryCode = afterRefCodes[0] || refPartyAnchors[0]?.code || ledgerAnchors[0]?.code || "";
     const partyName = (() => {
       if (!primaryCode) {
-        return extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
+        return extractLedgerPartyNameAfterCode(stripBillRefNumbers(rowText));
       }
-      const idx = segment.toUpperCase().indexOf(primaryCode);
-      if (idx >= 0) return extractLedgerPartyNameAfterCode(textAfterAnchor(segment, idx, primaryCode));
+      const idx = rowText.toUpperCase().indexOf(primaryCode);
+      if (idx >= 0) return extractLedgerPartyNameAfterCode(textAfterAnchor(rowText, idx, primaryCode));
       return refPartyAnchors[0]?.partyName
         || ledgerAnchors[0]?.partyName
-        || extractLedgerPartyNameAfterCode(stripBillRefNumbers(segment));
+        || extractLedgerPartyNameAfterCode(stripBillRefNumbers(rowText));
     })();
-    const candidates = extractBillRowCodeCandidates(segment, { primaryCode });
+    const candidates = extractBillRowCodeCandidates(rowText, { primaryCode });
     if (!candidates.length) return;
-    const remark = extractRemarkFromBillsSegment(segment);
+    const remark = extractRemarkFromBillsSegment(rowText);
     const row = buildRow(
       primaryCode || candidates[0],
       remark,
       "ocr-bills",
-      partyName || segment,
+      partyName || rowText,
       candidates,
     );
     if (row) upsertRemarkRow(rowsByCode, row);

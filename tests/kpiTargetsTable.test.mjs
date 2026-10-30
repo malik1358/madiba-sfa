@@ -260,6 +260,43 @@ test("pace estimate vs last month shows value and percent direction", () => {
   assert.equal(sumFilteredPriorMonthActuals(rows, prior, ["collection", "totalCashCollected"]).collection, 800_000);
   assert.equal(sumFilteredPriorMonthActuals(rows, prior, ["collection", "totalCashCollected"]).totalCashCollected, 900_000);
 
+  // Cache rows often store totalSales: 0 while components hold the real amount.
+  assert.equal(
+    sumFilteredPriorMonthActuals(
+      [{ salesmanCode: "OSAMA", isTeam: false }],
+      {
+        OSAMA: {
+          officeSupplies: 10_000,
+          localItemSales: 1_000,
+          otherSales: 40_000,
+          totalSales: 0,
+          collection: 0,
+          cashCollection: 0,
+        },
+      },
+      ["totalSales"],
+    ).totalSales,
+    51_000,
+  );
+  // Thamer aliases in the prior cache still resolve for canonical SM002.
+  assert.equal(
+    sumFilteredPriorMonthActuals(
+      [{ salesmanCode: "SM002", isTeam: false }],
+      {
+        THAMER: {
+          officeSupplies: 50_000,
+          localItemSales: 0,
+          otherSales: 2_396,
+          totalSales: 0,
+          collection: 0,
+          cashCollection: 0,
+        },
+      },
+      ["totalSales"],
+    ).totalSales,
+    52_396,
+  );
+
   const estimates = {
     collection: { estimate: 1_000_000 },
     totalCashCollected: { estimate: 1_100_000 },

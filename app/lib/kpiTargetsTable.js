@@ -11,6 +11,7 @@ import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
   normalizeReportSalesmanCode,
   normalizeReportSalesmanName,
+  reportSalesmanCodeAliases,
   THAMER_REPORT_CODE,
 } from "./salesmanReportIdentity.js";
 
@@ -276,6 +277,34 @@ export function compareKpiEstimateToPriorMonth(estimate, priorActual) {
   };
 }
 
+/** Resolve prior-month actuals for a salesman code, including report aliases (Thamer). */
+export function priorMonthActualsForCode(priorActualsByCode = {}, salesmanCode = "") {
+  const code = normalizeSalesmanCode(salesmanCode);
+  if (!code || !priorActualsByCode || typeof priorActualsByCode !== "object") return null;
+  const direct = priorActualsByCode[code] || priorActualsByCode[String(code).toUpperCase()];
+  if (direct && typeof direct === "object") return direct;
+  for (const alias of reportSalesmanCodeAliases(code)) {
+    const found = priorActualsByCode[alias] || priorActualsByCode[String(alias).toUpperCase()];
+    if (found && typeof found === "object") return found;
+  }
+  return null;
+}
+
+/**
+ * Prefer component sales when the cache stored totalSales as 0 (common in
+ * performance_kpi_actuals_v2 rows before withDerivedKpiActuals).
+ */
+export function priorMonthTotalSalesFromActuals(actuals = {}) {
+  const office = Number(actuals?.officeSupplies || 0) || 0;
+  const local = Number(actuals?.localItemSales || 0) || 0;
+  const other = Number(actuals?.otherSales || 0) || 0;
+  const components = office + local + other;
+  const stored = actuals?.totalSales != null ? Number(actuals.totalSales || 0) || 0 : null;
+  if (stored != null && stored !== 0) return stored;
+  if (components !== 0) return components;
+  return stored == null ? 0 : stored;
+}
+
 /** Sum last-month actuals for the same filtered (non-team) salesmen. */
 export function sumFilteredPriorMonthActuals(
   rows = [],
@@ -296,20 +325,13 @@ export function sumFilteredPriorMonthActuals(
     if (row?.isTeam) return;
     const code = normalizeSalesmanCode(row?.salesmanCode);
     if (!code) return;
-    const actuals = priorActualsByCode?.[code]
-      || priorActualsByCode?.[String(code).toUpperCase()]
-      || null;
+    const actuals = priorMonthActualsForCode(priorActualsByCode, code);
     if (!actuals || typeof actuals !== "object") return;
     matched = true;
     keys.forEach((key) => {
       if (key === "totalCashCollected") return;
       if (key === "totalSales") {
-        const total = actuals.totalSales != null
-          ? Number(actuals.totalSales || 0) || 0
-          : (Number(actuals.officeSupplies || 0) || 0)
-            + (Number(actuals.localItemSales || 0) || 0)
-            + (Number(actuals.otherSales || 0) || 0);
-        totals.totalSales = (totals.totalSales || 0) + total;
+        totals.totalSales = (totals.totalSales || 0) + priorMonthTotalSalesFromActuals(actuals);
         return;
       }
       totals[key] = (totals[key] || 0) + (Number(actuals[key] || 0) || 0);

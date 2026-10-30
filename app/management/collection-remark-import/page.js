@@ -83,7 +83,7 @@ export default function CollectionRemarkImportPage() {
   const [ocrProgress, setOcrProgress] = useState(null);
 
   const selectedCount = useMemo(
-    () => rows.filter((row) => row.selected && row.customerCode && row.remark).length,
+    () => rows.filter((row) => row.selected && row.customerExists !== false && row.customerCode && row.remark).length,
     [rows],
   );
 
@@ -203,7 +203,7 @@ export default function CollectionRemarkImportPage() {
         body: JSON.stringify({
           action: "commit",
           createdByUserId,
-          rows: rows.filter((row) => row.selected),
+          rows: rows.filter((row) => row.selected && row.customerExists !== false),
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -332,7 +332,14 @@ export default function CollectionRemarkImportPage() {
           <section className="moduleCard" style={{ display: "grid", gap: 12 }}>
             <div className="moduleActionRow" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <strong>{selectedCount} / {rows.length} {t("rows")}</strong>
-              <button type="button" className="moduleInlineButton" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: true })))}>
+              <button
+                type="button"
+                className="moduleInlineButton"
+                onClick={() => setRows((prev) => prev.map((row) => ({
+                  ...row,
+                  selected: !row.saved && row.customerExists !== false,
+                })))}
+              >
                 {t("selectAll")}
               </button>
               <button type="button" className="moduleInlineButton" onClick={() => setRows((prev) => prev.map((row) => ({ ...row, selected: false })))}>
@@ -373,7 +380,12 @@ export default function CollectionRemarkImportPage() {
                       <td>
                         <input
                           value={row.customerCode}
-                          onChange={(event) => updateRow(row.id, { customerCode: event.target.value.toUpperCase() })}
+                          onChange={(event) => updateRow(row.id, {
+                            customerCode: event.target.value.toUpperCase(),
+                            // Allow retry after manual fix; server remaps/validates on save.
+                            customerExists: true,
+                            selected: !row.saved,
+                          })}
                           style={{ width: 90 }}
                           disabled={row.saved}
                         />

@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ocrImageBuffer } from "../../lib/extractCustomerDocumentText.js";
 import {
+  expandCollectionRemarkCustomerCodeCandidates,
   formatCollectionRemarkActorLabel,
   normalizeCollectionRemarkImportRows,
   parseCollectionRemarkImportText,
+  resolveCollectionRemarkCustomerCodeFromKnown,
   suggestCollectionRemarkPaymentStatus,
 } from "../../lib/collectionRemarkImport.js";
 import { madibaStoreLocation } from "../../lib/madibaStoreLocation.js";
@@ -59,33 +61,67 @@ function jsonError(error) {
   return NextResponse.json({ success: false, error: error?.message || "Request failed." }, { status });
 }
 
-async function resolveExistingCustomerCodes(admin, codes) {
-  const unique = [...new Set((codes || []).map((code) => String(code || "").trim().toUpperCase()).filter(Boolean))];
-  if (!unique.length) return new Set();
+/**
+ * Map each parsed/OCR code to a unique customers.customer_code when possible
+ * (exact, C-suffix, or OCR leading-1 / zero-pad variants).
+ */
+async function resolveCustomerCodeMap(admin, codes) {
+  const unique = [...new Set(
+    (codes || []).map((code) => String(code || "").trim().toUpperCase()).filter(Boolean),
+  )];
+  const resolved = new Map();
+  if (!unique.length) return resolved;
 
+  const lookup = new Set();
+  unique.forEach((code) => {
+    expandCollectionRemarkCustomerCodeCandidates(code).forEach((candidate) => lookup.add(candidate));
+  });
+
+  const lookupList = [...lookup];
   const { data, error } = await admin
     .from("customers")
     .select("customer_code")
-    .in("customer_code", unique);
+    .in("customer_code", lookupList);
 
   if (error) throw Object.assign(new Error(error.message || "Unable to load customers."), { status: 500 });
 
-  const found = new Set((data || []).map((row) => String(row.customer_code || "").trim().toUpperCase()).filter(Boolean));
+  const known = new Set(
+    (data || []).map((row) => String(row.customer_code || "").trim().toUpperCase()).filter(Boolean),
+  );
 
-  const missing = unique.filter((code) => !found.has(code));
-  if (missing.length) {
-    const orFilter = missing.map((code) => `customer_code.ilike.${code}`).join(",");
-    const { data: fuzzy } = await admin
+  // Prefix search for any still-unresolved stems (1058 → 1058C / branch suffixes).
+  const unresolvedStems = unique
+    .filter((code) => !resolveCollectionRemarkCustomerCodeFromKnown(code, [...known]))
+    .flatMap((code) => expandCollectionRemarkCustomerCodeCandidates(code))
+    .map((code) => code.replace(/C$/i, "").replace(/^0+/, "") || code)
+    .filter((stem) => stem.length >= 3);
+  const stemSet = [...new Set(unresolvedStems)];
+  if (stemSet.length) {
+    const orFilter = stemSet
+      .slice(0, 40)
+      .map((stem) => `customer_code.ilike.${stem}%`)
+      .join(",");
+    const { data: fuzzy, error: fuzzyError } = await admin
       .from("customers")
       .select("customer_code")
-      .or(orFilter);
+      .or(orFilter)
+      .limit(200);
+    if (fuzzyError) {
+      throw Object.assign(new Error(fuzzyError.message || "Unable to load customers."), { status: 500 });
+    }
     (fuzzy || []).forEach((row) => {
       const code = String(row.customer_code || "").trim().toUpperCase();
-      if (code) found.add(code);
+      if (code) known.add(code);
     });
   }
 
-  return found;
+  const knownList = [...known];
+  unique.forEach((code) => {
+    const match = resolveCollectionRemarkCustomerCodeFromKnown(code, knownList);
+    if (match) resolved.set(code, match);
+  });
+
+  return resolved;
 }
 
 async function loadActorOptions(admin) {
@@ -219,11 +255,17 @@ export async function POST(request) {
         prefer: imageBuffer && !pastedText.trim() ? "ocr" : "auto",
       });
       const rows = normalizeCollectionRemarkImportRows(parsed);
-      const existing = await resolveExistingCustomerCodes(admin, rows.map((row) => row.customerCode));
-      const enriched = rows.map((row) => ({
-        ...row,
-        customerExists: existing.has(row.customerCode),
-      }));
+      const resolvedMap = await resolveCustomerCodeMap(admin, rows.map((row) => row.customerCode));
+      const enriched = rows.map((row) => {
+        const resolvedCode = resolvedMap.get(row.customerCode) || "";
+        const customerCode = resolvedCode || row.customerCode;
+        return {
+          ...row,
+          customerCode,
+          customerExists: Boolean(resolvedCode),
+          selected: Boolean(resolvedCode) && row.selected !== false,
+        };
+      });
 
       return NextResponse.json({
         success: true,
@@ -232,7 +274,9 @@ export async function POST(request) {
         ocrText: ocrText || String(pastedText || "").trim() || "",
         ocrError: ocrError || "",
         hint: enriched.length
-          ? ""
+          ? (enriched.some((row) => !row.customerExists)
+            ? "Some codes were not found in the customer master (OCR may have read overdue days or amounts). Fix the Customer column or paste Party + Remarks only."
+            : "")
           : "No customer remarks matched. For Bills Receivable screenshots, paste Party + Remarks columns if OCR is messy.",
         rows: enriched,
       });
@@ -244,11 +288,15 @@ export async function POST(request) {
         throw Object.assign(new Error("Select at least one row with a customer code and remark."), { status: 400 });
       }
 
-      const existing = await resolveExistingCustomerCodes(admin, rows.map((row) => row.customerCode));
-      const missing = rows.filter((row) => !existing.has(row.customerCode)).map((row) => row.customerCode);
+      const resolvedMap = await resolveCustomerCodeMap(admin, rows.map((row) => row.customerCode));
+      const missing = rows
+        .filter((row) => !resolvedMap.get(row.customerCode))
+        .map((row) => row.customerCode);
       if (missing.length) {
         throw Object.assign(
-          new Error(`Unknown customer code(s): ${missing.join(", ")}`),
+          new Error(
+            `Unknown customer code(s): ${missing.join(", ")}. Fix the Customer column to a real master code (4 digits), or deselect those rows. OCR often misreads overdue days as party codes.`,
+          ),
           { status: 400 },
         );
       }
@@ -270,7 +318,7 @@ export async function POST(request) {
         });
         const isLegal = visitOutcome === "TRANSFER_TO_LEGAL";
         return {
-          customer_code: row.customerCode,
+          customer_code: resolvedMap.get(row.customerCode) || row.customerCode,
           visit_outcome: visitOutcome,
           payment_status: paymentStatus,
           amount_received: 0,

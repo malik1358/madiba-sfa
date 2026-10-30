@@ -72,6 +72,15 @@ test("sanitizeCollectionRemarkComment drops salesman and customer names", () => 
     ),
     /Hayat|Ahmed Nabil/i,
   );
+  // OCR often glues the salesman cell with underscore padding before the remark.
+  assert.equal(
+    sanitizeCollectionRemarkComment("AhmedNabil_______ sunday 1st Nov. expected"),
+    "sunday 1st Nov. expected",
+  );
+  assert.equal(
+    sanitizeCollectionRemarkComment("ABDALLAANTHANATH _ sunday 1st Nov. expected"),
+    "sunday 1st Nov. expected",
+  );
 });
 
 test("parseCollectionRemarkTableText uses Customer and Remarks headers", () => {

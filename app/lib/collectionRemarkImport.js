@@ -27,12 +27,16 @@ const BILL_MONEY_RE = /\b\d{1,3}(?:,\d{3})*\.\d{2}\b/g;
 const BILL_STATE_RE = /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf)\b/gi;
 const REMARK_CUE_RE = /\b(good return|follow[\s/-]?up|sunday|expected|blanace|balance\s+confirmation|stock\s+returns?|shop\s+closed|write\s*off|payment\s+\d|goods\s+will|if\s+not\s+then\s+legal|dealyed|delayed|wrong\s+credit|an\s+email|aproximately|approximately|taken\s+back|case\s+is|court\s+has|purchas|fallwing|following\s+up|client'?s?\s+file)\b/i;
 const COMPANY_NAME_RE = /\b(?:Trading(?:\s+Co\.?|\s+Company|\s+Est\.?)?|Company|Est\.?|Ltd\.?|Limited|Wholesale|Lemted)\b/i;
-/** Known field users / salesmen that OCR often bleeds into the Remarks column. */
-const KNOWN_SALESMAN_NAME_PATTERN = String.raw`Ahmed\s+Nabil|ABDALLA\s+ANTHANATH|Abdulla\s+Anthanath|Abdul\s+Rehman|ABDUL\s+REHMAN|Moinudin(?:din)?|MOINUDIN(?:DIN)?|Parvez|PARVEZ|Junaid|JUNAID|Osama|OSAMA|Ahmed\s+Had(?:yah|ia|iya)|Ahmed\s+hadyah|Soyeb|Fazlur(?:\s+Rah(?:man|iman))?`;
+/** Known field users / salesmen that OCR often bleeds into the Remarks column (spaced or glued). */
+const KNOWN_SALESMAN_NAME_PATTERN = String.raw`Ahmed\s*Nabil|ABDALLA\s*ANTHANATH|Abdulla\s*Anthanath|Abdul\s*Rehman|ABDUL\s*REHMAN|Moinudin(?:din)?|MOINUDIN(?:DIN)?|Parvez|PARVEZ|Junaid|JUNAID|Osama|OSAMA|Ahmed\s*Had(?:yah|ia|iya)|Ahmed\s*hadyah|Soyeb|Fazlur(?:\s*Rah(?:man|iman))?`;
 /** At least two Title-Case tokens (First Last) before lowercase remark prose. */
 const LEADING_PERSON_NAME_RE = /^(?:[A-Z][A-Za-z.'-]*)(?:\s+[A-Z][A-Za-z.']*){1,3}\s+(?=[a-z\u0600-\u06FF(])/;
+/** OCR often glues the salesman cell then pads with underscores before the remark. */
+const LEADING_GLUED_NAME_PAD_RE = /^(?:[A-Z][A-Za-z]{2,40})\s*_+\s*(?=[a-z\u0600-\u06FF(])/;
 const LEADING_PARTY_NAME_RE = /^(?:[A-Za-z\u0600-\u06FF][A-Za-z\u0600-\u06FF0-9 .,&'/-]{0,80}?\b(?:Trading(?:\s+Co\.?|\s+Company|\s+Est\.?)?|Company|Est\.?|Ltd\.?|Wholesale|Lemted)\.?\s*)+/i;
 const TRAILING_BILL_NOISE_RE = /(?:\s+\d{1,2}-[A-Za-z]{3}-\d{2}|\s+[A-Z]{2,8}\/\d{2,5}|\s+\d{1,3}(?:,\d{3})*\.\d{2})+\s*$/g;
+/** Prefix before a remark cue that is only a name (letters/spaces) plus OCR underscore padding. */
+const NAME_LIKE_BEFORE_CUE_RE = /^(?:[A-Za-z][A-Za-z .,'-]{1,60}|[A-Z][A-Za-z]{2,40})[\s_=\-]{0,20}$/;
 
 function knownSalesmanNameRe(flags = "i") {
   return new RegExp(`(?:${KNOWN_SALESMAN_NAME_PATTERN})`, flags);
@@ -73,9 +77,14 @@ export function sanitizeCollectionRemarkComment(remark = "", { customerCode = ""
   text = text.replace(/^[^]*?\((?:Legal|قانوني)\)\s*/i, "");
   text = text.replace(/^[-—–:,./\s]+/, "");
 
-  // Drop salesman column values at the start (known names, then generic Title Case).
-  text = text.replace(new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})\\s*[-:]?\\s*`, "i"), "");
+  // Drop salesman column values at the start (known names, glued OCR, then Title Case).
+  text = text.replace(
+    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{0,20}`, "i"),
+    "",
+  );
+  text = text.replace(LEADING_GLUED_NAME_PAD_RE, "");
   text = text.replace(LEADING_PERSON_NAME_RE, "");
+  text = text.replace(/^[_=\-\s]+/, "");
 
   // If a remark cue appears after leftover name/noise, keep from the cue onward.
   const cueIdx = text.search(REMARK_CUE_RE);
@@ -85,14 +94,19 @@ export function sanitizeCollectionRemarkComment(remark = "", { customerCode = ""
       !before
       || COMPANY_NAME_RE.test(before)
       || knownSalesmanNameRe("i").test(before)
-      || /^[A-Z][A-Za-z .,'-]{2,60}$/.test(before)
+      || NAME_LIKE_BEFORE_CUE_RE.test(before)
     ) {
       text = text.slice(cueIdx);
     }
   }
 
-  // Final pass: strip a leading known salesman token if still present.
-  text = text.replace(new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})\\s*[-:]?\\s*`, "i"), "");
+  // Final pass: strip a leading known salesman token (spaced or glued) if still present.
+  text = text.replace(
+    new RegExp(`^(?:${KNOWN_SALESMAN_NAME_PATTERN})[\\s_=:\\-]{0,20}`, "i"),
+    "",
+  );
+  text = text.replace(LEADING_GLUED_NAME_PAD_RE, "");
+  text = text.replace(/^[_=\-\s]+/, "");
   // Drop trailing next-row bill noise (date / ref / money) that OCR glued on.
   text = text.replace(TRAILING_BILL_NOISE_RE, "");
   text = cleanCollectionRemarkText(text);

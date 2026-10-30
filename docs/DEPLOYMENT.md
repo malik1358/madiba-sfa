@@ -209,7 +209,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `MISSING_CATALOGUE_PHOTOS_EMAIL_TO`, `MISSING_CATALOGUE_PHOTOS_EMAIL_CC` | Optional To override / CC extras for the missing catalogue photos digest (default To Malik + Swami; default CC Jigar) |
 | `OUTSTANDING_RECONCILE_EMAIL_TO`, `OUTSTANDING_RECONCILE_EMAIL_CC` | Extra Tally vs SFA difference recipients (added to the built-in To / CC lists; default CC includes `kelwani@noorshukran.com`) |
 | `OUTSTANDING_RECONCILE_EMAIL_TEST_TO` | Send the difference report only to these addresses and skip the dedupe marker (CC omitted on test-to sends) |
-| `KPI_UPLOAD_SUMMARY_EMAIL_TO`, `KPI_UPLOAD_SUMMARY_EMAIL_CC` | Optional extras for the post-upload KPI Targets footer summary (default To `malik@pinasz.com`) |
+| `KPI_UPLOAD_SUMMARY_EMAIL_TO`, `KPI_UPLOAD_SUMMARY_EMAIL_CC` | Optional extras for the post-upload KPI Targets footer summary (default To `malik@pinasz.com`, CC `fazlur.rahiman@noorshukran.com`) |
 | `KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO` | Send the KPI upload summary only here and skip the unchanged dedupe marker |
 | `OUTSTANDING_NO_GPS_EMAIL_SEND_TO_USERS` | `false` skips per-salesman mail |
 | `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` | Field access to the visit plan |

@@ -14,12 +14,11 @@ import {
   resolveKpiUploadSummaryEmailRecipients,
 } from "./kpiUploadSummaryEmail.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
+import { monthStartDate } from "./performanceKpis.js";
 import {
-  emptyPerformanceActuals,
-  monthStartDate,
-  withDerivedKpiActuals,
-} from "./performanceKpis.js";
-import { loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
+  loadPerformanceSnapshotsForSalesmen,
+  loadStoredKpiActualsByCode,
+} from "./performanceKpisServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function createServiceAdmin(env = process.env) {
@@ -100,38 +99,6 @@ async function listKpiUploadSummarySalesmen(admin) {
   return mergeKpiTargetProfiles((data || []).filter(isKpiTargetProfile));
 }
 
-/**
- * Read a saved monthly KPI actuals cache without rebuilding or stamp checks.
- * Used for prior-month vs-last-month so the email does not scan active_sales again.
- */
-async function loadStoredKpiActualsByCode(admin, reportDate) {
-  const month = String(monthStartDate(reportDate) || reportDate || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(month)) return {};
-  const { data, error } = await admin
-    .from("system_settings")
-    .select("setting_value")
-    .eq("setting_key", `performance_kpi_actuals_v2:${month}`)
-    .maybeSingle();
-  if (error) throw error;
-  try {
-    const cache = JSON.parse(String(data?.setting_value || "null"));
-    const source = cache?.actualsBySalesman;
-    if (!source || typeof source !== "object") return {};
-    const byCode = {};
-    Object.entries(source).forEach(([code, actuals]) => {
-      const key = String(code || "").trim().toUpperCase();
-      if (!key || !actuals || typeof actuals !== "object") return;
-      byCode[key] = withDerivedKpiActuals({
-        ...emptyPerformanceActuals(),
-        ...actuals,
-      });
-    });
-    return byCode;
-  } catch {
-    return {};
-  }
-}
-
 export async function loadKpiUploadSummaryPayload(admin, {
   reportDate = "",
 } = {}) {
@@ -150,6 +117,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
     loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmanPayload,
       reportDate: monthDate,
+      allowRebuild: false,
     }),
     priorReportDate
       ? loadStoredKpiActualsByCode(admin, priorReportDate)

@@ -1,4 +1,5 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
+import { previousMonthKey } from "./categoryGrowth.js";
 import {
   buyingCustomerCodesFromSales,
   buildPerformanceSnapshot,
@@ -7,6 +8,7 @@ import {
   emptyPerformanceTargets,
   isMissingSchemaColumn,
   latestReceiptDateInRange,
+  monthStartDate,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
   averageCumulativeDayShares,
@@ -15,6 +17,7 @@ import {
   isKpiCollectionReceipt,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
+  withDerivedKpiActuals,
 } from "./performanceKpis.js";
 import { buildKpiActualDetails } from "./kpiActualDetails.js";
 import {
@@ -476,7 +479,22 @@ async function activeSalesBatchId(admin) {
   return String(data?.setting_value || "").trim();
 }
 
-async function readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp = "") {
+function isUsablePerformanceKpiCacheShape(cache) {
+  return Boolean(
+    cache
+    && cache.version === PERFORMANCE_KPI_CACHE_VERSION
+    && cache.actualsBySalesman
+    && typeof cache.actualsBySalesman === "object"
+    && Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
+    && Object.prototype.hasOwnProperty.call(cache, "receiptAsOfDate"),
+  );
+}
+
+/**
+ * Read a saved monthly KPI actuals cache without batch/stamp checks or rebuild.
+ * Used by KPI Targets / My Performance screen loads and prior-month comparisons.
+ */
+export async function readStoredPerformanceKpiCache(admin, reportDate) {
   const { data, error } = await admin
     .from("system_settings")
     .select("setting_value")
@@ -489,19 +507,40 @@ async function readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp 
   if (!data?.setting_value) return null;
   try {
     const cache = JSON.parse(String(data.setting_value));
-    if (
-      cache?.version !== PERFORMANCE_KPI_CACHE_VERSION
-      || String(cache.batchId || "") !== batchId
-      || String(cache.receiptStamp || "") !== String(receiptStamp || "")
-      || !cache.actualsBySalesman
-      || typeof cache.actualsBySalesman !== "object"
-      || !Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
-      || !Object.prototype.hasOwnProperty.call(cache, "receiptAsOfDate")
-    ) return null;
+    if (!isUsablePerformanceKpiCacheShape(cache)) return null;
     return cache;
   } catch {
     return null;
   }
+}
+
+/**
+ * Flat prior-month (or any month) actuals from the stored cache only — never rebuilds.
+ */
+export async function loadStoredKpiActualsByCode(admin, reportDate) {
+  const cache = await readStoredPerformanceKpiCache(admin, reportDate);
+  const source = cache?.actualsBySalesman;
+  if (!source || typeof source !== "object") return {};
+  const byCode = {};
+  Object.entries(source).forEach(([code, actuals]) => {
+    const key = normalizeSalesmanCode(code);
+    if (!key || !actuals || typeof actuals !== "object") return;
+    byCode[key] = withDerivedKpiActuals({
+      ...emptyPerformanceActuals(),
+      ...actuals,
+    });
+  });
+  return byCode;
+}
+
+async function readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp = "") {
+  const cache = await readStoredPerformanceKpiCache(admin, reportDate);
+  if (!cache) return null;
+  if (
+    String(cache.batchId || "") !== batchId
+    || String(cache.receiptStamp || "") !== String(receiptStamp || "")
+  ) return null;
+  return cache;
 }
 
 async function writePerformanceKpiCache(admin, reportDate, cache) {
@@ -583,6 +622,25 @@ export async function rebuildPerformanceKpiCache(admin, {
   return cache;
 }
 
+/**
+ * Rebuild current-month KPI actuals after a sales or receipt upload.
+ * Also builds the prior month once when that frozen cache is missing (for vs-last-month).
+ */
+export async function warmPerformanceKpiCachesAfterUpload(admin, {
+  reportDate = getKsaDateString(),
+} = {}) {
+  const cache = await rebuildPerformanceKpiCache(admin, { reportDate });
+  const priorMonth = previousMonthKey(String(monthStartDate(reportDate) || reportDate).slice(0, 7));
+  if (priorMonth) {
+    const priorReportDate = `${priorMonth}-01`;
+    const priorCache = await readStoredPerformanceKpiCache(admin, priorReportDate);
+    if (!priorCache) {
+      await rebuildPerformanceKpiCache(admin, { reportDate: priorReportDate });
+    }
+  }
+  return cache;
+}
+
 export async function loadPerformanceKpiActualDetails(admin, {
   salesmanCode,
   reportDate,
@@ -621,44 +679,62 @@ export async function loadPerformanceKpiActualDetails(admin, {
 export async function loadPerformanceSnapshotsForSalesmen(admin, {
   salesmen = [],
   reportDate,
+  allowRebuild = true,
 } = {}) {
   const codes = [...new Set(
     (salesmen || []).map((row) => normalizeSalesmanCode(row.salesmanCode || row.salesman_code)).filter(Boolean),
   )];
   const todayIso = getKsaDateString();
-  const [targetsByCode, batchId, receiptStamp] = await Promise.all([
-    loadKpiTargetsBySalesman(admin, { salesmanCodes: codes, reportDate }),
-    activeSalesBatchId(admin),
-    readReceiptRegisterStamp(admin),
-  ]);
-  let sourceCache = await readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp);
-  const missingSalesmen = !sourceCache
-    ? salesmen
-    : salesmen.filter((salesman) => {
-      const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
-      return code && !Object.prototype.hasOwnProperty.call(sourceCache.actualsBySalesman, code);
-    });
-  if (missingSalesmen.length) {
-    const refreshed = await buildPerformanceKpiSourceCache(admin, {
-      salesmen: missingSalesmen,
-      reportDate,
-      batchId,
-    });
+  const targetsByCode = await loadKpiTargetsBySalesman(admin, { salesmanCodes: codes, reportDate });
+
+  let sourceCache = null;
+  if (allowRebuild) {
+    const [batchId, receiptStamp] = await Promise.all([
+      activeSalesBatchId(admin),
+      readReceiptRegisterStamp(admin),
+    ]);
+    sourceCache = await readPerformanceKpiCache(admin, reportDate, batchId, receiptStamp);
+    const missingSalesmen = !sourceCache
+      ? salesmen
+      : salesmen.filter((salesman) => {
+        const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
+        return code && !Object.prototype.hasOwnProperty.call(sourceCache.actualsBySalesman, code);
+      });
+    if (missingSalesmen.length) {
+      const refreshed = await buildPerformanceKpiSourceCache(admin, {
+        salesmen: missingSalesmen,
+        reportDate,
+        batchId,
+      });
+      sourceCache = {
+        ...refreshed,
+        actualsBySalesman: {
+          ...(sourceCache?.actualsBySalesman || {}),
+          ...refreshed.actualsBySalesman,
+        },
+        paceBySalesman: {
+          ...(sourceCache?.paceBySalesman || {}),
+          ...refreshed.paceBySalesman,
+        },
+        salesAsOfDate: refreshed.salesAsOfDate ?? sourceCache?.salesAsOfDate ?? "",
+        receiptAsOfDate: refreshed.receiptAsOfDate ?? sourceCache?.receiptAsOfDate ?? "",
+        receiptStamp,
+      };
+      await writePerformanceKpiCache(admin, reportDate, sourceCache);
+    }
+  } else {
+    // Screen / email reads: never scan active_sales or the receipt register here.
+    // Sales and receipt uploads rebuild the cache in post-response work.
+    sourceCache = await readStoredPerformanceKpiCache(admin, reportDate);
+  }
+
+  if (!sourceCache) {
     sourceCache = {
-      ...refreshed,
-      actualsBySalesman: {
-        ...(sourceCache?.actualsBySalesman || {}),
-        ...refreshed.actualsBySalesman,
-      },
-      paceBySalesman: {
-        ...(sourceCache?.paceBySalesman || {}),
-        ...refreshed.paceBySalesman,
-      },
-      salesAsOfDate: refreshed.salesAsOfDate ?? sourceCache?.salesAsOfDate ?? "",
-      receiptAsOfDate: refreshed.receiptAsOfDate ?? sourceCache?.receiptAsOfDate ?? "",
-      receiptStamp,
+      actualsBySalesman: {},
+      paceBySalesman: {},
+      salesAsOfDate: "",
+      receiptAsOfDate: "",
     };
-    await writePerformanceKpiCache(admin, reportDate, sourceCache);
   }
 
   return Promise.all((salesmen || []).map((salesman) => {

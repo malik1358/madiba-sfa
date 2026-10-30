@@ -55,6 +55,7 @@ export async function runKpiTargetsEmailCycle(admin, {
   const snapshots = await loadSnapshots(admin, {
     salesmen: recipients.map((profile) => ({ salesmanCode: profile.salesman_code, salesmanName: profile.salesman_name })),
     reportDate: `${month}-01`,
+    allowRebuild: false,
   });
   const profilesByCode = new Map(recipients.map((profile) => [normalizeSalesmanCode(profile.salesman_code), profile]));
   const results = [];

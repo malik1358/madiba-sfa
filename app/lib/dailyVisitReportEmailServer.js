@@ -569,6 +569,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       const snapshots = await loadKpis(admin, {
         salesmen: kpiSalesmen,
         reportDate,
+        allowRebuild: false,
       });
       kpiByUserId = new Map(kpiSalesmen.map((row, index) => [row.userId, snapshots[index]]));
     } catch {

@@ -77,22 +77,32 @@ async function resolveCustomerCodeMap(admin, rowsOrCodes) {
   const rows = (Array.isArray(rowsOrCodes) ? rowsOrCodes : [])
     .map((entry) => {
       if (entry && typeof entry === "object") {
+        const customerCode = String(entry.customerCode || entry.customer_code || "").trim().toUpperCase();
+        const candidates = [...new Set(
+          [
+            customerCode,
+            ...((entry.customerCodeCandidates || entry.customer_code_candidates || [])
+              .map((code) => String(code || "").trim().toUpperCase())),
+          ].filter(Boolean),
+        )];
         return {
-          customerCode: String(entry.customerCode || entry.customer_code || "").trim().toUpperCase(),
+          customerCode: customerCode || candidates[0] || "",
+          customerCodeCandidates: candidates,
           partyName: String(entry.partyName || entry.party_name || "").trim(),
         };
       }
       return {
         customerCode: String(entry || "").trim().toUpperCase(),
+        customerCodeCandidates: [String(entry || "").trim().toUpperCase()].filter(Boolean),
         partyName: "",
       };
     })
-    .filter((row) => row.customerCode);
+    .filter((row) => row.customerCode || row.customerCodeCandidates.length);
 
   const resolved = new Map();
   if (!rows.length) return resolved;
 
-  const uniqueCodes = [...new Set(rows.map((row) => row.customerCode))];
+  const uniqueCodes = [...new Set(rows.flatMap((row) => row.customerCodeCandidates))];
   const lookup = new Set();
   uniqueCodes.forEach((code) => {
     expandCollectionRemarkCustomerCodeCandidates(code).forEach((candidate) => lookup.add(candidate));
@@ -159,18 +169,23 @@ async function resolveCustomerCodeMap(admin, rowsOrCodes) {
 
   const knownList = [...known];
   rows.forEach((row) => {
-    if (resolved.has(row.customerCode)) return;
-    const byCode = resolveCollectionRemarkCustomerCodeFromKnown(row.customerCode, knownList);
-    if (byCode) {
-      resolved.set(row.customerCode, byCode);
-      return;
+    const mapKey = row.customerCode || row.customerCodeCandidates[0];
+    if (!mapKey || resolved.has(mapKey)) return;
+
+    // Prefer ledger/primary, then any other OCR number on the same row (invoice etc.).
+    for (const candidate of row.customerCodeCandidates) {
+      const byCode = resolveCollectionRemarkCustomerCodeFromKnown(candidate, knownList);
+      if (byCode) {
+        resolved.set(mapKey, byCode);
+        return;
+      }
     }
 
     const partyKey = normalizeCustomerNameKey(row.partyName);
     if (!partyKey) return;
     const exactName = nameIndex.get(partyKey) || [];
     if (exactName.length === 1) {
-      resolved.set(row.customerCode, exactName[0]);
+      resolved.set(mapKey, exactName[0]);
       return;
     }
 
@@ -179,7 +194,7 @@ async function resolveCustomerCodeMap(admin, rowsOrCodes) {
       .flatMap(([, codes]) => codes);
     const uniquePartial = [...new Set(partial)];
     if (uniquePartial.length === 1) {
-      resolved.set(row.customerCode, uniquePartial[0]);
+      resolved.set(mapKey, uniquePartial[0]);
     }
   });
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   expandCollectionRemarkCustomerCodeCandidates,
+  extractBillRowCodeCandidates,
   looksLikeLedgerPartyNameAfterCode,
   normalizeCollectionRemarkCustomerCode,
   normalizeCollectionRemarkImportRows,
@@ -169,21 +170,35 @@ Date Ref. No. Party's Name State Pending Due on Overdue Invoice Sales person Rem
   assert.match(byCode["1468"].partyName || "", /Bahr Al-Takhfid/i);
 });
 
-test("parseBillsReceivableOcrText ignores invoice numbers before salesman names", () => {
+test("parseBillsReceivableOcrText keeps ledger primary and invoice candidates", () => {
   assert.equal(looksLikeLedgerPartyNameAfterCode("Ahmed Nabil sunday 1st Nov. expected"), false);
   assert.equal(looksLikeLedgerPartyNameAfterCode("Al -Rowad Wholesale Trading Est."), true);
   assert.equal(normalizeCollectionRemarkCustomerCode("1468_Bahr Al-Takhfid Trading Company"), "1468");
 
+  const segment = "1058 Al -Rowad Wholesale Trading Est. Riyadh 2,500.00 124 7258 Ahmed Nabil good return";
+  const candidates = extractBillRowCodeCandidates(segment, { primaryCode: "1058" });
+  assert.ok(candidates.includes("1058"));
+  assert.ok(candidates.includes("7258"));
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("986", ["1058", "1478"]),
+    "",
+  );
+  assert.equal(
+    resolveCollectionRemarkCustomerCodeFromKnown("7258", ["1058", "7258", "1478"]),
+    "7258",
+  );
+
   const ocr = `
 Pending Bills
-RNFD/045 1058 Al -Rowad Wholesale Trading Est. Riyadh 2,500.00 124 7258 Ahmed Nabil good return in next 2 days
-NFD/199 1468_Bahr Al-Takhfid Trading Company Riyadh 900.00 40 1939 ABDALLA ANTHANATH sunday 1st Nov. expected
+27-Jun-26 RNFD/045 1058 Al -Rowad Wholesale Trading Est. Riyadh 2,500.00 124 7258 Ahmed Nabil good return in next 2 days
+16-Sep-26 NFD/199 1468_Bahr Al-Takhfid Trading Company Riyadh 900.00 40 1939 ABDALLA ANTHANATH sunday 1st Nov. expected
 `;
   const rows = parseBillsReceivableOcrText(ocr);
   const codes = rows.map((row) => row.customerCode).sort();
   assert.deepEqual(codes, ["1058", "1468"]);
   assert.equal(rows.find((row) => row.customerCode === "1058")?.remark, "good return in next 2 days");
-  assert.doesNotMatch(codes.join(","), /7258|1939|124/);
+  assert.ok(rows.find((row) => row.customerCode === "1058")?.customerCodeCandidates.includes("7258"));
+  assert.ok(rows.find((row) => row.customerCode === "1468")?.customerCodeCandidates.includes("1939"));
 });
 
 test("parseCollectionRemarkOcrText auto-detects bills receivable layout", () => {

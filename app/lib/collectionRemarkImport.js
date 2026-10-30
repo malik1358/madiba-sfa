@@ -23,8 +23,13 @@ const OUTCOME_TOKENS = [
  */
 const CUSTOMER_CODE_RE = /(?<![,\d])(\d{3,5}C)(?![A-Z0-9])|(?:^|[\n\r])\s*(\d{4})(?=\s*[—\-–:])|(?<![,\d.])(\d{4})(?=\s+[A-Za-z\u0600-\u06FF])/gi;
 const CUSTOMER_CODE_ONLY_RE = /^(\d{3,5}C?)$/i;
+/**
+ * Ledger / Party's Name cell: code then space/underscore/hyphen then the trading name.
+ * Example: `1058 Al -Rowad…`, `1468_Bahr Al-Takhfid…`, `1297C Zahrat…`.
+ */
+const LEDGER_PARTY_CODE_RE = /\b(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 /** Bills Receivable row: Ref. No. then party code then party name. */
-const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}\s+(\d{4}C?)\s+(?=[A-Za-z\u0600-\u06FF])/gi;
+const BILL_REF_PARTY_CODE_RE = /\b[A-Z]{2,8}\/\d{2,5}\s+(\d{3,5}C?)(?:[_\-\s—–]+)(?=[A-Za-z\u0600-\u06FF])/gi;
 
 const BILL_DATE_RE = /\b\d{1,2}-[A-Za-z]{3}-\d{2}\b/gi;
 const BILL_REF_RE = /\b[A-Z]{2,8}\/\d{2,5}\b/gi;
@@ -47,12 +52,61 @@ function knownSalesmanNameRe(flags = "i") {
   return new RegExp(`(?:${KNOWN_SALESMAN_NAME_PATTERN})`, flags);
 }
 
+function textAfterAnchor(text, anchor, code, length = 100) {
+  const start = Math.max(0, Number(anchor) || 0) + String(code || "").length;
+  return cleanCollectionRemarkText(String(text || "").slice(start, start + length));
+}
+
+/**
+ * True when the text after a digit run looks like a Party's Name / ledger label,
+ * not Invoice→Sales person noise (`7258 Ahmed Nabil…`).
+ */
+export function looksLikeLedgerPartyNameAfterCode(after = "") {
+  const snippet = cleanCollectionRemarkText(after)
+    .replace(/^(?:[_\-\s—–]+)/, "")
+    .slice(0, 120);
+  if (!snippet) return false;
+
+  const leadingName = snippet.match(/^([A-Za-z\u0600-\u06FF][A-Za-z\u0600-\u06FF .,'-]{0,60})/);
+  const nameHead = String(leadingName?.[1] || "").trim();
+  if (!nameHead) return false;
+  if (knownSalesmanNameRe("i").test(nameHead)) return false;
+  if (/^(Riyadh|Jeddah|Dammam|Never|FAR|Pending|Overdue)\b/i.test(nameHead)) return false;
+
+  if (COMPANY_NAME_RE.test(snippet)) return true;
+
+  const beforeNoise = snippet.split(
+    /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|\d{1,3}(?:,\d{3})*\.\d{2}|Never|FAR)\b/i,
+  )[0] || snippet;
+  const words = beforeNoise.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && /^[A-Za-z\u0600-\u06FF]/.test(words[0])) return true;
+  // Underscore-glued ledger: "Bahr" alone after 1468_ still counts with company later,
+  // or a long first token that is not a salesman.
+  if (words.length >= 1 && /[A-Za-z\u0600-\u06FF]{4,}/.test(words[0]) && !/^(Ahmed|Osama|Parvez|Junaid|Soyeb|Fazlur|ABDALLA|ABDUL|MOIN)/i.test(words[0])) {
+    return true;
+  }
+  return false;
+}
+
+/** Pull the human ledger/party label that follows a leading account code. */
+export function extractLedgerPartyNameAfterCode(after = "") {
+  const snippet = cleanCollectionRemarkText(after).replace(/^(?:[_\-\s—–]+)/, "");
+  if (!snippet) return "";
+  const cut = snippet.split(
+    /\b(?:Riyadh|Jeddah|Dammam|Makkah|Madinah|Khobar|Qassim|Asir|Tabuk|Hail|Jazan|Najran|Baha|Northern Borders|Aljouf|\d{1,3}(?:,\d{3})*\.\d{2}|Never|FAR)\b/i,
+  )[0] || snippet;
+  const name = cleanCollectionRemarkText(cut).replace(/\s+/g, " ").trim();
+  if (!name || knownSalesmanNameRe("i").test(name) || name.length < 4) return "";
+  return name.slice(0, 120);
+}
+
 export function normalizeCollectionRemarkCustomerCode(value) {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) return "";
-  const fromPrefix = raw.match(/^(\d{3,5}C?)\b/);
+  // Allow ledger forms like 1468_Bahr… / 1058 Al… (underscore is a word char, so \b fails).
+  const fromPrefix = raw.match(/^(\d{3,5}C?)(?=$|[^A-Z0-9])/i);
   if (fromPrefix) return fromPrefix[1].toUpperCase();
-  const anywhere = raw.match(/\b(\d{3,5}C?)\b/);
+  const anywhere = raw.match(/(?:^|[^A-Z0-9])(\d{3,5}C?)(?=$|[^A-Z0-9])/i);
   return anywhere ? anywhere[1].toUpperCase() : "";
 }
 
@@ -310,13 +364,17 @@ function extractRemarkFromBillsSegment(segment) {
   return isNoiseRemark(text) ? "" : text;
 }
 
-function buildRow(customerCode, remark, source = "ocr") {
+function buildRow(customerCode, remark, source = "ocr", partyName = "") {
   const code = normalizeCollectionRemarkCustomerCode(customerCode);
   const cleaned = sanitizeCollectionRemarkComment(remark, { customerCode: code });
   if (!code || isNoiseRemark(cleaned)) return null;
   const visitOutcome = suggestCollectionRemarkVisitOutcome(cleaned);
+  const ledgerName = extractLedgerPartyNameAfterCode(partyName) || extractLedgerPartyNameAfterCode(
+    String(partyName || "").replace(new RegExp(`^${code}\\b[_\-\\s—–]*`, "i"), ""),
+  );
   return {
     customerCode: code,
+    partyName: ledgerName,
     remark: cleaned,
     visitOutcome,
     paymentStatus: suggestCollectionRemarkPaymentStatus(visitOutcome),
@@ -348,40 +406,62 @@ function upsertRemarkRow(rowsByCode, row) {
   }
 }
 
-function collectCustomerCodeMatchAnchors(text, regex) {
+function collectCustomerCodeMatchAnchors(text, regex, { requireLedgerName = false } = {}) {
   return [...String(text || "").matchAll(regex)]
     .map((match) => {
       const code = String(match[1] || match[2] || match[3] || "").toUpperCase();
       if (!code) return null;
       const codePos = String(text).toUpperCase().indexOf(code, match.index);
       const anchor = codePos >= 0 ? codePos : match.index;
-      return { code, anchor, index: match.index };
+      const after = textAfterAnchor(text, anchor, code);
+      if (requireLedgerName && !looksLikeLedgerPartyNameAfterCode(after)) return null;
+      return {
+        code,
+        anchor,
+        index: match.index,
+        partyName: extractLedgerPartyNameAfterCode(after),
+      };
     })
     .filter(Boolean)
     .sort((left, right) => left.anchor - right.anchor);
 }
 
 /**
- * Bills Receivable / Pending Bills OCR: party code + name, remarks on the right.
- * Prefer Ref. No. → party code anchors so overdue days / amounts are not treated as codes.
+ * Bills Receivable / Pending Bills OCR: take the code from Party's Name / ledger text only.
+ * Never treat Invoice→Sales person (`7258 Ahmed Nabil`) as a party code.
  */
 export function parseBillsReceivableOcrText(ocrText = "") {
   const text = String(ocrText || "").replace(/\r/g, "\n");
   if (!text.trim()) return [];
 
-  const refAnchors = collectCustomerCodeMatchAnchors(text, BILL_REF_PARTY_CODE_RE);
-  const genericAnchors = collectCustomerCodeMatchAnchors(text, CUSTOMER_CODE_RE);
-  const matches = refAnchors.length ? refAnchors : genericAnchors;
+  const ledgerAnchors = collectCustomerCodeMatchAnchors(text, LEDGER_PARTY_CODE_RE, {
+    requireLedgerName: true,
+  });
+  const refAnchors = collectCustomerCodeMatchAnchors(text, BILL_REF_PARTY_CODE_RE, {
+    requireLedgerName: true,
+  });
+  // Prefer ledger/Party's Name anchors; Ref anchors fill gaps only.
+  const byAnchor = new Map();
+  [...ledgerAnchors, ...refAnchors].forEach((entry) => {
+    const key = `${entry.code}@${entry.anchor}`;
+    if (!byAnchor.has(key)) byAnchor.set(key, entry);
+  });
+  let matches = [...byAnchor.values()].sort((left, right) => left.anchor - right.anchor);
+
+  // Last resort: generic 4-digit-before-letter, still filtered to ledger-like names.
+  if (!matches.length) {
+    matches = collectCustomerCodeMatchAnchors(text, CUSTOMER_CODE_RE, { requireLedgerName: true });
+  }
   if (!matches.length) return [];
 
   const rowsByCode = new Map();
   for (let index = 0; index < matches.length; index += 1) {
-    const { code, anchor } = matches[index];
+    const { code, anchor, partyName } = matches[index];
     const next = matches[index + 1];
     const end = next ? next.anchor : text.length;
     const segment = text.slice(anchor + code.length, end);
     const remark = extractRemarkFromBillsSegment(segment);
-    const row = buildRow(code, remark, "ocr-bills");
+    const row = buildRow(code, remark, "ocr-bills", partyName || segment);
     if (row) upsertRemarkRow(rowsByCode, row);
   }
 
@@ -535,6 +615,8 @@ export function normalizeCollectionRemarkImportRows(rows = []) {
   const out = [];
   (Array.isArray(rows) ? rows : []).forEach((row, index) => {
     const customerCode = normalizeCollectionRemarkCustomerCode(row?.customerCode || row?.customer_code);
+    const partyName = extractLedgerPartyNameAfterCode(row?.partyName || row?.party_name || "")
+      || extractLedgerPartyNameAfterCode(String(row?.customerCode || row?.customer_code || ""));
     const remark = sanitizeCollectionRemarkComment(
       row?.remark || row?.remark_english || row?.remarks,
       { customerCode },
@@ -555,6 +637,7 @@ export function normalizeCollectionRemarkImportRows(rows = []) {
     out.push({
       id: String(row?.id || `${customerCode}-${index}`),
       customerCode,
+      partyName,
       remark,
       visitOutcome,
       paymentStatus,

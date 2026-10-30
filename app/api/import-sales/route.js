@@ -9,7 +9,7 @@ import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
-import { rebuildPerformanceKpiCache } from "../../lib/performanceKpisServer.js";
+import { warmPerformanceKpiCachesAfterUpload } from "../../lib/performanceKpisServer.js";
 import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
 import {
   describePartialDateOverwrites,
@@ -1301,7 +1301,7 @@ export async function POST(request) {
         const kpiAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
-        const cache = await rebuildPerformanceKpiCache(kpiAdmin);
+        const cache = await warmPerformanceKpiCachesAfterUpload(kpiAdmin);
         console.info("Performance KPI cache rebuilt after sales upload:", {
           salesmanCount: Object.keys(cache.actualsBySalesman).length,
           reportMonth: cache.reportMonth,

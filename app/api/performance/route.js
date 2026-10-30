@@ -117,6 +117,7 @@ export async function GET(request) {
     const snapshots = await loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: members,
       reportDate,
+      allowRebuild: false,
     });
     const viewerTeamCode = teamTargetSalesmanCode(profile.salesman_code);
     const teamTargetMap = viewerTeamCode

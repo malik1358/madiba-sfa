@@ -206,6 +206,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` skips salesman and hierarchy-boss digests; sends only the company digest |
 | `OUTSTANDING_NO_GPS_EMAIL_TO`, `OUTSTANDING_NO_GPS_EMAIL_CC` | Optional management digest |
 | `CUSTOMER_GPS_CHANGE_EMAIL_TO` | Optional GPS-change digest override; defaults to `malik@pinasz.com`, no recipient configuration required |
+| `MISSING_CATALOGUE_PHOTOS_EMAIL_TO`, `MISSING_CATALOGUE_PHOTOS_EMAIL_CC` | Optional To override / CC extras for the missing catalogue photos digest (default To Malik + Swami; default CC Jigar) |
 | `OUTSTANDING_RECONCILE_EMAIL_TO`, `OUTSTANDING_RECONCILE_EMAIL_CC` | Extra Tally vs SFA difference recipients (added to the built-in To / CC lists; default CC includes `kelwani@noorshukran.com`) |
 | `OUTSTANDING_RECONCILE_EMAIL_TEST_TO` | Send the difference report only to these addresses and skip the dedupe marker (CC omitted on test-to sends) |
 | `KPI_UPLOAD_SUMMARY_EMAIL_TO`, `KPI_UPLOAD_SUMMARY_EMAIL_CC` | Optional extras for the post-upload KPI Targets footer summary (default To `malik@pinasz.com`) |
@@ -253,7 +254,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `matched-receipt-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday also sends Thursday. `maxDuration` 300s; workflow curl `--max-time` 360 | `/api/cron/matched-receipt-email` |
 | `receipts-not-in-tally-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/receipts-not-in-tally-email` |
 | `customer-gps-change-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Saturday sends Thursday and Friday | `/api/cron/customer-gps-change-email` |
-| `missing-catalogue-photos-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To `malik@pinasz.com` and `swami@pinasz.com`. Optional `MISSING_CATALOGUE_PHOTOS_EMAIL_TO`. | `/api/cron/missing-catalogue-photos-email` |
+| `missing-catalogue-photos-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To `malik@pinasz.com` and `swami@pinasz.com`. Default CC `jigar.wadiya@noorshukran.com`. Optional `MISSING_CATALOGUE_PHOTOS_EMAIL_TO` / `MISSING_CATALOGUE_PHOTOS_EMAIL_CC`. | `/api/cron/missing-catalogue-photos-email` |
 | `bad-debt-report-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Default To Malik, Fazlur, and Soyeb. Optional `BAD_DEBT_REPORT_EMAIL_TO`. | `/api/cron/bad-debt-report-email` |
 | `items-sold-at-loss-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Previous KSA day negative-GP sales. Default To `malik@pinasz.com`. Optional `ITEMS_SOLD_AT_LOSS_EMAIL_TO`. | `/api/cron/items-sold-at-loss-email` |
 | `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection + Total cash collected). Normal sends are scheduled 18 minutes after sales/receipt uploads and flushed by `/api/cron/inactivity-push`. | `/api/cron/kpi-upload-summary-email` |

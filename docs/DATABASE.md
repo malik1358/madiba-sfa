@@ -187,7 +187,8 @@ Schemes and quantity limits are settings, not tables:
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
 | `receivable_days_monthly_v1` | BI Net receivable days cache: last imported Tally outstanding total for each KSA month, plus monthly credit sales. Rebuilt when the stored outstanding file list, active sales batch, or KSA as-of date changes |
-| `performance_kpi_actuals_v2:<YYYY-MM-01>` | Per-salesman KPI actuals and the last three complete months of sales pace for the month. Inner `version` 8, including `salesAsOfDate` and `receiptAsOfDate`. Rebuilt after sales uploads, receipt-register uploads, and saved collection visits; read by `/api/performance` and KPI Targets so screens do not rescan source transactions. A version, batch, or receipt-stamp mismatch rebuilds on demand |
+| `performance_kpi_actuals_v2:<YYYY-MM-01>` | Per-salesman KPI actuals and the last three complete months of sales pace for the month. Inner `version` 8, including `salesAsOfDate` and `receiptAsOfDate`. Rebuilt only after sales uploads and receipt-register uploads (`warmPerformanceKpiCachesAfterUpload`; also warms a missing prior month once). KPI Targets, My Performance, and related emails soft-read this blob and never rebuild on GET. Collection visits do not rewrite it |
+| `kpi_targets_boss_map_v1` | Short-lived (30 min) map of profile id → boss code/name for KPI Targets, so GET avoids Auth `listUsers` on every open |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |
 | `order_quantity_controls` | Per-customer quantity caps |

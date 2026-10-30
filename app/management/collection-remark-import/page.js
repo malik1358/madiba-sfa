@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { COLLECTION_REMARK_IMPORT_OUTCOMES } from "../../lib/collectionRemarkImport";
+import { ocrCollectionRemarkImageInBrowser } from "../../lib/collectionRemarkImportClientOcr";
 import { getSupabaseClient } from "../../lib/supabase";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 
@@ -30,6 +31,7 @@ const TEXT = {
   },
   parse: { en: "Extract remarks", ar: "استخراج الملاحظات" },
   parsing: { en: "Reading screenshot…", ar: "جاري قراءة اللقطة…" },
+  ocrProgress: { en: "Reading screenshot", ar: "جاري قراءة اللقطة" },
   commit: { en: "Save FAR collection visits", ar: "حفظ زيارات التحصيل (FAR)" },
   committing: { en: "Saving…", ar: "جاري الحفظ…" },
   clear: { en: "Clear", ar: "مسح" },
@@ -78,6 +80,7 @@ export default function CollectionRemarkImportPage() {
   const [success, setSuccess] = useState("");
   const [actors, setActors] = useState([]);
   const [createdByUserId, setCreatedByUserId] = useState("");
+  const [ocrProgress, setOcrProgress] = useState(null);
 
   const selectedCount = useMemo(
     () => rows.filter((row) => row.selected && row.customerCode && row.remark).length,
@@ -119,27 +122,59 @@ export default function CollectionRemarkImportPage() {
     setError("");
     setSuccess("");
     setBusy("parse");
+    setOcrProgress(file ? 0 : null);
     try {
+      let browserOcrText = "";
+      if (file) {
+        try {
+          browserOcrText = await ocrCollectionRemarkImageInBrowser(file, {
+            onProgress: (progress) => setOcrProgress(progress),
+          });
+        } catch (ocrErr) {
+          // Fall through to server OCR / pasted text.
+          browserOcrText = "";
+          if (!pastedText.trim()) {
+            console.warn("Browser OCR failed", ocrErr);
+          }
+        }
+      }
+
       const headers = await authHeaders();
       const form = new FormData();
       form.set("action", "parse");
-      if (pastedText.trim()) form.set("text", pastedText);
-      if (file) form.set("file", file);
+      const combinedText = [pastedText, browserOcrText].filter((part) => String(part || "").trim()).join("\n");
+      if (combinedText.trim()) form.set("text", combinedText);
+      // Only upload the image when browser OCR produced nothing (server fallback).
+      if (file && !browserOcrText.trim()) form.set("file", file);
+      if (!combinedText.trim() && !file) {
+        throw new Error(t("parseError"));
+      }
+
       const response = await fetch("/api/collection-remark-import", {
         method: "POST",
         headers,
         body: form,
       });
-      const payload = await response.json().catch(() => ({}));
+      const rawBody = await response.text();
+      let payload = {};
+      try {
+        payload = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        throw new Error(
+          response.ok
+            ? t("parseError")
+            : `Extract failed (HTTP ${response.status}). ${rawBody.slice(0, 180) || t("parseError")}`,
+        );
+      }
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || t("parseError"));
+        throw new Error(payload.error || `Extract failed (HTTP ${response.status}). ${t("parseError")}`);
       }
       setRows((payload.rows || []).map((row, index) => ({
         ...row,
         id: row.id || `${row.customerCode}-${index}`,
         selected: row.customerExists !== false,
       })));
-      setOcrPreview(String(payload.ocrText || "").trim());
+      setOcrPreview(String(payload.ocrText || browserOcrText || "").trim());
       if (!(payload.rows || []).length) {
         setError(payload.hint || t("noRows"));
       }
@@ -148,6 +183,7 @@ export default function CollectionRemarkImportPage() {
       setError(err?.message || t("parseError"));
     } finally {
       setBusy("");
+      setOcrProgress(null);
     }
   }
 
@@ -263,9 +299,13 @@ export default function CollectionRemarkImportPage() {
             />
             <small className="moduleMuted">{t("pasteHint")}</small>
           </label>
-          <div className="moduleActionRow" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="moduleActionRow" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <button type="submit" className="modulePrimaryButton" disabled={Boolean(busy)}>
-              {busy === "parse" ? t("parsing") : t("parse")}
+              {busy === "parse"
+                ? (ocrProgress == null
+                  ? t("parsing")
+                  : `${t("ocrProgress")} ${Math.round(Number(ocrProgress) * 100)}%`)
+                : t("parse")}
             </button>
             <button
               type="button"

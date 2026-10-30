@@ -1,0 +1,15 @@
+---
+description: Auto-promote finished app fixes to production and verify after deploy
+alwaysApply: true
+---
+
+# Auto deploy and verify
+
+When a user-facing or production-behavior fix/feature is complete in this repo:
+
+1. Do **not** stop at local code + tests. Treat production promotion as part of finishing the task unless the user explicitly says to hold.
+2. Commit on a focused branch, open a PR into `main`, wait for GitHub Actions `Build`, merge, and wait for the Vercel production deploy to succeed.
+3. After deploy succeeds, verify on production (force the related cron/email/API or open the affected screen) and report the result.
+4. In the final response, list every user-visible change in that promotion with PR number, merge commit, and deployed build/status URL.
+
+Canonical path: feature branch → PR + CI → merge `main` → Vercel production → post-deploy verification.

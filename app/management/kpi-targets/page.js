@@ -84,6 +84,14 @@ const TEXT = {
   informationOnly: { en: "Information only", ar: "للمعلومات فقط" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
+  newSkusToRepeatCustomers: {
+    en: "New SKUs to repeat customers",
+    ar: "أصناف جديدة لعملاء متكررين",
+  },
+  avgSkusPerRepeatCustomer: {
+    en: "Avg SKUs / repeat customer (info)",
+    ar: "متوسط الأصناف / عميل متكرر (معلومات)",
+  },
   actual: { en: "Actual", ar: "الفعلي" },
   achievement: { en: "Ach. %", ar: "الإنجاز" },
   ofTarget: { en: "of target", ar: "من الهدف" },
@@ -118,6 +126,8 @@ function emptyDraft(snapshot) {
     collection: String(snapshot.targets?.collection ?? 0),
     newCustomers: String(snapshot.targets?.newCustomers ?? 0),
     repeatCustomers: String(snapshot.targets?.repeatCustomers ?? 0),
+    newSkusToRepeatCustomers: String(snapshot.targets?.newSkusToRepeatCustomers ?? 0),
+    actuals: snapshot.actuals || {},
     kpis: snapshot.kpis || [],
     paceShares: snapshot.paceShares || null,
     salesAsOfDate: snapshot.salesAsOfDate,
@@ -133,6 +143,7 @@ function withLiveTeamActuals(rows) {
     const actuals = sumKpiActuals(teamMemberRows(rows, row.bossCode));
     return {
       ...row,
+      actuals,
       kpis: PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => ({
         key,
         actual: actuals[key] || 0,
@@ -263,6 +274,7 @@ export default function KpiTargetsPage() {
                 collection: Number(row.collection || 0),
                 newCustomers: Number(row.newCustomers || 0),
                 repeatCustomers: Number(row.repeatCustomers || 0),
+                newSkusToRepeatCustomers: Number(row.newSkusToRepeatCustomers || 0),
               },
             })),
           }),

@@ -1,6 +1,7 @@
 import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
   achievementPercent,
+  averageSkusPerRepeatCustomer,
   buildPerformanceKpi,
   monthEndPaceEstimate,
   normalizePerformanceTargets,
@@ -134,14 +135,21 @@ export function teamMemberRows(rows, bossCode) {
 }
 
 export function sumKpiActuals(rows = []) {
-  return (rows || []).reduce((totals, row) => {
+  const totals = (rows || []).reduce((result, row) => {
     (row?.kpis || []).forEach((kpi) => {
       const key = kpi?.key;
-      if (!key) return;
-      totals[key] = (totals[key] || 0) + (Number(kpi.actual || 0) || 0);
+      if (!key || key === "avgSkusPerRepeatCustomer") return;
+      result[key] = (result[key] || 0) + (Number(kpi.actual || 0) || 0);
     });
-    return totals;
+    result.repeatCustomerSkuCount = (result.repeatCustomerSkuCount || 0)
+      + (Number(row?.actuals?.repeatCustomerSkuCount || 0) || 0);
+    return result;
   }, {});
+  totals.avgSkusPerRepeatCustomer = averageSkusPerRepeatCustomer(
+    totals.repeatCustomerSkuCount,
+    totals.repeatCustomers,
+  );
+  return totals;
 }
 
 export function rowTargetValue(row, key) {
@@ -152,7 +160,11 @@ export function rowTargetValue(row, key) {
       || Number(row?.totalSales || 0)
       || 0;
   }
-  if (key === "cashCollection" || key === "totalCashCollected") return 0;
+  if (
+    key === "cashCollection"
+    || key === "totalCashCollected"
+    || key === "avgSkusPerRepeatCustomer"
+  ) return 0;
   return Number(row?.[key] || 0) || 0;
 }
 
@@ -161,15 +173,26 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
   columns.forEach((key) => {
     totals[key] = { actual: 0, target: 0 };
   });
+  let repeatCustomerSkuCount = 0;
 
   (rows || []).forEach((row) => {
     if (row?.isTeam) return;
+    repeatCustomerSkuCount += Number(row?.actuals?.repeatCustomerSkuCount || 0) || 0;
     columns.forEach((key) => {
+      if (key === "avgSkusPerRepeatCustomer") return;
       const kpi = (row.kpis || []).find((item) => item.key === key);
       totals[key].actual += Number(kpi?.actual || 0) || 0;
       totals[key].target += rowTargetValue(row, key);
     });
   });
+
+  if (totals.avgSkusPerRepeatCustomer) {
+    totals.avgSkusPerRepeatCustomer.actual = averageSkusPerRepeatCustomer(
+      repeatCustomerSkuCount,
+      totals.repeatCustomers?.actual,
+    );
+    totals.avgSkusPerRepeatCustomer.target = 0;
+  }
 
   columns.forEach((key) => {
     totals[key].achievement = achievementPercent(totals[key].actual, totals[key].target);
@@ -316,11 +339,15 @@ export function sumFilteredPriorMonthActuals(
     keys.add("collection");
     keys.add("cashCollection");
   }
+  if (keys.has("avgSkusPerRepeatCustomer")) {
+    keys.add("repeatCustomers");
+  }
   const totals = {};
   keys.forEach((key) => {
     totals[key] = 0;
   });
   let matched = false;
+  let repeatCustomerSkuCount = 0;
   (rows || []).forEach((row) => {
     if (row?.isTeam) return;
     const code = normalizeSalesmanCode(row?.salesmanCode);
@@ -328,8 +355,9 @@ export function sumFilteredPriorMonthActuals(
     const actuals = priorMonthActualsForCode(priorActualsByCode, code);
     if (!actuals || typeof actuals !== "object") return;
     matched = true;
+    repeatCustomerSkuCount += Number(actuals.repeatCustomerSkuCount || 0) || 0;
     keys.forEach((key) => {
-      if (key === "totalCashCollected") return;
+      if (key === "totalCashCollected" || key === "avgSkusPerRepeatCustomer") return;
       if (key === "totalSales") {
         totals.totalSales = (totals.totalSales || 0) + priorMonthTotalSalesFromActuals(actuals);
         return;
@@ -340,6 +368,12 @@ export function sumFilteredPriorMonthActuals(
   if (keys.has("totalCashCollected")) {
     totals.totalCashCollected = (Number(totals.collection) || 0)
       + (Number(totals.cashCollection) || 0);
+  }
+  if (keys.has("avgSkusPerRepeatCustomer")) {
+    totals.avgSkusPerRepeatCustomer = averageSkusPerRepeatCustomer(
+      repeatCustomerSkuCount,
+      totals.repeatCustomers,
+    );
   }
   return matched ? totals : null;
 }

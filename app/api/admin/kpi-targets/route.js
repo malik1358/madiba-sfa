@@ -232,6 +232,7 @@ export async function GET(request) {
             collection: 0,
             newCustomers: 0,
             repeatCustomers: 0,
+            newSkusToRepeatCustomers: 0,
           },
         };
       }),
@@ -284,6 +285,7 @@ export async function PUT(request) {
         collection_target: targets.collection,
         new_buying_customers_target: Math.round(targets.newCustomers),
         existing_customers_buying_target: Math.round(targets.repeatCustomers),
+        new_skus_to_repeat_customers_target: Math.round(targets.newSkusToRepeatCustomers),
         is_approved: true,
         updated_by: access.user.id,
       };
@@ -304,7 +306,8 @@ export async function PUT(request) {
 
     const payloads = [
       rows,
-      rows.map(({ collection_target, updated_by, ...rest }) => rest),
+      rows.map(({ new_skus_to_repeat_customers_target, ...rest }) => rest),
+      rows.map(({ collection_target, updated_by, new_skus_to_repeat_customers_target, ...rest }) => rest),
     ];
 
     let result = { error: new Error("Unable to save KPI targets.") };
@@ -322,6 +325,12 @@ export async function PUT(request) {
         && String(result.error.message || result.error.details || "").includes("local_item_sales_target")
       ) {
         throw new Error("Apply supabase/migrations/20261009120000_kpi_targets_local_item_sales.sql before saving Local item sales targets.");
+      }
+      if (
+        isMissingColumnError(result.error)
+        && String(result.error.message || result.error.details || "").includes("new_skus_to_repeat_customers_target")
+      ) {
+        throw new Error("Apply supabase/migrations/20261031120000_kpi_targets_new_skus_to_repeat_customers.sql before saving New SKUs to repeat customers targets.");
       }
       throw new Error(
         "Unable to save KPI targets. Apply sql/setup_kpi_targets_collection.sql and the KPI target migrations so all target columns exist.",

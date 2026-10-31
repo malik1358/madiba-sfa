@@ -37,6 +37,14 @@ const KPI_LABELS = {
   totalCashCollected: { en: "Total cash collected", ar: "إجمالي النقد المحصل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
+  newSkusToRepeatCustomers: {
+    en: "New SKUs to repeat customers",
+    ar: "أصناف جديدة لعملاء متكررين",
+  },
+  avgSkusPerRepeatCustomer: {
+    en: "Avg SKUs / repeat customer (info)",
+    ar: "متوسط الأصناف / عميل متكرر (معلومات)",
+  },
 };
 
 function KpiDetailsContent() {
@@ -87,9 +95,7 @@ function KpiDetailsContent() {
     return <SupabaseUnavailable title="KPI details unavailable" message="Set the Supabase browser configuration to view KPI details." />;
   }
 
-  const amountLabel = kpiKey === "newCustomers" || kpiKey === "repeatCustomers"
-    ? (value) => String(Math.round(Number(value || 0)))
-    : (value) => formatPerformanceKpiValue(kpiKey, value);
+  const amountLabel = (value) => formatPerformanceKpiValue(kpiKey, value);
   const backHref = `/management/kpi-targets?month=${encodeURIComponent(month)}`;
   return (
     <MorningAttendanceGate>

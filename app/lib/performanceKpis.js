@@ -26,6 +26,8 @@ export const PERFORMANCE_KPI_KEYS = [
   "cashCollection",
   "newCustomers",
   "repeatCustomers",
+  "newSkusToRepeatCustomers",
+  "repeatCustomerSkuCount",
 ];
 
 export const PERFORMANCE_DISPLAY_KPI_KEYS = [
@@ -38,11 +40,14 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "totalCashCollected",
   "newCustomers",
   "repeatCustomers",
+  "newSkusToRepeatCustomers",
+  "avgSkusPerRepeatCustomer",
 ];
 
 export const INFORMATION_ONLY_KPI_KEYS = new Set([
   "cashCollection",
   "totalCashCollected",
+  "avgSkusPerRepeatCustomer",
 ]);
 
 const SALES_PACE_KPI_KEYS = new Set([
@@ -69,6 +74,9 @@ export const PERFORMANCE_KPI_LABELS = {
   totalCashCollected: "Total cash collected",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
+  newSkusToRepeatCustomers: "New SKUs to repeat customers",
+  avgSkusPerRepeatCustomer: "Avg SKUs / repeat customer (info)",
+  repeatCustomerSkuCount: "Repeat customer SKU placements",
 };
 
 const MONEY_KPI_KEYS = new Set([
@@ -475,6 +483,9 @@ export function emptyPerformanceActuals() {
     totalCashCollected: 0,
     newCustomers: 0,
     repeatCustomers: 0,
+    newSkusToRepeatCustomers: 0,
+    repeatCustomerSkuCount: 0,
+    avgSkusPerRepeatCustomer: 0,
   };
 }
 
@@ -489,6 +500,8 @@ export function emptyPerformanceTargets() {
     totalCashCollected: 0,
     newCustomers: 0,
     repeatCustomers: 0,
+    newSkusToRepeatCustomers: 0,
+    avgSkusPerRepeatCustomer: 0,
   };
 }
 
@@ -509,9 +522,12 @@ export function withDerivedKpiActuals(values = {}) {
   const withSales = withTotalSales(values);
   const collection = Number(withSales.collection || 0) || 0;
   const cashCollection = Number(withSales.cashCollection || 0) || 0;
+  const repeatCustomers = Number(withSales.repeatCustomers || 0) || 0;
+  const repeatCustomerSkuCount = Number(withSales.repeatCustomerSkuCount || 0) || 0;
   return {
     ...withSales,
     totalCashCollected: Math.round((collection + cashCollection) * 100) / 100,
+    avgSkusPerRepeatCustomer: averageSkusPerRepeatCustomer(repeatCustomerSkuCount, repeatCustomers),
   };
 }
 
@@ -537,6 +553,12 @@ export function normalizePerformanceTargets(row = {}) {
     repeatCustomers: Number(
       row.repeatCustomers ?? row.repeat_customers_target ?? row.existing_customers_buying_target ?? 0,
     ) || 0,
+    newSkusToRepeatCustomers: Number(
+      row.newSkusToRepeatCustomers
+      ?? row.new_skus_to_repeat_customers_target
+      ?? row.new_skus_to_repeat_customers
+      ?? 0,
+    ) || 0,
   };
 }
 
@@ -557,6 +579,115 @@ export function classifyBuyingCustomers(monthCustomerCodes = [], priorCustomerCo
   });
 
   return { newCustomers, repeatCustomers };
+}
+
+export function normalizeItemCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+export function averageSkusPerRepeatCustomer(repeatCustomerSkuCount, repeatCustomers) {
+  const customers = Number(repeatCustomers || 0) || 0;
+  const skuCount = Number(repeatCustomerSkuCount || 0) || 0;
+  if (!(customers > 0) || !(skuCount >= 0)) return 0;
+  return Math.round((skuCount / customers) * 10) / 10;
+}
+
+/**
+ * Measure assortment push on repeat buyers only.
+ * A "new SKU" is an item code this salesman sold to a repeat customer this month
+ * that the customer never bought (positive ordinary sale) before the month.
+ */
+export function classifyRepeatCustomerSkuExpansion({
+  monthSalesRows = [],
+  priorCustomerCodes = [],
+  priorCustomerItemCodes = {},
+} = {}) {
+  const priorCustomers = new Set(
+    (priorCustomerCodes || []).map((code) => normalizeSalesmanCode(code)).filter(Boolean),
+  );
+  const priorItemsByCustomer = new Map();
+  const registerPriorItems = (code, items) => {
+    const customer = normalizeSalesmanCode(code);
+    if (!customer) return;
+    let bucket = priorItemsByCustomer.get(customer);
+    if (!bucket) {
+      bucket = new Set();
+      priorItemsByCustomer.set(customer, bucket);
+    }
+    (items instanceof Set ? [...items] : (items || [])).forEach((item) => {
+      const itemCode = normalizeItemCode(item);
+      if (itemCode) bucket.add(itemCode);
+    });
+  };
+
+  if (priorCustomerItemCodes instanceof Map) {
+    priorCustomerItemCodes.forEach((items, code) => registerPriorItems(code, items));
+  } else {
+    Object.entries(priorCustomerItemCodes || {}).forEach(([code, items]) => {
+      registerPriorItems(code, items);
+    });
+  }
+
+  const monthSkusByCustomer = new Map();
+  (monthSalesRows || []).forEach((row) => {
+    if (netKpiSalesAmount(row) <= 0 || isCreditNoteTransaction(row)) return;
+    const customer = normalizeSalesmanCode(row.customer_code);
+    const itemCode = normalizeItemCode(row.item_code);
+    if (!customer || !itemCode || !priorCustomers.has(customer)) return;
+    let bucket = monthSkusByCustomer.get(customer);
+    if (!bucket) {
+      bucket = new Set();
+      monthSkusByCustomer.set(customer, bucket);
+    }
+    bucket.add(itemCode);
+  });
+
+  let newSkusToRepeatCustomers = 0;
+  let repeatCustomerSkuCount = 0;
+  let repeatCustomersWithNewSkus = 0;
+  const customerSummaries = [];
+
+  monthSkusByCustomer.forEach((monthSkus, customer) => {
+    const priorSkus = priorItemsByCustomer.get(customer) || new Set();
+    const newSkus = [...monthSkus].filter((itemCode) => !priorSkus.has(itemCode));
+    const monthSkuCount = monthSkus.size;
+    const newSkuCount = newSkus.length;
+    repeatCustomerSkuCount += monthSkuCount;
+    newSkusToRepeatCustomers += newSkuCount;
+    if (newSkuCount > 0) repeatCustomersWithNewSkus += 1;
+    customerSummaries.push({
+      customerCode: customer,
+      monthSkuCount,
+      newSkuCount,
+      newSkuCodes: newSkus,
+    });
+  });
+
+  const repeatCustomers = monthSkusByCustomer.size;
+  return {
+    newSkusToRepeatCustomers,
+    repeatCustomerSkuCount,
+    repeatCustomersWithNewSkus,
+    avgSkusPerRepeatCustomer: averageSkusPerRepeatCustomer(repeatCustomerSkuCount, repeatCustomers),
+    customerSummaries,
+  };
+}
+
+export function priorCustomerItemCodesFromSales(rows = []) {
+  const byCustomer = new Map();
+  (rows || []).forEach((row) => {
+    if (netKpiSalesAmount(row) <= 0 || isCreditNoteTransaction(row)) return;
+    const customer = normalizeSalesmanCode(row.customer_code);
+    const itemCode = normalizeItemCode(row.item_code);
+    if (!customer || !itemCode) return;
+    let bucket = byCustomer.get(customer);
+    if (!bucket) {
+      bucket = new Set();
+      byCustomer.set(customer, bucket);
+    }
+    bucket.add(itemCode);
+  });
+  return byCustomer;
 }
 
 export function buyingCustomerCodesFromSales(rows = []) {
@@ -830,6 +961,9 @@ export function formatPerformanceKpiValue(key, value) {
   const number = Number(value || 0);
   if (MONEY_KPI_KEYS.has(key)) {
     return number.toLocaleString("en-SA", { maximumFractionDigits: 0 });
+  }
+  if (key === "avgSkusPerRepeatCustomer") {
+    return number.toLocaleString("en-SA", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
   }
   return String(Math.round(number));
 }

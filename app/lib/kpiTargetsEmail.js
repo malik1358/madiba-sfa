@@ -11,7 +11,14 @@ function escapeHtml(value) {
 }
 
 export function changedKpiTargetKeys(previous = {}, next = {}) {
-  const keys = ["officeSupplies", "otherSales", "collection", "newCustomers", "repeatCustomers"];
+  const keys = [
+    "officeSupplies",
+    "otherSales",
+    "collection",
+    "newCustomers",
+    "repeatCustomers",
+    "newSkusToRepeatCustomers",
+  ];
   return keys.filter((key) => Number(previous[key] || 0) !== Number(next[key] || 0));
 }
 

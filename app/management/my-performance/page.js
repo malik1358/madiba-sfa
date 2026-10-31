@@ -58,6 +58,14 @@ const KPI_LABELS = {
   totalCashCollected: { en: "Total cash collected", ar: "إجمالي النقد المحصل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
+  newSkusToRepeatCustomers: {
+    en: "New SKUs to repeat customers",
+    ar: "أصناف جديدة لعملاء متكررين",
+  },
+  avgSkusPerRepeatCustomer: {
+    en: "Avg SKUs / repeat customer (info)",
+    ar: "متوسط الأصناف / عميل متكرر (معلومات)",
+  },
 };
 
 function statusClass(statusKey) {

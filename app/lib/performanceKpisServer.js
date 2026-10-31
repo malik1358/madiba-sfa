@@ -4,6 +4,7 @@ import {
   buyingCustomerCodesFromSales,
   buildPerformanceSnapshot,
   classifyBuyingCustomers,
+  classifyRepeatCustomerSkuExpansion,
   emptyPerformanceActuals,
   emptyPerformanceTargets,
   isMissingSchemaColumn,
@@ -15,6 +16,7 @@ import {
   pickSalesmanPaceShares,
   collectionAccountKey,
   isKpiCollectionReceipt,
+  priorCustomerItemCodesFromSales,
   splitCollectionActualsByInvoice,
   splitSalesActuals,
   withDerivedKpiActuals,
@@ -30,13 +32,15 @@ import { RECEIPT_DATASET_STAMP_KEY } from "./receiptRegister.js";
 import { loadReceiptRowsByCustomer, lookupByCustomerCode } from "./collectionAvgDays.js";
 
 const TARGET_SELECTS = [
+  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,new_skus_to_repeat_customers_target,is_approved,updated_at,updated_by",
   "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
   "id,salesman_code,target_month,sales_target,office_supplies_sales_target,local_item_sales_target,other_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
   "id,salesman_code,target_month,sales_target,local_item_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 8;
+const PERFORMANCE_KPI_CACHE_VERSION = 9;
+const MIN_USABLE_PERFORMANCE_KPI_CACHE_VERSION = 8;
 const SALES_PACE_HISTORY_MONTHS = 3;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
@@ -92,7 +96,17 @@ export function monthWindow(reportDate) {
 export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) {
-    return { officeSupplies: 0, localItemSales: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [], salesRows: [] };
+    return {
+      officeSupplies: 0,
+      localItemSales: 0,
+      otherSales: 0,
+      monthCustomerCodes: [],
+      priorCustomerCodes: [],
+      priorCustomerItemCodes: new Map(),
+      newSkusToRepeatCustomers: 0,
+      repeatCustomerSkuCount: 0,
+      salesRows: [],
+    };
   }
 
   const { from, to } = monthWindow(reportDate);
@@ -101,7 +115,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "transaction_date,customer_code,customer_name,sales_amount,category,item_name,local_import,voucher_type,voucher_number,reference,quantity",
+      "transaction_date,customer_code,customer_name,sales_amount,category,item_code,item_name,local_import,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
@@ -123,20 +137,47 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const monthCustomerCodes = buyingCustomerCodesFromSales(monthRows);
   const uniqueMonthCodes = [...new Set(monthCustomerCodes)];
   const priorCustomerCodes = [];
+  const priorCustomerItemCodes = new Map();
 
   for (const chunk of chunkList(uniqueMonthCodes, 200)) {
     if (!chunk.length) continue;
-    const priorRows = await fetchPagedRows(
-      admin,
-      "active_sales",
-      "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity",
-      (query) => query
-        .in("customer_code", chunk)
-        .lt("transaction_date", from),
-    );
+    let priorRows;
+    try {
+      priorRows = await fetchPagedRows(
+        admin,
+        "active_sales",
+        "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity,item_code",
+        (query) => query
+          .in("customer_code", chunk)
+          .lt("transaction_date", from),
+      );
+    } catch (error) {
+      if (!isMissingColumnError(error)) throw error;
+      priorRows = await fetchPagedRows(
+        admin,
+        "active_sales",
+        "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity",
+        (query) => query
+          .in("customer_code", chunk)
+          .lt("transaction_date", from),
+      );
+    }
     priorCustomerCodes.push(...buyingCustomerCodesFromSales(priorRows));
+    priorCustomerItemCodesFromSales(priorRows).forEach((items, customer) => {
+      let bucket = priorCustomerItemCodes.get(customer);
+      if (!bucket) {
+        bucket = new Set();
+        priorCustomerItemCodes.set(customer, bucket);
+      }
+      items.forEach((itemCode) => bucket.add(itemCode));
+    });
   }
 
+  const skuExpansion = classifyRepeatCustomerSkuExpansion({
+    monthSalesRows: monthRows,
+    priorCustomerCodes,
+    priorCustomerItemCodes,
+  });
   const split = splitSalesActuals(monthRows);
   return {
     officeSupplies: split.officeSupplies,
@@ -144,6 +185,9 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     otherSales: split.otherSales,
     monthCustomerCodes,
     priorCustomerCodes,
+    priorCustomerItemCodes,
+    newSkusToRepeatCustomers: skuExpansion.newSkusToRepeatCustomers,
+    repeatCustomerSkuCount: skuExpansion.repeatCustomerSkuCount,
     salesRows: monthRows,
   };
 }
@@ -438,6 +482,8 @@ export async function loadPerformanceSnapshot(admin, {
     cashCollection: collectionActuals.cashCollection,
     newCustomers: classified.newCustomers,
     repeatCustomers: classified.repeatCustomers,
+    newSkusToRepeatCustomers: salesActuals.newSkusToRepeatCustomers || 0,
+    repeatCustomerSkuCount: salesActuals.repeatCustomerSkuCount || 0,
   };
 
   let resolvedTarget = targetRow;
@@ -480,9 +526,12 @@ async function activeSalesBatchId(admin) {
 }
 
 function isUsablePerformanceKpiCacheShape(cache) {
+  const version = Number(cache?.version);
   return Boolean(
     cache
-    && cache.version === PERFORMANCE_KPI_CACHE_VERSION
+    && Number.isFinite(version)
+    && version >= MIN_USABLE_PERFORMANCE_KPI_CACHE_VERSION
+    && version <= PERFORMANCE_KPI_CACHE_VERSION
     && cache.actualsBySalesman
     && typeof cache.actualsBySalesman === "object"
     && Object.prototype.hasOwnProperty.call(cache, "salesAsOfDate")
@@ -587,6 +636,8 @@ function cacheActualsForSalesman(salesActuals, collectionActuals) {
     cashCollection: collectionActuals.cashCollection,
     newCustomers: classified.newCustomers,
     repeatCustomers: classified.repeatCustomers,
+    newSkusToRepeatCustomers: salesActuals.newSkusToRepeatCustomers || 0,
+    repeatCustomerSkuCount: salesActuals.repeatCustomerSkuCount || 0,
   };
 }
 
@@ -695,6 +746,7 @@ export async function loadPerformanceKpiActualDetails(admin, {
     salesmanCode: code,
     salesRows: salesData.salesRows,
     priorCustomerCodes: salesData.priorCustomerCodes,
+    priorCustomerItemCodes: salesData.priorCustomerItemCodes,
   });
 }
 

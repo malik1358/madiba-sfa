@@ -152,7 +152,7 @@ Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` 
 | `price_catalog_cache` | What `/api/pricing/cache` reads (`default`, `pricing_rules`, `order_schemes`, `order_quantity_controls`). Quantity controls are returned as `quantityControls` for offline New Order checks. |
 | `price_catalog_snapshots` | Dump written by price sync. `price_map` jsonb. |
 | `item_price_history` | `item_code`, `region` default `riyadh`, `price`, `recorded_at`, `source` default `price_sync`. |
-| `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `updated_by`. |
+| `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `local_item_sales_target`, `new_skus_to_repeat_customers_target`, `updated_by`. |
 | `recommendations`, `recommendation_results` | Suggestion engine tables from the baseline schema. |
 
 Schemes and quantity limits are settings, not tables:
@@ -187,7 +187,7 @@ Schemes and quantity limits are settings, not tables:
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
 | `receivable_days_monthly_v1` | BI Net receivable days cache: last imported Tally outstanding total for each KSA month, plus monthly credit sales. Rebuilt when the stored outstanding file list, active sales batch, or KSA as-of date changes |
-| `performance_kpi_actuals_v2:<YYYY-MM-01>` | Per-salesman KPI actuals and the last three complete months of sales pace for the month. Inner `version` 8, including `salesAsOfDate` and `receiptAsOfDate`. Rebuilt only after sales uploads and receipt-register uploads (`warmPerformanceKpiCachesAfterUpload`; also warms a missing prior month once). KPI Targets, My Performance, and related emails soft-read this blob and never rebuild on GET. Collection visits do not rewrite it |
+| `performance_kpi_actuals_v2:<YYYY-MM-01>` | Per-salesman KPI actuals and the last three complete months of sales pace for the month. Inner `version` 9 (soft-reads still accept 8), including `newSkusToRepeatCustomers`, `repeatCustomerSkuCount`, `salesAsOfDate`, and `receiptAsOfDate`. Rebuilt only after sales uploads and receipt-register uploads (`warmPerformanceKpiCachesAfterUpload`; also warms a missing prior month once). KPI Targets, My Performance, and related emails soft-read this blob and never rebuild on GET. Collection visits do not rewrite it |
 | `kpi_targets_boss_map_v1` | Short-lived (30 min) map of profile id → boss code/name for KPI Targets, so GET avoids Auth `listUsers` on every open |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   achievementPercent,
   averageCumulativeDayShares,
+  averageSkusPerRepeatCustomer,
   buyingCustomerCodesFromSales,
   buildPerformanceKpi,
   buildPerformanceSnapshot,
@@ -11,8 +12,10 @@ import {
   ksaWorkdayProgressRatio,
   isMissingSchemaColumn,
   classifyBuyingCustomers,
+  classifyRepeatCustomerSkuExpansion,
   consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
+  formatPerformanceKpiValue,
   isKpiCollectionReceipt,
   isOfficeSuppliesSale,
   isLocalItemSale,
@@ -20,6 +23,7 @@ import {
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
+  priorCustomerItemCodesFromSales,
   resolveKpiPaceDate,
   isKsaWorkday,
   latestReceiptDateInRange,
@@ -28,6 +32,7 @@ import {
   splitCollectionActualsByInvoice,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
+  withDerivedKpiActuals,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 import { buildKpiActualDetails } from "../app/lib/kpiActualDetails.js";
@@ -79,6 +84,54 @@ test("classifies new and repeat buying customers", () => {
     classifyBuyingCustomers(["A", "B", "a", "C"], ["A", "D"]),
     { newCustomers: 2, repeatCustomers: 1 },
   );
+});
+
+test("counts new SKUs sold only to repeat customers", () => {
+  const priorItems = priorCustomerItemCodesFromSales([
+    { customer_code: "A", item_code: "SKU1", sales_amount: 10 },
+    { customer_code: "A", item_code: "sku2", sales_amount: 10 },
+    { customer_code: "B", item_code: "SKU9", sales_amount: 10 },
+  ]);
+  const expansion = classifyRepeatCustomerSkuExpansion({
+    monthSalesRows: [
+      { customer_code: "A", item_code: "SKU1", sales_amount: 20 },
+      { customer_code: "A", item_code: "SKU3", sales_amount: 20 },
+      { customer_code: "A", item_code: "SKU4", sales_amount: 20 },
+      { customer_code: "B", item_code: "SKU9", sales_amount: 20 },
+      { customer_code: "C", item_code: "SKU8", sales_amount: 20 },
+      { customer_code: "A", item_code: "SKU3", voucher_type: "Credit Note", sales_amount: 5 },
+    ],
+    priorCustomerCodes: ["A", "B"],
+    priorCustomerItemCodes: priorItems,
+  });
+  assert.equal(expansion.newSkusToRepeatCustomers, 2);
+  assert.equal(expansion.repeatCustomerSkuCount, 4);
+  assert.equal(expansion.repeatCustomersWithNewSkus, 1);
+  assert.equal(expansion.avgSkusPerRepeatCustomer, 2);
+  assert.equal(averageSkusPerRepeatCustomer(5, 2), 2.5);
+  assert.equal(formatPerformanceKpiValue("avgSkusPerRepeatCustomer", 2.5), "2.5");
+  assert.equal(
+    withDerivedKpiActuals({
+      repeatCustomers: 2,
+      repeatCustomerSkuCount: 5,
+      newSkusToRepeatCustomers: 2,
+    }).avgSkusPerRepeatCustomer,
+    2.5,
+  );
+
+  const details = buildKpiActualDetails({
+    kpiKey: "newSkusToRepeatCustomers",
+    salesmanCode: "SM01",
+    salesRows: [
+      { transaction_date: "2026-10-02", voucher_number: "1", customer_code: "A", customer_name: "Alpha", item_code: "SKU3", item_name: "Pen", sales_amount: 20 },
+      { transaction_date: "2026-10-03", voucher_number: "2", customer_code: "A", customer_name: "Alpha", item_code: "SKU4", item_name: "Clip", sales_amount: 20 },
+      { transaction_date: "2026-10-04", voucher_number: "3", customer_code: "C", customer_name: "NewCo", item_code: "SKU8", item_name: "Tape", sales_amount: 20 },
+    ],
+    priorCustomerCodes: ["A", "B"],
+    priorCustomerItemCodes: priorItems,
+  });
+  assert.equal(details.actual, 2);
+  assert.equal(details.rows.length, 2);
 });
 
 test("KPI status compares actual/target with expected pace by today", () => {
@@ -873,7 +926,7 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 9);
+  assert.equal(snapshot.kpis.length, 11);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
   assert.equal(snapshot.kpis[1].label, "Local item sales");
   assert.equal(snapshot.kpis[2].label, "Others");
@@ -888,6 +941,13 @@ test("updated status explains when admin last saved targets", () => {
   assert.equal(totalCashCollected.actual, 10);
   assert.equal(totalCashCollected.target, 0);
   assert.equal(totalCashCollected.achievement, null);
+  const newSkus = snapshot.kpis.find((kpi) => kpi.key === "newSkusToRepeatCustomers");
+  assert.equal(newSkus.actual, 0);
+  assert.equal(newSkus.target, 0);
+  const avgSkus = snapshot.kpis.find((kpi) => kpi.key === "avgSkusPerRepeatCustomer");
+  assert.equal(avgSkus.actual, 0);
+  assert.equal(avgSkus.target, 0);
+  assert.equal(avgSkus.achievement, null);
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
@@ -898,14 +958,44 @@ test("consolidates member KPIs into a team snapshot", () => {
     buildPerformanceSnapshot({
       reportDate: "2026-09-04",
       salesmanCode: "SM001",
-      actuals: { officeSupplies: 40, otherSales: 10, collection: 5, newCustomers: 1, repeatCustomers: 2 },
-      targets: { officeSupplies: 100, otherSales: 20, collection: 10, newCustomers: 2, repeatCustomers: 4 },
+      actuals: {
+        officeSupplies: 40,
+        otherSales: 10,
+        collection: 5,
+        newCustomers: 1,
+        repeatCustomers: 2,
+        newSkusToRepeatCustomers: 3,
+        repeatCustomerSkuCount: 8,
+      },
+      targets: {
+        officeSupplies: 100,
+        otherSales: 20,
+        collection: 10,
+        newCustomers: 2,
+        repeatCustomers: 4,
+        newSkusToRepeatCustomers: 5,
+      },
     }),
     buildPerformanceSnapshot({
       reportDate: "2026-09-04",
       salesmanCode: "SM002",
-      actuals: { officeSupplies: 60, otherSales: 30, collection: 15, newCustomers: 1, repeatCustomers: 3 },
-      targets: { officeSupplies: 100, otherSales: 80, collection: 30, newCustomers: 2, repeatCustomers: 6 },
+      actuals: {
+        officeSupplies: 60,
+        otherSales: 30,
+        collection: 15,
+        newCustomers: 1,
+        repeatCustomers: 3,
+        newSkusToRepeatCustomers: 2,
+        repeatCustomerSkuCount: 7,
+      },
+      targets: {
+        officeSupplies: 100,
+        otherSales: 80,
+        collection: 30,
+        newCustomers: 2,
+        repeatCustomers: 6,
+        newSkusToRepeatCustomers: 4,
+      },
     }),
   ], { reportDate: "2026-09-04", salesmanName: "Ahmed — team" });
 
@@ -915,6 +1005,10 @@ test("consolidates member KPIs into a team snapshot", () => {
   assert.equal(team.actuals.officeSupplies, 100);
   assert.equal(team.targets.otherSales, 100);
   assert.equal(team.kpis[0].achievement, 50);
+  assert.equal(team.actuals.newSkusToRepeatCustomers, 5);
+  assert.equal(team.targets.newSkusToRepeatCustomers, 9);
+  assert.equal(team.actuals.repeatCustomerSkuCount, 15);
+  assert.equal(team.actuals.avgSkusPerRepeatCustomer, 3);
 });
 
 test("daily visit email includes monthly KPI status", () => {

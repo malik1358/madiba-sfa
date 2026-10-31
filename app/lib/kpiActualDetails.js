@@ -1,12 +1,14 @@
 import { isCashSalesVoucher, matchPaymentsFifo } from "./paymentBehavior.js";
 import {
   buyingCustomerCodesFromSales,
+  classifyRepeatCustomerSkuExpansion,
   collectionAccountKey,
   isKpiCollectionReceipt,
   unappliedCollectionReceipts,
   isOfficeSuppliesSale,
   isLocalItemSale,
   netKpiSalesAmount,
+  normalizeItemCode,
   normalizeSalesmanCode,
 } from "./performanceKpis.js";
 
@@ -20,7 +22,7 @@ function detailBase(row, salesmanCode) {
   };
 }
 
-function salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode) {
+function salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode, priorCustomerItemCodes = {}) {
   const sorted = [...(salesRows || [])].sort((left, right) => (
     String(left?.transaction_date || "").localeCompare(String(right?.transaction_date || ""))
     || String(left?.voucher_number || left?.reference || "").localeCompare(String(right?.voucher_number || right?.reference || ""))
@@ -36,6 +38,46 @@ function salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode) {
       if (kpiKey === "localItemSales" && !localItemSales) return [];
       if (kpiKey === "otherSales" && (officeSupplies || localItemSales)) return [];
       return [{ ...detailBase(row, salesmanCode), description: row?.item_name || row?.category || "Sales line", amount }];
+    });
+  }
+
+  if (kpiKey === "newSkusToRepeatCustomers" || kpiKey === "avgSkusPerRepeatCustomer") {
+    const expansion = classifyRepeatCustomerSkuExpansion({
+      monthSalesRows: sorted,
+      priorCustomerCodes,
+      priorCustomerItemCodes,
+    });
+    if (kpiKey === "avgSkusPerRepeatCustomer") {
+      return expansion.customerSummaries.map((summary) => {
+        const sample = sorted.find((row) => normalizeSalesmanCode(row.customer_code) === summary.customerCode) || {
+          customer_code: summary.customerCode,
+        };
+        return {
+          ...detailBase(sample, salesmanCode),
+          description: `${summary.monthSkuCount} SKU${summary.monthSkuCount === 1 ? "" : "s"} this month`
+            + (summary.newSkuCount ? ` (${summary.newSkuCount} new)` : ""),
+          amount: summary.monthSkuCount,
+        };
+      });
+    }
+    const newSkuSetByCustomer = new Map(
+      expansion.customerSummaries.map((summary) => [summary.customerCode, new Set(summary.newSkuCodes)]),
+    );
+    const seenPairs = new Set();
+    return sorted.flatMap((row) => {
+      if (!buyingCustomerCodesFromSales([row]).length) return [];
+      const customer = normalizeSalesmanCode(row.customer_code);
+      const itemCode = normalizeItemCode(row.item_code);
+      const newSkus = newSkuSetByCustomer.get(customer);
+      if (!customer || !itemCode || !newSkus?.has(itemCode)) return [];
+      const pairKey = `${customer}|${itemCode}`;
+      if (seenPairs.has(pairKey)) return [];
+      seenPairs.add(pairKey);
+      return [{
+        ...detailBase(row, salesmanCode),
+        description: `${row?.item_name || itemCode} (new SKU)`,
+        amount: 1,
+      }];
     });
   }
 
@@ -136,6 +178,7 @@ export function buildKpiActualDetails({
   salesmanCode,
   salesRows = [],
   priorCustomerCodes = [],
+  priorCustomerItemCodes = {},
   collectionVisits = [],
   collectionReceipts = [],
   receiptRegister = false,
@@ -151,9 +194,13 @@ export function buildKpiActualDetails({
       receiptRegister,
       collectionReceipts,
     })
-    : salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode);
+    : salesRowsForKpi(kpiKey, salesRows, priorCustomerCodes, salesmanCode, priorCustomerItemCodes);
+  const rawTotal = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const actual = kpiKey === "avgSkusPerRepeatCustomer"
+    ? (rows.length ? Math.round((rawTotal / rows.length) * 10) / 10 : 0)
+    : Math.round(rawTotal * 100) / 100;
   return {
     rows,
-    actual: Math.round(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0) * 100) / 100,
+    actual,
   };
 }

@@ -20,10 +20,12 @@ import {
   isOfficeSuppliesSale,
   isLocalItemSale,
   kpiStatus,
+  monthEndPaceEstimate,
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
   priorCustomerItemCodesFromSales,
+  resolveExpectedPacePercent,
   resolveKpiPaceDate,
   isKsaWorkday,
   latestReceiptDateInRange,
@@ -190,6 +192,71 @@ test("collection pace stops at the latest receipt date", () => {
       "2026-10-31",
     ),
     "2026-10-28",
+  );
+});
+
+test("pace through the last calendar day of the month is always 100%", () => {
+  // Day-31 historical shares often walk back to a day-30 average below 100%.
+  const incompleteMonthEndShares = { 29: 0.95, 30: 0.99846 };
+  assert.equal(expectedPacePercent("2026-10-31", incompleteMonthEndShares), 100);
+  assert.equal(expectedPacePercent("2026-10-30", incompleteMonthEndShares), 99.846);
+  assert.equal(
+    resolveExpectedPacePercent("totalSales", {
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-31",
+      paceShares: incompleteMonthEndShares,
+      salesAsOfDate: "2026-10-31",
+    }),
+    100,
+  );
+  assert.equal(
+    monthEndPaceEstimate({
+      actual: 2_404_792,
+      target: 4_550_000,
+      expected: resolveExpectedPacePercent("totalSales", {
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-31",
+        paceShares: incompleteMonthEndShares,
+        salesAsOfDate: "2026-10-31",
+      }),
+    }),
+    2_404_792,
+  );
+
+  // Cash/collection already hit 100% via workdays on 31 Oct; same month-end rule applies.
+  assert.equal(
+    resolveExpectedPacePercent("collection", {
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-31",
+      receiptAsOfDate: "2026-10-31",
+    }),
+    100,
+  );
+  assert.equal(
+    monthEndPaceEstimate({
+      actual: 1_000_000,
+      target: 2_000_000,
+      expected: resolveExpectedPacePercent("collection", {
+        reportDate: "2026-10-01",
+        todayIso: "2026-10-31",
+        receiptAsOfDate: "2026-10-31",
+      }),
+    }),
+    1_000_000,
+  );
+  // Receipts still lagging before month-end keep projecting leftover days.
+  const lagged = resolveExpectedPacePercent("collection", {
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-31",
+    receiptAsOfDate: "2026-10-29",
+  });
+  assert.ok(lagged < 100);
+  assert.ok(
+    monthEndPaceEstimate({
+      actual: 1_000_000,
+      target: 2_000_000,
+      expected: lagged,
+    }) > 1_000_000,
   );
 });
 

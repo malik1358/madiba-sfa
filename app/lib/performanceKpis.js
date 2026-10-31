@@ -314,6 +314,12 @@ export function pickSalesmanPaceShares(pace, salesmanCode) {
 export function expectedPacePercent(asOfDate, paceShares = null) {
   const date = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+  // Last calendar day of the month = 100% of the month's pace. Historical
+  // curves can walk day 31 back to a day-30 average below 100% and then inflate
+  // Estimate at current pace above booked actuals even when sales/receipts are
+  // uploaded through month-end.
+  const monthEnd = currentMonthDateRange(date).to;
+  if (date >= monthEnd) return 100;
   const workday = ksaWorkdayProgressRatio(date) * 100;
   const historical = shareForDay(paceShares, Number(date.slice(8, 10)));
   if (historical != null && historical > 0) {

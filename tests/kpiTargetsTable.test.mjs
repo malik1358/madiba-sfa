@@ -384,6 +384,46 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
   );
 });
 
+test("pace estimate equals actual when sales and receipts reach month-end", () => {
+  const incompleteShares = { 29: 0.95, 30: 0.99846 };
+  const rows = [
+    {
+      ...ahmed,
+      paceShares: incompleteShares,
+      kpis: [
+        { key: "totalSales", actual: 2_000_000 },
+        { key: "collection", actual: 800_000 },
+        { key: "cashCollection", actual: 200_000 },
+        { key: "totalCashCollected", actual: 1_000_000 },
+      ],
+    },
+    {
+      ...ali,
+      paceShares: incompleteShares,
+      kpis: [
+        { key: "totalSales", actual: 404_792 },
+        { key: "collection", actual: 100_000 },
+        { key: "cashCollection", actual: 50_000 },
+        { key: "totalCashCollected", actual: 150_000 },
+      ],
+    },
+  ];
+  const estimates = sumFilteredKpiPaceEstimates(
+    rows,
+    ["totalSales", "collection", "cashCollection", "totalCashCollected"],
+    {
+      reportDate: "2026-10-01",
+      todayIso: "2026-10-31",
+      salesAsOfDate: "2026-10-31",
+      receiptAsOfDate: "2026-10-31",
+    },
+  );
+  assert.equal(estimates.totalSales.estimate, 2_404_792);
+  assert.equal(estimates.collection.estimate, 900_000);
+  assert.equal(estimates.cashCollection.estimate, 250_000);
+  assert.equal(estimates.totalCashCollected.estimate, 1_150_000);
+});
+
 test("pace estimate footer sums each salesman's own scaled pace estimate", () => {
   const rows = [
     { ...ahmed, paceShares: { 10: 0.5 } },

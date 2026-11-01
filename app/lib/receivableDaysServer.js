@@ -141,7 +141,9 @@ export function receivableDaysDatasetIsFresh(dataset, {
   if (String(dataset.outstandingHistoryKey || "") !== String(historyKey || "")) return false;
   if (batchId && dataset.batchId && dataset.batchId !== batchId) return false;
   if (String(dataset.outstandingUploadedAt || "") !== String(outstandingUploadedAt || "")) return false;
-  if (asOfDate && dataset.asOfDate && dataset.asOfDate !== asOfDate) return false;
+  // asOfDate is applied when building the report from the prepared monthly series.
+  // Do not rebuild the heavy dataset just because the KSA calendar day changed.
+  void asOfDate;
   return true;
 }
 

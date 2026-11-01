@@ -8,10 +8,13 @@ import {
   buildPeriodChartModel,
   buildShareChartItems,
   buildSignalMix,
+  chartMonthPeriodLabel,
+  chartOpenMonthEstimate,
   compactChartNumber,
   periodTotal,
   splitTopChartRows,
 } from "../app/lib/growthCharts.js";
+import { expectedPacePercent } from "../app/lib/performanceKpis.js";
 
 const rows = [
   { label: "Fridge", lifetime: 900, monthValues: { "2026-01": 100, "2026-02": 200 }, status: "green" },
@@ -44,6 +47,38 @@ test("period chart model adds Others and Total series", () => {
   const total = model.series.find((item) => item.key === TOTAL_SERIES_KEY);
   assert.deepEqual(total.values, [175, 295]);
   assert.equal(model.max, 295);
+});
+
+test("open-month chart points use KPI pace estimates", () => {
+  const expected = expectedPacePercent("2026-11-01", null);
+  assert.ok(expected > 0 && expected < 100);
+  const projected = chartOpenMonthEstimate(100_000, {
+    openMonth: "2026-11",
+    period: "2026-11",
+    todayIso: "2026-11-01",
+    salesAsOfDate: "2026-11-01",
+  });
+  assert.equal(Math.round(projected), Math.round(100_000 * (100 / expected)));
+  assert.equal(chartOpenMonthEstimate(100_000, {
+    openMonth: "2026-11",
+    period: "2026-10",
+    todayIso: "2026-11-01",
+  }), 100_000);
+  assert.equal(chartMonthPeriodLabel("2026-11", "2026-11", { estimated: true }), "Nov 26 est.");
+  assert.equal(chartMonthPeriodLabel("2026-11", "2026-11", { estimated: false }), "Nov 26 MTD");
+
+  const model = buildPeriodChartModel(rows, ["2026-01", "2026-02"], (row) => row.monthValues, {
+    limit: 2,
+    estimateOpenMonth: true,
+    openMonth: "2026-02",
+    todayIso: "2026-02-02",
+    salesAsOfDate: "2026-02-02",
+  });
+  const total = model.series.find((item) => item.key === TOTAL_SERIES_KEY);
+  const febExpected = expectedPacePercent("2026-02-02", null);
+  assert.equal(Math.round(total.values[1]), Math.round(295 * (100 / febExpected)));
+  assert.equal(total.values[0], 175);
+  assert.equal(model.openMonthEstimated, true);
 });
 
 test("share and compare charts rank by the selected value", () => {

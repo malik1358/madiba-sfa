@@ -11,6 +11,7 @@ import {
   serializeSalesBiCube,
   salesBiCubeNeedsRebuild,
 } from "./salesBiCube.js";
+import { createInvoiceDateIndex, indexInvoiceDatesFromRows } from "./salesMix.js";
 
 const SALES_SELECTS = [
   "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_number,reference,voucher_type,local_import,abc_class",
@@ -157,6 +158,8 @@ async function writeCubeToTable(admin, facts) {
       local_sales_amount,
       import_sales_amount,
       unclassified_origin_sales_amount,
+      clerical_adjustments_amount,
+      sales_returns_amount,
       sales_adjustments_amount,
       ...fact
     }) => fact);
@@ -180,9 +183,21 @@ async function buildCubeFromActiveSales(admin) {
   for (const select of SALES_SELECTS) {
     cube.facts.clear();
     cube.sourceRowCount = 0;
+    cube.invoiceDates = createInvoiceDateIndex();
     try {
+      // Pass 1: invoice dates for every voucher so later CN pages can classify ≤7-day clerical notes.
       await pageActiveSales(admin, select, (rows) => {
-        ingestSalesRowsIntoCube(cube, applyCustomerSalesmanOwnershipToRows(rows, ownershipMap));
+        indexInvoiceDatesFromRows(
+          cube.invoiceDates,
+          applyCustomerSalesmanOwnershipToRows(rows, ownershipMap),
+        );
+      });
+      await pageActiveSales(admin, select, (rows) => {
+        ingestSalesRowsIntoCube(
+          cube,
+          applyCustomerSalesmanOwnershipToRows(rows, ownershipMap),
+          { invoiceDates: cube.invoiceDates },
+        );
       });
       lastError = null;
       break;
@@ -234,6 +249,12 @@ export async function rebuildSalesBiCube(admin) {
       console.error("Saving sales BI cube settings failed:", error);
       return false;
     });
+    try {
+      const { rebuildPreparedBiOverviewBundle } = await import("./categoryGrowthServer.js");
+      await rebuildPreparedBiOverviewBundle(admin, { cube });
+    } catch (error) {
+      console.error("Preparing BI overview bundle after cube rebuild failed:", error);
+    }
   }
   return cube;
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   accumulateMonthEndReceivables,
   buildReceivableDaysReport,
+  creditSalesTrailingMonths,
   creditSalesYtdThroughMonth,
   monthEndOpenReceivablesExclVat,
   receivableDays,
@@ -11,10 +12,12 @@ import {
   lastOutstandingUploadByMonth,
   parseStoredOutstandingUploadedAt,
   planOutstandingMonthUploads,
+  receivableTrailingDays,
   receivableYtdDays,
   receivablesFromOutstandingPlan,
   sumTallyOutstandingRows,
   tallyReceivablesByMonth,
+  trailingMonthKeys,
 } from "../app/lib/receivableDays.js";
 import { matchPaymentsFifo } from "../app/lib/paymentBehavior.js";
 
@@ -152,6 +155,38 @@ test("buildReceivableDaysReport uses YTD denominator and marks MoM improvement",
   assert.equal(mar.days, 31 + 28 + 15);
   assert.equal(mar.is_current, true);
   assert.equal(mar.improved, true);
+});
+
+test("rolling 3-month and 12-month DSO use trailing credit sales and days", () => {
+  assert.deepEqual(trailingMonthKeys("2026-03", 3), ["2026-01", "2026-02", "2026-03"]);
+  assert.equal(creditSalesTrailingMonths({
+    "2025-12": 50,
+    "2026-01": 100,
+    "2026-02": 200,
+    "2026-03": 300,
+  }, "2026-03", 3), 600);
+  assert.equal(receivableTrailingDays("2026-03", 3, "2026-03-15"), 31 + 28 + 15);
+
+  const report = buildReceivableDaysReport({
+    asOfDate: "2026-03-15",
+    monthlyCreditSales: {
+      "2025-12": 100000,
+      "2026-01": 200000,
+      "2026-02": 300000,
+      "2026-03": 400000,
+    },
+    monthlyReceivables: {
+      "2026-03": 450000,
+    },
+  });
+  const mar = report.monthly["2026-03"];
+  assert.equal(mar.credit_sales_3m, 900000);
+  assert.equal(mar.days_3m, 31 + 28 + 15);
+  assert.equal(mar.receivable_days_3m, receivableDays(450000, 900000, 31 + 28 + 15));
+  assert.equal(mar.credit_sales_12m, 1000000);
+  assert.equal(mar.receivable_days_12m, receivableDays(450000, 1000000, receivableTrailingDays("2026-03", 12, "2026-03-15")));
+  assert.equal(report.totals.receivable_days_3m, mar.receivable_days_3m);
+  assert.equal(report.totals.receivable_days_12m, mar.receivable_days_12m);
 });
 
 test("receivableDaysChangeTone treats lower days as improvement", () => {

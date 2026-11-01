@@ -20,6 +20,7 @@ import {
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
+import { rebuildReceivableDaysDataset } from "../../lib/receivableDaysServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -311,6 +312,16 @@ export async function POST(request) {
         }), { trigger: "outstanding-upload" });
       } catch (reconcileError) {
         console.error("Outstanding reconcile after outstanding upload failed:", reconcileError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await rebuildReceivableDaysDataset(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }), { trigger: "outstanding-upload" });
+        console.info("Receivable days dataset rebuilt after outstanding upload.");
+      } catch (receivableError) {
+        console.error("Receivable days rebuild after outstanding upload failed:", receivableError);
       }
     });
 

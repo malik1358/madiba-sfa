@@ -22,7 +22,12 @@ import { buildTeamMomRows } from "../../lib/salesmanTeamMom";
 import { translate } from "../../lib/appLanguage";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
 import { GrowthChartPanel, GrowthCompareChart, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
-import { buildCompareChartItems, buildPeriodChartModel, buildSignalMix } from "../../lib/growthCharts";
+import {
+  buildCompareChartItems,
+  buildPeriodChartModel,
+  buildSignalMix,
+  chartMonthPeriodLabel,
+} from "../../lib/growthCharts";
 
 function formatPreparedAt(value) {
   if (!value) return "";
@@ -120,6 +125,10 @@ const TEXT = {
   chartHint: {
     en: "Hover a period for amounts. Click a name to hide or show that line. Charts follow the current filters.",
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
+  },
+  monthChartHint: {
+    en: "Hover a period for amounts. Click a name to hide or show that line. The open month on this chart uses the KPI Estimate at current pace (actual ÷ workday pace), not raw MTD. Tables still show MTD.",
+    ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الشهر المفتوح في هذا الرسم يستخدم تقدير مؤشر الأداء حسب الوتيرة (الفعلي ÷ وتيرة أيام العمل)، وليس حتى اليوم الخام. الجداول تبقى حتى اليوم.",
   },
   compareChart: { en: "Last complete month vs month before", ar: "آخر شهر مكتمل مقابل الشهر السابق" },
   signalChart: { en: "Measure mix", ar: "مزيج القياس" },
@@ -359,8 +368,12 @@ export default function SalesmanMomReport({
   );
   const { latestCompleteMonth, priorCompleteMonth } = resolveMomComparisonMonths(report || {});
   const salesmanMonthChart = useMemo(
-    () => buildPeriodChartModel(visibleRows, recentMonths),
-    [visibleRows, recentMonths],
+    () => buildPeriodChartModel(visibleRows, recentMonths, (row) => row.monthValues, {
+      estimateOpenMonth: true,
+      openMonth: currentMonth,
+      salesAsOfDate: report?.lastDate || "",
+    }),
+    [currentMonth, recentMonths, report?.lastDate, visibleRows],
   );
   const salesmanQuarterChart = useMemo(
     () => buildPeriodChartModel(visibleRows, recentQuarters, (row) => row.quarterValues),
@@ -372,8 +385,12 @@ export default function SalesmanMomReport({
     [visibleRows],
   );
   const teamMonthChart = useMemo(
-    () => buildPeriodChartModel(visibleTeamRows, recentMonths),
-    [visibleTeamRows, recentMonths],
+    () => buildPeriodChartModel(visibleTeamRows, recentMonths, (row) => row.monthValues, {
+      estimateOpenMonth: true,
+      openMonth: currentMonth,
+      salesAsOfDate: report?.lastDate || "",
+    }),
+    [currentMonth, recentMonths, report?.lastDate, visibleTeamRows],
   );
   const teamQuarterChart = useMemo(
     () => buildPeriodChartModel(visibleTeamRows, recentQuarters, (row) => row.quarterValues),
@@ -572,11 +589,13 @@ export default function SalesmanMomReport({
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
         {visibleRows.length > 0 ? (
-          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+          <GrowthChartPanel title={t("trendChart")} hint={t("monthChartHint")}>
             <GrowthTrendChart
               periods={salesmanMonthChart.periods}
               series={salesmanMonthChart.series}
-              periodLabel={(month) => monthLabel(month, currentMonth)}
+              periodLabel={(month) => chartMonthPeriodLabel(month, currentMonth, {
+                estimated: salesmanMonthChart.openMonthEstimated,
+              })}
               formatValue={formatMoneyAmount}
             />
           </GrowthChartPanel>
@@ -722,11 +741,13 @@ export default function SalesmanMomReport({
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
         {visibleTeamRows.length > 0 ? (
-          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+          <GrowthChartPanel title={t("trendChart")} hint={t("monthChartHint")}>
             <GrowthTrendChart
               periods={teamMonthChart.periods}
               series={teamMonthChart.series}
-              periodLabel={(month) => monthLabel(month, currentMonth)}
+              periodLabel={(month) => chartMonthPeriodLabel(month, currentMonth, {
+                estimated: teamMonthChart.openMonthEstimated,
+              })}
               formatValue={formatMoneyAmount}
             />
           </GrowthChartPanel>

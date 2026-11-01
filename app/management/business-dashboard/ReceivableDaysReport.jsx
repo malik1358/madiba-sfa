@@ -10,8 +10,8 @@ import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 const TEXT = {
   title: { en: "Net receivable days", ar: "أيام الذمم المدينة الصافية" },
   hint: {
-    en: "Each month shows the last Tally outstanding file imported in that month. Receivable days = (that month’s outstanding ÷ credit sales YTD) × days YTD. The total row keeps the latest balance, not a sum of months.",
-    ar: "كل شهر يعرض آخر ملف مستحقات تالي تم رفعه في ذلك الشهر. أيام الذمم = (مستحقات ذلك الشهر ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة حتى التاريخ. صف الإجمالي يحتفظ بآخر رصيد وليس مجموع الأشهر.",
+    en: "Each month shows the last Tally outstanding file imported in that month. YTD DSO = (outstanding ÷ credit sales YTD) × days YTD. Rolling 12-month DSO uses trailing 12 months of credit sales for overall collection efficiency. Rolling 3-month DSO uses trailing 3 months so recent improvement or deterioration shows faster. The total row keeps the latest balance, not a sum of months.",
+    ar: "كل شهر يعرض آخر ملف مستحقات تالي تم رفعه في ذلك الشهر. أيام الذمم السنوية = (المستحقات ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة. أيام الذمم لـ12 شهراً متداولاً تستخدم مبيعات الآجل لآخر 12 شهراً لكفاءة التحصيل الكلية. أيام الذمم لـ3 أشهر متداولة تُظهر التحسن أو التراجع الأخير أسرع. صف الإجمالي يحتفظ بآخر رصيد وليس مجموع الأشهر.",
   },
   loading: { en: "Loading receivable days...", ar: "جاري تحميل أيام الذمم..." },
   empty: { en: "No credit sales or receivables match this period.", ar: "لا توجد مبيعات آجلة أو ذمم تطابق هذه الفترة." },
@@ -20,10 +20,14 @@ const TEXT = {
   creditSales: { en: "Credit sales (month)", ar: "مبيعات الآجل (الشهر)" },
   creditSalesYtd: { en: "Credit sales YTD", ar: "مبيعات الآجل منذ بداية السنة" },
   daysYtd: { en: "Days YTD", ar: "أيام السنة حتى التاريخ" },
-  receivableDays: { en: "Receivable days", ar: "أيام الذمم" },
-  momChange: { en: "MoM change", ar: "التغير الشهري" },
+  receivableDays: { en: "Receivable days (YTD)", ar: "أيام الذمم (سنوي)" },
+  receivableDays3m: { en: "Rolling 3-month DSO", ar: "أيام الذمم لـ3 أشهر متداولة" },
+  receivableDays12m: { en: "Rolling 12-month DSO", ar: "أيام الذمم لـ12 شهراً متداولاً" },
+  momChange: { en: "MoM", ar: "شهرياً" },
   trend: { en: "Receivable days trend", ar: "اتجاه أيام الذمم" },
-  latest: { en: "Latest complete", ar: "آخر شهر مكتمل" },
+  latest: { en: "Latest YTD", ar: "آخر سنوي" },
+  latest3m: { en: "Latest 3-month DSO", ar: "آخر 3 أشهر" },
+  latest12m: { en: "Latest 12-month DSO", ar: "آخر 12 شهراً" },
   current: { en: "Current MTD", ar: "الشهر الحالي حتى اليوم" },
   total: { en: "Total", ar: "الإجمالي" },
   all: { en: "All", ar: "الكل" },
@@ -75,7 +79,17 @@ export default function ReceivableDaysReport({
   const lastRow = rows.at(-1) || null;
 
   const keys = useMemo(
-    () => ["month", "receivables", "credit_sales", "credit_sales_ytd", "days", "receivable_days", "change_days"],
+    () => [
+      "month",
+      "receivables",
+      "credit_sales",
+      "credit_sales_ytd",
+      "days",
+      "receivable_days",
+      "receivable_days_3m",
+      "receivable_days_12m",
+      "change_days",
+    ],
     [],
   );
   const valueOf = useCallback((row, key) => {
@@ -85,17 +99,33 @@ export default function ReceivableDaysReport({
     if (key === "credit_sales_ytd") return formatMoneyAmount(row.credit_sales_ytd);
     if (key === "days") return String(row.days || 0);
     if (key === "receivable_days") return formatDays(row.receivable_days);
+    if (key === "receivable_days_3m") return formatDays(row.receivable_days_3m);
+    if (key === "receivable_days_12m") return formatDays(row.receivable_days_12m);
     if (key === "change_days") return formatChange(row.change_days);
     return "";
   }, [currentMonth, language]);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
 
-  const chartSeries = useMemo(() => ([{
-    key: "receivable_days",
-    label: t("receivableDays"),
-    color: "#0f4c5c",
-    values: rows.map((row) => Number(row.receivable_days || 0)),
-  }]), [rows, t]);
+  const chartSeries = useMemo(() => ([
+    {
+      key: "receivable_days",
+      label: t("receivableDays"),
+      color: "#0f4c5c",
+      values: rows.map((row) => Number(row.receivable_days || 0)),
+    },
+    {
+      key: "receivable_days_3m",
+      label: t("receivableDays3m"),
+      color: "#c1121f",
+      values: rows.map((row) => Number(row.receivable_days_3m || 0)),
+    },
+    {
+      key: "receivable_days_12m",
+      label: t("receivableDays12m"),
+      color: "#1d4e89",
+      values: rows.map((row) => Number(row.receivable_days_12m || 0)),
+    },
+  ]), [rows, t]);
 
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
   if (!rows.length) return <div className="moduleHint">{t("empty")}</div>;
@@ -116,6 +146,16 @@ export default function ReceivableDaysReport({
             <span>{t("latest")}</span>
             <strong>{formatDays(latest?.receivable_days)}</strong>
             <small>{latest ? monthLabel(latest.month, currentMonth, language) : "—"}</small>
+          </section>
+          <section className={`moduleMetricCard ${latest?.tone_3m === "up" ? "moduleBusinessKpi--green" : latest?.tone_3m === "down" ? "moduleBusinessKpi--red" : ""}`}>
+            <span>{t("latest3m")}</span>
+            <strong>{formatDays(latest?.receivable_days_3m ?? lastRow?.receivable_days_3m)}</strong>
+            <small>{formatChange(latest?.change_days_3m ?? lastRow?.change_days_3m)}</small>
+          </section>
+          <section className={`moduleMetricCard ${latest?.tone_12m === "up" ? "moduleBusinessKpi--green" : latest?.tone_12m === "down" ? "moduleBusinessKpi--red" : ""}`}>
+            <span>{t("latest12m")}</span>
+            <strong>{formatDays(latest?.receivable_days_12m ?? lastRow?.receivable_days_12m)}</strong>
+            <small>{formatChange(latest?.change_days_12m ?? lastRow?.change_days_12m)}</small>
           </section>
           <section className="moduleMetricCard moduleBusinessKpi--orange">
             <span>{t("current")}</span>
@@ -157,6 +197,8 @@ export default function ReceivableDaysReport({
                 <BiExcelHead label={t("creditSalesYtd")} filterKey="credit_sales_ytd" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                 <BiExcelHead label={t("daysYtd")} filterKey="days" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                 <BiExcelHead label={t("receivableDays")} filterKey="receivable_days" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+                <BiExcelHead label={t("receivableDays3m")} filterKey="receivable_days_3m" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+                <BiExcelHead label={t("receivableDays12m")} filterKey="receivable_days_12m" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
                 <BiExcelHead label={t("momChange")} filterKey="change_days" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               </tr>
             </thead>
@@ -181,6 +223,12 @@ export default function ReceivableDaysReport({
                   <td className={`moduleBiTotalCol ${toneClass(row.tone)} ${row.is_current ? "moduleBiMonthCell--current" : ""}`.trim()}>
                     <strong>{formatDays(row.receivable_days)}</strong>
                   </td>
+                  <td className={`moduleBiTotalCol ${toneClass(row.tone_3m)} ${row.is_current ? "moduleBiMonthCell--current" : ""}`.trim()}>
+                    <strong>{formatDays(row.receivable_days_3m)}</strong>
+                  </td>
+                  <td className={`moduleBiTotalCol ${toneClass(row.tone_12m)} ${row.is_current ? "moduleBiMonthCell--current" : ""}`.trim()}>
+                    <strong>{formatDays(row.receivable_days_12m)}</strong>
+                  </td>
                   <td className={`${toneClass(row.tone)} ${row.is_current ? "moduleBiMonthCell--current" : ""}`.trim()}>
                     {formatChange(row.change_days)}
                   </td>
@@ -195,6 +243,8 @@ export default function ReceivableDaysReport({
                 <td>{formatMoneyAmount(footerCreditYtd)}</td>
                 <td>—</td>
                 <td className="moduleBiTotalCol">{formatDays(lastRow?.receivable_days)}</td>
+                <td className="moduleBiTotalCol">{formatDays(lastRow?.receivable_days_3m)}</td>
+                <td className="moduleBiTotalCol">{formatDays(lastRow?.receivable_days_12m)}</td>
                 <td>{formatChange(lastRow?.change_days)}</td>
               </tr>
             </tfoot>

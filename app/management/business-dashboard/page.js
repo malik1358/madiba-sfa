@@ -185,6 +185,7 @@ export default function BusinessDashboardPage() {
   const itemCacheKeyRef = useRef("");
   const salesmanCacheKeyRef = useRef("");
   const salesMixCacheKeyRef = useRef("");
+  const madibaPreparedRef = useRef(null);
   const receivablePeriodKeyRef = useRef("");
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
@@ -357,8 +358,20 @@ export default function BusinessDashboardPage() {
     };
   }, [reportDate, view]);
 
+  const overviewFilters = useMemo(
+    () => applyBiReportPeriod(emptyGrowthFilters(), periodRange),
+    [periodRange],
+  );
+  const overviewIsAllTime = !overviewFilters.dateFrom && !overviewFilters.dateTo;
+
   useEffect(() => {
     let cancelled = false;
+    // All-time: warm every tab from the prepared bundle (independent of which BI tab is open).
+    // Custom periods: only fetch while Dashboard is visible.
+    if (!overviewIsAllTime && view !== "overview") {
+      setOverviewLoading(false);
+      return undefined;
+    }
 
     const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
@@ -387,7 +400,7 @@ export default function BusinessDashboardPage() {
         return;
       }
 
-      setOverviewLoading(true);
+      if (view === "overview") setOverviewLoading(true);
       setError("");
 
       try {
@@ -403,7 +416,7 @@ export default function BusinessDashboardPage() {
               Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ filters: applyBiReportPeriod(emptyGrowthFilters(), periodRange) }),
+            body: JSON.stringify({ filters: overviewFilters }),
           },
           60000,
         );
@@ -417,12 +430,10 @@ export default function BusinessDashboardPage() {
         if (payload.growth) {
           setGrowthReport(payload.growth);
           growthCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
-            ...applyBiReportPeriod(emptyGrowthFilters(), periodRange),
+            ...overviewFilters,
             groupBy: "category",
           }));
-          const overviewMixKey = JSON.stringify(normalizeGrowthFilters(
-            applyBiReportPeriod(emptyGrowthFilters(), periodRange),
-          ));
+          const overviewMixKey = JSON.stringify(normalizeGrowthFilters(overviewFilters));
           if (payload.growth.salesMix && (!salesMixCacheKeyRef.current || salesMixCacheKeyRef.current === overviewMixKey)) {
             setSalesMixReport(payload.growth.salesMix);
             salesMixCacheKeyRef.current = overviewMixKey;
@@ -430,8 +441,13 @@ export default function BusinessDashboardPage() {
         }
         if (payload.customer) {
           setCustomerReport(payload.customer);
-          // Overview omits cohorts; force a full customer fetch when that tab opens.
-          customerCacheKeyRef.current = "";
+          // Prepared all-time overview includes cohort matrices; keep the cache when present.
+          customerCacheKeyRef.current = payload.customer.customerCohorts
+            ? `cohorts:${JSON.stringify(normalizeGrowthFilters({
+              ...applyBiReportPeriod(emptyCustomerGrowthFilters(), periodRange),
+              groupBy: "customer",
+            }))}`
+            : "";
         }
         if (payload.item) {
           setItemReport(payload.item);
@@ -447,6 +463,17 @@ export default function BusinessDashboardPage() {
             groupBy: "salesman",
           }));
         }
+        if (payload.madiba) {
+          madibaPreparedRef.current = {
+            key: JSON.stringify(normalizeGrowthFilters({
+              ...overviewFilters,
+              itemNameContains: "MADIBA",
+            })),
+            report: payload.madiba,
+          };
+        } else {
+          madibaPreparedRef.current = null;
+        }
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
         overviewCacheKeyRef.current = overviewKey;
       } catch (err) {
@@ -459,22 +486,19 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "overview") {
-      stopSafetyTimer();
-      setOverviewLoading(false);
-      return () => {
-        cancelled = true;
-        stopSafetyTimer();
-      };
-    }
-
     loadOverview();
 
     return () => {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [view, periodRange]);
+  }, [
+    overviewFilters,
+    overviewIsAllTime,
+    periodRange,
+    // Re-run for custom periods when opening Dashboard; all-time ignores tab switches via guard above.
+    overviewIsAllTime ? "all-time" : view,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -516,7 +540,18 @@ export default function BusinessDashboardPage() {
         return;
       }
 
-      setGrowthLoading(true);
+      if (view === "madiba" && madibaPreparedRef.current?.key === normalizedKey && madibaPreparedRef.current.report) {
+        setGrowthReport(madibaPreparedRef.current.report);
+        growthCacheKeyRef.current = `madiba:${normalizedKey}`;
+        stopSafetyTimer();
+        setGrowthLoading(false);
+        return;
+      }
+
+      const keepVisible = (view === "category-growth" && growthReport)
+        || (view === "madiba" && growthReport)
+        || (view === "sales-mix" && salesMixReport);
+      if (!keepVisible) setGrowthLoading(true);
       setError("");
 
       try {
@@ -543,16 +578,20 @@ export default function BusinessDashboardPage() {
         }
 
         applyViewerMeta(payload);
-        setGrowthReport(payload);
-        // Tab fetches can replace the overview category payload; force overview to refresh next time.
-        overviewCacheKeyRef.current = "";
-        if (view === "category-growth") {
-          growthCacheKeyRef.current = normalizedKey;
-        } else if (view === "madiba") {
-          growthCacheKeyRef.current = `madiba:${normalizedKey}`;
-        } else if (view === "sales-mix") {
+        if (view === "sales-mix") {
           setSalesMixReport(payload.salesMix || null);
           salesMixCacheKeyRef.current = payload.salesMix ? normalizedKey : "";
+        } else {
+          setGrowthReport(payload);
+          if (view === "category-growth") {
+            growthCacheKeyRef.current = normalizedKey;
+          } else if (view === "madiba") {
+            growthCacheKeyRef.current = `madiba:${normalizedKey}`;
+          }
+        }
+        // Keep overview warm when the tab reused the prepared all-time slice.
+        if (payload?.meta?.servedFromPrepared !== true) {
+          overviewCacheKeyRef.current = "";
         }
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
       } catch (err) {
@@ -561,11 +600,10 @@ export default function BusinessDashboardPage() {
         if (view === "sales-mix") {
           setSalesMixReport(null);
           salesMixCacheKeyRef.current = "";
-        } else {
+        } else if (!growthReport) {
           setGrowthReport(null);
           growthCacheKeyRef.current = "";
         }
-        overviewCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setGrowthLoading(false);

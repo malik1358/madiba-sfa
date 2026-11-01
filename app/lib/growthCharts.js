@@ -1,3 +1,11 @@
+import {
+  estimateAtCurrentPace,
+  expectedPacePercent,
+  monthEndPaceEstimate,
+  resolveSalesPaceAsOfDate,
+} from "./performanceKpis.js";
+import { getKsaDateString } from "./workdayActivity.js";
+
 export const GROWTH_CHART_PALETTE = [
   "#0f4c5c",
   "#0ea5a4",
@@ -14,6 +22,49 @@ export const TOTAL_SERIES_KEY = "__total__";
 
 export function rowChartLabel(row = {}) {
   return String(row.label || row.category || "").trim() || "Unclassified";
+}
+
+/**
+ * KPI-style month-end projection for an open MTD chart point.
+ * Uses workday expected pace (same shape as Estimate at current pace without personal shares).
+ */
+export function chartOpenMonthEstimate(actual, {
+  openMonth = "",
+  period = "",
+  todayIso = "",
+  salesAsOfDate = "",
+} = {}) {
+  const month = String(openMonth || "").slice(0, 7);
+  const key = String(period || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month) || key !== month) {
+    return Number(actual || 0) || 0;
+  }
+  const today = String(todayIso || getKsaDateString()).slice(0, 10);
+  const monthEnd = `${month}-${String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd) {
+    return Number(actual || 0) || 0;
+  }
+  const reportDate = `${month}-01`;
+  const paceDate = resolveSalesPaceAsOfDate(reportDate, today || reportDate, salesAsOfDate || undefined);
+  const expected = expectedPacePercent(paceDate, null);
+  const estimate = monthEndPaceEstimate({
+    actual,
+    expected,
+  });
+  if (estimate == null) {
+    const fallback = estimateAtCurrentPace(actual, expected);
+    return fallback == null ? (Number(actual || 0) || 0) : fallback;
+  }
+  return estimate;
+}
+
+export function chartMonthPeriodLabel(month, currentMonth, { estimated = false } = {}) {
+  const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return month || "—";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  const label = date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  if (month !== currentMonth) return label;
+  return estimated ? `${label} est.` : `${label} MTD`;
 }
 
 export function compactChartNumber(value) {
@@ -42,14 +93,28 @@ export function buildPeriodChartModel(rows = [], periods = [], valuesOf = (row) 
   limit = 5,
   othersLabel = "Others",
   totalLabel = "Total",
+  openMonth = "",
+  todayIso = "",
+  salesAsOfDate = "",
+  estimateOpenMonth = false,
 } = {}) {
   const amountOf = (row) => periodTotal(row, periods, valuesOf);
   const { top, rest } = splitTopChartRows(rows, { limit, amountOf });
+  const valueFor = (raw, period) => {
+    const amount = Number(raw || 0) || 0;
+    if (!estimateOpenMonth) return amount;
+    return chartOpenMonthEstimate(amount, {
+      openMonth,
+      period,
+      todayIso,
+      salesAsOfDate,
+    });
+  };
   const series = top.map((row, index) => ({
     key: rowChartLabel(row),
     label: rowChartLabel(row),
     color: GROWTH_CHART_PALETTE[index % GROWTH_CHART_PALETTE.length],
-    values: (periods || []).map((period) => Number((valuesOf(row) || {})[period] || 0)),
+    values: (periods || []).map((period) => valueFor((valuesOf(row) || {})[period], period)),
   }));
 
   if (rest.length) {
@@ -57,8 +122,9 @@ export function buildPeriodChartModel(rows = [], periods = [], valuesOf = (row) 
       key: OTHERS_SERIES_KEY,
       label: othersLabel,
       color: "#94a3b8",
-      values: (periods || []).map((period) => (
-        rest.reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0)
+      values: (periods || []).map((period) => valueFor(
+        rest.reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0),
+        period,
       )),
     });
   }
@@ -68,13 +134,19 @@ export function buildPeriodChartModel(rows = [], periods = [], valuesOf = (row) 
     label: totalLabel,
     color: "#0f172a",
     dashed: true,
-    values: (periods || []).map((period) => (
-      (rows || []).reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0)
+    values: (periods || []).map((period) => valueFor(
+      (rows || []).reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0),
+      period,
     )),
   });
 
   const max = Math.max(1, ...series.flatMap((item) => item.values));
-  return { periods: periods || [], series, max };
+  return {
+    periods: periods || [],
+    series,
+    max,
+    openMonthEstimated: Boolean(estimateOpenMonth && openMonth && (periods || []).includes(openMonth)),
+  };
 }
 
 export function buildCompareChartItems(rows = [], {

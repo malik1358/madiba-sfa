@@ -156,8 +156,24 @@ export function groupTableBodyRows(table) {
   return groups;
 }
 
-function sortableNumber(value) {
-  const normalized = String(value || "").replace(/[\s,﷼%]/g, "").replace(/[()]/g, "-");
+export function isSortPlaceholder(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return !text || text === "-" || text === "—" || text === "–" || text.toLowerCase() === "n/a";
+}
+
+/**
+ * Primary numeric value for a report cell. BI amount+delta cells look like
+ * "516,958 -48%" — sort by the amount, not the glued "516958-48" string.
+ */
+export function sortableNumber(value) {
+  if (isSortPlaceholder(value)) return null;
+  let text = String(value ?? "").replace(/\s+/g, " ").trim();
+  // Keep ISO / display dates out of numeric mode so chronological sort still runs.
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(text)) return null;
+  if (/^\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}$/.test(text)) return null;
+  const primary = text.match(/^([^\d+-]*[+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)/);
+  if (primary) text = primary[1];
+  const normalized = text.replace(/[\s,﷼%]/g, "").replace(/[()]/g, "-");
   if (!normalized || !/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
   const number = Number(normalized);
   return Number.isFinite(number) ? number : null;
@@ -177,7 +193,7 @@ export function sortTableRowGroups(groups = [], columnIndex = 0, direction = "as
     (isPinned ? pinned : sortable).push({ group, index, value });
   });
 
-  const values = sortable.map(({ value }) => value).filter(Boolean);
+  const values = sortable.map(({ value }) => value).filter((value) => !isSortPlaceholder(value));
   const numeric = values.length > 0 && values.every((value) => sortableNumber(value) !== null);
   const date = !numeric && values.length > 0 && values.every((value) => (
     /^\d{4}-\d{1,2}-\d{1,2}$/.test(value)
@@ -191,9 +207,11 @@ export function sortTableRowGroups(groups = [], columnIndex = 0, direction = "as
   };
 
   sortable.sort((left, right) => {
-    if (!left.value && right.value) return 1;
-    if (left.value && !right.value) return -1;
-    if (!left.value && !right.value) return left.index - right.index;
+    const leftEmpty = isSortPlaceholder(left.value);
+    const rightEmpty = isSortPlaceholder(right.value);
+    if (leftEmpty && !rightEmpty) return 1;
+    if (!leftEmpty && rightEmpty) return -1;
+    if (leftEmpty && rightEmpty) return left.index - right.index;
     const comparison = numeric
       ? sortableNumber(left.value) - sortableNumber(right.value)
       : date ? timestamp(left.value) - timestamp(right.value) : collator.compare(left.value, right.value);

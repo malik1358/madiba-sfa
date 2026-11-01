@@ -1,10 +1,17 @@
-import { isCashSalesVoucher, isCreditNoteTransaction } from "./paymentBehavior.js";
+import {
+  isCashSalesVoucher,
+  isCreditNoteTransaction,
+  parseCreditNoteReferences,
+} from "./paymentBehavior.js";
 import {
   normalizeGrowthFilters,
   quarterKeyFromMonthKey,
   rowMatchesGrowthFilters,
   salesDateKey,
 } from "./categoryGrowth.js";
+
+/** Credit notes dated on the invoice day or within this many days count as clerical. */
+export const CLERICAL_CREDIT_NOTE_MAX_DAYS = 7;
 
 function classifySalesOrigin(value) {
   const origin = String(value || "").trim().toLowerCase();
@@ -15,11 +22,90 @@ function classifySalesOrigin(value) {
   return "unclassified_origin";
 }
 
-export function salesMixMeasuresForRow(row = {}) {
+function normalizeVoucherToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizeCustomerToken(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function calendarDaysBetween(fromIso, toIso) {
+  const from = salesDateKey(fromIso);
+  const to = salesDateKey(toIso);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return null;
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
+  return Math.round((toMs - fromMs) / 86400000);
+}
+
+export function createInvoiceDateIndex() {
+  return new Map();
+}
+
+export function rememberInvoiceDate(index, row = {}) {
+  if (!index || isCreditNoteTransaction(row)) return index;
+  const date = salesDateKey(row.transaction_date);
+  if (!date) return index;
+  const voucher = normalizeVoucherToken(row.voucher_number);
+  if (!voucher) return index;
+  const customer = normalizeCustomerToken(row.customer_code);
+  const remember = (key) => {
+    if (!key) return;
+    const previous = index.get(key);
+    if (!previous || date < previous) index.set(key, date);
+  };
+  remember(voucher);
+  if (customer) remember(`${customer}::${voucher}`);
+  return index;
+}
+
+export function indexInvoiceDatesFromRows(index, rows = []) {
+  const target = index || createInvoiceDateIndex();
+  (rows || []).forEach((row) => rememberInvoiceDate(target, row));
+  return target;
+}
+
+export function resolveCreditNoteSourceInvoiceDate(row = {}, index = new Map()) {
+  const customer = normalizeCustomerToken(row.customer_code);
+  const refs = parseCreditNoteReferences(row.reference);
+  for (const ref of refs) {
+    if (customer) {
+      const scoped = index.get(`${customer}::${ref}`);
+      if (scoped) return scoped;
+    }
+    const global = index.get(ref);
+    if (global) return global;
+  }
+  return "";
+}
+
+/**
+ * clerical = invoice found and CN date is on/before invoice+7 days (includes same-day and CN-before-invoice).
+ * return = invoice found and CN is 8+ days later, or no invoice could be matched.
+ */
+export function creditNoteAdjustmentBucket(row = {}, index = new Map()) {
+  if (!isCreditNoteTransaction(row)) return null;
+  const cnDate = salesDateKey(row.transaction_date);
+  const invoiceDate = resolveCreditNoteSourceInvoiceDate(row, index);
+  if (!cnDate || !invoiceDate) return "return";
+  const days = calendarDaysBetween(invoiceDate, cnDate);
+  if (days == null) return "return";
+  if (days <= CLERICAL_CREDIT_NOTE_MAX_DAYS) return "clerical";
+  return "return";
+}
+
+export function salesMixMeasuresForRow(row = {}, options = {}) {
   const amount = Number(row.sales_amount || 0);
   const isSale = Number.isFinite(amount) && amount > 0 && !isCreditNoteTransaction(row);
   const voucher = String(row.voucher_number || "").trim();
   const origin = classifySalesOrigin(row.local_import);
+  const isAdjustment = isCreditNoteTransaction(row) && Number.isFinite(amount);
+  const adjustment = isAdjustment ? -Math.abs(amount) : 0;
+  const bucket = isAdjustment
+    ? creditNoteAdjustmentBucket(row, options.invoiceDates || createInvoiceDateIndex())
+    : null;
 
   return {
     cash_sales_amount: isSale && isCashSalesVoucher(voucher) ? amount : 0,
@@ -27,7 +113,9 @@ export function salesMixMeasuresForRow(row = {}) {
     local_sales_amount: isSale && origin === "local" ? amount : 0,
     import_sales_amount: isSale && origin === "import" ? amount : 0,
     unclassified_origin_sales_amount: isSale && origin === "unclassified_origin" ? amount : 0,
-    sales_adjustments_amount: isCreditNoteTransaction(row) && Number.isFinite(amount) ? -Math.abs(amount) : 0,
+    clerical_adjustments_amount: bucket === "clerical" ? adjustment : 0,
+    sales_returns_amount: bucket === "return" ? adjustment : 0,
+    sales_adjustments_amount: adjustment,
   };
 }
 
@@ -37,6 +125,8 @@ const MIX_FIELDS = [
   "local_sales_amount",
   "import_sales_amount",
   "unclassified_origin_sales_amount",
+  "clerical_adjustments_amount",
+  "sales_returns_amount",
   "sales_adjustments_amount",
 ];
 
@@ -57,9 +147,17 @@ function ratioRows(periods, values, fields) {
   }));
 }
 
-export function buildSalesMixReport(rows = [], inputFilters = {}) {
+function rowHasStoredMixMeasures(row = {}) {
+  return MIX_FIELDS.every((field) => Number.isFinite(Number(row[field])));
+}
+
+export function buildSalesMixReport(rows = [], inputFilters = {}, options = {}) {
   const filters = normalizeGrowthFilters(inputFilters);
   const byMonth = new Map();
+  const providedIndex = options.invoiceDates;
+  const needsLiveClassification = (rows || []).some((row) => !rowHasStoredMixMeasures(row));
+  const invoiceDates = providedIndex
+    || (needsLiveClassification ? indexInvoiceDatesFromRows(createInvoiceDateIndex(), rows) : createInvoiceDateIndex());
 
   (rows || []).forEach((row) => {
     if (!rowMatchesGrowthFilters(row, filters)) return;
@@ -67,8 +165,9 @@ export function buildSalesMixReport(rows = [], inputFilters = {}) {
     const month = date ? date.slice(0, 7) : String(row.month || "").slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return;
 
-    const storedMeasures = MIX_FIELDS.every((field) => Number.isFinite(Number(row[field])));
-    const measures = storedMeasures ? row : salesMixMeasuresForRow(row);
+    const measures = rowHasStoredMixMeasures(row)
+      ? row
+      : salesMixMeasuresForRow(row, { invoiceDates });
     const current = byMonth.get(month) || Object.fromEntries(MIX_FIELDS.map((field) => [field, 0]));
     MIX_FIELDS.forEach((field) => {
       current[field] += Number(measures[field] || 0);
@@ -77,7 +176,18 @@ export function buildSalesMixReport(rows = [], inputFilters = {}) {
   });
 
   const months = [...byMonth.keys()].sort();
-  const monthly = Object.fromEntries(months.map((month) => [month, byMonth.get(month)]));
+  const monthly = Object.fromEntries(months.map((month) => {
+    const row = byMonth.get(month);
+    const clerical = Number(row.clerical_adjustments_amount || 0);
+    const returns = Number(row.sales_returns_amount || 0);
+    const combined = clerical + returns;
+    // Older cube facts may only carry the combined adjustment.
+    row.sales_adjustments_amount = combined || Number(row.sales_adjustments_amount || 0);
+    if (!clerical && !returns && row.sales_adjustments_amount) {
+      row.sales_returns_amount = Number(row.sales_adjustments_amount || 0);
+    }
+    return [month, row];
+  }));
   const quarters = [...new Set(months.map(quarterKeyFromMonthKey))].filter(Boolean).sort();
   const quarterMonths = Object.fromEntries(quarters.map((quarter) => [
     quarter,
@@ -97,6 +207,8 @@ export function buildSalesMixReport(rows = [], inputFilters = {}) {
     months.reduce((sum, month) => sum + Number(monthly[month][field] || 0), 0),
   ]));
   totals.gross_invoice_sales = sumFields(totals, PAYMENT_FIELDS);
+  totals.sales_adjustments_amount = Number(totals.clerical_adjustments_amount || 0)
+    + Number(totals.sales_returns_amount || 0);
   totals.net_sales = totals.gross_invoice_sales + Number(totals.sales_adjustments_amount || 0);
 
   const monthlyShares = {

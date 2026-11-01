@@ -136,3 +136,28 @@ test("sorting recognizes currency values and chronological ISO dates", () => {
   const septemberDisplay = sortGroup("30 Sep 2026");
   assert.deepEqual(sortTableRowGroups([octoberDisplay, septemberDisplay]), [septemberDisplay, octoberDisplay]);
 });
+
+test("Total / avg-days columns stay numeric when some cells are dashes", () => {
+  const high = sortGroup("1,506,234");
+  const mid = sortGroup("993");
+  const low = sortGroup("990");
+  const blank = sortGroup("—");
+  assert.deepEqual(
+    sortTableRowGroups([mid, high, blank, low], 0, "desc"),
+    [high, mid, low, blank],
+  );
+  assert.deepEqual(
+    sortTableRowGroups([mid, high, blank, low], 0, "asc"),
+    [low, mid, high, blank],
+  );
+});
+
+test("amount-plus-delta cells sort by the amount, not the percent text", () => {
+  const down = sortGroup("516,958 -48%");
+  const up = sortGroup("898,690 +18384%");
+  const plain = sortGroup("1,506,234");
+  assert.deepEqual(
+    sortTableRowGroups([up, plain, down], 0, "desc"),
+    [plain, up, down],
+  );
+});

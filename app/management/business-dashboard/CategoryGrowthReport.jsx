@@ -11,9 +11,11 @@ import {
   buildPeriodChartModel,
   buildShareChartItems,
   buildSignalMix,
+  chartMonthPeriodLabel,
 } from "../../lib/growthCharts";
 import {
   buildContributionGridRows,
+  formatAvgPayingDays,
   formatGrowthPercent,
   formatMoneyAmount,
   formatSharePercent,
@@ -26,6 +28,7 @@ import {
   previousQuarterKey,
   quarterGridTotals,
   quarterLabel,
+  yearCellComparisonPrevious,
   yearGridTotals,
 } from "../../lib/categoryGrowth";
 import { translate } from "../../lib/appLanguage";
@@ -101,9 +104,10 @@ const TEXT = {
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
   yearlyProfit: { en: "Profit by year since inception", ar: "الربح حسب السنة منذ البداية" },
   yearlyHint: {
-    en: "Green is higher than the previous year. Red is lower. The current year is year-to-date only.",
-    ar: "الأخضر أعلى من السنة السابقة. الأحمر أقل. السنة الحالية حتى اليوم فقط.",
+    en: "Green is higher than the previous year. Red is lower. The current year is year-to-date only, and its % compares to the same months last year (prior YTD), not the full prior year. Avg paying days is sales-weighted open-AR aging when FIFO avg days are not prepared.",
+    ar: "الأخضر أعلى من السنة السابقة. الأحمر أقل. السنة الحالية حتى اليوم فقط، ونسبتها تقارن بنفس الأشهر من السنة الماضية وليس السنة الكاملة. متوسط أيام السداد مرجح بالمبيعات من تقادم الذمم المفتوحة عندما لا يتوفر متوسط التحصيل.",
   },
+  avgPayingDays: { en: "Avg paying days", ar: "متوسط أيام السداد" },
   monthly: { en: "Last 12 months", ar: "آخر 12 شهراً" },
   quarterly: { en: "Last 8 quarters", ar: "آخر 8 أرباع" },
   gpQuarterly: { en: "MADIBA GP % by quarter", ar: "نسبة الربح الإجمالي لمديبا حسب الربع" },
@@ -117,6 +121,10 @@ const TEXT = {
   chartHint: {
     en: "Hover a period for amounts. Click a name to hide or show that line. Charts follow the current filters.",
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
+  },
+  monthChartHint: {
+    en: "Hover a period for amounts. Click a name to hide or show that line. The open month on this chart uses the KPI Estimate at current pace (actual ÷ workday pace), not raw MTD. Tables still show MTD.",
+    ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الشهر المفتوح في هذا الرسم يستخدم تقدير مؤشر الأداء حسب الوتيرة (الفعلي ÷ وتيرة أيام العمل)، وليس حتى اليوم الخام. الجداول تبقى حتى اليوم.",
   },
   shareChart: { en: "Share of lifetime sales", ar: "حصة مبيعات العمر" },
   contribution: { en: "Contribution %", ar: "نسبة المساهمة" },
@@ -182,7 +190,7 @@ function YearlyGrowthTable({
   linkNames = false,
 }) {
   const keys = useMemo(
-    () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years, "__total__"],
+    () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years, "__total__", "avgPayingDays"],
     [years],
   );
   const valueOf = useCallback((row, key) => {
@@ -199,6 +207,7 @@ function YearlyGrowthTable({
       const total = (years || []).reduce((sum, year) => sum + Number(row.yearValues?.[year] || 0), 0);
       return total ? formatMoneyAmount(total) : "—";
     }
+    if (key === "avgPayingDays") return formatAvgPayingDays(row.avgDaysToPay);
     return Number(row.yearValues?.[key] || 0) ? formatMoneyAmount(row.yearValues[key]) : "—";
   }, [years]);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
@@ -207,6 +216,22 @@ function YearlyGrowthTable({
     () => visibleRows.reduce((sum, row) => sum + Number(row.lifetime || 0), 0),
     [visibleRows],
   );
+  const priorYtdTotal = useMemo(
+    () => visibleRows.reduce((sum, row) => sum + Number(row.priorYtd || 0), 0),
+    [visibleRows],
+  );
+  const avgPayingDaysFooter = useMemo(() => {
+    let weighted = 0;
+    let weight = 0;
+    visibleRows.forEach((row) => {
+      const days = Number(row.avgDaysToPay);
+      const sales = Number(row.lifetime || 0);
+      if (!Number.isFinite(days) || !(sales > 0)) return;
+      weighted += days * sales;
+      weight += sales;
+    });
+    return weight > 0 ? Math.round(weighted / weight) : null;
+  }, [visibleRows]);
 
   return (
     <ExportableTable filename={filename} sheetName="Growth" className="moduleTableWrap moduleBiTableWrap">
@@ -241,6 +266,14 @@ function YearlyGrowthTable({
               onChange={setFilter}
               className="moduleBiTotalCol"
             />
+            <BiExcelHead
+              label={t("avgPayingDays")}
+              filterKey="avgPayingDays"
+              options={options}
+              filters={filters}
+              onChange={setFilter}
+              className="moduleBiTotalCol"
+            />
           </tr>
         </thead>
         <tbody>
@@ -259,10 +292,12 @@ function YearlyGrowthTable({
               </td>
               {years.map((year, index) => {
                 const amount = Number(row.yearValues?.[year] || 0);
-                const previousYear = index > 0 ? years[index - 1] : "";
-                const previous = previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
-                const tone = monthChangeTone(amount, previous, Boolean(previousYear));
-                const delta = previousYear ? formatWholePercent(growthPercent(amount, previous)) : "";
+                const previous = yearCellComparisonPrevious(row, year, currentYear, years, index);
+                const hasPrevious = String(year) === String(currentYear)
+                  ? row.priorYtd != null && row.priorYtd !== ""
+                  : index > 0;
+                const tone = monthChangeTone(amount, previous, hasPrevious);
+                const delta = hasPrevious ? formatWholePercent(growthPercent(amount, previous)) : "";
                 return (
                   <td key={year} className={periodCellClass(tone, year === currentYear)}>
                     <span className="moduleBiAmountDelta">
@@ -275,6 +310,7 @@ function YearlyGrowthTable({
               <td className="moduleBiTotalCol">
                 {yearTotals.rowTotals[rowIndex] ? formatMoneyAmount(yearTotals.rowTotals[rowIndex]) : "—"}
               </td>
+              <td className="moduleBiTotalCol">{formatAvgPayingDays(row.avgDaysToPay)}</td>
             </tr>
           ))}
         </tbody>
@@ -291,9 +327,12 @@ function YearlyGrowthTable({
             <td>—</td>
             {years.map((year, index) => {
               const amount = Number(yearTotals.columnTotals[index] || 0);
-              const previous = index > 0 ? Number(yearTotals.columnTotals[index - 1] || 0) : 0;
-              const tone = monthChangeTone(amount, previous, index > 0);
-              const delta = index > 0 ? formatWholePercent(growthPercent(amount, previous)) : "";
+              const previous = String(year) === String(currentYear)
+                ? priorYtdTotal
+                : (index > 0 ? Number(yearTotals.columnTotals[index - 1] || 0) : 0);
+              const hasPrevious = String(year) === String(currentYear) ? priorYtdTotal > 0 || visibleRows.some((row) => row.priorYtd != null) : index > 0;
+              const tone = monthChangeTone(amount, previous, hasPrevious);
+              const delta = hasPrevious ? formatWholePercent(growthPercent(amount, previous)) : "";
               return (
                 <td key={`year-total-${year}`} className={periodCellClass(tone, year === currentYear)}>
                   <span className="moduleBiAmountDelta">
@@ -306,6 +345,7 @@ function YearlyGrowthTable({
             <td className="moduleBiTotalCol">
               {yearTotals.grandTotal ? formatMoneyAmount(yearTotals.grandTotal) : "—"}
             </td>
+            <td className="moduleBiTotalCol">{formatAvgPayingDays(avgPayingDaysFooter)}</td>
           </tr>
         </tfoot>
       </table>
@@ -389,8 +429,12 @@ export default function CategoryGrowthReport({
     [categories, recentQuarters],
   );
   const monthChart = useMemo(
-    () => buildPeriodChartModel(categories, recentMonths),
-    [categories, recentMonths],
+    () => buildPeriodChartModel(categories, recentMonths, (row) => row.monthValues, {
+      estimateOpenMonth: true,
+      openMonth: currentMonth,
+      salesAsOfDate: report?.lastDate || "",
+    }),
+    [categories, currentMonth, recentMonths, report?.lastDate],
   );
   const yearContributionRows = useMemo(
     () => buildContributionGridRows(categories, years, (row) => row.yearValues),
@@ -622,11 +666,13 @@ export default function CategoryGrowthReport({
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
         {categories.length > 0 ? (
-          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+          <GrowthChartPanel title={t("trendChart")} hint={t("monthChartHint")}>
             <GrowthTrendChart
               periods={monthChart.periods}
               series={monthChart.series}
-              periodLabel={(month) => monthLabel(month, currentMonth)}
+              periodLabel={(month) => chartMonthPeriodLabel(month, currentMonth, {
+                estimated: monthChart.openMonthEstimated,
+              })}
               formatValue={formatMoneyAmount}
             />
           </GrowthChartPanel>

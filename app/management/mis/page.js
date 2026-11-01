@@ -84,7 +84,7 @@ function Section({ eyebrow, title, children }) {
 
 export default function MisPage() {
   const { language } = useAppLanguage();
-  const t = useCallback((key) => translate(TEXT, key, language), [language]);
+  const t = useMemo(() => translate(language, TEXT), [language]);
   const { access, loading: accessLoading } = useModuleAccess();
   const [asOf, setAsOf] = useState(() => getKsaDateString());
   const [loading, setLoading] = useState(true);

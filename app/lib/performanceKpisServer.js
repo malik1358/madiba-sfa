@@ -697,7 +697,8 @@ export async function rebuildPerformanceKpiCache(admin, {
 
 /**
  * Rebuild current-month KPI actuals after a sales or receipt upload.
- * Also builds the prior month once when that frozen cache is missing (for vs-last-month).
+ * Also builds the prior month when that frozen cache is missing or older than
+ * the current cache version (so new KPI fields appear in vs-last-month).
  */
 export async function warmPerformanceKpiCachesAfterUpload(admin, {
   reportDate = getKsaDateString(),
@@ -707,7 +708,8 @@ export async function warmPerformanceKpiCachesAfterUpload(admin, {
   if (priorMonth) {
     const priorReportDate = `${priorMonth}-01`;
     const priorCache = await readStoredPerformanceKpiCache(admin, priorReportDate);
-    if (!priorCache) {
+    const priorVersion = Number(priorCache?.version || 0);
+    if (!priorCache || priorVersion < PERFORMANCE_KPI_CACHE_VERSION) {
       await rebuildPerformanceKpiCache(admin, { reportDate: priorReportDate });
     }
   }

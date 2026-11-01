@@ -11,13 +11,17 @@ import {
   parseKpiTargetInput,
   INFORMATION_ONLY_KPI_KEYS,
   PERFORMANCE_DISPLAY_KPI_KEYS,
+  SKU_EXPANSION_KPI_KEYS,
 } from "../../lib/performanceKpis";
 import {
+  compareKpiActualToPriorMonth,
   filterKpiTargetRows,
   NO_BOSS_KEY,
+  priorMonthKpiActualForRow,
   sumFilteredKpiColumns,
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
+  sumFilteredPriorMonthActuals,
   sumKpiActuals,
   teamMemberRows,
   teamRowLabel,
@@ -94,6 +98,8 @@ const TEXT = {
   },
   actual: { en: "Actual", ar: "الفعلي" },
   achievement: { en: "Ach. %", ar: "الإنجاز" },
+  improvementPct: { en: "Impr. %", ar: "نسبة التحسن" },
+  vsLastMonthShort: { en: "vs last month", ar: "مقابل الشهر الماضي" },
   ofTarget: { en: "of target", ar: "من الهدف" },
   expectedByToday: { en: "expected", ar: "المتوقع" },
   status: { en: "Status", ar: "الحالة" },
@@ -508,7 +514,7 @@ export default function KpiTargetsPage() {
                         key={key}
                         group={t(key)}
                         actual={t("actual")}
-                        achievement={t("achievement")}
+                        achievement={SKU_EXPANSION_KPI_KEYS.has(key) ? t("improvementPct") : t("achievement")}
                       />
                     ))}
                   </tr>
@@ -534,6 +540,7 @@ export default function KpiTargetsPage() {
                         const kpi = (row.kpis || []).find((item) => item.key === key);
                         const isTotalSales = key === "totalSales";
                         const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);
+                        const isSkuExpansion = SKU_EXPANSION_KPI_KEYS.has(key);
                         const targetValue = isTotalSales
                           ? String(
                             (Number(row.officeSupplies || 0) || 0)
@@ -558,9 +565,24 @@ export default function KpiTargetsPage() {
                         const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
                           ? ""
                           : `${t("expectedByToday")} ${formatAchievementPercent(liveKpi.expected)}`;
+                        const priorSkuActual = isSkuExpansion
+                          ? priorMonthKpiActualForRow(row, key, priorMonthActualsByCode, liveRows)
+                          : null;
+                        const momComparison = !isSkuExpansion
+                          ? null
+                          : priorSkuActual == null
+                            ? {
+                              estimate: Number(kpi?.actual || 0) || 0,
+                              priorActual: null,
+                              delta: null,
+                              percent: null,
+                              direction: "flat",
+                            }
+                            : compareKpiActualToPriorMonth(kpi?.actual || 0, priorSkuActual);
                         return (
                           <KpiTargetCells
                             key={key}
+                            kpiKey={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
                             actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(liveKpi.achievement)}
@@ -570,6 +592,11 @@ export default function KpiTargetsPage() {
                             expected={expectedLabel}
                             value={formatKpiTargetInput(targetValue)}
                             readOnly={isTotalSales || isInformationOnly}
+                            momComparison={momComparison}
+                            momLabels={{
+                              vsLastMonth: t("vsLastMonthShort"),
+                              lastMonth: t("lastMonthActual"),
+                            }}
                             onChange={(value) => {
                               const parsed = parseKpiTargetInput(value);
                               setRows((current) => current.map((item) => {
@@ -609,12 +636,36 @@ export default function KpiTargetsPage() {
                         });
                         const statusKey = liveKpi.status?.key || "no_target";
                         const isInformationOnly = INFORMATION_ONLY_KPI_KEYS.has(key);
+                        const isSkuExpansion = SKU_EXPANSION_KPI_KEYS.has(key);
                         const detailSalesmen = visibleRows
                           .filter((row) => !row.isTeam)
                           .map((row) => row.salesmanCode);
+                        const individuals = visibleRows.filter((item) => !item.isTeam);
+                        const hasPriorSku = isSkuExpansion && individuals.some((item) => (
+                          priorMonthKpiActualForRow(item, key, priorMonthActualsByCode, liveRows) != null
+                        ));
+                        const priorTotals = hasPriorSku
+                          ? sumFilteredPriorMonthActuals(
+                            visibleRows,
+                            priorMonthActualsByCode,
+                            ["avgSkusPerRepeatCustomer", "repeatCustomers", "newSkusToRepeatCustomers"],
+                          )
+                          : null;
+                        const momComparison = !isSkuExpansion
+                          ? null
+                          : !hasPriorSku
+                            ? {
+                              estimate: Number(column.actual || 0) || 0,
+                              priorActual: null,
+                              delta: null,
+                              percent: null,
+                              direction: "flat",
+                            }
+                            : compareKpiActualToPriorMonth(column.actual, priorTotals?.[key]);
                         return (
                           <KpiTargetCells
                             key={key}
+                            kpiKey={key}
                             actual={formatPerformanceKpiValue(key, column.actual)}
                             actualHref={actualDetailsHref(month, key, detailSalesmen)}
                             achievement={formatAchievementPercent(column.achievement)}
@@ -624,6 +675,11 @@ export default function KpiTargetsPage() {
                             expected=""
                             value={isInformationOnly ? "" : formatKpiTargetInput(Math.round(column.target || 0))}
                             readOnly
+                            momComparison={momComparison}
+                            momLabels={{
+                              vsLastMonth: t("vsLastMonthShort"),
+                              lastMonth: t("lastMonthActual"),
+                            }}
                             onChange={() => {}}
                           />
                         );
@@ -771,6 +827,7 @@ function kpiStatusClass(statusKey) {
 }
 
 function KpiTargetCells({
+  kpiKey = "",
   actual,
   actualHref,
   achievement,
@@ -782,7 +839,18 @@ function KpiTargetCells({
   onChange,
   readOnly = false,
   hideTarget = false,
+  momComparison = null,
+  momLabels = null,
 }) {
+  const momToneClass = momComparison?.direction === "up"
+    ? "moduleBiMonthCell--up"
+    : momComparison?.direction === "down"
+      ? "moduleBiMonthCell--down"
+      : "";
+  const momPercentText = !momComparison
+    ? null
+    : (momComparison.percent == null ? "—" : formatGrowthPercent(momComparison.percent));
+
   return (
     <>
       <td>{actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}</td>
@@ -800,8 +868,26 @@ function KpiTargetCells({
           />
         )}
       </td>
-      <td className="moduleKpiAchCell">
-        {statusKey === "no_target" ? (
+      <td className={`moduleKpiAchCell ${momToneClass}`.trim()}>
+        {momComparison ? (
+          <>
+            <strong className="moduleKpiAchDone">{momPercentText}</strong>
+            <span className="moduleKpiAchHint">{momLabels?.vsLastMonth || "vs last month"}</span>
+            <div className="moduleKpiMeta">
+              {momLabels?.lastMonth || "last month"}:{" "}
+              {momComparison.priorActual == null
+                ? "—"
+                : formatPerformanceKpiValue(kpiKey, momComparison.priorActual)}
+            </div>
+            {statusKey !== "no_target" && achievement && achievement !== "—" ? (
+              <>
+                <strong className="moduleKpiAchDone" style={{ marginTop: 4 }}>{achievement}</strong>
+                <span className="moduleKpiAchHint">{ofTarget}</span>
+                <span className={`moduleKpiStatus ${kpiStatusClass(statusKey)}`}>{status}</span>
+              </>
+            ) : null}
+          </>
+        ) : statusKey === "no_target" ? (
           <span className={`moduleKpiStatus ${kpiStatusClass(statusKey)}`}>{status}</span>
         ) : (
           <>

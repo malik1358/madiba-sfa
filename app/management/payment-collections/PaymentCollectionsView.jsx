@@ -70,17 +70,15 @@ import { createClientSubmissionId } from "../../lib/collectionSubmission";
 import { openAttachment } from "../../lib/openAttachment";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import {
-  formatAvgDaysToPayWhatsappLines,
   loadCustomerAvgDaysToPay,
   prefetchCustomerAvgDaysForVisit,
   resolveAvgDaysForWhatsapp,
   resolveLocalAvgDaysToPay,
 } from "../../lib/avgDaysWhatsapp";
-import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
-import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
+import { buildCollectionVisitSummary } from "../../lib/collectionVisitSummary";
 import {
   buildCurrentWorkingHoursEntry,
-  formatWorkingHoursWhatsappLines,
   loadTodayWorkingHoursEntries,
   loadWorkingHoursTillMessage,
   WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
@@ -509,76 +507,36 @@ function formatCustomerCodeWithPriority(customerCode, priority) {
   return `${priority} · ${code}`;
 }
 
-function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
-  const amount = Number(form.amountReceived || 0);
-  const nextVisit = formatDateOnly(form.nextVisitAt);
-  const visitNumberForDay = Number(options.visitNumberForDay || 0);
-  const queuePriority = Number(options.queuePriority || 0);
-  const probabilityLabel = formatProbabilityLabel(row.probability_label, t);
-  const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
-  const visitDateTime = formatKsaDateTime(options.visitAt || new Date().toISOString());
-  const arabicRemark = String(form.remarkArabic || "").trim();
-  const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
-  const lines = [
-    `${t("summaryCustomer")}: ${row.customer_name || row.customer_code}`,
-    `${t("summaryCode")}: ${row.customer_code || "-"}`,
-    `${t("summarySalesman")}: ${getSalesmanLabel(row) || "-"}`,
-    `${t("summaryVisitDateTime")}: ${visitDateTime}`,
-    ...formatWorkingHoursWhatsappLines(options.workingHours, {
-      workingHours: t("summaryWorkingHours"),
-    }),
-    `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
-  ];
-
-  if (queuePriority > 0) {
-    lines.splice(1, 0, `${t("summaryQueuePriority")}: ${queuePriority}.`);
-  }
-  if (probabilityLabel && probabilityLabel !== t("probNA")) {
-    lines.splice(queuePriority > 0 ? 2 : 1, 0, `${t("summaryProbability")}: ${probabilityLabel}.`);
-  }
-
-  if (amount > 0) lines.push(`${t("summaryAmountReceived")}: ${formatMoney(amount)}.`);
-  if (form.receiptMode) lines.push(`${t("summaryReceiptMode")}: ${formatReceiptModeLabel(form.receiptMode, t)}.`);
-  if (arabicRemark) lines.push(`${t("remarkArabic")}: ${arabicRemark}.`);
-  if (englishRemark) lines.push(`${t("remarkEnglish")}: ${englishRemark}.`);
-  lines.push(`${t("summaryNextVisit")}: ${nextVisit || t("summaryNotSpecified")}.`);
-  if (visitNumberForDay > 0) {
-    lines.push(`${t("summaryVisitNumber")}: ${visitNumberForDay}.`);
-  }
-  lines.push(`${t("summaryOutstanding")}:`);
-  lines.push(`${t("bucket30")}: ${formatMoney(row.outstanding_0_30)}`);
-  lines.push(`${t("bucket31to60")}: ${formatMoney(row.outstanding_30_60)}`);
-  lines.push(`${t("bucket61to90")}: ${formatMoney(row.outstanding_61_90)}`);
-  lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
-  lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
-  lines.push(...formatAvgDaysToPayWhatsappLines(
-    options.avgDaysToPay ?? resolveLocalAvgDaysToPay(row),
+function buildVisitSummary(row, form, translatedRemark, _t, options = {}) {
+  // WhatsApp collection shares stay English even when the salesman UI is Arabic,
+  // matching field-visit WhatsApp so managers always see Remark (English).
+  return buildCollectionVisitSummary(
     {
-      avgDaysToPay: t("summaryAvgDaysToPay"),
-      avgDaysToPay6mLabel: t("summaryAvgDaysToPay6m"),
+      customer_name: row.customer_name,
+      customer_code: row.customer_code,
+      salesman_name: getSalesmanLabel(row) || row.salesman_name,
+      salesman_code: row.salesman_code,
+      outstanding_0_30: row.outstanding_0_30,
+      outstanding_30_60: row.outstanding_30_60,
+      outstanding_61_90: row.outstanding_61_90,
+      outstanding_91_120: row.outstanding_91_120,
+      outstanding_above_120: row.outstanding_above_120,
+      probability_label: row.probability_label,
     },
-  ));
-  lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
-    gps: t("summaryGps"),
-    distanceFromCustomer: t("summaryDistanceFromCustomer"),
-    distanceFromPrevious: t("summaryDistanceFromPrevious"),
-    estWaiting: t("summaryEstWaiting"),
-  }));
-  const lastVisitLines = formatCollectionLastVisitWhatsappLines(options.lastVisit, {
-    labels: {
-      summaryLastVisitDate: t("summaryLastVisitDate"),
-      summaryLastVisitOutcome: t("summaryLastVisitOutcome"),
-      summaryLastVisitAmountReceived: t("summaryLastVisitAmountReceived"),
-      summaryLastVisitRemarkArabic: t("summaryLastVisitRemarkArabic"),
-      summaryLastVisitRemarkEnglish: t("summaryLastVisitRemarkEnglish"),
-      summaryNotSpecified: t("summaryNotSpecified"),
+    {
+      visitOutcome: form.visitOutcome,
+      amountReceived: form.amountReceived,
+      receiptMode: form.receiptMode,
+      nextVisitAt: form.nextVisitAt,
+      remarkArabic: form.remarkArabic,
+      remarkEnglish: form.remarkEnglish,
     },
-    formatOutcome: (outcome) => formatOutcomeLabel(outcome, t),
-  });
-  if (lastVisitLines.length > 0) {
-    lines.push("", ...lastVisitLines);
-  }
-  return lines.join("\n");
+    {
+      ...options,
+      translatedRemark: translatedRemark || form.remarkEnglish || "",
+      probabilityLabel: String(options.probabilityLabel || row.probability_label || "").trim(),
+    },
+  );
 }
 
 function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {}) {

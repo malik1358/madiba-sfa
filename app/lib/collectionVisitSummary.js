@@ -239,6 +239,12 @@ export function patchCollectionVisitSummaryVisitNumber(
   return `${text}\n${insertLine}`;
 }
 
+export function isArabicLocalizedCollectionSummary(summary) {
+  return /^(العميل|أولوية الزيارة|احتمالية التحصيل|ملاحظة بالعربية|النتيجة|المديونية):/m.test(
+    String(summary || ""),
+  );
+}
+
 export function patchCollectionVisitSummaryVisitDistance(
   summary,
   metrics = {},
@@ -256,19 +262,49 @@ export function patchCollectionVisitSummaryVisitDistance(
   const block = distanceLines.join("\n").replace(/^\n/, "");
   if (!block) return text;
 
-  // Replace only the GPS/distance/waiting block so trailing last-visit lines stay intact.
-  const distanceBlockPattern = new RegExp(
-    `(?:\\n|^)(?:${escapeRegExp(labels.gps)}:\\s*[^\\n]*\\n)?${escapeRegExp(labels.distanceFromCustomer)}:\\s*[^\\n]*\\n${escapeRegExp(labels.distanceFromPrevious)}:\\s*[^\\n]*\\n${escapeRegExp(labels.estWaiting)}:\\s*[^\\n]*`,
-    "m",
-  );
-  if (distanceBlockPattern.test(text)) {
-    return text.replace(distanceBlockPattern, `\n${block}`);
+  // Replace English or legacy Arabic GPS/distance/waiting blocks so server
+  // patches do not append a second English block under an Arabic summary.
+  const distanceLabelSets = [
+    {
+      gps: labels.gps,
+      distanceFromCustomer: labels.distanceFromCustomer,
+      distanceFromPrevious: labels.distanceFromPrevious,
+      estWaiting: labels.estWaiting,
+    },
+    {
+      gps: "GPS",
+      distanceFromCustomer: "Distance from customer",
+      distanceFromPrevious: "Distance from previous",
+      estWaiting: "Est. waiting",
+    },
+    {
+      gps: "GPS",
+      distanceFromCustomer: "المسافة من العميل",
+      distanceFromPrevious: "المسافة من السابق",
+      estWaiting: "وقت الانتظار التقديري",
+    },
+  ];
+
+  for (const set of distanceLabelSets) {
+    const distanceBlockPattern = new RegExp(
+      `(?:\\n|^)(?:${escapeRegExp(set.gps)}:\\s*[^\\n]*\\n)?${escapeRegExp(set.distanceFromCustomer)}:\\s*[^\\n]*\\n${escapeRegExp(set.distanceFromPrevious)}:\\s*[^\\n]*\\n${escapeRegExp(set.estWaiting)}:\\s*[^\\n]*`,
+      "m",
+    );
+    if (distanceBlockPattern.test(text)) {
+      return text.replace(distanceBlockPattern, `\n${block}`);
+    }
   }
 
-  const lastVisitAnchor = labels.summaryLastVisitDate || "Last visit date";
-  const lastVisitPattern = new RegExp(`\\n${escapeRegExp(lastVisitAnchor)}:`);
-  if (lastVisitPattern.test(text)) {
-    return text.replace(lastVisitPattern, `\n\n${block}\n\n${lastVisitAnchor}:`);
+  const lastVisitAnchors = [
+    labels.summaryLastVisitDate,
+    "Last visit date",
+    "تاريخ آخر زيارة",
+  ].filter(Boolean);
+  for (const lastVisitAnchor of lastVisitAnchors) {
+    const lastVisitPattern = new RegExp(`\\n${escapeRegExp(lastVisitAnchor)}:`);
+    if (lastVisitPattern.test(text)) {
+      return text.replace(lastVisitPattern, `\n\n${block}\n\n${lastVisitAnchor}:`);
+    }
   }
 
   return `${text.trimEnd()}\n\n${block}`;

@@ -16,6 +16,7 @@ import {
 } from "../../../lib/collectionDaySummaryServer.js";
 import {
   buildStoredCollectionVisitSummary,
+  isArabicLocalizedCollectionSummary,
   isPriorityCollectionVisit,
   patchCollectionVisitSummaryEnglishRemark,
   patchCollectionVisitSummaryVisitNumber,
@@ -267,13 +268,18 @@ async function buildVisitReportFields(visit, customerContext, visitNumberForDay,
     probability_label: probabilityLabel,
   };
 
-  let whatsappSummary = storedSummary
+  // Rebuild Arabic-localized stored summaries in English so Collection Report
+  // WhatsApp shares match field visits (Remark (English) visible to managers).
+  let whatsappSummary = storedSummary && !isArabicLocalizedCollectionSummary(storedSummary)
     ? patchCollectionVisitSummaryEnglishRemark(storedSummary, resolvedEnglish)
     : buildStoredCollectionVisitSummary(customerRow, visitWithEnglish, {
       visitNumberForDay: effectiveVisitNumber,
       queuePriority,
       probabilityLabel,
     });
+  if (storedSummary && isArabicLocalizedCollectionSummary(storedSummary)) {
+    whatsappSummary = patchCollectionVisitSummaryEnglishRemark(whatsappSummary, resolvedEnglish);
+  }
   whatsappSummary = patchCollectionVisitSummaryVisitNumber(whatsappSummary, effectiveVisitNumber);
 
   return {

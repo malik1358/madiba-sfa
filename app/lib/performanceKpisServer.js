@@ -585,6 +585,20 @@ function preferKpiActualsRow(current, candidate) {
  * Soft-read monthly KPI actuals without stamp/batch rebuild checks.
  * Keys are canonical report salesman codes; totalSales / totalCashCollected are derived.
  */
+function stripUnsetSkuExpansionFields(derived, sourceActuals = {}) {
+  const row = { ...derived };
+  if (!Object.prototype.hasOwnProperty.call(sourceActuals, "newSkusToRepeatCustomers")) {
+    delete row.newSkusToRepeatCustomers;
+  }
+  if (!Object.prototype.hasOwnProperty.call(sourceActuals, "repeatCustomerSkuCount")) {
+    delete row.repeatCustomerSkuCount;
+    if (!Object.prototype.hasOwnProperty.call(sourceActuals, "avgSkusPerRepeatCustomer")) {
+      delete row.avgSkusPerRepeatCustomer;
+    }
+  }
+  return row;
+}
+
 export async function loadStoredKpiActualsByCode(admin, reportDate) {
   const cache = await readStoredPerformanceKpiCache(admin, reportDate);
   const source = cache?.actualsBySalesman;
@@ -595,10 +609,13 @@ export async function loadStoredKpiActualsByCode(admin, reportDate) {
     const raw = normalizeSalesmanCode(code);
     const key = normalizeReportSalesmanCode(raw) || raw;
     if (!key) return;
-    const derived = withDerivedKpiActuals({
-      ...emptyPerformanceActuals(),
-      ...actuals,
-    });
+    const derived = stripUnsetSkuExpansionFields(
+      withDerivedKpiActuals({
+        ...emptyPerformanceActuals(),
+        ...actuals,
+      }),
+      actuals,
+    );
     byCode[key] = preferKpiActualsRow(byCode[key], derived);
   });
   return byCode;

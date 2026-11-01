@@ -944,9 +944,39 @@ test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", 
   assert.equal(stored.salesAsOfDate, "2026-09-30");
   assert.equal(byCode.SM001.totalSales, 40);
   assert.equal(byCode.SM001.totalCashCollected, 10);
+  // Pre-SKU cache rows must not invent newSkus/avgSkus as 0 for MoM.
+  assert.equal(Object.prototype.hasOwnProperty.call(byCode.SM001, "newSkusToRepeatCustomers"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(byCode.SM001, "repeatCustomerSkuCount"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(byCode.SM001, "avgSkusPerRepeatCustomer"), false);
   // Thamer aliases collapse to SM002 once (not summed).
   assert.equal(byCode.SM002.totalSales, 60);
   assert.equal(byCode.THAMER, undefined);
+
+  const withSku = {
+    ...cache,
+    version: 9,
+    actualsBySalesman: {
+      SM001: {
+        ...cache.actualsBySalesman.SM001,
+        newSkusToRepeatCustomers: 3,
+        repeatCustomerSkuCount: 8,
+      },
+    },
+  };
+  const skuAdmin = {
+    from() {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({ data: { setting_value: JSON.stringify(withSku) }, error: null }),
+      };
+      return query;
+    },
+  };
+  const skuByCode = await loadStoredKpiActualsByCode(skuAdmin, "2026-10-01");
+  assert.equal(skuByCode.SM001.newSkusToRepeatCustomers, 3);
+  assert.equal(skuByCode.SM001.repeatCustomerSkuCount, 8);
+  assert.equal(skuByCode.SM001.avgSkusPerRepeatCustomer, 8);
 });
 
 test("does not move Others target into office supplies after save", () => {

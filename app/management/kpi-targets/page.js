@@ -842,11 +842,13 @@ function KpiTargetCells({
   momComparison = null,
   momLabels = null,
 }) {
-  const momToneClass = momComparison?.direction === "up"
-    ? "moduleBiMonthCell--up"
-    : momComparison?.direction === "down"
-      ? "moduleBiMonthCell--down"
-      : "";
+  const momToneClass = momComparison?.percent == null
+    ? ""
+    : momComparison.direction === "up"
+      ? "moduleBiMonthCell--up"
+      : momComparison.direction === "down"
+        ? "moduleBiMonthCell--down"
+        : "";
   const momPercentText = !momComparison
     ? null
     : (momComparison.percent == null ? "—" : formatGrowthPercent(momComparison.percent));

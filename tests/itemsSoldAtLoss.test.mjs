@@ -174,6 +174,69 @@ test("email cycle claims once and sends loss digests", async () => {
   assert.deepEqual(sent[0].to, ["malik@pinasz.com"]);
 });
 
+test("email cycle skips send when there are no loss lines", async () => {
+  const sent = [];
+  const finished = [];
+  const claims = new Map();
+  const admin = {
+    from() {
+      return {
+        insert: async ({ setting_key, setting_value }) => {
+          if (claims.has(setting_key)) return { error: { code: "23505" } };
+          claims.set(setting_key, setting_value);
+          return { error: null };
+        },
+        update: () => ({
+          eq: () => ({
+            eq: async () => ({ error: null }),
+          }),
+        }),
+        delete: () => ({
+          eq: () => ({
+            eq: async () => ({ error: null }),
+          }),
+        }),
+      };
+    },
+  };
+
+  const result = await runItemsSoldAtLossEmailCycle(admin, {
+    date: "2026-10-31",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_USER: "u",
+      SMTP_PASS: "p",
+      SMTP_FROM: "noreply@example.com",
+    },
+    loadReport: async () => buildItemsSoldAtLossReport({
+      sourceRows: [],
+      dateFrom: "2026-10-31",
+      dateTo: "2026-10-31",
+    }),
+    claimSend: async (_admin, date) => {
+      const settingKey = `items_sold_at_loss_email:${date}`;
+      const claim = JSON.stringify({ status: "sending", token: "t1" });
+      claims.set(settingKey, claim);
+      return { settingKey, claim };
+    },
+    finishSend: async (_admin, claim, counts) => {
+      finished.push({ claim, counts });
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { ok: true };
+    },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "no_loss_lines");
+  assert.equal(result.sentCount, 0);
+  assert.equal(result.lineCount, 0);
+  assert.equal(sent.length, 0);
+  assert.equal(finished.length, 1);
+  assert.deepEqual(finished[0].counts, { lineCount: 0, profitAmount: 0 });
+});
+
 test("summary helper matches footer totals", () => {
   const totals = summarizeItemsSoldAtLoss([
     { quantity: 1, salesAmount: 10, profitAmount: -2 },

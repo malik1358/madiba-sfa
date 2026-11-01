@@ -301,9 +301,31 @@ export function compareKpiEstimateToPriorMonth(estimate, priorActual) {
   };
 }
 
-/** Current actual vs last month's actual (same shape as estimate comparison). */
+/**
+ * Current actual vs last month's actual (same shape as estimate comparison).
+ * Null/missing prior stays null — do not treat it as zero (older KPI caches
+ * without SKU fields must not look like "last month: 0").
+ */
 export function compareKpiActualToPriorMonth(actual, priorActual) {
-  return compareKpiEstimateToPriorMonth(actual, priorActual);
+  if (actual == null || actual === "") return null;
+  const value = Number(actual);
+  if (!Number.isFinite(value)) return null;
+  if (priorActual == null || priorActual === "") {
+    return {
+      estimate: value,
+      priorActual: null,
+      delta: null,
+      percent: null,
+      direction: "flat",
+    };
+  }
+  const comparison = compareKpiEstimateToPriorMonth(actual, priorActual);
+  if (!comparison) return null;
+  // No baseline to divide by: keep the prior value visible, but do not paint up/down.
+  if (comparison.percent == null && Number(comparison.priorActual || 0) === 0 && value !== 0) {
+    return { ...comparison, direction: "flat" };
+  }
+  return comparison;
 }
 
 /** Prior-month actual for one KPI key from a stored actuals row. */

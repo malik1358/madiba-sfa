@@ -243,6 +243,16 @@ test("pace estimate vs last month shows value and percent direction", () => {
   assert.equal(compareKpiEstimateToPriorMonth(null, 100), null);
   assert.equal(compareKpiActualToPriorMonth(9.9, 6).percent, 65);
   assert.equal(compareKpiActualToPriorMonth(1.9, 2.5).direction, "down");
+  assert.deepEqual(compareKpiActualToPriorMonth(9.9, null), {
+    estimate: 9.9,
+    priorActual: null,
+    delta: null,
+    percent: null,
+    direction: "flat",
+  });
+  assert.equal(compareKpiActualToPriorMonth(9.9, 0).direction, "flat");
+  assert.equal(compareKpiActualToPriorMonth(9.9, 0).priorActual, 0);
+  assert.equal(compareKpiActualToPriorMonth(9.9, 0).percent, null);
   assert.equal(priorMonthKpiActualFromRow({
     newSkusToRepeatCustomers: 4,
     repeatCustomers: 2,

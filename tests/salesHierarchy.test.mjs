@@ -28,6 +28,35 @@ test("headSalesmanMetadataMatchesLeader matches code and name variants", () => {
     head_salesman_code: "GEORGE",
     head_salesman_name: "",
   }, nabil), false);
+
+  // Shared first name only must not attach Asrar Ahmed's team under Ahmed Nabil.
+  assert.equal(headSalesmanMetadataMatchesLeader({
+    head_salesman_code: "ASRAR AHMED",
+    head_salesman_name: "ASRAR AHMED",
+  }, nabil), false);
+
+  assert.equal(headSalesmanMetadataMatchesLeader({
+    head_salesman_code: "AHMED",
+    head_salesman_name: "",
+  }, nabil), false);
+});
+
+test("resolveSubordinateUserIds does not pull Zia when his head is Asrar Ahmed", () => {
+  const nabil = { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" };
+  const profiles = [
+    nabil,
+    { id: "zia", salesman_code: "ZIA", salesman_name: "ZIA" },
+    { id: "george", salesman_code: "GEORGE", salesman_name: "George" },
+  ];
+  const authUsers = [
+    { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+    { id: "zia", user_metadata: { head_salesman_code: "ASRAR AHMED", head_salesman_name: "ASRAR AHMED" } },
+    { id: "george", user_metadata: { head_salesman_code: "AHMED NABIL", head_salesman_name: "Ahmed Nabil" } },
+  ];
+
+  const subordinates = resolveSubordinateUserIds(authUsers, nabil, profiles);
+  assert.equal(subordinates.has("george"), true);
+  assert.equal(subordinates.has("zia"), false);
 });
 
 test("findHeadProfile returns the direct boss for a salesman", () => {

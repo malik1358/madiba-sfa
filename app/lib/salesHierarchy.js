@@ -1,5 +1,4 @@
 import {
-  buildSalesmanScopeMatchers,
   normalizeSalesmanCode,
   normalizeSalesmanName,
   salesmanValueMatchesScope,
@@ -19,19 +18,67 @@ function profileIdentityCandidates(profile) {
   ].filter(Boolean))];
 }
 
+function identityTokens(value) {
+  return [...new Set(
+    normalizeCode(value)
+      .replace(/[^A-Z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter((token) => token.length >= 3),
+  )];
+}
+
+function looseIdentity(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z]/g, "")
+    .replace(/[AEIOU]/g, "")
+    .replace(/(.)\1+/g, "$1");
+}
+
+/**
+ * Head metadata must identify this leader — not merely share a first name.
+ * "NABIL" may abbreviate "AHMED NABIL"; "ASRAR AHMED" must not.
+ */
+function headValueMatchesLeader(headValue, leaderProfile) {
+  const head = normalizeCode(headValue);
+  if (!head || !leaderProfile) return false;
+
+  const leaderKeys = new Set(profileIdentityCandidates(leaderProfile));
+  if (leaderKeys.has(head)) return true;
+
+  const leaderBlob = [leaderProfile.salesman_name, leaderProfile.salesman_code]
+    .map((part) => normalizeCode(part))
+    .filter(Boolean)
+    .join(" ");
+  const headTokens = identityTokens(head);
+  const leaderTokens = identityTokens(leaderBlob);
+  if (!headTokens.length || !leaderTokens.length) return false;
+
+  const headLoose = looseIdentity(head);
+  const leaderLooses = [...leaderKeys].map(looseIdentity).filter(Boolean);
+  if (headLoose && leaderLooses.includes(headLoose)) return true;
+
+  // Single-token heads: last-name (or sole-name) abbreviation only — not shared first names.
+  if (headTokens.length === 1) {
+    const token = headTokens[0];
+    if (token === leaderTokens[leaderTokens.length - 1]) return true;
+    if (leaderTokens.length === 1 && token === leaderTokens[0]) return true;
+    return false;
+  }
+
+  // Multi-token heads: require full token containment either direction (not a shared subset).
+  if (headTokens.every((token) => leaderTokens.includes(token))) return true;
+  if (leaderTokens.every((token) => headTokens.includes(token))) return true;
+  return false;
+}
+
 export function headSalesmanMetadataMatchesLeader(metadata, leaderProfile) {
   const headCode = normalizeCode(metadata?.head_salesman_code);
   const headName = normalizeCode(metadata?.head_salesman_name);
   if (!headCode && !headName) return false;
 
-  const leaderKeys = new Set(profileIdentityCandidates(leaderProfile));
-  if (headCode && leaderKeys.has(headCode)) return true;
-  if (headName && leaderKeys.has(headName)) return true;
-
-  const matchers = buildSalesmanScopeMatchers([leaderProfile]);
-  if (headCode && salesmanValueMatchesScope(headCode, matchers)) return true;
-  if (headName && salesmanValueMatchesScope(headName, matchers)) return true;
-
+  if (headCode && headValueMatchesLeader(headCode, leaderProfile)) return true;
+  if (headName && headValueMatchesLeader(headName, leaderProfile)) return true;
   return false;
 }
 

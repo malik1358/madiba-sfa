@@ -136,3 +136,86 @@ test("sales mix reads precomputed measures from prepared monthly cube facts", ()
   assert.equal(report.totals.sales_adjustments_amount, -30);
   assert.equal(report.totals.net_sales, 400);
 });
+
+test("credit notes within 7 days of the named invoice are clerical; later notes are real returns", () => {
+  const report = buildSalesMixReport([
+    {
+      transaction_date: "2026-09-01",
+      voucher_number: "NFD/100",
+      customer_code: "C1",
+      local_import: "Local",
+      sales_amount: 1000,
+    },
+    {
+      transaction_date: "2026-09-05",
+      voucher_number: "CN/10",
+      voucher_type: "Credit Note",
+      reference: "NFD/100",
+      customer_code: "C1",
+      sales_amount: 100,
+    },
+    {
+      transaction_date: "2026-09-01",
+      voucher_number: "NFD/200",
+      customer_code: "C1",
+      local_import: "Import",
+      sales_amount: 800,
+    },
+    {
+      transaction_date: "2026-09-20",
+      voucher_number: "CN/20",
+      voucher_type: "Credit Note",
+      reference: "NFD/200",
+      customer_code: "C1",
+      sales_amount: 50,
+    },
+    {
+      transaction_date: "2026-09-22",
+      voucher_number: "CN/21",
+      voucher_type: "Credit Note",
+      customer_code: "C1",
+      sales_amount: 25,
+    },
+  ], emptyGrowthFilters());
+
+  assert.equal(report.totals.clerical_adjustments_amount, -100);
+  assert.equal(report.totals.sales_returns_amount, -75);
+  assert.equal(report.totals.sales_adjustments_amount, -175);
+  assert.equal(report.totals.gross_invoice_sales, 1800);
+  assert.equal(report.totals.net_sales, 1625);
+});
+
+test("cube ingest stores clerical vs return mix measures using the named invoice date", () => {
+  const cube = createSalesBiCube();
+  ingestSalesRowsIntoCube(cube, [
+    {
+      transaction_date: "2026-08-01",
+      voucher_number: "RNFD/1",
+      customer_code: "C9",
+      sales_amount: 500,
+    },
+    {
+      transaction_date: "2026-08-03",
+      voucher_number: "CN/1",
+      voucher_type: "Credit Note",
+      reference: "RNFD/1",
+      customer_code: "C9",
+      sales_amount: 40,
+    },
+    {
+      transaction_date: "2026-08-20",
+      voucher_number: "CN/2",
+      voucher_type: "Credit Note",
+      reference: "RNFD/1",
+      customer_code: "C9",
+      sales_amount: 60,
+    },
+  ]);
+  const report = buildSalesMixReport(
+    salesBiFactsFromCube(cube).map(salesBiFactToGrowthRow),
+    emptyGrowthFilters(),
+  );
+  assert.equal(report.totals.clerical_adjustments_amount, -40);
+  assert.equal(report.totals.sales_returns_amount, -60);
+  assert.equal(report.totals.sales_adjustments_amount, -100);
+});

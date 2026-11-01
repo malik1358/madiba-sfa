@@ -8,6 +8,7 @@ import { resolveDailySupplierOrderEmailSchedule, runDailySupplierOrderEmailCycle
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
+import { rebuildReceivableDaysDataset } from "../../lib/receivableDaysServer.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { warmPerformanceKpiCachesAfterUpload } from "../../lib/performanceKpisServer.js";
 import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
@@ -1324,6 +1325,17 @@ export async function POST(request) {
         });
       } catch (cubeError) {
         console.error("Sales BI cube rebuild after sales upload failed:", cubeError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const receivableAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await rebuildReceivableDaysDataset(receivableAdmin, { trigger: "sales-upload" });
+        console.info("Receivable days dataset rebuilt after sales upload.");
+      } catch (receivableError) {
+        console.error("Receivable days rebuild after sales upload failed:", receivableError);
       }
 
       try {

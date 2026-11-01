@@ -11,6 +11,7 @@ import {
   isEodStockQtyOverAvailable,
 } from "../../../lib/eodStock.js";
 import ExportableTable from "../../../components/ExportableTable";
+import { normalizeCategoryName } from "../../../lib/categoryIdentity.js";
 
 function normalizedText(value) {
   return String(value || "").trim().toLowerCase();
@@ -20,12 +21,13 @@ function normalizeCategoryLabel(value) {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   if (!text) return "Unclassified";
 
-  return text
+  const titled = text
     .split(" ")
     .map((word) => (word.toUpperCase() === "POS"
       ? "POS"
       : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
     .join(" ");
+  return normalizeCategoryName(titled);
 }
 
 export default function FullItemList({

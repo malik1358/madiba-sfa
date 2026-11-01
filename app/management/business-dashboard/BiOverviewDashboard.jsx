@@ -11,7 +11,12 @@ import {
   monthChangeTone,
   previousMonthKey,
 } from "../../lib/categoryGrowth";
-import { buildPeriodChartModel, buildShareChartItems, buildSignalMix } from "../../lib/growthCharts";
+import {
+  buildPeriodChartModel,
+  buildShareChartItems,
+  buildSignalMix,
+  chartMonthPeriodLabel,
+} from "../../lib/growthCharts";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
 
@@ -129,8 +134,12 @@ export default function BiOverviewDashboard({
   const shareItems = useMemo(() => buildShareChartItems(model.topCategories), [model.topCategories]);
   const signalMix = useMemo(() => buildSignalMix(model.topCategories), [model.topCategories]);
   const monthChart = useMemo(
-    () => buildPeriodChartModel(model.topCategories, model.recentMonths),
-    [model.recentMonths, model.topCategories],
+    () => buildPeriodChartModel(model.topCategories, model.recentMonths, (row) => row.monthValues, {
+      estimateOpenMonth: true,
+      openMonth: model.currentMonth,
+      salesAsOfDate: growthReport?.lastDate || "",
+    }),
+    [growthReport?.lastDate, model.currentMonth, model.recentMonths, model.topCategories],
   );
 
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
@@ -273,7 +282,9 @@ export default function BiOverviewDashboard({
               <GrowthTrendChart
                 periods={monthChart.periods}
                 series={monthChart.series}
-                periodLabel={(month) => monthLabel(month, model.currentMonth)}
+                periodLabel={(month) => chartMonthPeriodLabel(month, model.currentMonth, {
+                  estimated: monthChart.openMonthEstimated,
+                })}
                 formatValue={formatMoneyAmount}
               />
             </GrowthChartPanel>

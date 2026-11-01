@@ -69,6 +69,47 @@ export function creditSalesYtdThroughMonth(monthlyCreditSales = {}, monthKey = "
   return Math.round(total * 100) / 100;
 }
 
+/** Inclusive trailing month keys ending at monthKey (newest last). */
+export function trailingMonthKeys(monthKey, monthCount = 12) {
+  const end = String(monthKey || "").slice(0, 7);
+  const count = Math.max(1, Math.floor(Number(monthCount) || 0));
+  if (!/^\d{4}-\d{2}$/.test(end)) return [];
+  const months = [end];
+  let cursor = end;
+  for (let index = 1; index < count; index += 1) {
+    cursor = previousMonthKey(cursor);
+    if (!cursor) break;
+    months.unshift(cursor);
+  }
+  return months;
+}
+
+/** Sum credit sales across the trailing window ending at monthKey. */
+export function creditSalesTrailingMonths(monthlyCreditSales = {}, monthKey = "", monthCount = 12) {
+  const creditMap = asObjectMap(monthlyCreditSales);
+  const total = trailingMonthKeys(monthKey, monthCount).reduce(
+    (sum, month) => sum + toNumber(creditMap[month]),
+    0,
+  );
+  return Math.round(total * 100) / 100;
+}
+
+/** Calendar days from the first day of the trailing window through month-end (or asOf). */
+export function receivableTrailingDays(monthKey, monthCount = 12, asOfDate = "") {
+  const months = trailingMonthKeys(monthKey, monthCount);
+  if (!months.length) return 0;
+  const start = `${months[0]}-01`;
+  const endMonth = months[months.length - 1];
+  const asOf = salesDateKey(asOfDate);
+  let end = lastDayOfMonth(endMonth);
+  if (asOf && asOf.slice(0, 7) === endMonth) end = asOf;
+  if (!end || end < start) return 0;
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
+  return Math.round((endMs - startMs) / 86400000) + 1;
+}
+
 function invoiceExclRatio(invoice) {
   const incl = toNumber(invoice?.amount ?? invoice?.amount_incl_vat);
   const excl = toNumber(invoice?.amount_excl_vat);
@@ -179,14 +220,26 @@ function daysForMonthRow(month, creditMap, arMap, asOf) {
   const receivables = hasReceivable ? Math.round(toNumber(arMap[month]) * 100) / 100 : null;
   const creditSalesMonth = Math.round(toNumber(creditMap[month]) * 100) / 100;
   const creditSalesYtd = creditSalesYtdThroughMonth(creditMap, month);
+  const creditSales3m = creditSalesTrailingMonths(creditMap, month, 3);
+  const creditSales12m = creditSalesTrailingMonths(creditMap, month, 12);
   const daysYtd = receivableYtdDays(month, asOf);
+  const days3m = receivableTrailingDays(month, 3, asOf);
+  const days12m = receivableTrailingDays(month, 12, asOf);
   const daysValue = hasReceivable ? receivableDays(receivables, creditSalesYtd, daysYtd) : null;
+  const days3mValue = hasReceivable ? receivableDays(receivables, creditSales3m, days3m) : null;
+  const days12mValue = hasReceivable ? receivableDays(receivables, creditSales12m, days12m) : null;
   return {
     receivables,
     credit_sales: creditSalesMonth,
     credit_sales_ytd: creditSalesYtd,
+    credit_sales_3m: creditSales3m,
+    credit_sales_12m: creditSales12m,
     days: daysYtd,
+    days_3m: days3m,
+    days_12m: days12m,
     receivable_days: daysValue,
+    receivable_days_3m: days3mValue,
+    receivable_days_12m: days12mValue,
   };
 }
 
@@ -291,7 +344,8 @@ export function receivablesFromOutstandingPlan(plan = []) {
 
 /**
  * Build the monthwise receivable-days report from monthly AR and credit sales maps.
- * Days use YTD credit sales and YTD calendar days through each month-end.
+ * YTD DSO uses calendar-year credit sales and YTD days.
+ * Rolling 3m / 12m DSO use trailing credit sales and trailing calendar days for faster / steadier views.
  */
 export function buildReceivableDaysReport({
   monthlyCreditSales = {},
@@ -323,13 +377,25 @@ export function buildReceivableDaysReport({
     const changeDays = current.receivable_days != null && previousDays != null
       ? Math.round((current.receivable_days - previousDays) * 10) / 10
       : null;
+    const previousDays3m = previousRow?.receivable_days_3m ?? null;
+    const previousDays12m = previousRow?.receivable_days_12m ?? null;
+    const changeDays3m = current.receivable_days_3m != null && previousDays3m != null
+      ? Math.round((current.receivable_days_3m - previousDays3m) * 10) / 10
+      : null;
+    const changeDays12m = current.receivable_days_12m != null && previousDays12m != null
+      ? Math.round((current.receivable_days_12m - previousDays12m) * 10) / 10
+      : null;
     return {
       month,
       ...current,
       previous_receivable_days: previousDays,
       change_days: changeDays,
+      change_days_3m: changeDays3m,
+      change_days_12m: changeDays12m,
       improved: changeDays != null ? changeDays < 0 : null,
       tone: receivableDaysChangeTone(current.receivable_days, previousDays),
+      tone_3m: receivableDaysChangeTone(current.receivable_days_3m, previousDays3m),
+      tone_12m: receivableDaysChangeTone(current.receivable_days_12m, previousDays12m),
       is_current: month === currentMonth,
     };
   });
@@ -345,6 +411,8 @@ export function buildReceivableDaysReport({
   const lastRow = rows.at(-1) || null;
   totals.credit_sales_ytd = lastRow ? toNumber(lastRow.credit_sales_ytd) : 0;
   totals.receivable_days = lastRow?.receivable_days ?? null;
+  totals.receivable_days_3m = lastRow?.receivable_days_3m ?? null;
+  totals.receivable_days_12m = lastRow?.receivable_days_12m ?? null;
 
   return {
     months,
@@ -357,6 +425,8 @@ export function buildReceivableDaysReport({
     dateFrom: salesDateKey(dateFrom),
     dateTo: salesDateKey(dateTo),
     formula: "(tally_outstanding / credit_sales_ytd) × days_ytd",
+    formula3m: "(tally_outstanding / credit_sales_trailing_3m) × days_trailing_3m",
+    formula12m: "(tally_outstanding / credit_sales_trailing_12m) × days_trailing_12m",
     receivablesSource: "tally_outstanding",
   };
 }

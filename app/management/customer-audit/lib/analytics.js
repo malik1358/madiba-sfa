@@ -1,3 +1,4 @@
+import { normalizeCategoryName } from '../../../lib/categoryIdentity.js';
 import { mergeReceiptMonthsIntoPerformanceWindow, selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
 import { attachMonthlyReceipts, monthKeyFromReceiptDate } from '../../../lib/receiptRegister.js';
 import {
@@ -123,7 +124,7 @@ export function buildAnalytics(transactions, {
     const itemCode = String(row.item_code || '').trim();
     const itemName = row.item_name || itemCode || 'Unknown Item';
     const itemKey = itemCode || itemName;
-    const category = row.category || 'Unclassified';
+    const category = normalizeCategoryName(row.category);
     const orderKey = row.voucher_number || row.reference || `ROW-${row.id}`;
 
     orderSet.add(orderKey);

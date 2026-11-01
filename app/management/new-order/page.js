@@ -18,6 +18,7 @@ import { dedupeCustomerMasterRows } from "../../lib/customerMasterQuery";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
+import { normalizeCategoryName } from "../../lib/categoryIdentity.js";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
@@ -234,12 +235,13 @@ function normalizeCategoryLabel(value) {
   const text = normalizeText(value).replace(/\s+/g, " ");
   if (!text) return "Unclassified";
 
-  return text
+  const titled = text
     .split(" ")
     .map((word) => (word.toUpperCase() === "POS"
       ? "POS"
       : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
     .join(" ");
+  return normalizeCategoryName(titled);
 }
 
 function isPlaceholderValue(value) {

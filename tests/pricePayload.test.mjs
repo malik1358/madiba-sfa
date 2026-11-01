@@ -115,7 +115,7 @@ test('parsePricePayload drops building material rows from the order catalog', ()
 });
 
 test('pickCatalogCategory prefers live sales or sheet over stale Cosmetics', () => {
-  assert.equal(pickCatalogCategory('Cosmetics', 'Body Care'), 'Body Care');
+  assert.equal(pickCatalogCategory('Cosmetics', 'Body Care'), 'Personal Care');
   assert.equal(pickCatalogCategory('Sundry', 'Cosmetics'), 'Sundry');
   assert.equal(pickCatalogCategory('Cosmetics', 'Unclassified'), '');
 });

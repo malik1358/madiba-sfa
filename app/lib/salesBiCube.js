@@ -3,10 +3,15 @@ import {
   normalizeCategoryName,
   salesDateKey,
 } from "./categoryGrowth.js";
-import { salesMixMeasuresForRow } from "./salesMix.js";
+import { preferItemDisplayName } from "./itemReportIdentity.js";
+import {
+  createInvoiceDateIndex,
+  indexInvoiceDatesFromRows,
+  salesMixMeasuresForRow,
+} from "./salesMix.js";
 
 export const SALES_BI_CUBE_KEY = "sales_bi_cube_v1";
-export const SALES_BI_CUBE_VERSION = 6;
+export const SALES_BI_CUBE_VERSION = 7;
 export const SALES_BI_TABLE = "sales_bi_monthly";
 
 const CUBE_DIMENSION_FIELDS = [
@@ -34,6 +39,7 @@ export function createSalesBiCube() {
   return {
     facts: new Map(),
     sourceRowCount: 0,
+    invoiceDates: createInvoiceDateIndex(),
   };
 }
 
@@ -50,7 +56,11 @@ export function cubeFactKey(fact) {
   ].join("\t");
 }
 
-export function ingestSalesRowsIntoCube(cube, rows = []) {
+export function ingestSalesRowsIntoCube(cube, rows = [], options = {}) {
+  if (!cube.invoiceDates) cube.invoiceDates = createInvoiceDateIndex();
+  const invoiceDates = options.invoiceDates || cube.invoiceDates;
+  indexInvoiceDatesFromRows(invoiceDates, rows);
+
   (rows || []).forEach((row) => {
     const month = cubeMonthFromDate(row.transaction_date);
     if (!month) return;
@@ -59,7 +69,7 @@ export function ingestSalesRowsIntoCube(cube, rows = []) {
     const quantity = Number(row.quantity || 0);
     if (!Number.isFinite(amount) && !Number.isFinite(profit) && !Number.isFinite(quantity)) return;
 
-    const mixMeasures = salesMixMeasuresForRow(row);
+    const mixMeasures = salesMixMeasuresForRow(row, { invoiceDates });
     cube.sourceRowCount += 1;
     const fact = {
       month,
@@ -90,13 +100,19 @@ export function ingestSalesRowsIntoCube(cube, rows = []) {
     existing.local_sales_amount += fact.local_sales_amount;
     existing.import_sales_amount += fact.import_sales_amount;
     existing.unclassified_origin_sales_amount += fact.unclassified_origin_sales_amount;
+    existing.clerical_adjustments_amount = Number(existing.clerical_adjustments_amount || 0)
+      + Number(fact.clerical_adjustments_amount || 0);
+    existing.sales_returns_amount = Number(existing.sales_returns_amount || 0)
+      + Number(fact.sales_returns_amount || 0);
     existing.sales_adjustments_amount += fact.sales_adjustments_amount;
     existing.profit_amount = Number(existing.profit_amount || 0) + fact.profit_amount;
     existing.quantity += fact.quantity;
     existing.line_count += 1;
     if (!existing.salesman_name && fact.salesman_name) existing.salesman_name = fact.salesman_name;
     if (!existing.customer_name && fact.customer_name) existing.customer_name = fact.customer_name;
-    if (!existing.item_name && fact.item_name) existing.item_name = fact.item_name;
+    if (fact.item_name) {
+      existing.item_name = preferItemDisplayName(existing.item_name, fact.item_name, fact.item_code);
+    }
   });
   return cube;
 }
@@ -124,6 +140,8 @@ export function salesBiFactToGrowthRow(fact, measure = "sales") {
     local_sales_amount: Number(fact.local_sales_amount || 0),
     import_sales_amount: Number(fact.import_sales_amount || 0),
     unclassified_origin_sales_amount: Number(fact.unclassified_origin_sales_amount || 0),
+    clerical_adjustments_amount: Number(fact.clerical_adjustments_amount || 0),
+    sales_returns_amount: Number(fact.sales_returns_amount || 0),
     sales_adjustments_amount: Number(fact.sales_adjustments_amount || 0),
     profit_amount: Number(fact.profit_amount || 0),
     quantity: Number(fact.quantity || 0),
@@ -156,6 +174,8 @@ export function serializeSalesBiCube({ facts = [], batchId = "", builtAt = "", s
       lsa: Number(fact.local_sales_amount || 0),
       isa: Number(fact.import_sales_amount || 0),
       usa: Number(fact.unclassified_origin_sales_amount || 0),
+      cla: Number(fact.clerical_adjustments_amount || 0),
+      sra: Number(fact.sales_returns_amount || 0),
       sxa: Number(fact.sales_adjustments_amount || 0),
       p: Number(fact.profit_amount || 0),
       q: Number(fact.quantity || 0),
@@ -192,6 +212,8 @@ export function deserializeSalesBiCube(payload) {
       local_sales_amount: Number(fact.lsa ?? fact.local_sales_amount ?? 0),
       import_sales_amount: Number(fact.isa ?? fact.import_sales_amount ?? 0),
       unclassified_origin_sales_amount: Number(fact.usa ?? fact.unclassified_origin_sales_amount ?? 0),
+      clerical_adjustments_amount: Number(fact.cla ?? fact.clerical_adjustments_amount ?? 0),
+      sales_returns_amount: Number(fact.sra ?? fact.sales_returns_amount ?? 0),
       sales_adjustments_amount: Number(fact.sxa ?? fact.sales_adjustments_amount ?? 0),
       profit_amount: Number(fact.p ?? fact.profit_amount ?? 0),
       quantity: Number(fact.q ?? fact.quantity ?? 0),
@@ -219,6 +241,8 @@ export function salesBiCubeNeedsRebuild(cube, { liveHasProfit = false, lastImpor
     || !Number.isFinite(Number(fact.local_sales_amount))
     || !Number.isFinite(Number(fact.import_sales_amount))
     || !Number.isFinite(Number(fact.unclassified_origin_sales_amount))
+    || !Number.isFinite(Number(fact.clerical_adjustments_amount))
+    || !Number.isFinite(Number(fact.sales_returns_amount))
     || !Number.isFinite(Number(fact.sales_adjustments_amount))
   ))) return true;
   if (liveHasProfit && salesBiCubeMeasureTotal(cube, "profit") === 0) return true;

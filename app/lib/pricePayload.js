@@ -1,4 +1,5 @@
 import { applyPriceCodeAliases } from "./itemCodeAliases.js";
+import { normalizeCategoryName } from "./categoryIdentity.js";
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { normalizeEodStockAvailability } from "./eodStock.js";
 import { resolveStoredOrderSchemes } from "./orderSchemes.js";
@@ -158,7 +159,7 @@ export function pickCatalogCategory(...candidates) {
     if (!text) continue;
     if (["UNCLASSIFIED", "TO_MAP", "TBD", "TODO", "N/A", "NA", "-"].includes(text.toUpperCase())) continue;
     if (isExcludedCategory(text) || isStaleCatalogCategory(text)) continue;
-    return text;
+    return normalizeCategoryName(text);
   }
   return "";
 }

@@ -1,10 +1,21 @@
 import {
+  UNCLASSIFIED_CATEGORY,
+  normalizeCategoryName,
+} from "./categoryIdentity.js";
+import {
+  itemIdentityKey,
+  normalizeReportItemCode,
+  preferItemDisplayName,
+  reportItemGroupKey,
+  reportItemLabel,
+} from "./itemReportIdentity.js";
+import {
   normalizeReportSalesmanCode,
   normalizeReportSalesmanName,
   reportSalesmanLabel,
 } from "./salesmanReportIdentity.js";
 
-export const UNCLASSIFIED_CATEGORY = "Unclassified";
+export { UNCLASSIFIED_CATEGORY, normalizeCategoryName } from "./categoryIdentity.js";
 export const DEFAULT_GROWTH_GROUP_BY = "category";
 
 export const GROWTH_DIMENSIONS = [
@@ -36,11 +47,6 @@ export function growthDimensionLabel(key, language = "en") {
   return dimension.label[language] || dimension.label.en;
 }
 
-export function normalizeCategoryName(value) {
-  const text = String(value ?? "").trim();
-  return text || UNCLASSIFIED_CATEGORY;
-}
-
 function joinNameCode(name, code) {
   const display = String(name || "").trim();
   const id = String(code || "").trim();
@@ -68,7 +74,9 @@ export function dimensionValue(row = {}, key) {
     case "customer":
       return joinNameCode(row.customer_name, row.customer_code);
     case "item":
-      return joinNameCode(row.item_name, row.item_code);
+      return reportItemLabel(row);
+    case "item_code":
+      return normalizeReportItemCode(row.item_code) || UNCLASSIFIED_CATEGORY;
     case "year":
       return dateKey.slice(0, 4) || UNCLASSIFIED_CATEGORY;
     case "month":
@@ -151,8 +159,16 @@ function selectedValueSet(values, key) {
         ? { salesman_name: parts[0], salesman_code: parts.slice(1).join(" · ") }
         : { salesman_name: value }).toLowerCase();
     }
+    if (key === "item" || key === "item_code") return itemIdentityKey(value);
     return value.toLowerCase();
   }));
+}
+
+function matchedDimensionValue(row, key) {
+  if (key === "item" || key === "item_code") {
+    return itemIdentityKey(row.item_code || dimensionValue(row, key));
+  }
+  return String(dimensionValue(row, key)).trim().toLowerCase();
 }
 
 export function rowMatchesGrowthFilters(row = {}, input = {}) {
@@ -173,7 +189,7 @@ export function rowMatchesGrowthFilters(row = {}, input = {}) {
   return GROWTH_DIMENSION_KEYS.every((key) => {
     const selected = selectedValueSet(filters.values?.[key], key);
     if (selected.size === 0) return true;
-    return selected.has(String(dimensionValue(row, key)).trim().toLowerCase());
+    return selected.has(matchedDimensionValue(row, key));
   });
 }
 
@@ -183,6 +199,26 @@ export function createGrowthCatalogs() {
 
 export function addRowToGrowthCatalogs(catalogs, row) {
   GROWTH_DIMENSION_KEYS.forEach((key) => {
+    if (key === "item") {
+      const code = normalizeReportItemCode(row.item_code);
+      const label = reportItemLabel(row);
+      if (!code) {
+        catalogs[key].add(label);
+        return;
+      }
+      const byCode = catalogs.__itemByCode || (catalogs.__itemByCode = new Map());
+      const previous = byCode.get(code) || "";
+      const preferredName = preferItemDisplayName(
+        previous.includes(" · ") ? previous.split(/\s*·\s*/).slice(0, -1).join(" · ") : previous,
+        row.item_name,
+        code,
+      );
+      const preferredLabel = joinNameCode(preferredName, code);
+      byCode.set(code, preferredLabel);
+      catalogs[key].add(preferredLabel);
+      if (previous && previous !== preferredLabel) catalogs[key].delete(previous);
+      return;
+    }
     catalogs[key].add(dimensionValue(row, key));
   });
   return catalogs;
@@ -421,18 +457,36 @@ function addAmount(map, key, amount) {
   map.set(key, Number(map.get(key) || 0) + amount);
 }
 
-function ensureGroup(acc, label, dateKey) {
-  let entry = acc.byGroup.get(label);
-  if (entry) return entry;
+function ensureGroup(acc, key, dateKey, { label = key, itemCode = "", itemName = "" } = {}) {
+  let entry = acc.byGroup.get(key);
+  if (entry) {
+    if (itemCode) {
+      entry.itemName = preferItemDisplayName(entry.itemName, itemName, itemCode);
+      entry.label = joinNameCode(entry.itemName, itemCode);
+      entry.category = entry.label;
+    }
+    return entry;
+  }
   entry = {
     label,
     category: label,
+    itemCode: itemCode || "",
+    itemName: itemName || "",
     byMonth: new Map(),
     firstDate: dateKey,
     lastDate: dateKey,
   };
-  acc.byGroup.set(label, entry);
+  acc.byGroup.set(key, entry);
   return entry;
+}
+
+function groupKeyForDimension(row, groupBy) {
+  if (groupBy === "item") return reportItemGroupKey(row);
+  return dimensionValue(row, groupBy);
+}
+
+function groupLabelForDimension(row, groupBy) {
+  return dimensionValue(row, groupBy);
 }
 
 export function growthRowAmount(row = {}, measure = "sales") {
@@ -470,8 +524,15 @@ export function ingestCategoryGrowthRows(acc, rows = [], options = {}) {
     }
     if (!matches) return;
 
-    const label = dimensionValue(row, groupBy);
-    const entry = ensureGroup(acc, label, dateKey);
+    const groupKey = groupKeyForDimension(row, groupBy);
+    const label = groupLabelForDimension(row, groupBy);
+    const entry = ensureGroup(acc, groupKey, dateKey, groupBy === "item"
+      ? {
+        label,
+        itemCode: normalizeReportItemCode(row.item_code),
+        itemName: String(row.item_name || "").trim(),
+      }
+      : { label });
     addAmount(entry.byMonth, month, amount);
     if (dateKey < entry.firstDate) entry.firstDate = dateKey;
     if (dateKey > entry.lastDate) entry.lastDate = dateKey;
@@ -604,6 +665,111 @@ export function monthChangeTone(current, previous, hasPrevious = true) {
   if (now > prior) return "up";
   if (now < prior) return "down";
   return "";
+}
+
+/**
+ * Baseline for a yearly cell delta. The open year is YTD, so compare it to prior YTD
+ * through the same month — not the full prior calendar year shown in yearValues.
+ */
+export function yearCellComparisonPrevious(row = {}, year = "", currentYear = "", years = [], index = 0) {
+  if (String(year) === String(currentYear) && row.priorYtd != null && row.priorYtd !== "") {
+    return Number(row.priorYtd || 0);
+  }
+  const previousYear = index > 0 ? years[index - 1] : "";
+  return previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
+}
+
+export function formatAvgPayingDays(value) {
+  if (value == null || value === "") return "—";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return number.toLocaleString("en-SA", { maximumFractionDigits: 0 });
+}
+
+/** Attach sales-weighted avg paying days onto growth groups from a customer→days map. */
+export function attachAvgPayingDaysToGrowthReport(report, sourceRows = [], customerDaysMap = null) {
+  if (!report || !customerDaysMap || !(customerDaysMap instanceof Map) || !customerDaysMap.size) {
+    return report;
+  }
+  const groupBy = report.filters?.groupBy || report.meta?.groupBy || "category";
+  const weightByGroup = new Map();
+
+  (sourceRows || []).forEach((row) => {
+    const code = String(row.customer_code || "").trim().toUpperCase();
+    if (!code) return;
+    const days = customerDaysMap.get(code);
+    if (days == null || !Number.isFinite(Number(days))) return;
+    const sales = Math.abs(Number(row.sales_amount || 0));
+    if (!(sales > 0.009)) return;
+    const key = groupKeyForDimension(row, groupBy);
+    if (!key) return;
+    const entry = weightByGroup.get(key) || { weighted: 0, weight: 0 };
+    entry.weighted += Number(days) * sales;
+    entry.weight += sales;
+    weightByGroup.set(key, entry);
+  });
+
+  function rowLookupKey(row = {}) {
+    if (groupBy === "item") {
+      return reportItemGroupKey({
+        item_code: row.itemCode || row.item_code,
+        item_name: row.itemName || row.item_name || row.label,
+      });
+    }
+    if (groupBy === "customer" || groupBy === "customer_code") {
+      return dimensionValue({
+        customer_code: row.customerCode || row.customer_code,
+        customer_name: row.customerName || row.customer_name || row.label,
+      }, groupBy === "customer_code" ? "customer_code" : "customer");
+    }
+    if (groupBy === "salesman" || groupBy === "salesman_code" || groupBy === "salesman_name") {
+      return dimensionValue({
+        salesman_code: row.salesmanCode || row.salesman_code,
+        salesman_name: row.salesmanName || row.salesman_name || row.label,
+      }, groupBy);
+    }
+    return dimensionValue({ category: row.category || row.label }, "category");
+  }
+
+  function withDays(rows = []) {
+    return (rows || []).map((row) => {
+      const entry = weightByGroup.get(rowLookupKey(row))
+        || weightByGroup.get(String(row.label || row.category || "").trim())
+        || null;
+      const avgDaysToPay = entry && entry.weight > 0
+        ? Math.round(entry.weighted / entry.weight)
+        : (row.avgDaysToPay ?? null);
+      return { ...row, avgDaysToPay };
+    });
+  }
+
+  const groups = withDays(report.groups || report.categories || []);
+  const next = {
+    ...report,
+    groups,
+    categories: groups,
+  };
+  if (report.measures?.sales) {
+    next.measures = {
+      ...report.measures,
+      sales: {
+        ...report.measures.sales,
+        groups: withDays(report.measures.sales.groups || report.measures.sales.categories || []),
+        categories: withDays(report.measures.sales.categories || report.measures.sales.groups || []),
+      },
+    };
+  }
+  if (report.measures?.profit) {
+    next.measures = {
+      ...next.measures,
+      profit: {
+        ...report.measures.profit,
+        groups: withDays(report.measures.profit.groups || report.measures.profit.categories || []),
+        categories: withDays(report.measures.profit.categories || report.measures.profit.groups || []),
+      },
+    };
+  }
+  return next;
 }
 
 export function formatContributionPercent(value) {

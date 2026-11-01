@@ -27,16 +27,91 @@ import {
   normalizeCategoryName,
   quarterGridTotals,
   yearGridTotals,
+  yearCellComparisonPrevious,
+  attachAvgPayingDaysToGrowthReport,
   quarterKeyFromMonthKey,
   quarterLabel,
   selectRecentGrowthMonths,
   selectRecentGrowthQuarters,
   silentMonthCount,
 } from "../app/lib/categoryGrowth.js";
+import {
+  avgPayingDaysFromOutstandingCustomer,
+  outstandingBucketMidpointDays,
+} from "../app/lib/biAvgPayingDays.js";
 
 test("blank categories become Unclassified", () => {
   assert.equal(normalizeCategoryName(""), UNCLASSIFIED_CATEGORY);
   assert.equal(normalizeCategoryName("  Fridge  "), "Fridge");
+});
+
+test("Body Care folds into Personal Care", () => {
+  assert.equal(normalizeCategoryName("Body Care"), "Personal Care");
+  assert.equal(normalizeCategoryName("  body   care  "), "Personal Care");
+  assert.equal(normalizeCategoryName("Personal Care"), "Personal Care");
+});
+
+test("current year cell compares to prior YTD not full prior year", () => {
+  const row = {
+    yearValues: { 2025: 1000, 2026: 400 },
+    priorYtd: 500,
+  };
+  assert.equal(yearCellComparisonPrevious(row, "2026", "2026", ["2025", "2026"], 1), 500);
+  assert.equal(yearCellComparisonPrevious(row, "2025", "2026", ["2025", "2026"], 0), 0);
+  assert.equal(growthPercent(400, 500), -20);
+  assert.notEqual(growthPercent(400, 1000), -20);
+});
+
+test("avg paying days attach weights open-AR days by category sales", () => {
+  assert.equal(outstandingBucketMidpointDays("0-30"), 15);
+  assert.equal(outstandingBucketMidpointDays("31-60"), 46);
+  assert.equal(avgPayingDaysFromOutstandingCustomer({
+    buckets: { "0-30": 100, "31-60": 100 },
+  }), 31);
+
+  const report = {
+    filters: { groupBy: "category" },
+    groups: [
+      { label: "Personal Care", category: "Personal Care", lifetime: 150 },
+      { label: "Office", category: "Office", lifetime: 50 },
+    ],
+  };
+  const enriched = attachAvgPayingDaysToGrowthReport(
+    report,
+    [
+      { category: "Personal Care", customer_code: "C1", sales_amount: 100 },
+      { category: "Personal Care", customer_code: "C2", sales_amount: 50 },
+      { category: "Office", customer_code: "C1", sales_amount: 50 },
+    ],
+    new Map([["C1", 40], ["C2", 20]]),
+  );
+  assert.equal(enriched.groups[0].avgDaysToPay, 33);
+  assert.equal(enriched.groups[1].avgDaysToPay, 40);
+});
+
+test("category growth merges Body Care into Personal Care", () => {
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, [
+    {
+      transaction_date: "2026-01-15",
+      sales_amount: 100,
+      category: "Body Care",
+      item_code: "A1",
+      item_name: "Lotion",
+    },
+    {
+      transaction_date: "2026-01-20",
+      sales_amount: 50,
+      category: "Personal Care",
+      item_code: "A2",
+      item_name: "Soap",
+    },
+  ]);
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-01-31" });
+  const personal = report.categories.find((row) => row.category === "Personal Care");
+  assert.equal(Boolean(personal), true);
+  assert.equal(personal.lifetime, 150);
+  assert.equal(report.categories.some((row) => row.category === "Body Care"), false);
 });
 
 test("growth and CAGR use a prior baseline", () => {
@@ -158,6 +233,50 @@ test("filters and group-by slice the same sales into different rows", () => {
   ingestCategoryGrowthRows(dateAcc, rows, { filters: { dateFrom: "2026-01-01" } });
   const dateReport = buildCategoryGrowthReport(dateAcc, { asOfDate: "2026-09-11" });
   assert.equal(dateReport.lifetimeTotal, 80);
+});
+
+test("item growth merges same item codes even when names differ", () => {
+  const rows = [
+    {
+      transaction_date: "2026-01-10",
+      item_code: "A004555",
+      item_name: "A004555_PHOTOCOPY PAPER OMNIA 80GSM 500SHEE/PCK , 5PCK/BOX",
+      sales_amount: 1283,
+    },
+    {
+      transaction_date: "2026-02-10",
+      item_code: "a004555",
+      item_name: "A004555 OMNIA PAPER DO NOT USEE",
+      sales_amount: 543,
+    },
+    {
+      transaction_date: "2026-02-10",
+      item_code: "A000057",
+      item_name: "PAPERLINE A4 80 GSM DO NOT USEE",
+      sales_amount: 495,
+    },
+  ];
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, rows, { groupBy: "item" });
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-09-11" });
+
+  assert.equal(report.groups.length, 2);
+  const omnia = report.groups.find((row) => String(row.label).includes("A004555"));
+  assert.ok(omnia);
+  assert.equal(omnia.lifetime, 1826);
+  assert.match(omnia.label, /PHOTOCOPY PAPER OMNIA/i);
+  assert.equal(/do\s*not\s*use+/i.test(omnia.label), false);
+
+  const filtered = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(filtered, rows, {
+    filters: {
+      groupBy: "item",
+      values: { item: ["A004555 OMNIA PAPER DO NOT USEE · A004555"] },
+    },
+  });
+  const filteredReport = buildCategoryGrowthReport(filtered, { asOfDate: "2026-09-11" });
+  assert.equal(filteredReport.groups.length, 1);
+  assert.equal(filteredReport.groups[0].lifetime, 1826);
 });
 
 test("salesman report dimensions merge Thamer's imported identity variants", () => {

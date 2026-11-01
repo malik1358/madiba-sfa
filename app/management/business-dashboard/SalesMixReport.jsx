@@ -16,8 +16,8 @@ import CategoryGrowthFilters from "./CategoryGrowthFilters";
 const TEXT = {
   title: { en: "Cash, credit, local and import sales", ar: "مبيعات النقدي والآجل والمحلي والمستورد" },
   hint: {
-    en: "Cash/credit and origin amounts are gross invoice sales. Credit notes and returns are shown separately and deducted to calculate net sales. Origin percentages include Other / unspecified.",
-    ar: "مبالغ النقدي والآجل والمصدر هي إجمالي مبيعات الفواتير. تظهر الإشعارات الدائنة والمرتجعات منفصلة وتُخصم لحساب صافي المبيعات. تشمل نسب المصدر أخرى / غير محدد.",
+    en: "Cash/credit and origin amounts are gross invoice sales. Credit notes are split into clerical mistakes (same day or within 7 days of the named invoice) and real sales returns (after 7 days, or with no matched invoice), then deducted for net sales. Origin percentages include Other / unspecified.",
+    ar: "مبالغ النقدي والآجل والمصدر هي إجمالي مبيعات الفواتير. تُقسَّم الإشعارات الدائنة إلى أخطاء مكتبية (نفس اليوم أو خلال 7 أيام من الفاتورة المسماة) ومرتجعات مبيعات حقيقية (بعد 7 أيام أو بلا فاتورة مطابقة)، ثم تُخصم لحساب صافي المبيعات. تشمل نسب المصدر أخرى / غير محدد.",
   },
   loading: { en: "Loading sales mix...", ar: "جاري تحميل مزيج المبيعات..." },
   empty: { en: "No sales match this period and filters.", ar: "لا توجد مبيعات تطابق هذه الفترة والتصفية." },
@@ -30,6 +30,8 @@ const TEXT = {
   cash: { en: "Cash sales", ar: "مبيعات نقدية" },
   credit: { en: "Credit sales", ar: "مبيعات آجلة" },
   adjustmentsDeducted: { en: "Credit notes / returns (deducted)", ar: "إشعارات دائنة / مرتجعات (مخصومة)" },
+  clericalDeducted: { en: "Clerical credit notes ≤7 days (deducted)", ar: "إشعارات دائنة مكتبية ≤7 أيام (مخصومة)" },
+  returnsDeducted: { en: "Real sales returns >7 days (deducted)", ar: "مرتجعات مبيعات حقيقية >7 أيام (مخصومة)" },
   local: { en: "Local sales", ar: "مبيعات محلية" },
   import: { en: "Import sales", ar: "مبيعات مستوردة" },
   other: { en: "Other / unspecified origin", ar: "مصدر آخر / غير محدد" },
@@ -38,13 +40,13 @@ const TEXT = {
   monthlyReconciliation: { en: "Monthly gross-to-net sales", ar: "تسوية إجمالي وصافي المبيعات شهرياً" },
   quarterlyReconciliation: { en: "Quarterly gross-to-net sales", ar: "تسوية إجمالي وصافي المبيعات ربع سنوياً" },
   grossSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
-  adjustments: { en: "Credit notes / returns", ar: "إشعارات دائنة / مرتجعات" },
+  clericalAdjustments: { en: "Clerical mistakes (CN ≤7 days)", ar: "أخطاء مكتبية (إشعار ≤7 أيام)" },
+  salesReturns: { en: "Real sales returns (CN >7 days)", ar: "مرتجعات مبيعات حقيقية (إشعار >7 أيام)" },
+  adjustments: { en: "Credit notes / returns (total)", ar: "إشعارات دائنة / مرتجعات (الإجمالي)" },
   netSales: { en: "Net sales", ar: "صافي المبيعات" },
   monthlyRatio: { en: "Monthly share movement", ar: "حركة الحصة الشهرية" },
   quarterlyRatio: { en: "Quarterly share movement", ar: "حركة الحصة ربع السنوية" },
   grossInvoiceSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
-  netSales: { en: "Net sales", ar: "صافي المبيعات" },
-  adjustments: { en: "Credit notes / returns", ar: "إشعارات دائنة / مرتجعات" },
   movementHint: { en: "Shares are calculated from summed amounts in each period. Change is shown in percentage points (pp).", ar: "تُحسب الحصص من مجموع مبالغ كل فترة. ويظهر التغير بالنقاط المئوية (pp)." },
   shareOfSales: { en: "of sales", ar: "من المبيعات" },
   movement: { en: "Share movement", ar: "حركة الحصة" },
@@ -60,6 +62,10 @@ const ORIGIN_SERIES = [
   ["local_sales_amount", "local", "#65a30d"],
   ["import_sales_amount", "import", "#ea580c"],
   ["unclassified_origin_sales_amount", "other", "#64748b"],
+];
+const ADJUSTMENT_ENTRIES = [
+  ["clerical_adjustments_amount", "clericalDeducted"],
+  ["sales_returns_amount", "returnsDeducted"],
 ];
 
 function monthLabel(month, currentMonth, language) {
@@ -84,7 +90,10 @@ function MixSection({ language, title, entries, adjustmentEntry, valuesByPeriod,
     color,
     values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] || 0)),
   }));
-  const tableEntries = adjustmentEntry ? [...entries, adjustmentEntry] : entries;
+  const adjustmentEntries = Array.isArray(adjustmentEntry)
+    ? adjustmentEntry
+    : (adjustmentEntry ? [adjustmentEntry] : []);
+  const tableEntries = adjustmentEntries.length ? [...entries, ...adjustmentEntries] : entries;
   const rows = tableEntries.map(([field, label]) => ({
     label: t(label),
     monthValues: Object.fromEntries(
@@ -192,14 +201,25 @@ function SalesReconciliationSection({ language, title, periodHeading, periods, v
   const t = translate(language, TEXT);
   const fields = [
     ["gross_invoice_sales", t("grossSales")],
+    ["clerical_adjustments_amount", t("clericalAdjustments")],
+    ["sales_returns_amount", t("salesReturns")],
     ["sales_adjustments_amount", t("adjustments")],
     ["net_sales", t("netSales")],
   ];
   const valuesForPeriod = (period) => {
     const row = valuesByPeriod?.[period] || {};
     const gross = Number(row.cash_sales_amount || 0) + Number(row.credit_sales_amount || 0);
-    const adjustments = Number(row.sales_adjustments_amount || 0);
-    return { gross_invoice_sales: gross, sales_adjustments_amount: adjustments, net_sales: gross + adjustments };
+    const clerical = Number(row.clerical_adjustments_amount || 0);
+    const returns = Number(row.sales_returns_amount || 0);
+    const splitTotal = clerical + returns;
+    const adjustments = splitTotal || Number(row.sales_adjustments_amount || 0);
+    return {
+      gross_invoice_sales: gross,
+      clerical_adjustments_amount: clerical,
+      sales_returns_amount: splitTotal ? returns : Number(row.sales_adjustments_amount || 0),
+      sales_adjustments_amount: adjustments,
+      net_sales: gross + adjustments,
+    };
   };
 
   return (
@@ -238,6 +258,8 @@ function MixCards({ language, mix }) {
     ["local_sales_amount", t("local"), originTotal, "moduleBusinessKpi--green"],
     ["import_sales_amount", t("import"), originTotal, "moduleBusinessKpi--orange"],
     ["unclassified_origin_sales_amount", t("other"), originTotal, ""],
+    ["clerical_adjustments_amount", t("clericalAdjustments"), null, "moduleBusinessKpi--orange"],
+    ["sales_returns_amount", t("salesReturns"), null, "moduleBusinessKpi--red"],
     ["sales_adjustments_amount", t("adjustments"), null, "moduleBusinessKpi--red"],
     ["net_sales", t("netSales"), null, "moduleBusinessKpi--green"],
   ];
@@ -342,7 +364,7 @@ export default function SalesMixReport({
         language={language}
         title={t("cashCredit")}
         entries={PAYMENT_SERIES}
-        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
+        adjustmentEntry={ADJUSTMENT_ENTRIES}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -355,7 +377,7 @@ export default function SalesMixReport({
         language={language}
         title={t("localImport")}
         entries={ORIGIN_SERIES}
-        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
+        adjustmentEntry={ADJUSTMENT_ENTRIES}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -368,7 +390,7 @@ export default function SalesMixReport({
         language={language}
         title={`${t("quarterly")} · ${t("cashCredit")}`}
         entries={PAYMENT_SERIES}
-        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
+        adjustmentEntry={ADJUSTMENT_ENTRIES}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}
@@ -381,7 +403,7 @@ export default function SalesMixReport({
         language={language}
         title={`${t("quarterly")} · ${t("localImport")}`}
         entries={ORIGIN_SERIES}
-        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
+        adjustmentEntry={ADJUSTMENT_ENTRIES}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}

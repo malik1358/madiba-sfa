@@ -229,6 +229,11 @@ test("business dashboard is available to management report viewers and salesmen"
   assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("mis"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("mis"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("mis"), true);
+  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("mis"), false);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("mis"), false);
 });
 
 test("outstanding without GPS is available to management report viewers", () => {

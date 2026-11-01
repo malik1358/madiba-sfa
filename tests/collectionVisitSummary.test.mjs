@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCollectionVisitSummary,
   buildStoredCollectionVisitSummary,
+  isArabicLocalizedCollectionSummary,
   isPriorityCollectionVisit,
   patchCollectionVisitSummaryEnglishRemark,
   patchCollectionVisitSummaryVisitDistance,
@@ -316,6 +317,84 @@ Last visit outcome: Funds received.`;
   assert.doesNotMatch(patched, /27\.69 km/);
   assert.match(patched, /Est\. waiting: 39 min\n\nLast visit date: 10\/09\/2026\./);
   assert.match(patched, /Last visit outcome: Funds received\./);
+});
+
+test("isArabicLocalizedCollectionSummary detects Arabic WhatsApp labels", () => {
+  assert.equal(
+    isArabicLocalizedCollectionSummary(`العميل: 1077 Asrar\nملاحظة بالعربية: تم استلام 1000.`),
+    true,
+  );
+  assert.equal(
+    isArabicLocalizedCollectionSummary(`Customer: 1077 Asrar\nRemark (English): 1000 received.`),
+    false,
+  );
+});
+
+test("patchCollectionVisitSummaryVisitDistance replaces Arabic distance block instead of duplicating", () => {
+  const stored = `العميل: 1077 Asrar Al Madinah Company for Accessories
+أولوية الزيارة: 11.
+الكود: 1077
+النتيجة: تم استلام مبلغ
+ملاحظة بالعربية: تم استلام 1000.
+الملاحظة بالانجليزية: 1000 received.
+المديونية:
+0-30: 0
+
+GPS: https://www.google.com/maps/search/?api=1&query=24.626017%2C46.66654
+المسافة من العميل: 0.00 km
+المسافة من السابق: 0.00 km
+وقت الانتظار التقديري: -`;
+
+  const patched = patchCollectionVisitSummaryVisitDistance(stored, {
+    latitude: 24.626017,
+    longitude: 46.66654,
+    distanceFromCustomerKm: 0,
+    distanceFromPreviousKm: 2.4,
+    waitingMinutes: null,
+  });
+
+  assert.match(patched, /Distance from customer: 0\.00 km/);
+  assert.match(patched, /Distance from previous: 2\.40 km/);
+  assert.match(patched, /Est\. waiting: -/);
+  assert.doesNotMatch(patched, /المسافة من العميل/);
+  assert.equal((patched.match(/Distance from customer:/g) || []).length, 1);
+  assert.equal((patched.match(/GPS:/g) || []).length, 1);
+});
+
+test("buildCollectionVisitSummary always uses English remark labels", () => {
+  const summary = buildCollectionVisitSummary(
+    {
+      customer_name: "1077 Asrar Al Madinah Company for Accessories",
+      customer_code: "1077",
+      salesman_name: "ST106  Mr George",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 3336.15,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "FUNDS_RECEIVED",
+      amountReceived: "1000",
+      receiptMode: "CASH",
+      nextVisitAt: "2026-11-01",
+      remarkArabic: "تم استلام 1000",
+      remarkEnglish: "1000 received",
+    },
+    {
+      queuePriority: 11,
+      probabilityLabel: "High",
+      visitNumberForDay: 1,
+      visitAt: "2026-11-01T05:56:00.000Z",
+    },
+  );
+
+  assert.match(summary, /^Customer: 1077 Asrar/m);
+  assert.match(summary, /^Remark \(Arabic\): تم استلام 1000\./m);
+  assert.match(summary, /^Remark \(English\): 1000 received\./m);
+  assert.doesNotMatch(summary, /ملاحظة بالعربية/);
+  assert.doesNotMatch(summary, /الملاحظة بالانجليزية/);
+  assert.match(summary, /^Outcome: Funds received$/m);
 });
 
 test("patchCollectionVisitSummaryEnglishRemark replaces stale English remarks", () => {

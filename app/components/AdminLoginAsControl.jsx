@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
-import { ADMIN_LOGIN_AS_SESSION_KEY, canStartAdminLoginAs } from "../lib/adminLoginAs";
+import {
+  ADMIN_LOGIN_AS_SESSION_KEY,
+  buildAdminLoginAsReturnContext,
+  canStartAdminLoginAs,
+  isActiveAdminLoginAsContext,
+} from "../lib/adminLoginAs";
 import { useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 
@@ -42,6 +47,15 @@ function readSavedSession() {
   }
 }
 
+function syncReturnContext(currentUserId) {
+  const saved = readSavedSession();
+  if (!saved) return null;
+  if (isActiveAdminLoginAsContext(saved, currentUserId)) return saved;
+  // Live session is not the target (admin JWT again, or another account) — drop the banner.
+  window.sessionStorage.removeItem(ADMIN_LOGIN_AS_SESSION_KEY);
+  return null;
+}
+
 async function loadTargets(accessToken) {
   const response = await fetch("/api/admin/login-as", {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -75,7 +89,7 @@ export default function AdminLoginAsControl() {
     const syncSession = (nextSession) => {
       if (!mounted) return;
       setSession(nextSession || null);
-      setReturnContext(readSavedSession());
+      setReturnContext(syncReturnContext(nextSession?.user?.id));
     };
 
     supabase.auth.getSession().then(({ data }) => syncSession(data?.session));
@@ -137,21 +151,32 @@ export default function AdminLoginAsControl() {
       if (!response.ok || !payload.tokenHash) throw new Error(payload.error || "Could not start session");
 
       const target = targets.find((item) => item.id === targetId) || payload.target;
-      window.sessionStorage.setItem(ADMIN_LOGIN_AS_SESSION_KEY, JSON.stringify({
-        session: {
-          access_token: adminSession.access_token,
-          refresh_token: adminSession.refresh_token,
-        },
+      const returnContext = buildAdminLoginAsReturnContext({
+        adminSession,
+        targetId,
         targetName: target?.salesmanName || target?.name || "User",
-      }));
+      });
+      if (!returnContext) throw new Error("Admin session unavailable");
+      window.sessionStorage.setItem(ADMIN_LOGIN_AS_SESSION_KEY, JSON.stringify(returnContext));
 
-      const { error: verifyError } = await supabase.auth.verifyOtp({
+      const { data: verified, error: verifyError } = await supabase.auth.verifyOtp({
         token_hash: payload.tokenHash,
         type: payload.verificationType || "magiclink",
       });
       if (verifyError) {
         window.sessionStorage.removeItem(ADMIN_LOGIN_AS_SESSION_KEY);
         throw verifyError;
+      }
+
+      const switchedUserId = verified?.session?.user?.id
+        || (await supabase.auth.getSession()).data?.session?.user?.id;
+      if (!isActiveAdminLoginAsContext(returnContext, switchedUserId)) {
+        window.sessionStorage.removeItem(ADMIN_LOGIN_AS_SESSION_KEY);
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
+        throw new Error("Target session did not activate");
       }
 
       window.location.assign("/");

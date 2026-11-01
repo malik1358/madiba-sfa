@@ -50,6 +50,12 @@ export const INFORMATION_ONLY_KPI_KEYS = new Set([
   "avgSkusPerRepeatCustomer",
 ]);
 
+/** SKU-expansion KPIs show actual-vs-prior-month improvement % in the Ach. column. */
+export const SKU_EXPANSION_KPI_KEYS = new Set([
+  "newSkusToRepeatCustomers",
+  "avgSkusPerRepeatCustomer",
+]);
+
 const SALES_PACE_KPI_KEYS = new Set([
   "officeSupplies",
   "localItemSales",

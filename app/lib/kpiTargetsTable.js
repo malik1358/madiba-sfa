@@ -1,5 +1,6 @@
 import {
   PERFORMANCE_DISPLAY_KPI_KEYS,
+  SKU_EXPANSION_KPI_KEYS,
   achievementPercent,
   averageSkusPerRepeatCustomer,
   buildPerformanceKpi,
@@ -298,6 +299,78 @@ export function compareKpiEstimateToPriorMonth(estimate, priorActual) {
     percent,
     direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
   };
+}
+
+/** Current actual vs last month's actual (same shape as estimate comparison). */
+export function compareKpiActualToPriorMonth(actual, priorActual) {
+  return compareKpiEstimateToPriorMonth(actual, priorActual);
+}
+
+/** Prior-month actual for one KPI key from a stored actuals row. */
+export function priorMonthKpiActualFromRow(actuals, key) {
+  if (!actuals || typeof actuals !== "object" || !key) return null;
+  if (key === "totalSales") return priorMonthTotalSalesFromActuals(actuals);
+  if (key === "totalCashCollected") {
+    return (Number(actuals.collection || 0) || 0) + (Number(actuals.cashCollection || 0) || 0);
+  }
+  if (key === "avgSkusPerRepeatCustomer") {
+    if (
+      !Object.prototype.hasOwnProperty.call(actuals, "repeatCustomerSkuCount")
+      && !Object.prototype.hasOwnProperty.call(actuals, "avgSkusPerRepeatCustomer")
+    ) {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(actuals, "repeatCustomerSkuCount")) {
+      return averageSkusPerRepeatCustomer(
+        actuals.repeatCustomerSkuCount,
+        actuals.repeatCustomers,
+      );
+    }
+    const avg = Number(actuals.avgSkusPerRepeatCustomer);
+    return Number.isFinite(avg) ? avg : null;
+  }
+  if (key === "newSkusToRepeatCustomers") {
+    if (!Object.prototype.hasOwnProperty.call(actuals, "newSkusToRepeatCustomers")) return null;
+  }
+  const value = Number(actuals[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function priorActualsHaveSkuField(actuals, key) {
+  if (!actuals || typeof actuals !== "object") return false;
+  if (key === "newSkusToRepeatCustomers") {
+    return Object.prototype.hasOwnProperty.call(actuals, "newSkusToRepeatCustomers");
+  }
+  if (key === "avgSkusPerRepeatCustomer") {
+    return Object.prototype.hasOwnProperty.call(actuals, "repeatCustomerSkuCount")
+      || Object.prototype.hasOwnProperty.call(actuals, "avgSkusPerRepeatCustomer");
+  }
+  return Object.prototype.hasOwnProperty.call(actuals, key);
+}
+
+/**
+ * Prior-month actual for a KPI Targets row (person or team).
+ * Team rows recompute avg SKUs from member SKU placements.
+ * Returns null when the prior cache predates SKU-expansion fields.
+ */
+export function priorMonthKpiActualForRow(row, key, priorActualsByCode = {}, allRows = []) {
+  if (row?.isTeam) {
+    const members = teamMemberRows(allRows, row.bossCode || bossCodeFromTeamTarget(row.salesmanCode));
+    const hasSkuHistory = members.some((member) => priorActualsHaveSkuField(
+      priorMonthActualsForCode(priorActualsByCode, member.salesmanCode),
+      key,
+    ));
+    if (SKU_EXPANSION_KPI_KEYS.has(key) && !hasSkuHistory) return null;
+    const priorTotals = sumFilteredPriorMonthActuals(
+      members,
+      priorActualsByCode,
+      ["avgSkusPerRepeatCustomer", "repeatCustomers", "newSkusToRepeatCustomers"],
+    );
+    if (!priorTotals) return null;
+    return priorTotals[key] ?? null;
+  }
+  const actuals = priorMonthActualsForCode(priorActualsByCode, row?.salesmanCode);
+  return priorMonthKpiActualFromRow(actuals, key);
 }
 
 /** Resolve prior-month actuals for a salesman code, including report aliases (Thamer). */

@@ -9,7 +9,10 @@ import {
   isTeamTargetSalesmanCode,
   mergeKpiTargetProfiles,
   rowMatchesKpiFilters,
+  compareKpiActualToPriorMonth,
   compareKpiEstimateToPriorMonth,
+  priorMonthKpiActualForRow,
+  priorMonthKpiActualFromRow,
   sumFilteredKpiColumns,
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
@@ -238,6 +241,29 @@ test("pace estimate vs last month shows value and percent direction", () => {
   assert.equal(compareKpiEstimateToPriorMonth(100, 100).direction, "flat");
   assert.equal(compareKpiEstimateToPriorMonth(50, 0).percent, null);
   assert.equal(compareKpiEstimateToPriorMonth(null, 100), null);
+  assert.equal(compareKpiActualToPriorMonth(9.9, 6).percent, 65);
+  assert.equal(compareKpiActualToPriorMonth(1.9, 2.5).direction, "down");
+  assert.equal(priorMonthKpiActualFromRow({
+    newSkusToRepeatCustomers: 4,
+    repeatCustomers: 2,
+    repeatCustomerSkuCount: 10,
+  }, "avgSkusPerRepeatCustomer"), 5);
+  assert.equal(priorMonthKpiActualFromRow({
+    repeatCustomers: 2,
+  }, "avgSkusPerRepeatCustomer"), null);
+  assert.equal(priorMonthKpiActualFromRow({
+    newSkusToRepeatCustomers: 4,
+  }, "newSkusToRepeatCustomers"), 4);
+  assert.equal(priorMonthKpiActualForRow(
+    { salesmanCode: "OSAMA", isTeam: false },
+    "avgSkusPerRepeatCustomer",
+    { OSAMA: { repeatCustomers: 3, repeatCustomerSkuCount: 12, newSkusToRepeatCustomers: 2 } },
+  ), 4);
+  assert.equal(priorMonthKpiActualForRow(
+    { salesmanCode: "OSAMA", isTeam: false },
+    "avgSkusPerRepeatCustomer",
+    { OSAMA: { repeatCustomers: 3 } },
+  ), null);
 
   const rows = [{
     ...ahmed,

@@ -134,9 +134,25 @@ export async function runItemsSoldAtLossEmailCycle(admin, {
 
   try {
     const report = await loadReport(admin, { dateFrom: reportDate, dateTo: reportDate });
+    const rows = Array.isArray(report?.rows) ? report.rows : [];
+    if (!rows.length) {
+      if (claim) {
+        await finishSend(admin, claim, { lineCount: 0, profitAmount: 0 });
+      }
+      return {
+        date: reportDate,
+        skipped: true,
+        reason: "no_loss_lines",
+        sentCount: 0,
+        lineCount: 0,
+        profitAmount: 0,
+        trigger,
+      };
+    }
+
     const message = buildItemsSoldAtLossEmail({
       date: reportDate,
-      rows: report.rows || [],
+      rows,
       env,
     });
     const subject = isTestSend || forceSend ? `[TEST] ${message.subject}` : message.subject;

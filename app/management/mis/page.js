@@ -86,15 +86,17 @@ export default function MisPage() {
   const { language } = useAppLanguage();
   const t = useCallback((key) => translate(TEXT, key, language), [language]);
   const { access, loading: accessLoading } = useModuleAccess();
-  const { showError } = usePopupMessages();
   const [asOf, setAsOf] = useState(() => getKsaDateString());
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState(null);
+  const [error, setError] = useState("");
+  usePopupMessages({ error });
 
   const canOpen = access?.canAccess?.("mis");
 
   const load = useCallback(async (date) => {
     setLoading(true);
+    setError("");
     try {
       const session = await resolveAuthSession();
       if (!session?.access_token) throw new Error("Please sign in again.");
@@ -107,13 +109,13 @@ export default function MisPage() {
       );
       if (!data?.success) throw new Error(data?.error || "Unable to load MIS");
       setReport(data.report || null);
-    } catch (error) {
+    } catch (err) {
       setReport(null);
-      showError(error?.message || "Unable to load MIS");
+      setError(err?.message || "Unable to load MIS");
     } finally {
       setLoading(false);
     }
-  }, [showError]);
+  }, []);
 
   useEffect(() => {
     if (accessLoading) return;

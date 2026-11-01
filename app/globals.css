@@ -8560,7 +8560,7 @@ tr.paymentSettleStatementLead td {
 .misPage .misShell { max-width: 1180px; }
 .misHeader .moduleEyebrow { color: #c9a227; letter-spacing: 0.08em; font-weight: 700; margin: 0 0 6px; }
 .misToolbar {
-  display: flex; flex-wrap: wrap; gap: 12px; align-items: end;
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
   margin: 0 0 18px; padding: 14px 16px; border-radius: 12px;
   background: #0b2545; color: #fff;
 }

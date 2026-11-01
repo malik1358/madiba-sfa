@@ -420,6 +420,71 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
   );
 });
 
+test("pace estimate keeps untarged credit-note negatives so it matches Actual", () => {
+  // Production Oct 2026: BASHEER −3,289.56 and AHMED NABIL −407.80 totalSales with
+  // no target were dropped from the pace sum, so Estimate showed 2,408,490 over Actual 2,404,792.
+  const rows = [
+    {
+      ...ahmed,
+      officeSupplies: "0",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "0",
+      paceShares: { 31: 1 },
+      kpis: [
+        { key: "officeSupplies", actual: 100_000 },
+        { key: "localItemSales", actual: 0 },
+        { key: "otherSales", actual: 50_000 },
+        { key: "totalSales", actual: 150_000 },
+      ],
+    },
+    {
+      ...ali,
+      officeSupplies: "0",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "0",
+      paceShares: { 31: 1 },
+      kpis: [
+        { key: "officeSupplies", actual: -2_855.51 },
+        { key: "localItemSales", actual: 0 },
+        { key: "otherSales", actual: -434.05 },
+        { key: "totalSales", actual: -3_289.56 },
+      ],
+    },
+    {
+      salesmanCode: "AHMED NABIL",
+      salesmanName: "Ahmed Nabil",
+      bossCode: "DIRECTOR",
+      bossName: "Director",
+      officeSupplies: "0",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "0",
+      paceShares: { 31: 1 },
+      kpis: [
+        { key: "officeSupplies", actual: 0 },
+        { key: "localItemSales", actual: 0 },
+        { key: "otherSales", actual: -407.8 },
+        { key: "totalSales", actual: -407.8 },
+      ],
+    },
+  ];
+  const columns = ["officeSupplies", "otherSales", "totalSales"];
+  const actuals = sumFilteredKpiColumns(rows, columns);
+  const estimates = sumFilteredKpiPaceEstimates(rows, columns, {
+    reportDate: "2026-10-01",
+    todayIso: "2026-11-01",
+    salesAsOfDate: "2026-10-31",
+  });
+  assert.equal(Math.round(actuals.totalSales.actual), Math.round(150_000 - 3_289.56 - 407.8));
+  assert.equal(Math.round(estimates.totalSales.estimate), Math.round(actuals.totalSales.actual));
+  assert.equal(Math.round(estimates.officeSupplies.estimate), Math.round(actuals.officeSupplies.actual));
+  assert.equal(Math.round(estimates.otherSales.estimate), Math.round(actuals.otherSales.actual));
+  assert.equal(monthEndPaceEstimate({ actual: -3_289.56, target: 0, expected: 100 }), -3_289.56);
+  assert.equal(monthEndPaceEstimate({ actual: 0, target: 0, expected: 100 }), null);
+});
+
 test("pace estimate equals actual when sales and receipts reach month-end", () => {
   const incompleteShares = { 29: 0.95, 30: 0.99846 };
   const rows = [

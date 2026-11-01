@@ -383,7 +383,9 @@ export function estimateFromPaceGap(target, paceGap) {
  * One salesman's month-end figure for the Estimate at current pace footer.
  * Scales actual by expected pace share (`actual × 100 / expected%`) so leftover
  * matches historical (or workday) share still ahead, not target × ahead/behind gap.
- * Never returns below the current actual; keeps untarged actuals in the sum.
+ * Never returns below the current actual; keeps untarged actuals in the sum,
+ * including credit-note / return negatives (dropping those made the footer sit
+ * above Total actual after a full-month upload).
  * `target` / `paceGap` are accepted for call-site compatibility but unused.
  */
 export function monthEndPaceEstimate({
@@ -394,10 +396,12 @@ export function monthEndPaceEstimate({
 } = {}) {
   const value = Number(actual || 0) || 0;
   const goal = Number(target || 0) || 0;
-  if (!(value > 0) && !(goal > 0)) return null;
+  if (value === 0 && !(goal > 0)) return null;
+  // Booked negatives (returns / credit notes) stay as-is — do not drop or scale.
+  if (!(value > 0)) return value;
   const estimate = estimateAtCurrentPace(value, expected);
   if (estimate == null) {
-    return value > 0 ? value : null;
+    return value;
   }
   return Math.max(value, Number(estimate) || 0);
 }

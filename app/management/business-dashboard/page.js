@@ -131,6 +131,12 @@ function alertClass(severity) {
   return severity === "red" ? "moduleBusinessAlert--red" : "moduleBusinessAlert--orange";
 }
 
+/** Client fetch limits — safety timers must exceed these or they false-alarm first. */
+const BI_REPORT_FETCH_MS = 90000;
+const BI_REPORT_SAFETY_MS = 95000;
+const BI_RECEIVABLE_FETCH_MS = 280000;
+const BI_RECEIVABLE_SAFETY_MS = 290000;
+
 export default function BusinessDashboardPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -197,6 +203,8 @@ export default function BusinessDashboardPage() {
   const salesMixCacheKeyRef = useRef("");
   const madibaPreparedRef = useRef(null);
   const receivableCacheKeyRef = useRef("");
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
       dateFrom: customPeriodFrom,
@@ -313,7 +321,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setLoading(false);
       setError((current) => current || "Dashboard load timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadDashboard() {
       const supabase = getSupabaseClient();
@@ -335,7 +343,7 @@ export default function BusinessDashboardPage() {
         const { response, payload } = await fetchJsonWithTimeout(
           `/api/business-dashboard?${params.toString()}`,
           { headers: { Authorization: `Bearer ${session.access_token}` } },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -395,8 +403,11 @@ export default function BusinessDashboardPage() {
     const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
       setOverviewLoading(false);
-      setError((current) => current || "BI dashboard timed out. Please refresh.");
-    });
+      // Background warm must not popup while the user is on another BI tab.
+      if (viewRef.current === "overview") {
+        setError((current) => current || "BI dashboard timed out. Please refresh.");
+      }
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadOverview() {
       const supabase = getSupabaseClient();
@@ -420,7 +431,7 @@ export default function BusinessDashboardPage() {
       }
 
       if (view === "overview") setOverviewLoading(true);
-      setError("");
+      if (viewRef.current === "overview") setError("");
 
       try {
         const session = await resolveAuthSession(supabase, 12000);
@@ -437,7 +448,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: overviewFilters }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -445,6 +456,7 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load BI dashboard.");
         }
 
+        setError("");
         applyViewerMeta(payload);
         if (payload.growth) {
           setGrowthReport(payload.growth);
@@ -515,8 +527,10 @@ export default function BusinessDashboardPage() {
         overviewCacheKeyRef.current = overviewKey;
       } catch (err) {
         if (cancelled) return;
-        setError(err.message || "Unable to load BI dashboard.");
         overviewCacheKeyRef.current = "";
+        if (viewRef.current === "overview") {
+          setError(err.message || "Unable to load BI dashboard.");
+        }
       } finally {
         stopSafetyTimer();
         if (!cancelled) setOverviewLoading(false);
@@ -545,7 +559,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setGrowthLoading(false);
       setError((current) => current || "Category growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadGrowth() {
       const supabase = getSupabaseClient();
@@ -607,7 +621,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: requestedFilters }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -672,7 +686,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setCustomerLoading(false);
       setError((current) => current || "Customer growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadCustomers() {
       const supabase = getSupabaseClient();
@@ -707,7 +721,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: customerApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -753,7 +767,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setItemLoading(false);
       setError((current) => current || "Item growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadItems() {
       const supabase = getSupabaseClient();
@@ -788,7 +802,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: itemApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -834,7 +848,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setSalesmanLoading(false);
       setError((current) => current || "Salesman performance timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadSalesmen() {
       const supabase = getSupabaseClient();
@@ -869,7 +883,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: salesmanApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -916,7 +930,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setReceivableLoading(false);
       setError((current) => current || "Receivable days timed out. Please refresh.");
-    });
+    }, BI_RECEIVABLE_SAFETY_MS);
 
     async function loadReceivableDays() {
       const supabase = getSupabaseClient();
@@ -955,7 +969,7 @@ export default function BusinessDashboardPage() {
               filters: receivableApplied,
             }),
           },
-          280000,
+          BI_RECEIVABLE_FETCH_MS,
         );
 
         if (cancelled) return;

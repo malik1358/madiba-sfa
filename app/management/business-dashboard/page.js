@@ -1091,20 +1091,19 @@ export default function BusinessDashboardPage() {
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
-                <label className="moduleBiPeriodField">
-                  <select
-                    className="moduleInput moduleBiPeriodSelect"
-                    value={reportPeriod}
-                    aria-label={t("period")}
-                    onChange={(event) => setReportPeriod(event.target.value)}
-                  >
-                    {BI_REPORT_PERIODS.map((period) => (
-                      <option key={period.key} value={period.key}>
-                        {biReportPeriodLabel(period.key, language)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="moduleBiTabs moduleBiPeriodTabs" role="group" aria-label={t("period")}>
+                  {BI_REPORT_PERIODS.map((period) => (
+                    <button
+                      key={period.key}
+                      type="button"
+                      className={`moduleBiTab${reportPeriod === period.key ? " isActive" : ""}`}
+                      aria-pressed={reportPeriod === period.key}
+                      onClick={() => setReportPeriod(period.key)}
+                    >
+                      {biReportPeriodLabel(period.key, language)}
+                    </button>
+                  ))}
+                </div>
                 {reportPeriod === "custom" ? (
                   <>
                     <label className="moduleBiPeriodField">

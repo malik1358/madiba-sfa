@@ -32,6 +32,13 @@ import { isPreparedOverviewFilters } from "../../lib/biPreparedBundle";
 import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, hasActiveGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
+/** Matches typical /api/business-dashboard* maxDuration (60s). */
+const BI_REPORT_FETCH_MS = 60_000;
+/** UI safety net must outlive session resolve + fetch abort, or it false-alarms. */
+const BI_REPORT_SAFETY_MS = BI_REPORT_FETCH_MS + 20_000;
+const BI_RECEIVABLE_FETCH_MS = 280_000;
+const BI_RECEIVABLE_SAFETY_MS = BI_RECEIVABLE_FETCH_MS + 20_000;
+
 const TEXT = {
   title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   subtitle: {
@@ -313,7 +320,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setLoading(false);
       setError((current) => current || "Dashboard load timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadDashboard() {
       const supabase = getSupabaseClient();
@@ -335,7 +342,7 @@ export default function BusinessDashboardPage() {
         const { response, payload } = await fetchJsonWithTimeout(
           `/api/business-dashboard?${params.toString()}`,
           { headers: { Authorization: `Bearer ${session.access_token}` } },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -396,7 +403,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setOverviewLoading(false);
       setError((current) => current || "BI dashboard timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadOverview() {
       const supabase = getSupabaseClient();
@@ -437,7 +444,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: overviewFilters }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -446,6 +453,7 @@ export default function BusinessDashboardPage() {
         }
 
         applyViewerMeta(payload);
+        setError("");
         if (payload.growth) {
           setGrowthReport(payload.growth);
           if (overviewHasFieldFilters) {
@@ -545,7 +553,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setGrowthLoading(false);
       setError((current) => current || "Category growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadGrowth() {
       const supabase = getSupabaseClient();
@@ -607,7 +615,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: requestedFilters }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -672,7 +680,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setCustomerLoading(false);
       setError((current) => current || "Customer growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadCustomers() {
       const supabase = getSupabaseClient();
@@ -707,7 +715,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: customerApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -753,7 +761,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setItemLoading(false);
       setError((current) => current || "Item growth timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadItems() {
       const supabase = getSupabaseClient();
@@ -788,7 +796,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: itemApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -834,7 +842,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setSalesmanLoading(false);
       setError((current) => current || "Salesman performance timed out. Please refresh.");
-    });
+    }, BI_REPORT_SAFETY_MS);
 
     async function loadSalesmen() {
       const supabase = getSupabaseClient();
@@ -869,7 +877,7 @@ export default function BusinessDashboardPage() {
             },
             body: JSON.stringify({ filters: salesmanApplied }),
           },
-          60000,
+          BI_REPORT_FETCH_MS,
         );
 
         if (cancelled) return;
@@ -916,7 +924,7 @@ export default function BusinessDashboardPage() {
       if (cancelled) return;
       setReceivableLoading(false);
       setError((current) => current || "Receivable days timed out. Please refresh.");
-    });
+    }, BI_RECEIVABLE_SAFETY_MS);
 
     async function loadReceivableDays() {
       const supabase = getSupabaseClient();
@@ -955,7 +963,7 @@ export default function BusinessDashboardPage() {
               filters: receivableApplied,
             }),
           },
-          280000,
+          BI_RECEIVABLE_FETCH_MS,
         );
 
         if (cancelled) return;

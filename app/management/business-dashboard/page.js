@@ -32,6 +32,13 @@ import { isPreparedOverviewFilters } from "../../lib/biPreparedBundle";
 import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, hasActiveGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
+/** Matches /api/business-dashboard/overview and category-growth maxDuration (90s). */
+const BI_REPORT_FETCH_MS = 90_000;
+/** UI safety net must outlive session resolve + fetch abort, or it false-alarms. */
+const BI_REPORT_SAFETY_MS = BI_REPORT_FETCH_MS + 20_000;
+const BI_RECEIVABLE_FETCH_MS = 280_000;
+const BI_RECEIVABLE_SAFETY_MS = BI_RECEIVABLE_FETCH_MS + 20_000;
+
 const TEXT = {
   title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   subtitle: {
@@ -130,12 +137,6 @@ function kpiClass(status) {
 function alertClass(severity) {
   return severity === "red" ? "moduleBusinessAlert--red" : "moduleBusinessAlert--orange";
 }
-
-/** Client fetch limits — safety timers must exceed these or they false-alarm first. */
-const BI_REPORT_FETCH_MS = 90000;
-const BI_REPORT_SAFETY_MS = 95000;
-const BI_RECEIVABLE_FETCH_MS = 280000;
-const BI_RECEIVABLE_SAFETY_MS = 290000;
 
 export default function BusinessDashboardPage() {
   const { language, dir, setLanguage } = useAppLanguage();

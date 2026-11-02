@@ -323,6 +323,17 @@ export async function POST(request) {
       } catch (matchedReceiptEmailError) {
         console.error("Matched receipt email after receipt upload failed:", matchedReceiptEmailError);
       }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const { rebuildPreparedMisReport } = await import("../../lib/misReportServer.js");
+        await rebuildPreparedMisReport(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }));
+        console.info("Management MIS prepared after receipt upload.");
+      } catch (misError) {
+        console.error("Management MIS prepare after receipt upload failed:", misError);
+      }
     });
 
     const paymentNote = includePaymentVouchers

@@ -8572,6 +8572,9 @@ tr.paymentSettleStatementLead td {
 .misToolbar input[type="date"] {
   border: 0; border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 160px;
 }
+.misPreparedStamp {
+  margin-left: auto; font-size: 12px; font-weight: 600; color: #dfe7ec; opacity: 0.95;
+}
 .misDeck { display: grid; gap: 14px; }
 .misDeck--presenter { gap: 12px; }
 .misDeckNav {

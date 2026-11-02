@@ -103,7 +103,12 @@ export function clearAuthSessionCache() {
   sharedSessionPromise = null;
 }
 
-export function startReportSafetyTimer(onTimeout, timeoutMs = 45000) {
+/**
+ * UI fallback when a report fetch hangs. Pass timeoutMs >= the page's
+ * fetchJsonWithTimeout budget (+ session resolve headroom); the old 45s
+ * default false-alarmed BI overview which aborts only at 60s.
+ */
+export function startReportSafetyTimer(onTimeout, timeoutMs = 90000) {
   const timer = setTimeout(onTimeout, timeoutMs);
   return () => clearTimeout(timer);
 }

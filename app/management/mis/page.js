@@ -98,17 +98,19 @@ export default function MisPage() {
     setLoading(true);
     setError("");
     try {
-      const session = await resolveAuthSession();
-      if (!session?.access_token) throw new Error("Please sign in again.");
-      const data = await fetchJsonWithTimeout(
+      const supabase = getSupabaseClient();
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const session = await resolveAuthSession(supabase, 12000);
+      if (!session?.access_token) throw new Error("Please login again.");
+      const { response, payload } = await fetchJsonWithTimeout(
         `/api/business-dashboard/mis?asOf=${encodeURIComponent(date)}`,
-        {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          timeoutMs: 90000,
-        },
+        { headers: { Authorization: `Bearer ${session.access_token}` } },
+        90000,
       );
-      if (!data?.success) throw new Error(data?.error || "Unable to load MIS");
-      setReport(data.report || null);
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || "Unable to load MIS");
+      }
+      setReport(payload.report || null);
     } catch (err) {
       setReport(null);
       setError(err?.message || "Unable to load MIS");

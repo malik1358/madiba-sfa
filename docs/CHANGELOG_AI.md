@@ -5,7 +5,11 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+<<<<<<< HEAD
 - **2026-11-02** — BI overview warm no longer popups “timed out” on other tabs (Receivable days / Category…); overview/category-growth `maxDuration` and client fetch raised to 90s so cold rebuilds finish and Slice and dice catalogs populate. Builds on #819 timer alignment. No migration. See `docs/ARCHITECTURE.md`.
+=======
+- **2026-11-02** — Management MIS UI is a presenter deck (13 slides: cover → summary) with sticky prev/next, jump tabs, keyboard arrows; adds portfolio / MADIBA / inventory / SWOT / initiatives; category/salesman/MADIBA tables get Excel column filters + totals. No migration.
+>>>>>>> origin/main
 - **2026-11-02** — BI dashboard false **timed out** popup: UI safety timer was 45s while overview/growth fetch aborts at 60s. BI page safety timers now outlive each fetch (+20s); default `startReportSafetyTimer` is 90s; successful overview clears error. No migration.
 - **2026-11-02** — BI **Net receivable days** adds Slice and dice (salesman and other field filters). Credit sales follow the growth slice; outstanding follows salesman/customer or customers in that credit slice. Filtered loads do not overwrite `receivable_days_monthly_v1`. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`.
 - **2026-11-02** — BI Dashboard adds the same Slice and dice field filters (salesman and other dimensions) as Category / Sales mix; Apply reloads overview with those filters. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`.

@@ -8572,12 +8572,49 @@ tr.paymentSettleStatementLead td {
 .misToolbar input[type="date"] {
   border: 0; border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 160px;
 }
-.misDeck { display: grid; gap: 18px; }
+.misDeck { display: grid; gap: 14px; }
+.misDeck--presenter { gap: 12px; }
+.misDeckNav {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 5;
+  padding: 10px 12px; border-radius: 12px;
+  background: #0b2545; color: #fff;
+}
+.misDeckStatus { font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
+.misDeckStatusLabel { margin-left: 10px; color: #d4af37; font-weight: 800; text-transform: uppercase; }
+.misDeckTabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.misDeckTab {
+  border: 1px solid #d7e2e8; background: #fff; color: #0f4c5c;
+  border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.misDeckTab--active {
+  background: #0f4c5c; border-color: #0f4c5c; color: #fff;
+}
+.misDeckStage {
+  min-height: min(70vh, 720px);
+}
 .misSlide {
   background: #f5f8fa; border: 1px solid #d7e2e8; border-radius: 16px;
   padding: 18px 18px 16px; box-shadow: 0 8px 24px rgba(11, 37, 69, 0.06);
+  min-height: min(70vh, 720px); display: flex; flex-direction: column;
+}
+.misSlide--cover {
+  background: linear-gradient(145deg, #0b2545 0%, #0f4c5c 55%, #163a4a 100%);
+  color: #fff; border-color: #0b2545;
+}
+.misSlide--cover .misEyebrow { color: #d4af37; }
+.misSlide--cover h2 { color: #fff; font-size: clamp(1.6rem, 4vw, 2.4rem); text-transform: uppercase; }
+.misSlide--cover .misRemark { color: #e8eef2; }
+.misCoverLead { margin: 8px 0 0; color: #d4af37; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.misCoverTopics { margin: 18px 0; color: #dfe7ec; font-weight: 600; line-height: 1.5; max-width: 36rem; }
+.misCoverBadge {
+  display: inline-flex; margin: 8px 0 18px; padding: 10px 16px; border-radius: 999px;
+  background: #d4af37; color: #0b2545; font-weight: 800; letter-spacing: 0.04em;
 }
 .misSlideHead { margin-bottom: 14px; }
+.misSlideBody { flex: 1; }
 .misEyebrow {
   color: #0f4c5c; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; margin-bottom: 4px;
 }
@@ -8611,7 +8648,23 @@ tr.paymentSettleStatementLead td {
 }
 .misSummaryCard h3 { margin: 0 0 8px; color: #0f4c5c; }
 .misSummaryCard p { margin: 0 0 8px; color: #243b4a; line-height: 1.45; }
+.misSwotGrid, .misInitiativeGrid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.misSwotCard, .misInitiativeCard {
+  background: #fff; border: 1px solid #d7e2e8; border-radius: 12px; padding: 14px 16px;
+}
+.misSwotCard h3, .misInitiativeCard h3 { margin: 0 0 8px; color: #fff; padding: 8px 10px; border-radius: 8px; font-size: 0.95rem; }
+.misSwotCard--strength h3 { background: #16a34a; }
+.misSwotCard--weak h3 { background: #d97706; }
+.misSwotCard--opportunity h3 { background: #0f4c5c; }
+.misSwotCard--threat h3 { background: #b91c1c; }
+.misSwotCard ul { margin: 0; padding-left: 18px; color: #243b4a; line-height: 1.45; }
+.misSwotCard li { margin-bottom: 6px; }
+.misInitiativeCard h3 { background: #0b2545; }
+.misInitiativeCard p { margin: 0; color: #243b4a; line-height: 1.45; }
 .misMeta { margin-top: 12px; color: #6b7c86; font-size: 12px; }
 @media (max-width: 900px) {
-  .misKpiGrid, .misSplit, .misSummaryGrid { grid-template-columns: 1fr; }
+  .misKpiGrid, .misSplit, .misSummaryGrid, .misSwotGrid, .misInitiativeGrid { grid-template-columns: 1fr; }
+  .misSlide, .misDeckStage { min-height: 0; }
 }

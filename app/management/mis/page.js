@@ -11,30 +11,29 @@ import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession"
 import { getSupabaseClient } from "../../lib/supabase";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { defaultMisAsOfDate } from "../../lib/misPrepared";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
-
-/** Default to last day of the previous KSA month (month-end pack). */
-function defaultMisAsOfDate() {
-  const today = getKsaDateString();
-  const [year, month] = today.split("-").map(Number);
-  const lastPrev = new Date(Date.UTC(year, month - 1, 0));
-  return lastPrev.toISOString().slice(0, 10);
-}
 
 const TEXT = {
   title: { en: "Management MIS", ar: "تقرير الإدارة" },
   subtitle: {
-    en: "Live month-end pack from BI sales, receipts, and outstanding.",
-    ar: "حزمة نهاية الشهر مباشرة من المبيعات والتحصيل والمستحقات.",
+    en: "Prepared month-end pack from BI sales, receipts, and outstanding.",
+    ar: "حزمة نهاية الشهر الجاهزة من المبيعات والتحصيل والمستحقات.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   bi: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
-  loading: { en: "Building live MIS…", ar: "جاري بناء تقرير الإدارة…" },
+  loading: { en: "Loading prepared MIS…", ar: "جاري تحميل تقرير الإدارة…" },
+  preparing: { en: "Preparing month-end MIS in the backend…", ar: "جاري تجهيز تقرير الإدارة في الخلفية…" },
   asOf: { en: "As of", ar: "حتى" },
   refresh: { en: "Refresh", ar: "تحديث" },
   denied: { en: "MIS is available to admin and manager only.", ar: "تقرير الإدارة متاح للمدير فقط." },
   noData: { en: "No MIS data returned.", ar: "لا توجد بيانات." },
+  notPrepared: {
+    en: "Month-end MIS is not prepared yet. Tap Refresh once to build it in the backend.",
+    ar: "تقرير الإدارة غير جاهز بعد. اضغط تحديث مرة واحدة لبنائه في الخلفية.",
+  },
+  preparedAt: { en: "Prepared", ar: "جاهز" },
   prev: { en: "Previous", ar: "السابق" },
   next: { en: "Next", ar: "التالي" },
   slideOf: { en: "Slide", ar: "شريحة" },
@@ -506,37 +505,53 @@ export default function MisPage() {
   const { language } = useAppLanguage();
   const t = useMemo(() => translate(language, TEXT), [language]);
   const { access, loading: accessLoading } = useModuleAccess();
-  const [asOf, setAsOf] = useState(() => defaultMisAsOfDate());
+  const [asOf, setAsOf] = useState(() => defaultMisAsOfDate(getKsaDateString()) || getKsaDateString());
   const [loading, setLoading] = useState(true);
+  const [preparing, setPreparing] = useState(false);
   const [report, setReport] = useState(null);
+  const [builtAt, setBuiltAt] = useState("");
   const [error, setError] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
   usePopupMessages({ error });
 
   const canOpen = access?.canAccess?.("mis");
 
-  const load = useCallback(async (date) => {
+  const load = useCallback(async (date, { rebuild = false } = {}) => {
     setLoading(true);
+    setPreparing(Boolean(rebuild));
     setError("");
     try {
       const supabase = getSupabaseClient();
       if (!supabase) throw new Error("Supabase is not configured.");
       const session = await resolveAuthSession(supabase, 12000);
       if (!session?.access_token) throw new Error("Please login again.");
+      const params = new URLSearchParams({ asOf: date });
+      if (rebuild) params.set("rebuild", "1");
       const { response, payload } = await fetchJsonWithTimeout(
-        `/api/business-dashboard/mis?asOf=${encodeURIComponent(date)}`,
+        `/api/business-dashboard/mis?${params.toString()}`,
         { headers: { Authorization: `Bearer ${session.access_token}` } },
-        90000,
+        rebuild ? 90000 : 20000,
       );
+      if (payload?.code === "MIS_NOT_PREPARED") {
+        setReport(null);
+        setBuiltAt("");
+        setError(payload?.error || "Month-end MIS is not prepared yet.");
+        return;
+      }
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.error || "Unable to load MIS");
       }
       setReport(payload.report || null);
+      setBuiltAt(payload.builtAt || payload.report?.meta?.preparedAt || "");
+      if (payload.asOfDate) setAsOf(payload.asOfDate);
+      if (payload.message) setError(payload.message);
       setSlideIndex(0);
     } catch (err) {
       setReport(null);
+      setBuiltAt("");
       setError(err?.message || "Unable to load MIS");
     } finally {
+      setPreparing(false);
       setLoading(false);
     }
   }, []);
@@ -547,8 +562,10 @@ export default function MisPage() {
       setLoading(false);
       return;
     }
-    load(asOf);
-  }, [accessLoading, canOpen, asOf, load]);
+    load(asOf, { rebuild: false });
+    // Open from prepared pack only; as-of changes apply on Refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessLoading, canOpen, load]);
 
   const slides = useMemo(
     () => (report ? buildSlides(report, language) : []),
@@ -625,15 +642,29 @@ export default function MisPage() {
                     onChange={(event) => setAsOf(event.target.value)}
                   />
                 </label>
-                <button type="button" className="moduleButton moduleButtonPrimary" onClick={() => load(asOf)} disabled={loading}>
+                <button
+                  type="button"
+                  className="moduleButton moduleButtonPrimary"
+                  onClick={() => load(asOf, { rebuild: true })}
+                  disabled={loading}
+                >
                   {t("refresh")}
                 </button>
+                {builtAt ? (
+                  <span className="misPreparedStamp">
+                    {t("preparedAt")}
+                    {" "}
+                    {new Date(builtAt).toLocaleString()}
+                  </span>
+                ) : null}
               </div>
 
               {loading ? (
-                <div className="moduleCard"><p>{t("loading")}</p></div>
+                <div className="moduleCard"><p>{preparing ? t("preparing") : t("loading")}</p></div>
               ) : !report || !active ? (
-                <div className="moduleCard"><p>{t("noData")}</p></div>
+                <div className="moduleCard">
+                  <p>{error ? t("notPrepared") : t("noData")}</p>
+                </div>
               ) : (
                 <div className="misDeck misDeck--presenter">
                   <div className="misDeckNav" role="navigation" aria-label="MIS slides">

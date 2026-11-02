@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { isManagementRole } from "../../../lib/moduleAccess.js";
-import { loadLiveMisReport } from "../../../lib/misReportServer.js";
+import {
+  defaultMisAsOfDate,
+  loadPreparedMisReport,
+  rebuildPreparedMisReport,
+} from "../../../lib/misReportServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
@@ -10,11 +14,16 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function parseAsOfDate(value) {
-  const date = String(value || getKsaDateString()).trim().slice(0, 10);
+  const date = String(value || defaultMisAsOfDate(getKsaDateString()) || getKsaDateString()).trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error("Invalid asOf date. Use YYYY-MM-DD.");
   }
   return date;
+}
+
+function wantsRebuild(url) {
+  const raw = String(url.searchParams.get("rebuild") || url.searchParams.get("refresh") || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
 async function getAuthUser(request) {
@@ -60,9 +69,41 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const asOfDate = parseAsOfDate(url.searchParams.get("asOf") || url.searchParams.get("date"));
-    const report = await loadLiveMisReport(admin, { asOfDate });
+    const rebuild = wantsRebuild(url);
 
-    return Response.json({ success: true, report });
+    if (rebuild) {
+      const prepared = await rebuildPreparedMisReport(admin, { asOfDate });
+      return Response.json({
+        success: true,
+        prepared: true,
+        rebuilt: true,
+        asOfDate: prepared.asOfDate,
+        builtAt: prepared.builtAt,
+        report: prepared.report,
+      });
+    }
+
+    const loaded = await loadPreparedMisReport(admin, { asOfDate });
+    if (!loaded.report) {
+      return Response.json({
+        success: false,
+        prepared: false,
+        code: "MIS_NOT_PREPARED",
+        asOfDate,
+        error: "Month-end MIS is not prepared yet. Tap Refresh to build it once in the backend.",
+      }, { status: 404 });
+    }
+
+    return Response.json({
+      success: true,
+      prepared: true,
+      rebuilt: false,
+      asOfDate: loaded.asOfDate,
+      builtAt: loaded.builtAt,
+      staleRequest: Boolean(loaded.staleRequest),
+      message: loaded.message || null,
+      report: loaded.report,
+    });
   } catch (error) {
     console.error("MIS report error", error);
     return Response.json(

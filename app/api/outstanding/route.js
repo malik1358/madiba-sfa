@@ -323,6 +323,17 @@ export async function POST(request) {
       } catch (receivableError) {
         console.error("Receivable days rebuild after outstanding upload failed:", receivableError);
       }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const { rebuildPreparedMisReport } = await import("../../lib/misReportServer.js");
+        await rebuildPreparedMisReport(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }));
+        console.info("Management MIS prepared after outstanding upload.");
+      } catch (misError) {
+        console.error("Management MIS prepare after outstanding upload failed:", misError);
+      }
     });
 
     return NextResponse.json({

@@ -255,6 +255,12 @@ export async function rebuildSalesBiCube(admin) {
     } catch (error) {
       console.error("Preparing BI overview bundle after cube rebuild failed:", error);
     }
+    try {
+      const { rebuildPreparedMisReport } = await import("./misReportServer.js");
+      await rebuildPreparedMisReport(admin, { cube });
+    } catch (error) {
+      console.error("Preparing Management MIS after cube rebuild failed:", error);
+    }
   }
   return cube;
 }

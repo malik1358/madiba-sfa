@@ -8,17 +8,22 @@ import {
   prioritizeOutstandingSheets,
   selectPreferredOutstandingParses,
 } from "./outstanding.js";
+import { normalizeGrowthFilters, rowMatchesGrowthFilters } from "./categoryGrowth.js";
 import { mergeSalesSnapshots } from "./salesHistory.js";
 import { loadSalesBiCube } from "./salesBiCubeServer.js";
+import { salesBiFactToGrowthRow, salesBiFactsFromCube } from "./salesBiCube.js";
 import { salesMixMeasuresForRow } from "./salesMix.js";
 import { forEachCustomerSalesHistory } from "./outstandingReconcileServer.js";
 import {
   RECEIVABLE_DAYS_DATASET_KEY,
   buildReceivableDaysReport,
+  filterOutstandingRowsForReceivableFilters,
+  hasReceivableFieldFilters,
   outstandingHistoryKey,
   parseStoredOutstandingUploadedAt,
   planOutstandingMonthUploads,
   receivablesFromOutstandingPlan,
+  sumFilteredTallyOutstandingRows,
   sumTallyOutstandingRows,
 } from "./receivableDays.js";
 import { UPLOAD_FILES_BUCKET, downloadStoredUpload } from "./uploadFilesStorage.js";
@@ -62,26 +67,40 @@ async function activeSalesBatchId(admin) {
   return String(data?.setting_value || "").trim();
 }
 
-function sumMonthlyCreditSalesFromFacts(facts = []) {
+function sumMonthlyCreditSalesFromFacts(facts = [], filters = null) {
   const byMonth = new Map();
+  const customerCodes = new Set();
+  const normalized = filters
+    ? normalizeGrowthFilters({ ...filters, dateFrom: "", dateTo: "" })
+    : null;
   (Array.isArray(facts) ? facts : []).forEach((fact) => {
     const month = String(fact?.month || "").slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return;
+    if (normalized && !rowMatchesGrowthFilters(salesBiFactToGrowthRow(fact), normalized)) return;
     const credit = Number(fact?.credit_sales_amount);
     const amount = Number.isFinite(credit)
       ? credit
       : Number(salesMixMeasuresForRow(fact).credit_sales_amount || 0);
     byMonth.set(month, Math.round((Number(byMonth.get(month) || 0) + amount) * 100) / 100);
+    const code = String(fact?.customer_code || "").trim().toUpperCase();
+    if (code) customerCodes.add(code);
   });
-  return Object.fromEntries(byMonth);
+  return {
+    monthlyCreditSales: Object.fromEntries(byMonth),
+    customerCodes,
+  };
 }
 
-async function loadMonthlyCreditSales(admin) {
+async function loadMonthlyCreditSales(admin, filters = null) {
+  const useFilters = filters && hasReceivableFieldFilters(filters);
   try {
     const cube = await loadSalesBiCube(admin, { allowStale: true });
-    if (cube?.facts?.length) {
+    const facts = salesBiFactsFromCube(cube);
+    if (facts.length) {
+      const summed = sumMonthlyCreditSalesFromFacts(facts, useFilters ? filters : null);
       return {
-        monthlyCreditSales: sumMonthlyCreditSalesFromFacts(cube.facts),
+        monthlyCreditSales: summed.monthlyCreditSales,
+        customerCodes: summed.customerCodes,
         source: cube.source || "sales_bi_cube",
         batchId: String(cube.batchId || ""),
       };
@@ -91,17 +110,25 @@ async function loadMonthlyCreditSales(admin) {
   }
 
   const byMonth = new Map();
+  const customerCodes = new Set();
+  const normalized = useFilters
+    ? normalizeGrowthFilters({ ...filters, dateFrom: "", dateTo: "" })
+    : null;
   await forEachCustomerSalesHistory(admin, async (_code, salesRows) => {
     mergeSalesSnapshots(salesRows).forEach((row) => {
       const month = String(row?.transaction_date || "").slice(0, 7);
       if (!/^\d{4}-\d{2}$/.test(month)) return;
+      if (normalized && !rowMatchesGrowthFilters(row, normalized)) return;
       const amount = Number(salesMixMeasuresForRow(row).credit_sales_amount || 0);
       if (!(amount > 0)) return;
       byMonth.set(month, Math.round((Number(byMonth.get(month) || 0) + amount) * 100) / 100);
+      const code = String(row?.customer_code || "").trim().toUpperCase();
+      if (code) customerCodes.add(code);
     });
   });
   return {
     monthlyCreditSales: Object.fromEntries(byMonth),
+    customerCodes,
     source: "active_sales",
     batchId: await activeSalesBatchId(admin),
   };
@@ -147,12 +174,15 @@ export function receivableDaysDatasetIsFresh(dataset, {
   return true;
 }
 
-function tallyOutstandingFromDataset(dataset) {
+function tallyOutstandingFromDataset(dataset, filters = null, customerCodesFromSales = null) {
   const rows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row) => buildOutstandingRow(row));
+  const filtered = filters && hasReceivableFieldFilters(filters)
+    ? filterOutstandingRowsForReceivableFilters(rows, filters, customerCodesFromSales)
+    : rows;
   return {
-    total: sumTallyOutstandingRows(rows),
+    total: sumTallyOutstandingRows(filtered),
     uploadedAt: String(dataset?.uploadedAt || ""),
-    customerCount: rows.length,
+    customerCount: filtered.length,
   };
 }
 
@@ -181,7 +211,7 @@ async function listOutstandingStoredFiles(admin) {
   return files;
 }
 
-export function totalOutstandingFromWorkbook(bytes) {
+export function totalOutstandingFromWorkbook(bytes, filters = null, customerCodesFromSales = null) {
   const workbook = XLSX.read(Buffer.from(bytes), { type: "buffer" });
   const sheetNames = prioritizeOutstandingSheets(workbook.SheetNames || []);
   const parsedBySheetName = [];
@@ -197,10 +227,14 @@ export function totalOutstandingFromWorkbook(bytes) {
   const parsedSheets = selectPreferredOutstandingParses(parsedBySheetName);
   if (!parsedSheets.length) throw new Error("Unable to read an outstanding sheet.");
   const parsed = parsedSheets.length === 1 ? parsedSheets[0] : mergeParsedOutstandingSheets(parsedSheets);
-  return sumTallyOutstandingRows((parsed.rows || []).map((row) => buildOutstandingRow(row)));
+  const rows = (parsed.rows || []).map((row) => buildOutstandingRow(row));
+  if (filters && hasReceivableFieldFilters(filters)) {
+    return sumFilteredTallyOutstandingRows(rows, filters, customerCodesFromSales);
+  }
+  return sumTallyOutstandingRows(rows);
 }
 
-async function outstandingUploadsByMonth(admin, currentUpload) {
+async function outstandingUploadsByMonth(admin, currentUpload, filters = null, customerCodesFromSales = null) {
   let storedFiles = [];
   try {
     storedFiles = await listOutstandingStoredFiles(admin);
@@ -208,13 +242,22 @@ async function outstandingUploadsByMonth(admin, currentUpload) {
     console.error("Receivable days: could not list stored outstanding files:", error);
   }
   const plan = planOutstandingMonthUploads(storedFiles, currentUpload);
+  const useFilters = filters && hasReceivableFieldFilters(filters);
   let failedCount = 0;
   for (const row of plan) {
+    if (!useFilters && (row.total != null || !row.filePath)) continue;
+    if (useFilters && !row.filePath) {
+      // Live month total is already filtered in currentUpload.total.
+      continue;
+    }
+    if (useFilters && row.filePath) {
+      row.total = null;
+    }
     if (row.total != null || !row.filePath) continue;
     try {
       const file = await downloadStoredUpload(admin, row.filePath);
       const bytes = Buffer.from(await file.arrayBuffer());
-      row.total = totalOutstandingFromWorkbook(bytes);
+      row.total = totalOutstandingFromWorkbook(bytes, useFilters ? filters : null, customerCodesFromSales);
     } catch (error) {
       failedCount += 1;
       console.error(`Receivable days: could not read ${row.filePath}:`, error);
@@ -281,8 +324,51 @@ export async function loadReceivableDaysReport(admin, {
   asOfDate = "",
   dateFrom = "",
   dateTo = "",
+  filters = {},
 } = {}) {
   const asOf = String(asOfDate || getKsaDateString()).slice(0, 10);
+  const normalizedFilters = normalizeGrowthFilters(filters);
+  const fieldFilters = hasReceivableFieldFilters(normalizedFilters);
+
+  if (fieldFilters) {
+    const outstandingDataset = await readSettingJson(admin, OUTSTANDING_DATASET_KEY);
+    const credit = await loadMonthlyCreditSales(admin, normalizedFilters);
+    const tally = tallyOutstandingFromDataset(
+      outstandingDataset,
+      normalizedFilters,
+      credit.customerCodes,
+    );
+    const history = await outstandingUploadsByMonth(
+      admin,
+      tally,
+      normalizedFilters,
+      credit.customerCodes,
+    );
+    const report = buildReceivableDaysReport({
+      monthlyCreditSales: credit.monthlyCreditSales,
+      monthlyReceivables: history.monthlyReceivables,
+      asOfDate: asOf,
+      dateFrom,
+      dateTo,
+    });
+    return {
+      ...report,
+      meta: {
+        preparedAt: new Date().toISOString(),
+        batchId: credit.batchId,
+        outstandingUploadedAt: tally.uploadedAt,
+        receivablesSource: "tally_outstanding",
+        tallyOutstanding: tally.total,
+        creditSalesSource: credit.source,
+        scannedCount: tally.customerCount,
+        failedCount: history.failedCount,
+        rebuilt: false,
+        filtered: true,
+        source: "receivable_days_filtered",
+      },
+    };
+  }
+
   const [batchId, outstandingDataset, cached] = await Promise.all([
     activeSalesBatchId(admin),
     readSettingJson(admin, OUTSTANDING_DATASET_KEY),
@@ -327,6 +413,7 @@ export async function loadReceivableDaysReport(admin, {
       scannedCount: dataset.scannedCount,
       failedCount: dataset.failedCount,
       rebuilt,
+      filtered: false,
       source: "receivable_days_monthly_v1",
     },
   };

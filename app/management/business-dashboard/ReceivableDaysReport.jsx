@@ -5,6 +5,7 @@ import { translate } from "../../lib/appLanguage";
 import { formatMoneyAmount } from "../../lib/categoryGrowth";
 import ExportableTable from "../../components/ExportableTable";
 import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
+import CategoryGrowthFilters from "./CategoryGrowthFilters";
 import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 
 const TEXT = {
@@ -13,8 +14,12 @@ const TEXT = {
     en: "Each month shows the last Tally outstanding file imported in that month. YTD DSO = (outstanding ÷ credit sales YTD) × days YTD. Rolling 12-month DSO uses trailing 12 months of credit sales for overall collection efficiency. Rolling 3-month DSO uses trailing 3 months so recent improvement or deterioration shows faster. The total row keeps the latest balance, not a sum of months.",
     ar: "كل شهر يعرض آخر ملف مستحقات تالي تم رفعه في ذلك الشهر. أيام الذمم السنوية = (المستحقات ÷ مبيعات الآجل منذ بداية السنة) × أيام السنة. أيام الذمم لـ12 شهراً متداولاً تستخدم مبيعات الآجل لآخر 12 شهراً لكفاءة التحصيل الكلية. أيام الذمم لـ3 أشهر متداولة تُظهر التحسن أو التراجع الأخير أسرع. صف الإجمالي يحتفظ بآخر رصيد وليس مجموع الأشهر.",
   },
+  filterHint: {
+    en: "Use the same salesman and field filters as the other reports, then Apply. Credit sales follow the full slice; Tally outstanding follows salesman/customer filters, or customers in that credit-sales slice.",
+    ar: "استخدم نفس تصفية المندوب والحقول في التقارير الأخرى ثم اضغط تطبيق. مبيعات الآجل تتبع الشريحة كاملة؛ مستحقات تالي تتبع المندوب/العميل أو عملاء شريحة مبيعات الآجل.",
+  },
   loading: { en: "Loading receivable days...", ar: "جاري تحميل أيام الذمم..." },
-  empty: { en: "No credit sales or receivables match this period.", ar: "لا توجد مبيعات آجلة أو ذمم تطابق هذه الفترة." },
+  empty: { en: "No credit sales or receivables match this period and filters.", ar: "لا توجد مبيعات آجلة أو ذمم تطابق الفترة والتصفية." },
   month: { en: "Month", ar: "الشهر" },
   receivables: { en: "Tally outstanding", ar: "مستحقات تالي" },
   creditSales: { en: "Credit sales (month)", ar: "مبيعات الآجل (الشهر)" },
@@ -71,12 +76,34 @@ export default function ReceivableDaysReport({
   language = "en",
   loading = false,
   report = null,
+  draft,
+  catalogs = {},
+  applied,
+  onDraftChange,
+  onApply,
+  onClear,
 }) {
   const t = translate(language, TEXT);
   const rows = report?.rows || [];
   const currentMonth = report?.currentMonth || "";
   const latest = report?.latestComplete || null;
   const lastRow = rows.at(-1) || null;
+  const filtersPanel = (
+    <CategoryGrowthFilters
+      language={language}
+      draft={draft}
+      catalogs={catalogs}
+      applied={applied}
+      onDraftChange={onDraftChange}
+      onGroupByChange={() => {}}
+      onApply={onApply}
+      onClear={onClear}
+      lockGroupBy="category"
+      showSearch={false}
+      showStatusFilters={false}
+      hint={t("filterHint")}
+    />
+  );
 
   const keys = useMemo(
     () => [
@@ -127,8 +154,22 @@ export default function ReceivableDaysReport({
     },
   ]), [rows, t]);
 
-  if (loading) return <div className="moduleLoading">{t("loading")}</div>;
-  if (!rows.length) return <div className="moduleHint">{t("empty")}</div>;
+  if (loading) {
+    return (
+      <>
+        {filtersPanel}
+        <div className="moduleLoading">{t("loading")}</div>
+      </>
+    );
+  }
+  if (!rows.length) {
+    return (
+      <>
+        {filtersPanel}
+        <div className="moduleHint">{t("empty")}</div>
+      </>
+    );
+  }
 
   const footerReceivables = report?.totals?.receivables ?? null;
   const footerCreditMonth = visibleRows.reduce((sum, row) => sum + Number(row.credit_sales || 0), 0);
@@ -138,6 +179,7 @@ export default function ReceivableDaysReport({
 
   return (
     <>
+      {filtersPanel}
       <section id="bi-receivable-days" className="moduleSection">
         <div className="moduleSectionHeader"><h2>{t("title")}</h2></div>
         <p className="moduleHint">{t("hint")}</p>

@@ -58,10 +58,12 @@ async function buildResponse(request, body = {}) {
   }
 
   const asOfDate = getKsaDateString();
+  const filters = body?.filters && typeof body.filters === "object" ? body.filters : body || {};
   const report = await loadReceivableDaysReport(admin, {
     asOfDate,
-    dateFrom: salesDateKey(body?.dateFrom || body?.filters?.dateFrom),
-    dateTo: salesDateKey(body?.dateTo || body?.filters?.dateTo),
+    dateFrom: salesDateKey(body?.dateFrom || filters?.dateFrom),
+    dateTo: salesDateKey(body?.dateTo || filters?.dateTo),
+    filters,
   });
 
   return Response.json({

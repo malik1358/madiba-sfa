@@ -1,8 +1,25 @@
-import { previousMonthKey, salesDateKey } from "./categoryGrowth.js";
+import {
+  GROWTH_DIMENSION_KEYS,
+  hasActiveGrowthFilters,
+  normalizeGrowthFilters,
+  previousMonthKey,
+  rowMatchesGrowthFilters,
+  salesDateKey,
+} from "./categoryGrowth.js";
 import { lastDayOfMonth } from "./biReportPeriod.js";
 import { isCashSalesVoucher } from "./paymentBehavior.js";
 
 export const RECEIVABLE_DAYS_DATASET_KEY = "receivable_days_monthly_v1";
+
+/** Outstanding files only carry salesman / customer identity for AR slicing. */
+export const RECEIVABLE_AR_FILTER_KEYS = [
+  "salesman",
+  "salesman_code",
+  "salesman_name",
+  "customer",
+  "customer_code",
+  "customer_name",
+];
 
 function toNumber(value) {
   const number = Number(value);
@@ -250,6 +267,82 @@ export function sumTallyOutstandingRows(rows = []) {
     0,
   );
   return Math.round(total * 100) / 100;
+}
+
+/** Field filters beyond the shared Period dates. */
+export function hasReceivableFieldFilters(input = {}) {
+  return hasActiveGrowthFilters({
+    ...normalizeGrowthFilters(input),
+    dateFrom: "",
+    dateTo: "",
+  });
+}
+
+function receivableArFilterValues(filters = {}) {
+  const normalized = normalizeGrowthFilters(filters);
+  return Object.fromEntries(
+    GROWTH_DIMENSION_KEYS.map((key) => [
+      key,
+      RECEIVABLE_AR_FILTER_KEYS.includes(key) ? (normalized.values[key] || []) : [],
+    ]),
+  );
+}
+
+export function hasReceivableArValueFilters(input = {}) {
+  const values = receivableArFilterValues(input);
+  return RECEIVABLE_AR_FILTER_KEYS.some((key) => (values[key] || []).length > 0);
+}
+
+/** Map a Tally outstanding customer row onto growth-filter fields. */
+export function outstandingRowAsGrowthRow(row = {}) {
+  const salesman = String(row.salesman || row.salesman_name || "").trim();
+  return {
+    salesman_code: String(row.salesman_code || "").trim() || salesman,
+    salesman_name: salesman,
+    customer_code: String(row.customer_code || "").trim(),
+    customer_name: String(row.customer_name || "").trim(),
+  };
+}
+
+/**
+ * Keep outstanding rows that match salesman/customer filters, or (when only
+ * product dimensions are set) customers present in the filtered credit-sales slice.
+ */
+export function outstandingRowMatchesReceivableFilters(row = {}, input = {}, customerCodesFromSales = null) {
+  const normalized = normalizeGrowthFilters(input);
+  const arValues = receivableArFilterValues(normalized);
+  const hasArValues = RECEIVABLE_AR_FILTER_KEYS.some((key) => (arValues[key] || []).length > 0);
+  if (hasArValues) {
+    return rowMatchesGrowthFilters(outstandingRowAsGrowthRow(row), {
+      ...normalized,
+      values: arValues,
+      dateFrom: "",
+      dateTo: "",
+      amountMin: null,
+      amountMax: null,
+      quantityMin: null,
+      quantityMax: null,
+      itemNameContains: "",
+    });
+  }
+  if (customerCodesFromSales instanceof Set) {
+    const code = String(row.customer_code || "").trim().toUpperCase();
+    return Boolean(code) && customerCodesFromSales.has(code);
+  }
+  return true;
+}
+
+export function filterOutstandingRowsForReceivableFilters(rows = [], input = {}, customerCodesFromSales = null) {
+  if (!hasReceivableFieldFilters(input)) return Array.isArray(rows) ? rows : [];
+  return (Array.isArray(rows) ? rows : []).filter((row) => (
+    outstandingRowMatchesReceivableFilters(row, input, customerCodesFromSales)
+  ));
+}
+
+export function sumFilteredTallyOutstandingRows(rows = [], input = {}, customerCodesFromSales = null) {
+  return sumTallyOutstandingRows(
+    filterOutstandingRowsForReceivableFilters(rows, input, customerCodesFromSales),
+  );
 }
 
 /** The uploaded outstanding file is one balance. It belongs on the as-of month only. */

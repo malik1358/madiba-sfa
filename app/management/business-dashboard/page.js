@@ -173,6 +173,8 @@ export default function BusinessDashboardPage() {
   const [salesmanStatusFilter, setSalesmanStatusFilter] = useState([]);
   const [receivableLoading, setReceivableLoading] = useState(false);
   const [receivableReport, setReceivableReport] = useState(null);
+  const [receivableDraft, setReceivableDraft] = useState(() => emptyGrowthFilters());
+  const [receivableApplied, setReceivableApplied] = useState(() => emptyGrowthFilters());
   const [salesMixReport, setSalesMixReport] = useState(null);
   const [salesMixDraft, setSalesMixDraft] = useState(() => emptyGrowthFilters());
   const [salesMixApplied, setSalesMixApplied] = useState(() => emptyGrowthFilters());
@@ -194,7 +196,7 @@ export default function BusinessDashboardPage() {
   const salesmanCacheKeyRef = useRef("");
   const salesMixCacheKeyRef = useRef("");
   const madibaPreparedRef = useRef(null);
-  const receivablePeriodKeyRef = useRef("");
+  const receivableCacheKeyRef = useRef("");
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
       dateFrom: customPeriodFrom,
@@ -300,6 +302,8 @@ export default function BusinessDashboardPage() {
     setSalesMixApplied((current) => applyBiReportPeriod(current, periodRange));
     setOverviewDraft((current) => applyBiReportPeriod(current, periodRange));
     setOverviewApplied((current) => applyBiReportPeriod(current, periodRange));
+    setReceivableDraft((current) => applyBiReportPeriod(current, periodRange));
+    setReceivableApplied((current) => applyBiReportPeriod(current, periodRange));
   }, [periodRange, reportPeriod]);
 
   useEffect(() => {
@@ -922,8 +926,8 @@ export default function BusinessDashboardPage() {
         return;
       }
 
-      const periodKey = `${periodRange.dateFrom || ""}|${periodRange.dateTo || ""}`;
-      if (receivablePeriodKeyRef.current === periodKey) {
+      const cacheKey = JSON.stringify(normalizeGrowthFilters(receivableApplied));
+      if (receivableCacheKeyRef.current === cacheKey && receivableReport) {
         stopSafetyTimer();
         setReceivableLoading(false);
         return;
@@ -948,6 +952,7 @@ export default function BusinessDashboardPage() {
             body: JSON.stringify({
               dateFrom: periodRange.dateFrom || "",
               dateTo: periodRange.dateTo || "",
+              filters: receivableApplied,
             }),
           },
           280000,
@@ -959,12 +964,12 @@ export default function BusinessDashboardPage() {
         }
 
         setReceivableReport(payload);
-        receivablePeriodKeyRef.current = periodKey;
+        receivableCacheKeyRef.current = cacheKey;
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Unable to load receivable days.");
         setReceivableReport(null);
-        receivablePeriodKeyRef.current = "";
+        receivableCacheKeyRef.current = "";
       } finally {
         stopSafetyTimer();
         if (!cancelled) setReceivableLoading(false);
@@ -986,7 +991,7 @@ export default function BusinessDashboardPage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [view, periodRange]);
+  }, [view, periodRange, receivableApplied]);
 
   const redAlerts = useMemo(
     () => (dashboard?.alerts || []).filter((row) => row.severity === "red"),
@@ -1279,6 +1284,16 @@ export default function BusinessDashboardPage() {
               language={language}
               loading={receivableLoading}
               report={receivableReport}
+              draft={receivableDraft}
+              catalogs={growthCatalogs}
+              applied={receivableApplied}
+              onDraftChange={setReceivableDraft}
+              onApply={() => setReceivableApplied({ ...receivableDraft })}
+              onClear={() => {
+                const empty = applyBiReportPeriod(emptyGrowthFilters(), periodRange);
+                setReceivableDraft(empty);
+                setReceivableApplied(empty);
+              }}
             />
           ) : null}
 

@@ -5,7 +5,10 @@ import {
   buildReceivableDaysReport,
   creditSalesTrailingMonths,
   creditSalesYtdThroughMonth,
+  filterOutstandingRowsForReceivableFilters,
+  hasReceivableFieldFilters,
   monthEndOpenReceivablesExclVat,
+  outstandingRowMatchesReceivableFilters,
   receivableDays,
   receivableDaysChangeTone,
   ksaMonthKey,
@@ -15,10 +18,12 @@ import {
   receivableTrailingDays,
   receivableYtdDays,
   receivablesFromOutstandingPlan,
+  sumFilteredTallyOutstandingRows,
   sumTallyOutstandingRows,
   tallyReceivablesByMonth,
   trailingMonthKeys,
 } from "../app/lib/receivableDays.js";
+import { emptyGrowthFilters } from "../app/lib/categoryGrowth.js";
 import { matchPaymentsFifo } from "../app/lib/paymentBehavior.js";
 
 test("receivableDays uses YTD sales and YTD days", () => {
@@ -276,4 +281,31 @@ test("buildReceivableDaysReport respects date filters", () => {
   assert.deepEqual(report.months, ["2026-02", "2026-03"]);
   // YTD credit sales for Feb still includes January even when Jan is hidden.
   assert.equal(report.monthly["2026-02"].credit_sales_ytd, 200);
+});
+
+test("receivable field filters slice outstanding by salesman or credit-sales customers", () => {
+  const rows = [
+    { customer_code: "1001", customer_name: "Alpha", salesman: "Ahmed", total_outstanding: 100 },
+    { customer_code: "1002", customer_name: "Beta", salesman: "Zia", total_outstanding: 250 },
+    { customer_code: "1003", customer_name: "Gamma", salesman: "Ahmed", total_outstanding: 50 },
+  ];
+  const salesmanFilters = {
+    ...emptyGrowthFilters(),
+    values: { ...emptyGrowthFilters().values, salesman_name: ["Ahmed"] },
+  };
+  assert.equal(hasReceivableFieldFilters(salesmanFilters), true);
+  assert.equal(outstandingRowMatchesReceivableFilters(rows[0], salesmanFilters), true);
+  assert.equal(outstandingRowMatchesReceivableFilters(rows[1], salesmanFilters), false);
+  assert.equal(sumFilteredTallyOutstandingRows(rows, salesmanFilters), 150);
+
+  const categoryOnly = {
+    ...emptyGrowthFilters(),
+    values: { ...emptyGrowthFilters().values, category: ["Personal Care"] },
+  };
+  const fromSales = new Set(["1002"]);
+  assert.deepEqual(
+    filterOutstandingRowsForReceivableFilters(rows, categoryOnly, fromSales).map((row) => row.customer_code),
+    ["1002"],
+  );
+  assert.equal(sumFilteredTallyOutstandingRows(rows, categoryOnly, fromSales), 250);
 });

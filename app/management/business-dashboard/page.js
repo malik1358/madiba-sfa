@@ -13,6 +13,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { isAdminRole } from "../../lib/moduleAccess";
 import BiOverviewDashboard from "./BiOverviewDashboard";
+import CategoryGrowthFilters from "./CategoryGrowthFilters";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import CustomerCohortReport from "./CustomerCohortReport";
 import ItemsSoldAtLossReport from "./ItemsSoldAtLossReport";
@@ -27,7 +28,8 @@ import {
   formatBiReportPeriodRange,
   resolveBiReportPeriod,
 } from "../../lib/biReportPeriod";
-import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
+import { isPreparedOverviewFilters } from "../../lib/biPreparedBundle";
+import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, hasActiveGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
 const TEXT = {
@@ -39,6 +41,10 @@ const TEXT = {
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
   overview: { en: "Dashboard", ar: "اللوحة" },
+  overviewFilterHint: {
+    en: "Use the same salesman and field filters as the other reports, then Apply. Dashboard cards and charts recalculate for that slice.",
+    ar: "استخدم نفس تصفية المندوب والحقول في التقارير الأخرى ثم اضغط تطبيق. تُعاد حساب بطاقات اللوحة والرسوم لهذه الشريحة.",
+  },
   salesMix: { en: "Sales mix", ar: "مزيج المبيعات" },
   receivableDays: { en: "Receivable days", ar: "أيام الذمم" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
@@ -170,6 +176,8 @@ export default function BusinessDashboardPage() {
   const [salesMixReport, setSalesMixReport] = useState(null);
   const [salesMixDraft, setSalesMixDraft] = useState(() => emptyGrowthFilters());
   const [salesMixApplied, setSalesMixApplied] = useState(() => emptyGrowthFilters());
+  const [overviewDraft, setOverviewDraft] = useState(() => emptyGrowthFilters());
+  const [overviewApplied, setOverviewApplied] = useState(() => emptyGrowthFilters());
   const [amountMeasure, setAmountMeasure] = useState("sales");
   const [viewer, setViewer] = useState({ canViewProfit: true, scoped: false });
   const canViewProfit = viewer?.canViewProfit !== false;
@@ -290,6 +298,8 @@ export default function BusinessDashboardPage() {
     setSalesmanApplied((current) => applyBiReportPeriod({ ...current, groupBy: "salesman" }, periodRange));
     setSalesMixDraft((current) => applyBiReportPeriod(current, periodRange));
     setSalesMixApplied((current) => applyBiReportPeriod(current, periodRange));
+    setOverviewDraft((current) => applyBiReportPeriod(current, periodRange));
+    setOverviewApplied((current) => applyBiReportPeriod(current, periodRange));
   }, [periodRange, reportPeriod]);
 
   useEffect(() => {
@@ -359,16 +369,21 @@ export default function BusinessDashboardPage() {
   }, [reportDate, view]);
 
   const overviewFilters = useMemo(
-    () => applyBiReportPeriod(emptyGrowthFilters(), periodRange),
-    [periodRange],
+    () => applyBiReportPeriod(overviewApplied, periodRange),
+    [overviewApplied, periodRange],
   );
-  const overviewIsAllTime = !overviewFilters.dateFrom && !overviewFilters.dateTo;
+  const overviewCanWarmAllTabs = isPreparedOverviewFilters(overviewFilters);
+  const overviewHasFieldFilters = hasActiveGrowthFilters({
+    ...overviewFilters,
+    dateFrom: "",
+    dateTo: "",
+  });
 
   useEffect(() => {
     let cancelled = false;
-    // All-time: warm every tab from the prepared bundle (independent of which BI tab is open).
-    // Custom periods: only fetch while Dashboard is visible.
-    if (!overviewIsAllTime && view !== "overview") {
+    // All-time with no field filters: warm every tab from the prepared bundle.
+    // Custom periods / field filters: only fetch while Dashboard is visible.
+    if (!overviewCanWarmAllTabs && view !== "overview") {
       setOverviewLoading(false);
       return undefined;
     }
@@ -387,7 +402,7 @@ export default function BusinessDashboardPage() {
         return;
       }
 
-      const overviewKey = JSON.stringify(periodRange);
+      const overviewKey = JSON.stringify(normalizeGrowthFilters(overviewFilters));
       if (
         overviewCacheKeyRef.current === overviewKey
         && growthReport
@@ -429,41 +444,59 @@ export default function BusinessDashboardPage() {
         applyViewerMeta(payload);
         if (payload.growth) {
           setGrowthReport(payload.growth);
-          growthCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
-            ...overviewFilters,
-            groupBy: "category",
-          }));
-          const overviewMixKey = JSON.stringify(normalizeGrowthFilters(overviewFilters));
-          if (payload.growth.salesMix && (!salesMixCacheKeyRef.current || salesMixCacheKeyRef.current === overviewMixKey)) {
-            setSalesMixReport(payload.growth.salesMix);
-            salesMixCacheKeyRef.current = overviewMixKey;
+          if (overviewHasFieldFilters) {
+            // Field-filtered overview must not poison other tabs' period caches.
+            growthCacheKeyRef.current = "";
+            salesMixCacheKeyRef.current = "";
+          } else {
+            growthCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+              ...overviewFilters,
+              groupBy: "category",
+            }));
+            const overviewMixKey = JSON.stringify(normalizeGrowthFilters(overviewFilters));
+            if (payload.growth.salesMix && (!salesMixCacheKeyRef.current || salesMixCacheKeyRef.current === overviewMixKey)) {
+              setSalesMixReport(payload.growth.salesMix);
+              salesMixCacheKeyRef.current = overviewMixKey;
+            }
           }
         }
         if (payload.customer) {
           setCustomerReport(payload.customer);
-          // Prepared all-time overview includes cohort matrices; keep the cache when present.
-          customerCacheKeyRef.current = payload.customer.customerCohorts
-            ? `cohorts:${JSON.stringify(normalizeGrowthFilters({
-              ...applyBiReportPeriod(emptyCustomerGrowthFilters(), periodRange),
-              groupBy: "customer",
-            }))}`
-            : "";
+          if (overviewHasFieldFilters) {
+            customerCacheKeyRef.current = "";
+          } else {
+            // Prepared all-time overview includes cohort matrices; keep the cache when present.
+            customerCacheKeyRef.current = payload.customer.customerCohorts
+              ? `cohorts:${JSON.stringify(normalizeGrowthFilters({
+                ...applyBiReportPeriod(emptyCustomerGrowthFilters(), periodRange),
+                groupBy: "customer",
+              }))}`
+              : "";
+          }
         }
         if (payload.item) {
           setItemReport(payload.item);
-          itemCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
-            ...applyBiReportPeriod(emptyItemGrowthFilters(), periodRange),
-            groupBy: "item",
-          }));
+          if (overviewHasFieldFilters) {
+            itemCacheKeyRef.current = "";
+          } else {
+            itemCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+              ...applyBiReportPeriod(emptyItemGrowthFilters(), periodRange),
+              groupBy: "item",
+            }));
+          }
         }
         if (payload.salesman) {
           setSalesmanReport(payload.salesman);
-          salesmanCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
-            ...applyBiReportPeriod(emptySalesmanMomFilters(), periodRange),
-            groupBy: "salesman",
-          }));
+          if (overviewHasFieldFilters) {
+            salesmanCacheKeyRef.current = "";
+          } else {
+            salesmanCacheKeyRef.current = JSON.stringify(normalizeGrowthFilters({
+              ...applyBiReportPeriod(emptySalesmanMomFilters(), periodRange),
+              groupBy: "salesman",
+            }));
+          }
         }
-        if (payload.madiba) {
+        if (payload.madiba && !overviewHasFieldFilters) {
           madibaPreparedRef.current = {
             key: JSON.stringify(normalizeGrowthFilters({
               ...overviewFilters,
@@ -471,7 +504,7 @@ export default function BusinessDashboardPage() {
             })),
             report: payload.madiba,
           };
-        } else {
+        } else if (!payload.madiba || overviewHasFieldFilters) {
           madibaPreparedRef.current = null;
         }
         if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
@@ -494,10 +527,11 @@ export default function BusinessDashboardPage() {
     };
   }, [
     overviewFilters,
-    overviewIsAllTime,
+    overviewCanWarmAllTabs,
+    overviewHasFieldFilters,
     periodRange,
-    // Re-run for custom periods when opening Dashboard; all-time ignores tab switches via guard above.
-    overviewIsAllTime ? "all-time" : view,
+    // Re-run for custom periods / field filters when opening Dashboard; prepared all-time ignores tab switches.
+    overviewCanWarmAllTabs ? "all-time" : view,
   ]);
 
   useEffect(() => {
@@ -1154,22 +1188,42 @@ export default function BusinessDashboardPage() {
           ) : null}
 
           {view === "overview" ? (
-            <BiOverviewDashboard
-              language={language}
-              loading={overviewLoading}
-              growthReport={visibleGrowthReport}
-              salesmanReport={visibleSalesmanReport}
-              customerReport={visibleCustomerReport}
-              itemReport={visibleItemReport}
-              operations={{
-                redAlerts: redAlerts.length,
-                orangeAlerts: orangeAlerts.length,
-              }}
-              onOpen={(nextView, section) => {
-                setView(nextView);
-                setReportFocus(section || "");
-              }}
-            />
+            <>
+              <CategoryGrowthFilters
+                language={language}
+                draft={overviewDraft}
+                catalogs={growthCatalogs}
+                applied={overviewApplied}
+                onDraftChange={setOverviewDraft}
+                onGroupByChange={() => {}}
+                onApply={() => setOverviewApplied({ ...overviewDraft })}
+                onClear={() => {
+                  const empty = applyBiReportPeriod(emptyGrowthFilters(), periodRange);
+                  setOverviewDraft(empty);
+                  setOverviewApplied(empty);
+                }}
+                lockGroupBy="category"
+                showSearch={false}
+                showStatusFilters={false}
+                hint={t("overviewFilterHint")}
+              />
+              <BiOverviewDashboard
+                language={language}
+                loading={overviewLoading}
+                growthReport={visibleGrowthReport}
+                salesmanReport={visibleSalesmanReport}
+                customerReport={visibleCustomerReport}
+                itemReport={visibleItemReport}
+                operations={{
+                  redAlerts: redAlerts.length,
+                  orangeAlerts: orangeAlerts.length,
+                }}
+                onOpen={(nextView, section) => {
+                  setView(nextView);
+                  setReportFocus(section || "");
+                }}
+              />
+            </>
           ) : null}
 
           {view === "category-growth" ? (

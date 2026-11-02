@@ -32,8 +32,8 @@ import { isPreparedOverviewFilters } from "../../lib/biPreparedBundle";
 import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, hasActiveGrowthFilters, normalizeGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
-/** Matches typical /api/business-dashboard* maxDuration (60s). */
-const BI_REPORT_FETCH_MS = 60_000;
+/** Matches /api/business-dashboard/overview and category-growth maxDuration (90s). */
+const BI_REPORT_FETCH_MS = 90_000;
 /** UI safety net must outlive session resolve + fetch abort, or it false-alarms. */
 const BI_REPORT_SAFETY_MS = BI_REPORT_FETCH_MS + 20_000;
 const BI_RECEIVABLE_FETCH_MS = 280_000;
@@ -204,6 +204,8 @@ export default function BusinessDashboardPage() {
   const salesMixCacheKeyRef = useRef("");
   const madibaPreparedRef = useRef(null);
   const receivableCacheKeyRef = useRef("");
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const periodRange = useMemo(
     () => resolveBiReportPeriod(reportPeriod, getKsaDateString(), {
       dateFrom: customPeriodFrom,
@@ -402,7 +404,10 @@ export default function BusinessDashboardPage() {
     const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
       setOverviewLoading(false);
-      setError((current) => current || "BI dashboard timed out. Please refresh.");
+      // Background warm must not popup while the user is on another BI tab.
+      if (viewRef.current === "overview") {
+        setError((current) => current || "BI dashboard timed out. Please refresh.");
+      }
     }, BI_REPORT_SAFETY_MS);
 
     async function loadOverview() {
@@ -427,7 +432,7 @@ export default function BusinessDashboardPage() {
       }
 
       if (view === "overview") setOverviewLoading(true);
-      setError("");
+      if (viewRef.current === "overview") setError("");
 
       try {
         const session = await resolveAuthSession(supabase, 12000);
@@ -452,8 +457,8 @@ export default function BusinessDashboardPage() {
           throw new Error(payload.error || "Unable to load BI dashboard.");
         }
 
-        applyViewerMeta(payload);
         setError("");
+        applyViewerMeta(payload);
         if (payload.growth) {
           setGrowthReport(payload.growth);
           if (overviewHasFieldFilters) {
@@ -523,8 +528,10 @@ export default function BusinessDashboardPage() {
         overviewCacheKeyRef.current = overviewKey;
       } catch (err) {
         if (cancelled) return;
-        setError(err.message || "Unable to load BI dashboard.");
         overviewCacheKeyRef.current = "";
+        if (viewRef.current === "overview") {
+          setError(err.message || "Unable to load BI dashboard.");
+        }
       } finally {
         stopSafetyTimer();
         if (!cancelled) setOverviewLoading(false);

@@ -7276,6 +7276,10 @@ th:has(.moduleTableColumnFilterInput) {
   min-width: 168px;
 }
 
+.moduleBiPeriodTabs {
+  flex: 1 1 480px;
+}
+
 .moduleBiPeriodRange {
   font-size: 12px;
   font-weight: 700;

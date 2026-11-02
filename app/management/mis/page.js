@@ -12,6 +12,14 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { getKsaDateString } from "../../lib/workdayActivity";
 
+/** Default to last day of the previous KSA month (month-end pack). */
+function defaultMisAsOfDate() {
+  const today = getKsaDateString();
+  const [year, month] = today.split("-").map(Number);
+  const lastPrev = new Date(Date.UTC(year, month - 1, 0));
+  return lastPrev.toISOString().slice(0, 10);
+}
+
 const TEXT = {
   title: { en: "Management MIS", ar: "تقرير الإدارة" },
   subtitle: {
@@ -86,7 +94,7 @@ export default function MisPage() {
   const { language } = useAppLanguage();
   const t = useMemo(() => translate(language, TEXT), [language]);
   const { access, loading: accessLoading } = useModuleAccess();
-  const [asOf, setAsOf] = useState(() => getKsaDateString());
+  const [asOf, setAsOf] = useState(() => defaultMisAsOfDate());
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");

@@ -1,7 +1,8 @@
 import { OUTSTANDING_DATASET_KEY, buildOutstandingRow } from "./outstanding.js";
 import { RECEIPT_DATASET_KEY } from "./receiptRegister.js";
 import { buildMisReport } from "./misReport.js";
-import { pageActiveSales } from "./salesBiCubeServer.js";
+import { salesBiFactToGrowthRow } from "./salesBiCube.js";
+import { loadSalesBiCube, pageActiveSales } from "./salesBiCubeServer.js";
 
 const MIS_INVENTORY_SETTING_KEY = "mis_inventory_physical_v1";
 const SALES_SELECT = "transaction_date,category,sales_amount,profit_amount,salesman_code,salesman_name,customer_code,item_code,item_name";
@@ -31,7 +32,29 @@ async function readSettingJson(admin, key) {
   }
 }
 
-export async function loadMisSalesRows(admin, { toDateExclusive }) {
+function monthKey(value) {
+  const raw = String(value || "").slice(0, 10);
+  return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
+}
+
+function cubeFactsList(cube) {
+  if (Array.isArray(cube?.facts)) return cube.facts;
+  if (cube?.facts instanceof Map) return [...cube.facts.values()];
+  return [];
+}
+
+function salesRowsFromCube(cube, { asOfYm }) {
+  const rows = [];
+  for (const fact of cubeFactsList(cube)) {
+    const ym = monthKey(fact?.month);
+    if (!ym || ym > asOfYm) continue;
+    rows.push(salesBiFactToGrowthRow(fact));
+  }
+  return rows;
+}
+
+/** Fallback only when the prepared BI cube is empty / unavailable. */
+export async function loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }) {
   const rows = [];
   const selectAttempts = [
     SALES_SELECT,
@@ -43,7 +66,6 @@ export async function loadMisSalesRows(admin, { toDateExclusive }) {
   for (const select of selectAttempts) {
     try {
       rows.length = 0;
-      // Load full active_sales history (needed for first-purchase / repeat), cut off after as-of.
       await pageActiveSales(admin, select, async (page) => {
         for (const row of page || []) {
           const day = String(row.transaction_date || "").slice(0, 10);
@@ -59,6 +81,20 @@ export async function loadMisSalesRows(admin, { toDateExclusive }) {
     }
   }
   throw lastError || new Error("Unable to load active_sales for MIS");
+}
+
+export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive }) {
+  try {
+    const cube = await loadSalesBiCube(admin, { allowStale: true });
+    const rows = salesRowsFromCube(cube, { asOfYm });
+    if (rows.length) {
+      return { rows, source: cube.source || "sales_bi_cube", preparedAt: cube.builtAt || null };
+    }
+  } catch (error) {
+    console.error("MIS: sales BI cube unavailable, scanning active_sales:", error);
+  }
+  const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
+  return { rows, source: "active_sales", preparedAt: null };
 }
 
 export async function loadMisReceiptRows(admin) {
@@ -92,13 +128,14 @@ export async function loadLiveMisReport(admin, { asOfDate }) {
   const toDateExclusive = nextDay.toISOString().slice(0, 10);
   const ytdFromDate = `${year}-01-01`;
 
-  const [salesRows, receiptRows, outstandingRows, inventoryPhysical] = await Promise.all([
-    loadMisSalesRows(admin, { toDateExclusive }),
+  const [salesLoad, receiptRows, outstandingRows, inventoryPhysical] = await Promise.all([
+    loadMisSalesRows(admin, { asOfYm, toDateExclusive }),
     loadMisReceiptRows(admin),
     loadMisOutstandingRows(admin),
     loadMisInventoryPhysical(admin, asOfYm),
   ]);
 
+  const salesRows = salesLoad.rows || [];
   const report = buildMisReport({
     salesRows,
     receiptRows,
@@ -114,6 +151,8 @@ export async function loadLiveMisReport(admin, { asOfDate }) {
       receiptRowCount: receiptRows.length,
       outstandingRowCount: outstandingRows.length,
       inventorySource: inventoryPhysical == null ? null : MIS_INVENTORY_SETTING_KEY,
+      salesSource: salesLoad.source || null,
+      salesPreparedAt: salesLoad.preparedAt || null,
       ytdFromDate,
       toDateExclusive,
     },

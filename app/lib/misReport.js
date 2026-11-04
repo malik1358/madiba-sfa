@@ -81,6 +81,8 @@ export function buildMisReport({
   outstandingRows = [],
   asOfDate,
   inventoryPhysical = null,
+  /** Optional prior outstanding snapshot for MoM on AR / collection days. */
+  priorOutstanding = null,
 } = {}) {
   const asOf = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
@@ -240,13 +242,57 @@ export function buildMisReport({
   const curGp = moneyRound(cur.gp);
   const prevGp = prev ? moneyRound(prev.gp) : 0;
   const ytdSales = moneyRound(months.reduce((sum, ym) => sum + monthly[ym].sales, 0));
+  const previousYtdSales = moneyRound(
+    months.filter((ym) => prevYm && ym <= prevYm).reduce((sum, ym) => sum + monthly[ym].sales, 0),
+  );
+  const ytdGp = moneyRound(months.reduce((sum, ym) => sum + monthly[ym].gp, 0));
+  const previousYtdGp = moneyRound(
+    months.filter((ym) => prevYm && ym <= prevYm).reduce((sum, ym) => sum + monthly[ym].gp, 0),
+  );
 
-  const inventory = inventoryPhysical == null ? null : {
-    physical: moneyRound(inventoryPhysical),
-    days: curSales
-      ? Math.round(moneyRound(inventoryPhysical) / (curSales / daysInMonth(asOfYm)))
+  const inventoryInput = inventoryPhysical && typeof inventoryPhysical === "object"
+    ? inventoryPhysical
+    : inventoryPhysical == null
+      ? null
+      : { physical: inventoryPhysical };
+  const inventoryPhysicalAmount = inventoryInput == null
+    ? null
+    : Number(inventoryInput.physical ?? inventoryInput.amount ?? inventoryInput.total);
+  const previousInventoryPhysical = inventoryInput?.previousPhysical != null
+    ? Number(inventoryInput.previousPhysical)
+    : inventoryInput?.previous?.physical != null
+      ? Number(inventoryInput.previous.physical)
+      : null;
+  const inventoryDays = curSales && Number.isFinite(inventoryPhysicalAmount)
+    ? Math.round(moneyRound(inventoryPhysicalAmount) / (curSales / daysInMonth(asOfYm)))
+    : null;
+  const previousInventoryDays = prevSales && Number.isFinite(previousInventoryPhysical)
+    ? Math.round(moneyRound(previousInventoryPhysical) / (prevSales / daysInMonth(prevYm)))
+    : null;
+  const inventoryCategories = inventoryInput?.byCategory && typeof inventoryInput.byCategory === "object"
+    ? Object.entries(inventoryInput.byCategory)
+      .map(([category, amount]) => ({
+        category: String(category || "").trim() || "(blank)",
+        amount: moneyRound(amount),
+      }))
+      .filter((row) => row.amount)
+      .sort((a, b) => b.amount - a.amount)
+    : [];
+  const inventory = Number.isFinite(inventoryPhysicalAmount) ? {
+    physical: moneyRound(inventoryPhysicalAmount),
+    previousPhysical: Number.isFinite(previousInventoryPhysical)
+      ? moneyRound(previousInventoryPhysical)
       : null,
-  };
+    physicalMomPct: Number.isFinite(previousInventoryPhysical)
+      ? pctChange(inventoryPhysicalAmount, previousInventoryPhysical)
+      : null,
+    days: inventoryDays,
+    previousDays: previousInventoryDays,
+    daysMomPct: inventoryDays != null && previousInventoryDays != null
+      ? pctChange(inventoryDays, previousInventoryDays)
+      : null,
+    categories: inventoryCategories,
+  } : null;
 
   const portfolio = {};
   for (const ym of months) {
@@ -297,23 +343,72 @@ export function buildMisReport({
       previousGp: prevGp,
       previousGpPct: gpPct(prevSales, prevGp),
       ytdSales,
+      previousYtdSales,
+      ytdMomPct: pctChange(ytdSales, previousYtdSales),
+      ytdGp,
+      previousYtdGp,
+      ytdGpMomPct: pctChange(ytdGp, previousYtdGp),
       repeatSales: monthlyRepeat[asOfYm].sales,
       repeatPct: monthlyRepeat[asOfYm].pct,
       previousRepeatSales: prevYm ? monthlyRepeat[prevYm].sales : 0,
       previousRepeatPct: prevYm ? monthlyRepeat[prevYm].pct : 0,
+      repeatMomPct: pctChange(
+        monthlyRepeat[asOfYm].pct,
+        prevYm ? monthlyRepeat[prevYm].pct : 0,
+      ),
+      repeatSalesMomPct: pctChange(
+        monthlyRepeat[asOfYm].sales,
+        prevYm ? monthlyRepeat[prevYm].sales : 0,
+      ),
       newCustomers: monthlyRepeat[asOfYm].newCustomers,
       repeatCustomers: monthlyRepeat[asOfYm].repeatCustomers,
       previousNewCustomers: prevYm ? monthlyRepeat[prevYm].newCustomers : 0,
       previousRepeatCustomers: prevYm ? monthlyRepeat[prevYm].repeatCustomers : 0,
+      newCustomersMomPct: pctChange(
+        monthlyRepeat[asOfYm].newCustomers,
+        prevYm ? monthlyRepeat[prevYm].newCustomers : 0,
+      ),
       collection: collections[asOfYm] || 0,
       previousCollection: prevYm ? collections[prevYm] || 0 : 0,
       collectionMomPct: pctChange(collections[asOfYm] || 0, prevYm ? collections[prevYm] || 0 : 0),
       collectionDays: curSales ? Math.round(totalAr / (curSales / 30)) : null,
+      previousCollectionDays: prevSales && priorOutstanding?.totalAr != null
+        ? Math.round(toNumber(priorOutstanding.totalAr) / (prevSales / 30))
+        : null,
+      collectionDaysMomPct: (() => {
+        const curDays = curSales ? Math.round(totalAr / (curSales / 30)) : null;
+        const prevDays = prevSales && priorOutstanding?.totalAr != null
+          ? Math.round(toNumber(priorOutstanding.totalAr) / (prevSales / 30))
+          : null;
+        if (curDays == null || prevDays == null) return null;
+        return pctChange(curDays, prevDays);
+      })(),
       totalAr: moneyRound(totalAr),
+      previousTotalAr: priorOutstanding?.totalAr != null ? moneyRound(priorOutstanding.totalAr) : null,
+      totalArMomPct: priorOutstanding?.totalAr != null
+        ? pctChange(totalAr, priorOutstanding.totalAr)
+        : null,
       gt90Ar: moneyRound(gt90),
+      previousGt90Ar: priorOutstanding?.gt90Ar != null ? moneyRound(priorOutstanding.gt90Ar) : null,
+      gt90ArMomPct: priorOutstanding?.gt90Ar != null
+        ? pctChange(gt90, priorOutstanding.gt90Ar)
+        : null,
       arBuckets: Object.fromEntries(
         Object.entries(arBuckets).map(([k, v]) => [k, moneyRound(v)]),
       ),
+      previousArBuckets: priorOutstanding?.arBuckets
+        ? Object.fromEntries(
+          Object.entries(priorOutstanding.arBuckets).map(([k, v]) => [k, moneyRound(v)]),
+        )
+        : null,
+      arBucketMomPct: priorOutstanding?.arBuckets
+        ? Object.fromEntries(
+          Object.keys(arBuckets).map((key) => [
+            key,
+            pctChange(arBuckets[key], priorOutstanding.arBuckets[key] || 0),
+          ]),
+        )
+        : null,
     },
     monthlySales,
     monthlyGp,

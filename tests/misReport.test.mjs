@@ -29,12 +29,45 @@ test("buildMisReport computes month sales, GP, MoM and item-level repeat", () =>
   assert.ok(report.headline.salesMomPct < 0);
   assert.equal(report.headline.collection, 120000);
   assert.equal(report.headline.gt90Ar, 300000);
+  assert.equal(report.headline.previousYtdSales, 350000);
+  assert.ok(Number.isFinite(report.headline.ytdMomPct));
+  assert.ok(Number.isFinite(report.headline.repeatMomPct));
   // Hammer repurchase in Oct counts as repeat sale.
   assert.equal(report.headline.repeatSales, 150000);
   assert.equal(report.headline.newCustomers, 1);
   assert.equal(report.headline.repeatCustomers, 1);
   assert.ok(report.remarks.bottomLine);
   assert.ok(report.categories.some((row) => row.period === "2026-10" && row.category === "Building Material"));
+});
+
+test("buildMisReport attaches prior AR bucket MoM when provided", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-01", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 100000, profit_amount: 10000 },
+      { transaction_date: "2026-10-01", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 120000, profit_amount: 15000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [
+      { total_outstanding: 200000, buckets: { "0-30": 50000, "31-60": 50000, "61-90": 20000, "91-120": 30000, ">120": 50000 } },
+    ],
+    priorOutstanding: {
+      totalAr: 180000,
+      gt90Ar: 70000,
+      arBuckets: { "0-30": 40000, "31-60": 40000, "61-90": 30000, "91-120": 20000, ">120": 50000 },
+    },
+    inventoryPhysical: {
+      physical: 1000000,
+      previousPhysical: 900000,
+      byCategory: { Sundry: 600000, Fragrance: 400000 },
+    },
+  });
+  assert.equal(report.headline.gt90Ar, 80000);
+  assert.ok(report.headline.gt90ArMomPct > 0);
+  assert.equal(report.headline.previousArBuckets["0-30"], 40000);
+  assert.ok(report.headline.arBucketMomPct["0-30"] > 0);
+  assert.equal(report.inventory.physical, 1000000);
+  assert.equal(report.inventory.categories.length, 2);
 });
 
 test("buildMisReport selected portfolio excludes electronics and building material", () => {

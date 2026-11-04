@@ -148,7 +148,53 @@ export async function loadMisInventoryPhysical(admin, asOfMonth) {
   if (!payload || typeof payload !== "object") return null;
   if (payload.month && String(payload.month).slice(0, 7) !== asOfMonth) return null;
   const value = Number(payload.physical ?? payload.amount ?? payload.total);
-  return Number.isFinite(value) ? value : null;
+  if (!Number.isFinite(value)) return null;
+  const previousPhysical = Number(
+    payload.previousPhysical
+    ?? payload.previous?.physical
+    ?? payload.previous_amount
+    ?? payload.sep_physical,
+  );
+  const byCategory = payload.byCategory || payload.by_category || payload.categories || null;
+  return {
+    physical: value,
+    previousPhysical: Number.isFinite(previousPhysical) ? previousPhysical : null,
+    byCategory: byCategory && typeof byCategory === "object" ? byCategory : null,
+  };
+}
+
+function priorOutstandingFromPrepared(prepared, asOfYm) {
+  const headline = prepared?.report?.headline;
+  if (!headline) return null;
+  const preparedYm = String(prepared.asOfDate || prepared.report?.asOfMonth || "").slice(0, 7);
+  if (preparedYm && preparedYm < asOfYm) {
+    return {
+      totalAr: headline.totalAr,
+      gt90Ar: headline.gt90Ar,
+      arBuckets: headline.arBuckets || null,
+    };
+  }
+  if (preparedYm === asOfYm && (headline.previousTotalAr != null || headline.previousArBuckets)) {
+    return {
+      totalAr: headline.previousTotalAr,
+      gt90Ar: headline.previousGt90Ar,
+      arBuckets: headline.previousArBuckets || null,
+    };
+  }
+  return null;
+}
+
+async function priorOutstandingFromReceivableDays(admin, prevYm) {
+  if (!prevYm) return null;
+  try {
+    const { RECEIVABLE_DAYS_DATASET_KEY } = await import("./receivableDays.js");
+    const dataset = await readSettingJson(admin, RECEIVABLE_DAYS_DATASET_KEY);
+    const total = Number(dataset?.monthlyReceivables?.[prevYm]);
+    if (!Number.isFinite(total)) return null;
+    return { totalAr: total, gt90Ar: null, arBuckets: null };
+  } catch {
+    return null;
+  }
 }
 
 /** Build MIS metrics from cube + register datasets (used only while preparing). */
@@ -156,17 +202,25 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
   const asOf = String(asOfDate || defaultMisAsOfDate(getKsaDateString())).slice(0, 10);
   const year = asOf.slice(0, 4);
   const asOfYm = asOf.slice(0, 7);
+  const [y, m] = asOfYm.split("-").map(Number);
+  const prevYm = m > 1
+    ? `${y}-${String(m - 1).padStart(2, "0")}`
+    : `${y - 1}-12`;
   const nextDay = new Date(`${asOf}T12:00:00Z`);
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const toDateExclusive = nextDay.toISOString().slice(0, 10);
   const ytdFromDate = `${year}-01-01`;
 
-  const [salesLoad, receiptRows, outstandingRows, inventoryPhysical] = await Promise.all([
+  const existingPrepared = await readPreparedMisReport(admin).catch(() => null);
+  const [salesLoad, receiptRows, outstandingRows, inventoryPhysical, receivablePrior] = await Promise.all([
     loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube }),
     loadMisReceiptRows(admin),
     loadMisOutstandingRows(admin),
     loadMisInventoryPhysical(admin, asOfYm),
+    priorOutstandingFromReceivableDays(admin, prevYm),
   ]);
+
+  const priorOutstanding = priorOutstandingFromPrepared(existingPrepared, asOfYm) || receivablePrior;
 
   const salesRows = salesLoad.rows || [];
   const report = buildMisReport({
@@ -175,6 +229,7 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
     outstandingRows,
     asOfDate: asOf,
     inventoryPhysical,
+    priorOutstanding,
   });
 
   return {

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
+import {
+  authSalesmanCodeCandidates,
+  buildSalesmanScopeMatchers,
+  expandMutualGroupScopeIdentities,
+  mergeMutualGroupProfiles,
+} from "../../lib/mutualSalesmanGroups.js";
 import {
   customerSalesmanAssignmentMatchesScope,
   resolvePeersUnderSameHeadUserIds,
@@ -49,18 +54,7 @@ function profileCodeCandidates(profile) {
 }
 
 function authCodeCandidates(authUser) {
-  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-  const localPart = extractEmailLocalPart(authUser?.email);
-
-  return [
-    normalizeCode(metadata.salesman_code),
-    normalizeCode(metadata.salesman_name),
-    normalizeCode(metadata.head_salesman_code),
-    normalizeCode(metadata.head_salesman_name),
-    normalizeCode(localPart),
-    normalizeCode(localPart.replace(/[._-]+/g, " ")),
-    normalizeCode(localPart.replace(/[._-]+/g, "")),
-  ].filter(Boolean);
+  return authSalesmanCodeCandidates(authUser);
 }
 
 function fuzzyMatchedProfileCodes(allProfiles, authUser) {

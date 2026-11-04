@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  authSalesmanCodeCandidates,
   buildSalesmanScopeMatchers,
   expandMutualGroupScopeIdentities,
   isSoyebProfile,
@@ -17,6 +18,21 @@ const TEAM_PROFILES = [
   { salesman_code: "SOYEB", salesman_name: "Soyeb" },
   { salesman_code: "AHMED", salesman_name: "Ahmed Nabil" },
 ];
+
+test("authSalesmanCodeCandidates keeps self identity and excludes boss head metadata", () => {
+  const codes = authSalesmanCodeCandidates({
+    email: "ahmed.nabil@madiba.local",
+    user_metadata: {
+      salesman_code: "AHMED NABIL",
+      salesman_name: "Ahmed Nabil",
+      head_salesman_code: "SOYEB",
+      head_salesman_name: "Soyeb",
+    },
+  });
+
+  assert.ok(codes.includes("AHMED NABIL"));
+  assert.ok(!codes.includes("SOYEB"));
+});
 
 test("resolveMutualGroupCodes includes all team salesman codes for Parvez", () => {
   const codes = resolveMutualGroupCodes(TEAM_PROFILES, TEAM_PROFILES[1]);

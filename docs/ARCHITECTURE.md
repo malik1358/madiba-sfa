@@ -173,7 +173,7 @@ Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` ma
 
 ## Sales scope
 
-`GET /api/user/sales-scope` (and `app/lib/salesScope.js`) builds the list of salesman codes a user may see, plus `sharedCustomerCodes` from `customer_shares` for the caller. Downstream routes call helpers such as `ensureCustomerVisibleToScope` (`app/lib/customerAccess.js`). A customer is visible when any of these is true:
+`GET /api/user/sales-scope` (and `app/lib/salesScope.js`) builds the list of salesman codes a user may see, plus `sharedCustomerCodes` from `customer_shares` for the caller. Auth metadata contributes only self identity (`authSalesmanCodeCandidates`); `head_salesman_*` is the boss and is not added to `visibleSalesmanCodes` (promoters still see their head via the peer/members branch). Downstream routes call helpers such as `ensureCustomerVisibleToScope` (`app/lib/customerAccess.js`). A customer is visible when any of these is true:
 
 - The caller has all-access (admin/manager paths inside the scope builder).
 - `current_salesman_code` or `previous_salesman_code` matches the scope (assignment helpers).

@@ -3,11 +3,13 @@
 import { translate } from "../../lib/appLanguage";
 import {
   formatMoneyAmount,
+  monthChangeTone,
   previousMonthKey,
   previousQuarterKey,
   quarterKeyFromMonthKey,
   quarterLabel,
 } from "../../lib/categoryGrowth";
+import { completeSalesMixChartPeriods } from "../../lib/salesMix";
 import ExportableTable from "../../components/ExportableTable";
 import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
@@ -16,8 +18,8 @@ import CategoryGrowthFilters from "./CategoryGrowthFilters";
 const TEXT = {
   title: { en: "Cash, credit, local and import sales", ar: "مبيعات النقدي والآجل والمحلي والمستورد" },
   hint: {
-    en: "Cash/credit and origin amounts are gross invoice sales. Credit notes are split into clerical mistakes (same day or within 7 days of the named invoice) and real sales returns (after 7 days, or with no matched invoice), then deducted for net sales. Origin percentages include Other / unspecified.",
-    ar: "مبالغ النقدي والآجل والمصدر هي إجمالي مبيعات الفواتير. تُقسَّم الإشعارات الدائنة إلى أخطاء مكتبية (نفس اليوم أو خلال 7 أيام من الفاتورة المسماة) ومرتجعات مبيعات حقيقية (بعد 7 أيام أو بلا فاتورة مطابقة)، ثم تُخصم لحساب صافي المبيعات. تشمل نسب المصدر أخرى / غير محدد.",
+    en: "Cash/credit and origin amounts are invoice sales after clerical credit notes (≤7 days of the named invoice) are deducted into the linked cash/credit and local/import buckets. Real sales returns (after 7 days, or with no matched invoice) stay separate and are deducted for net sales. Charts use complete periods only (no open MTD/QTD).",
+    ar: "مبالغ النقدي والآجل والمصدر هي مبيعات الفواتير بعد خصم الإشعارات الدائنة المكتبية (≤7 أيام من الفاتورة المسماة) في خانات النقدي/الآجل والمحلي/المستورد المرتبطة. مرتجعات المبيعات الحقيقية (بعد 7 أيام أو بلا فاتورة مطابقة) تبقى منفصلة وتُخصم لصافي المبيعات. الرسوم تستخدم الفترات المكتملة فقط (بدون الشهر/الربع الجاري).",
   },
   loading: { en: "Loading sales mix...", ar: "جاري تحميل مزيج المبيعات..." },
   empty: { en: "No sales match this period and filters.", ar: "لا توجد مبيعات تطابق هذه الفترة والتصفية." },
@@ -29,8 +31,6 @@ const TEXT = {
   localImport: { en: "Local vs import", ar: "محلي مقابل مستورد" },
   cash: { en: "Cash sales", ar: "مبيعات نقدية" },
   credit: { en: "Credit sales", ar: "مبيعات آجلة" },
-  adjustmentsDeducted: { en: "Credit notes / returns (deducted)", ar: "إشعارات دائنة / مرتجعات (مخصومة)" },
-  clericalDeducted: { en: "Clerical credit notes ≤7 days (deducted)", ar: "إشعارات دائنة مكتبية ≤7 أيام (مخصومة)" },
   returnsDeducted: { en: "Real sales returns >7 days (deducted)", ar: "مرتجعات مبيعات حقيقية >7 أيام (مخصومة)" },
   local: { en: "Local sales", ar: "مبيعات محلية" },
   import: { en: "Import sales", ar: "مبيعات مستوردة" },
@@ -46,9 +46,7 @@ const TEXT = {
   netSales: { en: "Net sales", ar: "صافي المبيعات" },
   monthlyRatio: { en: "Monthly share movement", ar: "حركة الحصة الشهرية" },
   quarterlyRatio: { en: "Quarterly share movement", ar: "حركة الحصة ربع السنوية" },
-  grossInvoiceSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
-  movementHint: { en: "Shares are calculated from summed amounts in each period. Change is shown in percentage points (pp).", ar: "تُحسب الحصص من مجموع مبالغ كل فترة. ويظهر التغير بالنقاط المئوية (pp)." },
-  shareOfSales: { en: "of sales", ar: "من المبيعات" },
+  movementHint: { en: "Shares are calculated from summed amounts in each period. Change is shown in percentage points (pp). Charts omit the open period.", ar: "تُحسب الحصص من مجموع مبالغ كل فترة. ويظهر التغير بالنقاط المئوية (pp). الرسوم تستبعد الفترة الجارية." },
   movement: { en: "Share movement", ar: "حركة الحصة" },
   total: { en: "Total", ar: "الإجمالي" },
   share: { en: "of sales", ar: "من المبيعات" },
@@ -63,10 +61,10 @@ const ORIGIN_SERIES = [
   ["import_sales_amount", "import", "#ea580c"],
   ["unclassified_origin_sales_amount", "other", "#64748b"],
 ];
-const ADJUSTMENT_ENTRIES = [
-  ["clerical_adjustments_amount", "clericalDeducted"],
+const RETURN_ENTRIES = [
   ["sales_returns_amount", "returnsDeducted"],
 ];
+const RECON_TONE_FIELDS = new Set(["sales_returns_amount", "net_sales"]);
 
 function monthLabel(month, currentMonth, language) {
   const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
@@ -84,11 +82,12 @@ function shareLabel(amount, total, language) {
 
 function MixSection({ language, title, entries, adjustmentEntry, valuesByPeriod, periods, currentPeriod, periodLabel, previousKeyOf, filename, sheetName }) {
   const t = translate(language, TEXT);
+  const chartPeriods = completeSalesMixChartPeriods(periods, currentPeriod);
   const chartSeries = entries.map(([field, label, color]) => ({
     key: field,
     label: t(label),
     color,
-    values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] || 0)),
+    values: chartPeriods.map((period) => Number(valuesByPeriod?.[period]?.[field] || 0)),
   }));
   const adjustmentEntries = Array.isArray(adjustmentEntry)
     ? adjustmentEntry
@@ -109,7 +108,7 @@ function MixSection({ language, title, entries, adjustmentEntry, valuesByPeriod,
       <div className="moduleBiChartGrid">
         <GrowthChartPanel title={t("monthly")}>
           <GrowthTrendChart
-            periods={periods}
+            periods={chartPeriods}
             series={chartSeries}
             periodLabel={periodLabel}
             formatValue={formatMoneyAmount}
@@ -145,11 +144,12 @@ function formatPointMovement(current, previous) {
 
 function RatioMovementSection({ language, title, entries, periods, currentPeriod, valuesByPeriod, filename, sheetName, periodLabel, previousKeyOf }) {
   const t = translate(language, TEXT);
+  const chartPeriods = completeSalesMixChartPeriods(periods, currentPeriod);
   const series = entries.map(([field, label, color]) => ({
     key: field,
     label: t(label),
     color,
-    values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] ?? 0)),
+    values: chartPeriods.map((period) => Number(valuesByPeriod?.[period]?.[field] ?? 0)),
   }));
 
   return (
@@ -158,7 +158,7 @@ function RatioMovementSection({ language, title, entries, periods, currentPeriod
       <p className="moduleHint">{t("movementHint")}</p>
       <div className="moduleBiChartGrid">
         <GrowthChartPanel title={t("movement")}>
-          <GrowthTrendChart periods={periods} series={series} periodLabel={periodLabel} formatValue={formatShare} />
+          <GrowthTrendChart periods={chartPeriods} series={series} periodLabel={periodLabel} formatValue={formatShare} />
         </GrowthChartPanel>
       </div>
       <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
@@ -197,7 +197,26 @@ function RatioMovementSection({ language, title, entries, periods, currentPeriod
   );
 }
 
-function SalesReconciliationSection({ language, title, periodHeading, periods, valuesByPeriod, periodLabel, filename, sheetName }) {
+function reconciliationValuesForPeriod(row = {}) {
+  const cash = Number(row.cash_sales_amount || 0);
+  const credit = Number(row.credit_sales_amount || 0);
+  const clerical = Number(row.clerical_adjustments_amount || 0);
+  const returns = Number(row.sales_returns_amount || 0);
+  const splitTotal = clerical + returns;
+  const adjustments = splitTotal || Number(row.sales_adjustments_amount || 0);
+  const payment = cash + credit;
+  // Payment already includes clerical folds; restore gross for the reconciliation grid.
+  const gross = payment - clerical;
+  return {
+    gross_invoice_sales: gross,
+    clerical_adjustments_amount: clerical,
+    sales_returns_amount: splitTotal ? returns : Number(row.sales_adjustments_amount || 0),
+    sales_adjustments_amount: adjustments,
+    net_sales: payment + (splitTotal ? returns : Number(row.sales_adjustments_amount || 0)),
+  };
+}
+
+function SalesReconciliationSection({ language, title, periodHeading, periods, currentPeriod, valuesByPeriod, periodLabel, filename, sheetName }) {
   const t = translate(language, TEXT);
   const fields = [
     ["gross_invoice_sales", t("grossSales")],
@@ -206,21 +225,6 @@ function SalesReconciliationSection({ language, title, periodHeading, periods, v
     ["sales_adjustments_amount", t("adjustments")],
     ["net_sales", t("netSales")],
   ];
-  const valuesForPeriod = (period) => {
-    const row = valuesByPeriod?.[period] || {};
-    const gross = Number(row.cash_sales_amount || 0) + Number(row.credit_sales_amount || 0);
-    const clerical = Number(row.clerical_adjustments_amount || 0);
-    const returns = Number(row.sales_returns_amount || 0);
-    const splitTotal = clerical + returns;
-    const adjustments = splitTotal || Number(row.sales_adjustments_amount || 0);
-    return {
-      gross_invoice_sales: gross,
-      clerical_adjustments_amount: clerical,
-      sales_returns_amount: splitTotal ? returns : Number(row.sales_adjustments_amount || 0),
-      sales_adjustments_amount: adjustments,
-      net_sales: gross + adjustments,
-    };
-  };
 
   return (
     <section className="moduleSection">
@@ -230,14 +234,39 @@ function SalesReconciliationSection({ language, title, periodHeading, periods, v
           <thead>
             <tr>
               <th>{periodHeading}</th>
-              {periods.map((period) => <th key={period}>{periodLabel(period)}</th>)}
+              {periods.map((period) => (
+                <th key={period} className={period === currentPeriod ? "moduleBiMonthHead--current" : ""}>
+                  {periodLabel(period)}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {fields.map(([field, label]) => (
               <tr key={field}>
                 <td>{label}</td>
-                {periods.map((period) => <td key={period}>{formatMoneyAmount(valuesForPeriod(period)[field])}</td>)}
+                {periods.map((period, index) => {
+                  const values = reconciliationValuesForPeriod(valuesByPeriod?.[period] || {});
+                  const amount = values[field];
+                  const previousKey = index > 0 ? periods[index - 1] : "";
+                  const previous = previousKey
+                    ? reconciliationValuesForPeriod(valuesByPeriod?.[previousKey] || {})[field]
+                    : null;
+                  const tone = RECON_TONE_FIELDS.has(field)
+                    ? monthChangeTone(amount, previous, Boolean(previousKey))
+                    : "";
+                  return (
+                    <td
+                      key={period}
+                      className={[
+                        tone ? `moduleBiMonthCell--${tone}` : "",
+                        period === currentPeriod ? "moduleBiMonthCell--current" : "",
+                      ].filter(Boolean).join(" ")}
+                    >
+                      {formatMoneyAmount(amount)}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -246,6 +275,7 @@ function SalesReconciliationSection({ language, title, periodHeading, periods, v
     </section>
   );
 }
+
 function MixCards({ language, mix }) {
   const t = translate(language, TEXT);
   const paymentTotal = Number(mix?.totals?.cash_sales_amount || 0) + Number(mix?.totals?.credit_sales_amount || 0);
@@ -258,9 +288,7 @@ function MixCards({ language, mix }) {
     ["local_sales_amount", t("local"), originTotal, "moduleBusinessKpi--green"],
     ["import_sales_amount", t("import"), originTotal, "moduleBusinessKpi--orange"],
     ["unclassified_origin_sales_amount", t("other"), originTotal, ""],
-    ["clerical_adjustments_amount", t("clericalAdjustments"), null, "moduleBusinessKpi--orange"],
     ["sales_returns_amount", t("salesReturns"), null, "moduleBusinessKpi--red"],
-    ["sales_adjustments_amount", t("adjustments"), null, "moduleBusinessKpi--red"],
     ["net_sales", t("netSales"), null, "moduleBusinessKpi--green"],
   ];
 
@@ -345,6 +373,7 @@ export default function SalesMixReport({
         title={t("monthlyReconciliation")}
         periodHeading={t("monthly")}
         periods={periods}
+        currentPeriod={currentMonth}
         valuesByPeriod={mix.monthly}
         periodLabel={monthPeriodLabel}
         filename="monthly-gross-to-net-sales"
@@ -355,6 +384,7 @@ export default function SalesMixReport({
         title={t("quarterlyReconciliation")}
         periodHeading={t("quarterly")}
         periods={quarters}
+        currentPeriod={currentQuarter}
         valuesByPeriod={mix.quarterly}
         periodLabel={quarterPeriodLabel}
         filename="quarterly-gross-to-net-sales"
@@ -364,7 +394,7 @@ export default function SalesMixReport({
         language={language}
         title={t("cashCredit")}
         entries={PAYMENT_SERIES}
-        adjustmentEntry={ADJUSTMENT_ENTRIES}
+        adjustmentEntry={RETURN_ENTRIES}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -377,7 +407,7 @@ export default function SalesMixReport({
         language={language}
         title={t("localImport")}
         entries={ORIGIN_SERIES}
-        adjustmentEntry={ADJUSTMENT_ENTRIES}
+        adjustmentEntry={RETURN_ENTRIES}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -390,7 +420,7 @@ export default function SalesMixReport({
         language={language}
         title={`${t("quarterly")} · ${t("cashCredit")}`}
         entries={PAYMENT_SERIES}
-        adjustmentEntry={ADJUSTMENT_ENTRIES}
+        adjustmentEntry={RETURN_ENTRIES}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}
@@ -403,7 +433,7 @@ export default function SalesMixReport({
         language={language}
         title={`${t("quarterly")} · ${t("localImport")}`}
         entries={ORIGIN_SERIES}
-        adjustmentEntry={ADJUSTMENT_ENTRIES}
+        adjustmentEntry={RETURN_ENTRIES}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}

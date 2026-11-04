@@ -4,6 +4,8 @@
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
+import { receivableDays, receivableYtdDays } from "./receivableDays.js";
+
 const PORTFOLIO_EXCLUDE = new Set([
   "electronics",
   "building material",
@@ -122,6 +124,13 @@ export function buildMisReport({
   const categoryByPeriod = new Map();
   const salesmanByPeriod = new Map();
   const madibaByPeriod = new Map();
+  const monthlyMadibaSales = Object.fromEntries(months.map((ym) => [ym, 0]));
+  const monthlyMadibaByCategory = Object.fromEntries(months.map((ym) => [ym, {
+    Sundry: 0,
+    "Personal Care": 0,
+    Fragrance: 0,
+    "Baby Care": 0,
+  }]));
   const portfolioMonthly = Object.fromEntries(months.map((ym) => [ym, {
     sales: 0,
     gp: 0,
@@ -181,11 +190,15 @@ export function buildMisReport({
 
     const itemName = String(row.item_name || "").toLowerCase();
     if (itemName.includes("madiba") && MADIBA_FOCUS.has(catNorm)) {
+      const focus = catNorm === "personal care" ? "Personal Care"
+        : catNorm === "baby care" ? "Baby Care"
+          : catNorm === "fragrance" ? "Fragrance"
+            : "Sundry";
+      if (monthlyMadibaSales[ym] != null) {
+        monthlyMadibaSales[ym] += amount;
+        monthlyMadibaByCategory[ym][focus] += amount;
+      }
       for (const period of periodKeys) {
-        const focus = catNorm === "personal care" ? "Personal Care"
-          : catNorm === "baby care" ? "Baby Care"
-            : catNorm === "fragrance" ? "Fragrance"
-              : "Sundry";
         const key = `${period}||${focus}`;
         const focusRow = madibaByPeriod.get(key) || { period, category: focus, sales: 0, gp: 0 };
         focusRow.sales += amount;
@@ -249,6 +262,19 @@ export function buildMisReport({
   const previousYtdGp = moneyRound(
     months.filter((ym) => prevYm && ym <= prevYm).reduce((sum, ym) => sum + monthly[ym].gp, 0),
   );
+
+  // Match BI Net receivable days: (AR ÷ YTD sales) × days YTD — not AR ÷ (month sales / 30).
+  const collectionDays = receivableDays(totalAr, ytdSales, receivableYtdDays(asOfYm, asOf));
+  const previousCollectionDays = prevYm && priorOutstanding?.totalAr != null
+    ? receivableDays(
+      priorOutstanding.totalAr,
+      previousYtdSales,
+      receivableYtdDays(prevYm),
+    )
+    : null;
+  const collectionDaysMomPct = collectionDays != null && previousCollectionDays != null
+    ? pctChange(collectionDays, previousCollectionDays)
+    : null;
 
   const inventoryInput = inventoryPhysical && typeof inventoryPhysical === "object"
     ? inventoryPhysical
@@ -371,18 +397,9 @@ export function buildMisReport({
       collection: collections[asOfYm] || 0,
       previousCollection: prevYm ? collections[prevYm] || 0 : 0,
       collectionMomPct: pctChange(collections[asOfYm] || 0, prevYm ? collections[prevYm] || 0 : 0),
-      collectionDays: curSales ? Math.round(totalAr / (curSales / 30)) : null,
-      previousCollectionDays: prevSales && priorOutstanding?.totalAr != null
-        ? Math.round(toNumber(priorOutstanding.totalAr) / (prevSales / 30))
-        : null,
-      collectionDaysMomPct: (() => {
-        const curDays = curSales ? Math.round(totalAr / (curSales / 30)) : null;
-        const prevDays = prevSales && priorOutstanding?.totalAr != null
-          ? Math.round(toNumber(priorOutstanding.totalAr) / (prevSales / 30))
-          : null;
-        if (curDays == null || prevDays == null) return null;
-        return pctChange(curDays, prevDays);
-      })(),
+      collectionDays,
+      previousCollectionDays,
+      collectionDaysMomPct,
       totalAr: moneyRound(totalAr),
       previousTotalAr: priorOutstanding?.totalAr != null ? moneyRound(priorOutstanding.totalAr) : null,
       totalArMomPct: priorOutstanding?.totalAr != null
@@ -413,6 +430,14 @@ export function buildMisReport({
     monthlySales,
     monthlyGp,
     monthlyRepeat,
+    monthlyMadibaSales: Object.fromEntries(
+      months.map((ym) => [ym, moneyRound(monthlyMadibaSales[ym])]),
+    ),
+    monthlyMadibaByCategory: Object.fromEntries(
+      months.map((ym) => [ym, Object.fromEntries(
+        Object.entries(monthlyMadibaByCategory[ym]).map(([cat, value]) => [cat, moneyRound(value)]),
+      )]),
+    ),
     collections,
     inventory,
     portfolio,
@@ -431,7 +456,7 @@ export function buildMisReport({
       repeatPct: monthlyRepeat[asOfYm].pct,
       prevRepeatPct: prevYm ? monthlyRepeat[prevYm].pct : 0,
       gt90: moneyRound(gt90),
-      collectionDays: curSales ? Math.round(totalAr / (curSales / 30)) : null,
+      collectionDays,
       portfolioGpPct: portfolio[asOfYm]?.gpPct || 0,
     }),
   };

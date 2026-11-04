@@ -24,6 +24,16 @@ function isMissingTableError(error) {
     || (message.includes("relation") && message.includes("does not exist"));
 }
 
+function parseSettingJsonValue(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "object") return raw;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+}
+
 async function readSettingJson(admin, key) {
   const { data, error } = await admin
     .from("system_settings")
@@ -34,12 +44,7 @@ async function readSettingJson(admin, key) {
     if (isMissingTableError(error)) return null;
     throw error;
   }
-  if (!data?.setting_value) return null;
-  try {
-    return JSON.parse(String(data.setting_value));
-  } catch {
-    return null;
-  }
+  return parseSettingJsonValue(data?.setting_value);
 }
 
 async function writeSettingJson(admin, key, value) {
@@ -143,24 +148,41 @@ export async function loadMisOutstandingRows(admin) {
   return rawRows.map((row) => buildOutstandingRow(row)).filter(Boolean);
 }
 
-export async function loadMisInventoryPhysical(admin, asOfMonth) {
-  const payload = await readSettingJson(admin, MIS_INVENTORY_SETTING_KEY);
+function normalizeInventoryPayload(payload, asOfMonth) {
   if (!payload || typeof payload !== "object") return null;
-  if (payload.month && String(payload.month).slice(0, 7) !== asOfMonth) return null;
-  const value = Number(payload.physical ?? payload.amount ?? payload.total);
+  const month = String(asOfMonth || "").slice(0, 7);
+  let entry = payload;
+  if (payload.byMonth && typeof payload.byMonth === "object" && month) {
+    entry = payload.byMonth[month] || payload.byMonth[month.replace("-", "")] || null;
+  } else if (payload.months && typeof payload.months === "object" && month) {
+    entry = payload.months[month] || null;
+  } else if (payload.month && String(payload.month).slice(0, 7) !== month) {
+    return null;
+  }
+  if (!entry || typeof entry !== "object") return null;
+  const value = Number(entry.physical ?? entry.amount ?? entry.total);
   if (!Number.isFinite(value)) return null;
   const previousPhysical = Number(
-    payload.previousPhysical
-    ?? payload.previous?.physical
-    ?? payload.previous_amount
-    ?? payload.sep_physical,
+    entry.previousPhysical
+    ?? entry.previous?.physical
+    ?? entry.previous_amount
+    ?? entry.sep_physical
+    ?? payload.previousPhysical,
   );
-  const byCategory = payload.byCategory || payload.by_category || payload.categories || null;
+  const byCategory = entry.byCategory || entry.by_category || entry.categories
+    || payload.byCategory || payload.by_category || null;
   return {
     physical: value,
     previousPhysical: Number.isFinite(previousPhysical) ? previousPhysical : null,
-    byCategory: byCategory && typeof byCategory === "object" ? byCategory : null,
+    byCategory: byCategory && typeof byCategory === "object" && !Array.isArray(byCategory)
+      ? byCategory
+      : null,
   };
+}
+
+export async function loadMisInventoryPhysical(admin, asOfMonth) {
+  const payload = await readSettingJson(admin, MIS_INVENTORY_SETTING_KEY);
+  return normalizeInventoryPayload(payload, asOfMonth);
 }
 
 function priorOutstandingFromPrepared(prepared, asOfYm) {

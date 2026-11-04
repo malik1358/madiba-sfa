@@ -146,6 +146,69 @@ test("BI overview bundle builds all report slices from one cube including custom
   }
 });
 
+test("team-scoped BI overview early-filters salesman rows and reuses memory cache", async () => {
+  clearSalesBiCubeMemory();
+  clearPreparedBiOverviewMemory();
+  try {
+    const facts = [
+      ...sampleFacts,
+      {
+        ...sampleFacts[0],
+        month: "2026-08",
+        category: "Building",
+        salesman_code: "NABIL",
+        salesman_name: "Nabil",
+        customer_code: "C9",
+        customer_name: "Team shop",
+        item_code: "I9",
+        item_name: "Cement",
+        sales_amount: 50,
+        profit_amount: 5,
+        quantity: 1,
+        line_count: 1,
+        cash_sales_amount: 50,
+        credit_sales_amount: 0,
+        local_sales_amount: 50,
+        import_sales_amount: 0,
+      },
+    ];
+    const admin = overviewAdmin({
+      batchId: "batch-1",
+      builtAt: new Date().toISOString(),
+      sourceRowCount: facts.length,
+      facts,
+    });
+    const filters = {
+      values: { salesman_code: ["NABIL"] },
+    };
+
+    const first = await loadBiOverviewBundle(admin, {
+      asOfDate: "2026-09-15",
+      filters,
+      catalogMatchedOnly: true,
+      includeProfit: false,
+    });
+    assert.equal(first.meta.servedFromScopedMemory, undefined);
+    assert.equal(first.growth.measures?.profit, undefined);
+    assert.equal(first.growth.lifetimeTotal, 50);
+    assert.ok((first.salesman?.groups || []).length >= 1);
+    assert.ok((first.salesman?.groups || []).every((row) => /nabil/i.test(String(row.label || row.key || ""))));
+    assert.equal(first.madiba?.meta?.skippedForScope, true);
+
+    const second = await loadBiOverviewBundle(admin, {
+      asOfDate: "2026-09-15",
+      filters,
+      catalogMatchedOnly: true,
+      includeProfit: false,
+    });
+    assert.equal(second.meta.servedFromScopedMemory, true);
+    assert.equal(second.growth.lifetimeTotal, first.growth.lifetimeTotal);
+  } finally {
+    clearSalesBiCubeMemory();
+    clearPreparedBiOverviewMemory();
+  }
+});
+
 test("BI overview serves the prepared all-time bundle without recomputing", async () => {
   clearSalesBiCubeMemory();
   clearPreparedBiOverviewMemory();

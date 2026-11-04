@@ -11,7 +11,7 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { isAdminRole } from "../../lib/moduleAccess";
+import { canViewManagementReports, isAdminRole, normalizeAccessRole } from "../../lib/moduleAccess";
 import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthFilters from "./CategoryGrowthFilters";
 import CategoryGrowthReport from "./CategoryGrowthReport";
@@ -188,8 +188,8 @@ export default function BusinessDashboardPage() {
   const [overviewDraft, setOverviewDraft] = useState(() => emptyGrowthFilters());
   const [overviewApplied, setOverviewApplied] = useState(() => emptyGrowthFilters());
   const [amountMeasure, setAmountMeasure] = useState("sales");
-  const [viewer, setViewer] = useState({ canViewProfit: true, scoped: false });
-  const canViewProfit = viewer?.canViewProfit !== false;
+  const [viewer, setViewer] = useState({ canViewProfit: false, scoped: false });
+  const canViewProfit = viewer?.canViewProfit === true;
   const teamScoped = Boolean(viewer?.scoped);
   const effectiveMeasure = canViewProfit ? amountMeasure : "sales";
   const [reportPeriod, setReportPeriod] = useState(DEFAULT_BI_REPORT_PERIOD);
@@ -233,11 +233,12 @@ export default function BusinessDashboardPage() {
 
   function applyViewerMeta(payload) {
     if (!payload?.viewer || typeof payload.viewer !== "object") return;
+    const allowProfit = payload.viewer.canViewProfit === true;
     setViewer({
-      canViewProfit: payload.viewer.canViewProfit !== false,
+      canViewProfit: allowProfit,
       scoped: Boolean(payload.viewer.scoped),
     });
-    if (payload.viewer.canViewProfit === false) {
+    if (!allowProfit) {
       setAmountMeasure("sales");
     }
   }
@@ -258,9 +259,21 @@ export default function BusinessDashboardPage() {
           .eq("id", session.user.id)
           .maybeSingle();
         if (cancelled) return;
-        setIsAdminViewer(isAdminRole(data?.role));
+        const role = normalizeAccessRole(data?.role);
+        const allowProfit = canViewManagementReports(role);
+        setIsAdminViewer(isAdminRole(role));
+        // Hide Profit before overview meta arrives (salesmen must never flash GP controls).
+        setViewer({
+          canViewProfit: allowProfit,
+          scoped: role === "salesman" && !allowProfit,
+        });
+        if (!allowProfit) setAmountMeasure("sales");
       } catch {
-        if (!cancelled) setIsAdminViewer(false);
+        if (!cancelled) {
+          setIsAdminViewer(false);
+          setViewer({ canViewProfit: false, scoped: false });
+          setAmountMeasure("sales");
+        }
       }
     }
     void loadViewerRole();

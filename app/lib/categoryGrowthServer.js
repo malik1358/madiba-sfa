@@ -20,6 +20,7 @@ import {
   preparedOverviewFingerprint,
   serializePreparedOverviewBundle,
 } from "./biPreparedBundle.js";
+import { filterRowsBySalesmanCodes } from "./businessDashboardAccess.js";
 import { applyCustomerSalesmanOwnershipToRows } from "./customerSalesmanOwnership.js";
 import { loadCustomerSalesmanOwnershipMap } from "./customerSalesmanOwnershipServer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
@@ -32,7 +33,48 @@ import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 const MAX_PREPARED_BUNDLE_CHARS = 3500000;
+const SCOPED_OVERVIEW_CACHE_MAX = 32;
 let memoryPreparedOverview = null;
+const memoryScopedOverview = new Map();
+
+function salesmanCodesFromFilters(filters) {
+  return [...new Set(
+    (filters?.values?.salesman_code || [])
+      .map((code) => String(code || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+}
+
+function prefilterOverviewFacts(facts, filters) {
+  const codes = new Set(salesmanCodesFromFilters(filters));
+  if (!codes.size) return facts || [];
+  return (facts || []).filter((fact) => codes.has(String(fact?.salesman_code || "").trim().toUpperCase()));
+}
+
+function prefilterOverviewSourceRows(rows, filters) {
+  const codes = salesmanCodesFromFilters(filters);
+  if (!codes.length) return rows || [];
+  return filterRowsBySalesmanCodes(rows, codes);
+}
+
+function scopedOverviewCacheKey({ batchId, fingerprint, catalogMatchedOnly, includeProfit }) {
+  return [
+    String(batchId || ""),
+    String(fingerprint || ""),
+    catalogMatchedOnly ? "1" : "0",
+    includeProfit === false ? "0" : "1",
+  ].join("|");
+}
+
+function rememberScopedOverview(key, bundle) {
+  if (!key || !bundle) return;
+  if (memoryScopedOverview.has(key)) memoryScopedOverview.delete(key);
+  memoryScopedOverview.set(key, bundle);
+  while (memoryScopedOverview.size > SCOPED_OVERVIEW_CACHE_MAX) {
+    const oldest = memoryScopedOverview.keys().next().value;
+    memoryScopedOverview.delete(oldest);
+  }
+}
 
 const SALES_SELECTS = [
   "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
@@ -448,6 +490,7 @@ async function writePreparedOverviewBundle(admin, prepared) {
 
 export function clearPreparedBiOverviewMemory() {
   memoryPreparedOverview = null;
+  memoryScopedOverview.clear();
 }
 
 async function computeBiOverviewBundle(admin, {
@@ -487,10 +530,12 @@ async function computeBiOverviewBundle(admin, {
         };
       }
       if (loadedCube?.facts) {
+        const scopedFacts = prefilterOverviewFacts(loadedCube.facts, base);
         sourceRows = applyCustomerSalesmanOwnershipToRows(
-          (loadedCube.facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
+          scopedFacts.map((fact) => salesBiFactToGrowthRow(fact)),
           ownershipMap,
         );
+        sourceRows = prefilterOverviewSourceRows(sourceRows, base);
         cubeMeta = cubeExtraMeta(loadedCube);
         buildFromRows = (groupBy, options = {}) => reportFromRows(sourceRows, {
           asOfDate,
@@ -518,7 +563,7 @@ async function computeBiOverviewBundle(admin, {
       catalogMatchedOnly,
       includeProfit,
     });
-    sourceRows = live.rows || [];
+    sourceRows = prefilterOverviewSourceRows(live.rows || [], base);
     cubeMeta = { source: "active_sales", preparedAt: null, stale: false };
     buildFromRows = (groupBy, options = {}) => reportFromRows(sourceRows, {
       asOfDate,
@@ -533,6 +578,19 @@ async function computeBiOverviewBundle(admin, {
     });
   }
 
+  // Team-scoped / salesman-filtered overviews never reuse the company MADIBA slice client-side.
+  const skipMadiba = catalogMatchedOnly === true || salesmanCodesFromFilters(base).length > 0;
+  const outstandingPromise = sourceRows.length
+    ? readOutstandingDataset(admin).catch((error) => {
+      console.error("Avg paying days enrichment failed for BI overview:", error);
+      return null;
+    })
+    : Promise.resolve(null);
+  const teamMembersPromise = loadSalesmanTeamMembers(admin).catch((error) => {
+    console.error("Team month-on-month grouping failed for BI overview:", error);
+    return [];
+  });
+
   const growth = buildFromRows("category");
   // Customer cohorts are prepared with the default all-time bundle so the Customer growth tab opens without a second scan.
   const customer = reportFromRows(sourceRows, {
@@ -543,21 +601,31 @@ async function computeBiOverviewBundle(admin, {
     includeCohorts: true,
     includeSalesMix: false,
     includeCatalogs: false,
+    catalogMatchedOnly,
+    includeProfit,
   });
   const item = buildFromRows("item");
   const salesman = buildFromRows("salesman");
-  const madiba = reportFromRows(sourceRows, {
-    asOfDate,
-    filters: normalizeGrowthFilters({ ...base, groupBy: "category", itemNameContains: "MADIBA" }),
-    extraMeta: { ...cubeMeta, brand: "MADIBA" },
-    alignDates: Boolean(loadedCube?.facts),
-    includeCohorts: false,
-    includeSalesMix: false,
-    includeCatalogs: false,
-  });
+  const madiba = skipMadiba
+    ? packReport(createCategoryGrowthAccumulator(), {
+      asOfDate,
+      filters: normalizeGrowthFilters({ ...base, groupBy: "category", itemNameContains: "MADIBA" }),
+      extraMeta: { ...cubeMeta, brand: "MADIBA", skippedForScope: true },
+    })
+    : reportFromRows(sourceRows, {
+      asOfDate,
+      filters: normalizeGrowthFilters({ ...base, groupBy: "category", itemNameContains: "MADIBA" }),
+      extraMeta: { ...cubeMeta, brand: "MADIBA" },
+      alignDates: Boolean(loadedCube?.facts),
+      includeCohorts: false,
+      includeSalesMix: false,
+      includeCatalogs: false,
+      catalogMatchedOnly,
+      includeProfit,
+    });
 
   try {
-    const members = await loadSalesmanTeamMembers(admin);
+    const members = await teamMembersPromise;
     attachSalesmanTeams(salesman, {
       sourceRows,
       members,
@@ -574,14 +642,16 @@ async function computeBiOverviewBundle(admin, {
   let salesmanWithDays = salesman;
   let madibaWithDays = madiba;
   try {
-    if (sourceRows.length) {
-      const outstanding = await readOutstandingDataset(admin);
+    const outstanding = await outstandingPromise;
+    if (outstanding && sourceRows.length) {
       const customerDays = customerAvgPayingDaysFromOutstandingDataset(outstanding);
       growthWithDays = attachAvgPayingDaysToGrowthReport(growth, sourceRows, customerDays);
       customerWithDays = attachAvgPayingDaysToGrowthReport(customer, sourceRows, customerDays);
       itemWithDays = attachAvgPayingDaysToGrowthReport(item, sourceRows, customerDays);
       salesmanWithDays = attachAvgPayingDaysToGrowthReport(salesman, sourceRows, customerDays);
-      madibaWithDays = attachAvgPayingDaysToGrowthReport(madiba, sourceRows, customerDays);
+      if (!skipMadiba) {
+        madibaWithDays = attachAvgPayingDaysToGrowthReport(madiba, sourceRows, customerDays);
+      }
     }
   } catch (error) {
     console.error("Avg paying days enrichment failed for BI overview:", error);
@@ -671,12 +741,34 @@ export async function loadBiOverviewBundle(admin, {
     }
   }
 
+  // Team-scoped / filtered overviews cannot use the company prepared bundle; cache per scope in-process.
+  const batchId = await activeSalesBatchId(admin).catch(() => "");
+  const scopedKey = scopedOverviewCacheKey({
+    batchId,
+    fingerprint,
+    catalogMatchedOnly,
+    includeProfit,
+  });
+  if (!canUsePrepared && memoryScopedOverview.has(scopedKey)) {
+    const cached = memoryScopedOverview.get(scopedKey);
+    return {
+      ...cached,
+      meta: {
+        ...cached.meta,
+        servedFromScopedMemory: true,
+      },
+    };
+  }
+
   const bundle = await computeBiOverviewBundle(admin, {
     asOfDate,
     filters: base,
     catalogMatchedOnly,
     includeProfit,
   });
+  if (!canUsePrepared && !bundle?.meta?.missingTable) {
+    rememberScopedOverview(scopedKey, bundle);
+  }
   if (canUsePrepared && !bundle?.meta?.missingTable) {
     try {
       const batchId = await activeSalesBatchId(admin);

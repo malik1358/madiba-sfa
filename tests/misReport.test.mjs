@@ -70,6 +70,39 @@ test("buildMisReport attaches prior AR bucket MoM when provided", () => {
   assert.equal(report.inventory.categories.length, 2);
 });
 
+test("buildMisReport collection days uses YTD DSO not month/30", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-01-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 900000, profit_amount: 90000 },
+      { transaction_date: "2026-10-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 100000, profit_amount: 10000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [
+      { total_outstanding: 500000, buckets: { "0-30": 500000, "31-60": 0, "61-90": 0, "91-120": 0, ">120": 0 } },
+    ],
+  });
+  // (500000 / 1000000) × 304 = 152 — not 500000 / (100000 / 30) = 150.
+  assert.equal(report.headline.collectionDays, 152);
+  assert.match(report.remarks.receivables, /collection days ~152/);
+});
+
+test("buildMisReport tracks MADIBA monthly sales for focus categories", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-10", customer_code: "1", item_name: "MADIBA Soap", category: "Personal Care", salesman_name: "A", sales_amount: 40000, profit_amount: 8000 },
+      { transaction_date: "2026-10-10", customer_code: "1", item_name: "MADIBA Cream", category: "Personal Care", salesman_name: "A", sales_amount: 60000, profit_amount: 12000 },
+      { transaction_date: "2026-10-11", customer_code: "2", item_name: "Other Soap", category: "Personal Care", salesman_name: "A", sales_amount: 50000, profit_amount: 5000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  assert.equal(report.monthlyMadibaSales["2026-09"], 40000);
+  assert.equal(report.monthlyMadibaSales["2026-10"], 60000);
+  assert.equal(report.monthlyMadibaByCategory["2026-10"]["Personal Care"], 60000);
+});
+
 test("buildMisReport selected portfolio excludes electronics and building material", () => {
   const report = buildMisReport({
     asOfDate: "2026-10-31",

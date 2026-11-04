@@ -289,6 +289,27 @@ function buildSlides(report, language) {
       values: cumulativeSeries(months, report.monthlySales),
     },
   ];
+  const madibaFocusCats = ["Sundry", "Personal Care", "Fragrance", "Baby Care"];
+  const madibaCatColors = {
+    Sundry: "#0f4c5c",
+    "Personal Care": "#0891b2",
+    Fragrance: "#7c3aed",
+    "Baby Care": "#ea580c",
+  };
+  const madibaSalesSeries = [
+    {
+      key: "madiba-total",
+      label: "MADIBA focus total",
+      color: "#0b2545",
+      values: months.map((ym) => Number(report.monthlyMadibaSales?.[ym] || 0)),
+    },
+    ...madibaFocusCats.map((cat) => ({
+      key: `madiba-${cat}`,
+      label: cat,
+      color: madibaCatColors[cat],
+      values: months.map((ym) => Number(report.monthlyMadibaByCategory?.[ym]?.[cat] || 0)),
+    })),
+  ];
   const gpSeries = [
     {
       key: "monthly-gp",
@@ -536,6 +557,13 @@ function buildSlides(report, language) {
       label: "MADIBA",
       node: (
         <Slide eyebrow="MADIBA BRAND" title={`Focus categories · ${monthLabel(asOfYm)}`}>
+          <h3>Historical sales growth</h3>
+          <GrowthTrendChart
+            periods={months}
+            series={madibaSalesSeries}
+            periodLabel={monthLabel}
+            formatValue={compactChartNumber}
+          />
           {asOfMadiba.length ? (
             <MadibaTable rows={asOfMadiba} language={language} />
           ) : (

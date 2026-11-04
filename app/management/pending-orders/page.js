@@ -42,7 +42,13 @@ import {
   createOrderPdfDocument,
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
-import { buildTallyOrderExportRows, TALLY_EXPORT_COLUMNS, unitMapFromItems, withTallyCatalogRates } from "../../lib/tallyItemUnits";
+import {
+  buildTallyOrderExportRows,
+  expandTallyItemLookupCodes,
+  TALLY_EXPORT_COLUMNS,
+  unitMapFromItems,
+  withTallyCatalogRates,
+} from "../../lib/tallyItemUnits";
 import { loadPricePayload } from "../../lib/pricePayload";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
@@ -1417,11 +1423,9 @@ export default function PendingOrdersPage() {
   }
 
   async function loadTallyUnitMap(lines, token) {
-    const codes = [...new Set(
-      (lines || [])
-        .map((line) => String(line?.item_code || "").trim().toUpperCase())
-        .filter(Boolean),
-    )];
+    const codes = expandTallyItemLookupCodes(
+      (lines || []).map((line) => String(line?.item_code || "").trim()),
+    );
     if (!codes.length || !token) return {};
 
     try {

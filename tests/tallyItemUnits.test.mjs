@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildTallyItemName,
   buildTallyOrderExportRows,
   chooseTallyLedgerName,
+  expandTallyItemLookupCodes,
   ledgerNamesFromSalesRows,
   withTallyCatalogRates,
   resolveTallySalesRouting,
@@ -141,6 +143,58 @@ test("catalog list rate is the item rate and discount is the per-unit gap", () =
   assert.equal(rows[0]["SALES TEAM"], "SM13");
   assert.equal(rows.at(-1).Amount, 837.15);
   assert.equal(rows.at(-1)["Charge.Ledgers VAT/Freight"], "Output VAT 15% - Non Food Division");
+});
+
+test("Item Name is not doubled when line code is already CODE_NAME", () => {
+  const full = "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3PCS/SET (SIZE 18-22-26)";
+  assert.equal(
+    buildTallyItemName({ item_code: full, item_name: full }),
+    full,
+  );
+  assert.equal(
+    buildTallyItemName(
+      { item_code: full, item_name: full },
+      {
+        "A005215/1": {
+          tally_item_name: "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3pcs/Set (Size 18-22-26)",
+          tally_unit: "PC",
+        },
+      },
+    ),
+    "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3pcs/Set (Size 18-22-26)",
+  );
+
+  const rows = buildTallyOrderExportRows({
+    order: { customer_name: "KNOOZ", salesman_name: "ABA" },
+    lines: [{
+      item_code: full,
+      item_name: full,
+      quantity: 5,
+      rate: 0,
+      category: "LUGGAGE",
+    }],
+    unitMap: {
+      "A005215/1": {
+        tally_item_name: "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3pcs/Set (Size 18-22-26)",
+        tally_unit: "PC",
+      },
+    },
+    orderNumber: "ABA115",
+    pricingRegion: "riyadh",
+    paymentType: "credit",
+  });
+  assert.equal(
+    rows[0]["Item Name"],
+    "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3pcs/Set (Size 18-22-26)",
+  );
+  assert.equal(String(rows[0]["Item Name"]).split("_").length, 2);
+  assert.deepEqual(
+    expandTallyItemLookupCodes([full]).sort(),
+    [
+      "A005215/1",
+      "A005215/1_MADIBA LUGGAGE TROLLEY BAG PP (#5215) 3PCS/SET (SIZE 18-22-26)",
+    ],
+  );
 });
 
 test("customer name uses the imported Tally ledger, including its spacing", () => {

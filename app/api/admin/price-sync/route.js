@@ -5,6 +5,10 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../../lib/o
 import { recordItemPriceHistory } from "../../../lib/itemPriceHistory.js";
 import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
+import {
+  keepPositivePublishedPrices,
+  keepPositiveRegionPriceMaps,
+} from "../../../lib/priceSyncPublish.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
@@ -26,16 +30,6 @@ function normalizeCode(value) {
 
 function normalizeText(value) {
   return String(value || "").trim();
-}
-
-function toPositiveNumber(value) {
-  const cleaned = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "")
-    .trim();
-
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function isPlaceholderValue(value) {
@@ -145,75 +139,6 @@ async function loadItemMetadata(admin, codes) {
   }
 
   return metadataByCode;
-}
-
-async function loadRateFallback(admin, codes) {
-  const rateByCode = new Map();
-  if (!Array.isArray(codes) || codes.length === 0) return rateByCode;
-
-  const codeChunks = chunkCodes(codes);
-
-  for (const chunk of codeChunks) {
-    const { data, error } = await admin
-      .from("active_sales")
-      .select("item_code,rate,transaction_date,id")
-      .in("item_code", chunk)
-      .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(2000);
-
-    if (error) {
-      throw new Error(`sales_raw rate lookup failed: ${error.message}`);
-    }
-
-    (data || []).forEach((row) => {
-      const code = normalizeCode(row.item_code);
-      if (!code || rateByCode.has(code)) return;
-      if (code.startsWith("LP")) return;
-
-      const rate = toPositiveNumber(row.rate);
-      if (rate > 0) {
-        rateByCode.set(code, rate);
-      }
-    });
-  }
-
-  return rateByCode;
-}
-
-async function loadAllItemCodes(admin) {
-  const codes = new Set();
-  let from = 0;
-  const pageSize = 1000;
-
-  while (true) {
-    const to = from + pageSize - 1;
-    const { data, error } = await admin
-      .from("items_master")
-      .select("item_code")
-      .range(from, to);
-
-    if (error) {
-      throw new Error(`items_master code lookup failed: ${error.message}`);
-    }
-
-    if (!Array.isArray(data) || data.length === 0) {
-      break;
-    }
-
-    data.forEach((row) => {
-      const code = normalizeCode(row?.item_code);
-      if (code) codes.add(code);
-    });
-
-    if (data.length < pageSize) {
-      break;
-    }
-
-    from += pageSize;
-  }
-
-  return Array.from(codes);
 }
 
 function buildEnrichedSheetItems(parsed, metadataByCode) {
@@ -398,24 +323,14 @@ async function runSync(sourcePayload = null) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: existingCacheRow, error: existingCacheError } = await admin
-    .from("price_catalog_cache")
-    .select("price_map")
-    .eq("cache_key", "default")
-    .maybeSingle();
-
-  if (existingCacheError) {
-    throw new Error(`Existing cache lookup failed: ${existingCacheError.message}`);
-  }
-
-  const existingPriceMap =
-    existingCacheRow && existingCacheRow.price_map && typeof existingCacheRow.price_map === "object"
-      ? existingCacheRow.price_map
-      : {};
+  // Publish only Google Sheet / costing-workbook rates. Never invent prices from
+  // active_sales history or the previous cache for codes missing from the sheet.
+  parsed.priceMap = keepPositivePublishedPrices(parsed.priceMap);
+  parsed.regionPriceMaps = keepPositiveRegionPriceMaps(parsed.regionPriceMaps);
+  parsed.retailRegionPriceMaps = keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps);
 
   const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
   const metadataByCode = await loadItemMetadata(admin, codes);
-  const fallbackRatesByCode = await loadRateFallback(admin, codes);
 
   Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
     const code = normalizeCode(rawCode);
@@ -431,49 +346,9 @@ async function runSync(sourcePayload = null) {
     }
   });
 
-  Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
-    const code = normalizeCode(rawCode);
-    if (!code) return;
-
-    const currentRate = toPositiveNumber(parsed.priceMap[rawCode]);
-    if (currentRate > 0) return;
-
-    // A zero from the price service means no current selling price is published.
-    // Do not silently substitute an old transaction rate for an orderable price.
-    if (Object.prototype.hasOwnProperty.call(parsed.priceMap, rawCode)) return;
-
-    const fallbackRate = fallbackRatesByCode.get(code) || 0;
-    if (fallbackRate > 0) {
-      parsed.priceMap[rawCode] = fallbackRate;
-      return;
-    }
-
-    const existingRate = toPositiveNumber(existingPriceMap[rawCode] ?? existingPriceMap[code]);
-    if (existingRate > 0) {
-      parsed.priceMap[rawCode] = existingRate;
-    }
-  });
-
-  const parsedCodeSet = new Set(
-    Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean)
-  );
-
-  const allItemCodes = await loadAllItemCodes(admin);
-  const missingCodes = allItemCodes.filter((code) => !parsedCodeSet.has(code));
-  const missingRateByCode = await loadRateFallback(admin, missingCodes);
-
-  missingRateByCode.forEach((rate, code) => {
-    if (!Number.isFinite(rate) || rate <= 0) return;
-    parsed.priceMap[code] = rate;
-  });
-
-  const missingCodesWithRate = Array.from(missingRateByCode.keys());
-  if (missingCodesWithRate.length > 0) {
-    const missingMetadata = await loadItemMetadata(admin, missingCodesWithRate);
-    missingMetadata.forEach((value, code) => {
-      metadataByCode.set(code, value);
-    });
-  }
+  parsed.priceMap = keepPositivePublishedPrices(parsed.priceMap);
+  parsed.regionPriceMaps = keepPositiveRegionPriceMaps(parsed.regionPriceMaps);
+  parsed.retailRegionPriceMaps = keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps);
 
   const enrichedSheetItems = buildEnrichedSheetItems(parsed, metadataByCode);
 

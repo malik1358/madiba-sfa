@@ -13,6 +13,13 @@ import {
 /** Credit notes dated on the invoice day or within this many days count as clerical. */
 export const CLERICAL_CREDIT_NOTE_MAX_DAYS = 7;
 
+/** Charts compare closed periods only — drop open MTD / current quarter. */
+export function completeSalesMixChartPeriods(periods = [], currentPeriod = "") {
+  const current = String(currentPeriod || "");
+  if (!current) return [...(periods || [])];
+  return (periods || []).filter((period) => String(period) !== current);
+}
+
 function classifySalesOrigin(value) {
   const origin = String(value || "").trim().toLowerCase();
   const isLocal = /\blocal\b/.test(origin);
@@ -44,6 +51,12 @@ export function createInvoiceDateIndex() {
   return new Map();
 }
 
+function invoiceIndexEntryDate(entry) {
+  if (!entry) return "";
+  if (typeof entry === "string") return entry;
+  return String(entry.date || "").slice(0, 10);
+}
+
 export function rememberInvoiceDate(index, row = {}) {
   if (!index || isCreditNoteTransaction(row)) return index;
   const date = salesDateKey(row.transaction_date);
@@ -51,10 +64,16 @@ export function rememberInvoiceDate(index, row = {}) {
   const voucher = normalizeVoucherToken(row.voucher_number);
   if (!voucher) return index;
   const customer = normalizeCustomerToken(row.customer_code);
+  const entry = {
+    date,
+    isCash: isCashSalesVoucher(String(row.voucher_number || "").trim()),
+    origin: classifySalesOrigin(row.local_import),
+  };
   const remember = (key) => {
     if (!key) return;
     const previous = index.get(key);
-    if (!previous || date < previous) index.set(key, date);
+    const previousDate = invoiceIndexEntryDate(previous);
+    if (!previousDate || date < previousDate) index.set(key, entry);
   };
   remember(voucher);
   if (customer) remember(`${customer}::${voucher}`);
@@ -67,7 +86,7 @@ export function indexInvoiceDatesFromRows(index, rows = []) {
   return target;
 }
 
-export function resolveCreditNoteSourceInvoiceDate(row = {}, index = new Map()) {
+export function resolveCreditNoteSourceInvoice(row = {}, index = new Map()) {
   const customer = normalizeCustomerToken(row.customer_code);
   const refs = parseCreditNoteReferences(row.reference);
   for (const ref of refs) {
@@ -78,7 +97,11 @@ export function resolveCreditNoteSourceInvoiceDate(row = {}, index = new Map()) 
     const global = index.get(ref);
     if (global) return global;
   }
-  return "";
+  return null;
+}
+
+export function resolveCreditNoteSourceInvoiceDate(row = {}, index = new Map()) {
+  return invoiceIndexEntryDate(resolveCreditNoteSourceInvoice(row, index));
 }
 
 /**
@@ -101,20 +124,38 @@ export function salesMixMeasuresForRow(row = {}, options = {}) {
   const isSale = Number.isFinite(amount) && amount > 0 && !isCreditNoteTransaction(row);
   const voucher = String(row.voucher_number || "").trim();
   const origin = classifySalesOrigin(row.local_import);
+  const isCash = isCashSalesVoucher(voucher);
   const isAdjustment = isCreditNoteTransaction(row) && Number.isFinite(amount);
   const adjustment = isAdjustment ? -Math.abs(amount) : 0;
-  const bucket = isAdjustment
-    ? creditNoteAdjustmentBucket(row, options.invoiceDates || createInvoiceDateIndex())
-    : null;
+  const invoiceDates = options.invoiceDates || createInvoiceDateIndex();
+  const bucket = isAdjustment ? creditNoteAdjustmentBucket(row, invoiceDates) : null;
+  const isClerical = bucket === "clerical";
+  const isReturn = bucket === "return";
+
+  // Fold clerical CNs into the linked invoice's cash/credit and origin buckets.
+  let clericalIsCash = isCash;
+  let clericalOrigin = origin;
+  if (isClerical) {
+    const source = resolveCreditNoteSourceInvoice(row, invoiceDates);
+    if (source && typeof source === "object") {
+      if (typeof source.isCash === "boolean") clericalIsCash = source.isCash;
+      if (source.origin) clericalOrigin = source.origin;
+    }
+  }
+  const clericalCash = isClerical && clericalIsCash ? adjustment : 0;
+  const clericalCredit = isClerical && !clericalIsCash ? adjustment : 0;
+  const clericalLocal = isClerical && clericalOrigin === "local" ? adjustment : 0;
+  const clericalImport = isClerical && clericalOrigin === "import" ? adjustment : 0;
+  const clericalUnclassified = isClerical && clericalOrigin === "unclassified_origin" ? adjustment : 0;
 
   return {
-    cash_sales_amount: isSale && isCashSalesVoucher(voucher) ? amount : 0,
-    credit_sales_amount: isSale && !isCashSalesVoucher(voucher) ? amount : 0,
-    local_sales_amount: isSale && origin === "local" ? amount : 0,
-    import_sales_amount: isSale && origin === "import" ? amount : 0,
-    unclassified_origin_sales_amount: isSale && origin === "unclassified_origin" ? amount : 0,
-    clerical_adjustments_amount: bucket === "clerical" ? adjustment : 0,
-    sales_returns_amount: bucket === "return" ? adjustment : 0,
+    cash_sales_amount: (isSale && isCash ? amount : 0) + clericalCash,
+    credit_sales_amount: (isSale && !isCash ? amount : 0) + clericalCredit,
+    local_sales_amount: (isSale && origin === "local" ? amount : 0) + clericalLocal,
+    import_sales_amount: (isSale && origin === "import" ? amount : 0) + clericalImport,
+    unclassified_origin_sales_amount: (isSale && origin === "unclassified_origin" ? amount : 0) + clericalUnclassified,
+    clerical_adjustments_amount: isClerical ? adjustment : 0,
+    sales_returns_amount: isReturn ? adjustment : 0,
     sales_adjustments_amount: adjustment,
   };
 }
@@ -206,10 +247,13 @@ export function buildSalesMixReport(rows = [], inputFilters = {}, options = {}) 
     field,
     months.reduce((sum, month) => sum + Number(monthly[month][field] || 0), 0),
   ]));
-  totals.gross_invoice_sales = sumFields(totals, PAYMENT_FIELDS);
-  totals.sales_adjustments_amount = Number(totals.clerical_adjustments_amount || 0)
-    + Number(totals.sales_returns_amount || 0);
-  totals.net_sales = totals.gross_invoice_sales + Number(totals.sales_adjustments_amount || 0);
+  // Cash/credit already include clerical folds; restore gross, then net = payment + real returns.
+  const paymentSales = sumFields(totals, PAYMENT_FIELDS);
+  const clerical = Number(totals.clerical_adjustments_amount || 0);
+  const returns = Number(totals.sales_returns_amount || 0);
+  totals.sales_adjustments_amount = clerical + returns;
+  totals.gross_invoice_sales = paymentSales - clerical;
+  totals.net_sales = paymentSales + returns;
 
   const monthlyShares = {
     payment: ratioRows(months, monthly, PAYMENT_FIELDS),

@@ -11,7 +11,7 @@ import {
 } from "./salesMix.js";
 
 export const SALES_BI_CUBE_KEY = "sales_bi_cube_v1";
-export const SALES_BI_CUBE_VERSION = 7;
+export const SALES_BI_CUBE_VERSION = 8;
 export const SALES_BI_TABLE = "sales_bi_monthly";
 
 const CUBE_DIMENSION_FIELDS = [

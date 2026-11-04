@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { emptyGrowthFilters } from "../app/lib/categoryGrowth.js";
-import { buildSalesMixReport } from "../app/lib/salesMix.js";
+import { buildSalesMixReport, completeSalesMixChartPeriods } from "../app/lib/salesMix.js";
 import { createSalesBiCube, ingestSalesRowsIntoCube, salesBiFactToGrowthRow, salesBiFactsFromCube } from "../app/lib/salesBiCube.js";
 
 const rows = [
@@ -181,8 +181,23 @@ test("credit notes within 7 days of the named invoice are clerical; later notes 
   assert.equal(report.totals.clerical_adjustments_amount, -100);
   assert.equal(report.totals.sales_returns_amount, -75);
   assert.equal(report.totals.sales_adjustments_amount, -175);
+  // Clerical CN folds into the linked credit + local invoice buckets.
+  assert.equal(report.totals.credit_sales_amount, 1700);
+  assert.equal(report.totals.local_sales_amount, 900);
+  assert.equal(report.totals.import_sales_amount, 800);
   assert.equal(report.totals.gross_invoice_sales, 1800);
   assert.equal(report.totals.net_sales, 1625);
+});
+
+test("sales mix charts omit the open MTD / current period", () => {
+  assert.deepEqual(
+    completeSalesMixChartPeriods(["2026-09", "2026-10", "2026-11"], "2026-11"),
+    ["2026-09", "2026-10"],
+  );
+  assert.deepEqual(
+    completeSalesMixChartPeriods(["2026-Q2", "2026-Q3", "2026-Q4"], "2026-Q4"),
+    ["2026-Q2", "2026-Q3"],
+  );
 });
 
 test("cube ingest stores clerical vs return mix measures using the named invoice date", () => {

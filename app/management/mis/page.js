@@ -13,7 +13,14 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { defaultMisAsOfDate } from "../../lib/misPrepared";
 import { getKsaDateString } from "../../lib/workdayActivity";
+import { compactChartNumber } from "../../lib/growthCharts";
+import { MIS_PORTFOLIO_EXCLUDE } from "../../lib/misReport";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
+import { GrowthTrendChart } from "../business-dashboard/GrowthCharts";
+
+const PORTFOLIO_EXCLUDE_SET = new Set(
+  MIS_PORTFOLIO_EXCLUDE.map((value) => String(value || "").trim().toLowerCase()),
+);
 
 const TEXT = {
   title: { en: "Management MIS", ar: "تقرير الإدارة" },
@@ -49,9 +56,36 @@ function money(value, { digits = 1 } = {}) {
   return `${sign}SAR ${abs.toFixed(0)}`;
 }
 
+/** Table amounts: plain integer, no currency prefix. */
+function amountInt(value) {
+  const n = Math.round(Number(value) || 0);
+  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
 function pct(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
   const n = Number(value) || 0;
   return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
+}
+
+function momNote(momPct, extra = "") {
+  const base = `${pct(momPct)} vs prior month`;
+  return extra ? `${base} · ${extra}` : base;
+}
+
+function pctChangeSafe(current, previous) {
+  const cur = Number(current) || 0;
+  const prev = Number(previous) || 0;
+  if (!prev) return cur ? 100 : 0;
+  return Math.round(((cur / prev) - 1) * 1000) / 10;
+}
+
+function cumulativeSeries(months, valuesByMonth) {
+  let running = 0;
+  return months.map((ym) => {
+    running += Number(valuesByMonth?.[ym] || 0);
+    return running;
+  });
 }
 
 function monthLabel(ym) {
@@ -124,8 +158,8 @@ function CategoryTable({ rows, language }) {
             {visibleRows.map((row, index) => (
               <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
                 <td>{row.category}</td>
-                <td>{money(row.sales)}</td>
-                <td>{money(row.gp)}</td>
+                <td>{amountInt(row.sales)}</td>
+                <td>{amountInt(row.gp)}</td>
                 <td className="moduleBiTotalCol">{row.sales ? `${((row.gp / row.sales) * 100).toFixed(1)}%` : "—"}</td>
               </tr>
             ))}
@@ -133,8 +167,8 @@ function CategoryTable({ rows, language }) {
           <tfoot>
             <tr>
               <td>Total</td>
-              <td>{money(salesTotal)}</td>
-              <td>{money(gpTotal)}</td>
+              <td>{amountInt(salesTotal)}</td>
+              <td>{amountInt(gpTotal)}</td>
               <td className="moduleBiTotalCol">{salesTotal ? `${((gpTotal / salesTotal) * 100).toFixed(1)}%` : "—"}</td>
             </tr>
           </tfoot>
@@ -165,14 +199,14 @@ function SalesmanTable({ rows, language }) {
             {visibleRows.map((row, index) => (
               <tr key={row.salesman} className={index % 2 ? "moduleBiRowAlt" : undefined}>
                 <td>{row.salesman}</td>
-                <td className="moduleBiTotalCol">{money(row.sales)}</td>
+                <td className="moduleBiTotalCol">{amountInt(row.sales)}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td>Total</td>
-              <td className="moduleBiTotalCol">{money(salesTotal)}</td>
+              <td className="moduleBiTotalCol">{amountInt(salesTotal)}</td>
             </tr>
           </tfoot>
         </table>
@@ -208,8 +242,8 @@ function MadibaTable({ rows, language }) {
             {visibleRows.map((row, index) => (
               <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
                 <td>{row.category}</td>
-                <td>{money(row.sales)}</td>
-                <td>{money(row.gp)}</td>
+                <td>{amountInt(row.sales)}</td>
+                <td>{amountInt(row.gp)}</td>
                 <td className="moduleBiTotalCol">{`${row.gpPct ?? 0}%`}</td>
               </tr>
             ))}
@@ -217,8 +251,8 @@ function MadibaTable({ rows, language }) {
           <tfoot>
             <tr>
               <td>Total</td>
-              <td>{money(salesTotal)}</td>
-              <td>{money(gpTotal)}</td>
+              <td>{amountInt(salesTotal)}</td>
+              <td>{amountInt(gpTotal)}</td>
               <td className="moduleBiTotalCol">{salesTotal ? `${((gpTotal / salesTotal) * 100).toFixed(1)}%` : "—"}</td>
             </tr>
           </tfoot>
@@ -230,8 +264,6 @@ function MadibaTable({ rows, language }) {
 
 function buildSlides(report, language) {
   const months = report?.months || [];
-  const salesMax = Math.max(0, ...months.map((ym) => Number(report?.monthlySales?.[ym] || 0)));
-  const gpMax = Math.max(0, ...months.map((ym) => Number(report?.monthlyGp?.[ym] || 0)));
   const colMax = Math.max(0, ...months.map((ym) => Number(report?.collections?.[ym] || 0)));
   const asOfYm = report.asOfMonth;
   const asOfCats = (report.categories || []).filter((row) => row.period === asOfYm);
@@ -242,6 +274,50 @@ function buildSlides(report, language) {
   const rangeLabel = months.length
     ? `${monthLabel(months[0])} – ${monthLabel(months[months.length - 1])}`
     : monthLabel(asOfYm);
+  const salesSeries = [
+    {
+      key: "monthly-sales",
+      label: "Monthly sales",
+      color: "#0f4c5c",
+      values: months.map((ym) => Number(report.monthlySales?.[ym] || 0)),
+    },
+    {
+      key: "ytd-sales",
+      label: "YTD run-rate",
+      color: "#16a34a",
+      dashed: true,
+      values: cumulativeSeries(months, report.monthlySales),
+    },
+  ];
+  const gpSeries = [
+    {
+      key: "monthly-gp",
+      label: "Monthly GP",
+      color: "#0f4c5c",
+      values: months.map((ym) => Number(report.monthlyGp?.[ym] || 0)),
+    },
+    {
+      key: "ytd-gp",
+      label: "YTD GP run-rate",
+      color: "#16a34a",
+      dashed: true,
+      values: cumulativeSeries(months, report.monthlyGp),
+    },
+  ];
+  const repeatSeries = [
+    {
+      key: "repeat-pct",
+      label: "Repeat mix %",
+      color: "#0f4c5c",
+      values: months.map((ym) => Number(report.monthlyRepeat?.[ym]?.pct || 0)),
+    },
+    {
+      key: "repeat-sales",
+      label: "Repeat sales (SAR)",
+      color: "#2563eb",
+      values: months.map((ym) => Number(report.monthlyRepeat?.[ym]?.sales || 0)),
+    },
+  ];
 
   return [
     {
@@ -262,12 +338,19 @@ function buildSlides(report, language) {
       node: (
         <Slide eyebrow="MOMENTUM" title={`Performance through ${monthLabel(asOfYm)}`}>
           <div className="misKpiGrid">
-            <Kpi label="Sales" value={money(report.headline.sales)} note={`${pct(report.headline.salesMomPct)} vs prior month`} tone={report.headline.salesMomPct >= 0 ? "green" : "orange"} />
-            <Kpi label="Gross profit" value={money(report.headline.gp)} note={`${pct(report.headline.gpMomPct)} · ${report.headline.gpPct}% margin`} tone={report.headline.gpMomPct >= 0 ? "green" : "orange"} />
-            <Kpi label="Collections" value={money(report.headline.collection)} note={`${pct(report.headline.collectionMomPct)} vs prior month`} tone={report.headline.collectionMomPct >= 0 ? "green" : "orange"} />
-            <Kpi label="Repeat mix" value={`${report.headline.repeatPct}%`} note={`${money(report.headline.repeatSales)} · ${report.headline.repeatCustomers} buyers`} tone="teal" />
-            <Kpi label=">90-day AR" value={money(report.headline.gt90Ar)} note={`Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`} tone="orange" />
-            <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={`${report.headline.newCustomers} new customers this month`} tone="teal" />
+            <Kpi label="Sales" value={money(report.headline.sales)} note={momNote(report.headline.salesMomPct)} tone={report.headline.salesMomPct >= 0 ? "green" : "orange"} />
+            <Kpi label="Gross profit" value={money(report.headline.gp)} note={momNote(report.headline.gpMomPct, `${report.headline.gpPct}% margin (was ${report.headline.previousGpPct}%)`)} tone={report.headline.gpMomPct >= 0 ? "green" : "orange"} />
+            <Kpi label="Collections" value={money(report.headline.collection)} note={momNote(report.headline.collectionMomPct)} tone={report.headline.collectionMomPct >= 0 ? "green" : "orange"} />
+            <Kpi label="Repeat mix" value={`${report.headline.repeatPct}%`} note={momNote(report.headline.repeatMomPct, `was ${report.headline.previousRepeatPct}% · ${money(report.headline.repeatSales)}`)} tone={Number(report.headline.repeatMomPct) >= 0 ? "green" : "orange"} />
+            <Kpi
+              label=">90-day AR"
+              value={money(report.headline.gt90Ar)}
+              note={report.headline.gt90ArMomPct == null
+                ? `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`
+                : momNote(report.headline.gt90ArMomPct, `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`)}
+              tone={report.headline.gt90ArMomPct == null || report.headline.gt90ArMomPct <= 0 ? "green" : "orange"}
+            />
+            <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={momNote(report.headline.ytdMomPct, `${report.headline.newCustomers} new customers`)} tone={Number(report.headline.ytdMomPct) >= 0 ? "green" : "orange"} />
           </div>
           <p className="misRemark">{report.remarks.momentum} {report.remarks.margin}</p>
         </Slide>
@@ -277,19 +360,15 @@ function buildSlides(report, language) {
       id: "sales-gp",
       label: "Sales & GP",
       node: (
-        <Slide eyebrow="SALES & GP" title="Monthly sales and gross profit">
+        <Slide eyebrow="SALES & GP" title="Sales and GP run-rate">
           <div className="misSplit">
             <div>
-              <h3>Sales</h3>
-              {months.map((ym) => (
-                <BarRow key={`s-${ym}`} label={monthLabel(ym)} value={report.monthlySales[ym]} max={salesMax} highlight={ym === asOfYm} />
-              ))}
+              <h3>Sales run-rate</h3>
+              <GrowthTrendChart periods={months} series={salesSeries} periodLabel={monthLabel} formatValue={compactChartNumber} />
             </div>
             <div>
-              <h3>Gross profit</h3>
-              {months.map((ym) => (
-                <BarRow key={`g-${ym}`} label={monthLabel(ym)} value={report.monthlyGp[ym]} max={gpMax} highlight={ym === asOfYm} />
-              ))}
+              <h3>Gross profit run-rate</h3>
+              <GrowthTrendChart periods={months} series={gpSeries} periodLabel={monthLabel} formatValue={compactChartNumber} />
             </div>
           </div>
         </Slide>
@@ -308,11 +387,21 @@ function buildSlides(report, language) {
               ))}
             </div>
             <div>
-              <h3>AR ageing (latest outstanding upload)</h3>
+              <h3>AR ageing vs prior month</h3>
               <div className="misKpiGrid misKpiGrid--compact">
-                {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => (
-                  <Kpi key={bucket} label={bucket} value={money(value)} tone={bucket.includes("90") || bucket.includes(">") ? "orange" : "teal"} />
-                ))}
+                {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => {
+                  const mom = report.headline.arBucketMomPct?.[bucket];
+                  const prior = report.headline.previousArBuckets?.[bucket];
+                  return (
+                    <Kpi
+                      key={bucket}
+                      label={bucket}
+                      value={money(value)}
+                      note={mom == null ? (prior == null ? "No prior snapshot" : money(prior)) : momNote(mom, prior != null ? `was ${money(prior)}` : "")}
+                      tone={bucket.includes("90") || bucket.includes(">") ? "orange" : "teal"}
+                    />
+                  );
+                })}
               </div>
               <p className="misRemark">{report.remarks.receivables}</p>
             </div>
@@ -326,21 +415,49 @@ function buildSlides(report, language) {
       node: (
         <Slide eyebrow="INVENTORY" title="Working capital in stock">
           {report.inventory ? (
-            <div className="misKpiGrid">
-              <Kpi label="Physical stock" value={money(report.inventory.physical, { digits: 2 })} tone="teal" />
-              <Kpi label="Days on hand" value={report.inventory.days != null ? String(report.inventory.days) : "—"} note={`vs ${monthLabel(asOfYm)} sales pace`} tone={report.inventory.days > 90 ? "orange" : "green"} />
-            </div>
+            <>
+              <div className="misKpiGrid">
+                <Kpi
+                  label="Physical stock"
+                  value={money(report.inventory.physical, { digits: 2 })}
+                  note={report.inventory.physicalMomPct == null
+                    ? null
+                    : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : "")}
+                  tone="teal"
+                />
+                <Kpi
+                  label="Days on hand"
+                  value={report.inventory.days != null ? String(report.inventory.days) : "—"}
+                  note={report.inventory.daysMomPct == null
+                    ? `vs ${monthLabel(asOfYm)} sales pace`
+                    : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "")}
+                  tone={report.inventory.days > 90 ? "orange" : "green"}
+                />
+              </div>
+              {report.inventory.categories?.length ? (
+                <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+                  <table className="moduleTable moduleBiTable">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th className="moduleBiTotalCol">Stock value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.inventory.categories.map((row, index) => (
+                        <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                          <td>{row.category}</td>
+                          <td className="moduleBiTotalCol">{amountInt(row.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </>
           ) : (
             <p className="misRemark">
-              Physical inventory is not in the live BI cube yet. Publish
-              {" "}
-              <code>mis_inventory_physical_v1</code>
-              {" "}
-              as
-              {" "}
-              <code>{`{ "month": "${asOfYm}", "physical": 1234567 }`}</code>
-              {" "}
-              to unlock days-on-hand on this slide.
+              Physical inventory is not published for {monthLabel(asOfYm)} yet.
             </p>
           )}
         </Slide>
@@ -352,11 +469,18 @@ function buildSlides(report, language) {
       node: (
         <Slide eyebrow="CUSTOMERS" title="Repeat business">
           <div className="misKpiGrid">
-            <Kpi label="Repeat sales" value={money(report.headline.repeatSales)} note={`${report.headline.repeatPct}% of month`} tone="teal" />
+            <Kpi label="Repeat sales" value={money(report.headline.repeatSales)} note={momNote(report.headline.repeatSalesMomPct, `${report.headline.repeatPct}% of month`)} tone={Number(report.headline.repeatSalesMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Repeat customers" value={String(report.headline.repeatCustomers)} note={`Prior month ${report.headline.previousRepeatCustomers}`} tone="teal" />
-            <Kpi label="New customers" value={String(report.headline.newCustomers)} note={`Prior month ${report.headline.previousNewCustomers}`} tone="green" />
+            <Kpi label="New customers" value={String(report.headline.newCustomers)} note={momNote(report.headline.newCustomersMomPct, `prior ${report.headline.previousNewCustomers}`)} tone={Number(report.headline.newCustomersMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Prior repeat mix" value={`${report.headline.previousRepeatPct}%`} note={money(report.headline.previousRepeatSales)} tone="orange" />
           </div>
+          <h3>Historical month-on-month growth</h3>
+          <GrowthTrendChart
+            periods={months}
+            series={repeatSeries}
+            periodLabel={monthLabel}
+            formatValue={(value) => (Number(value) >= 1000 ? compactChartNumber(value) : `${Number(value || 0).toFixed(1)}%`)}
+          />
           <p className="misRemark">{report.remarks.repeat}</p>
         </Slide>
       ),
@@ -366,14 +490,26 @@ function buildSlides(report, language) {
       label: "Portfolio",
       node: (
         <Slide eyebrow="PORTFOLIO" title="Selected high-margin categories">
+          <p className="misRemark">
+            Included:
+            {" "}
+            {(asOfCats
+              .filter((row) => !PORTFOLIO_EXCLUDE_SET.has(String(row.category || "").trim().toLowerCase()))
+              .map((row) => row.category)
+              .filter(Boolean)
+              .join(", ")) || "Sundry, Personal Care, Fragrance, Baby Care, Cosmetics, POS Supplies, and other non-excluded lines"}
+            .
+          </p>
+          <p className="misMeta">
+            Excluded from this portfolio: Electronics, Building Material, Office supplies, and Stationery.
+          </p>
           <div className="misKpiGrid">
-            <Kpi label="Portfolio sales" value={money(portfolio.sales || 0)} note={`Prior ${money(prevPortfolio.sales || 0)}`} tone="teal" />
-            <Kpi label="Portfolio GP" value={money(portfolio.gp || 0)} note={`Prior ${money(prevPortfolio.gp || 0)}`} tone="green" />
+            <Kpi label="Portfolio sales" value={money(portfolio.sales || 0)} note={momNote(pctChangeSafe(portfolio.sales, prevPortfolio.sales), `prior ${money(prevPortfolio.sales || 0)}`)} tone="teal" />
+            <Kpi label="Portfolio GP" value={money(portfolio.gp || 0)} note={momNote(pctChangeSafe(portfolio.gp, prevPortfolio.gp), `prior ${money(prevPortfolio.gp || 0)}`)} tone="green" />
             <Kpi label="Portfolio GP%" value={`${portfolio.gpPct ?? 0}%`} note={`Prior ${prevPortfolio.gpPct ?? 0}%`} tone="green" />
             <Kpi label="Active SKUs / customers" value={`${portfolio.skus ?? 0} / ${portfolio.customers ?? 0}`} tone="teal" />
           </div>
           <p className="misRemark">{report.remarks.portfolio}</p>
-          <p className="misMeta">Excludes Electronics, Building Material, Office supplies, and Stationery.</p>
         </Slide>
       ),
     },

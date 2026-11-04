@@ -156,6 +156,32 @@ export function splitTallyItemName(rawName) {
   };
 }
 
+/**
+ * True when value already looks like Tally "CODE_NAME" (code may include /).
+ */
+export function isTallyStyleItemLabel(value) {
+  const text = String(value || "").trim();
+  if (!text || !text.includes("_")) return false;
+  const split = splitTallyItemName(text);
+  return Boolean(split.itemCode && split.itemName && split.itemName !== text);
+}
+
+/**
+ * Expand order-line codes so unit lookup also hits the short master code
+ * when the line stored the full Tally label as item_code.
+ */
+export function expandTallyItemLookupCodes(codes = []) {
+  const out = new Set();
+  (Array.isArray(codes) ? codes : []).forEach((raw) => {
+    const code = normalizeItemCode(raw);
+    if (!code) return;
+    out.add(code);
+    const split = splitTallyItemName(code);
+    if (split.itemCode) out.add(split.itemCode);
+  });
+  return [...out];
+}
+
 export function parseTallyItemMasterRow(row) {
   const tallyName = String(firstValue(row, [
     "tally item name",
@@ -338,13 +364,42 @@ export function formatTallyDate(value = new Date()) {
 }
 
 export function buildTallyItemName(line = {}, unitMap = {}) {
-  const code = normalizeItemCode(line.item_code);
-  const mapped = unitMap[code] || unitMap[line.item_code] || null;
-  if (mapped?.tally_item_name) return String(mapped.tally_item_name).trim();
+  const rawCode = String(line.item_code || "").trim();
+  const code = normalizeItemCode(rawCode);
+  const codeSplit = splitTallyItemName(rawCode);
+  const shortCode = codeSplit.itemCode || code;
+
+  const lookupKeys = [code, shortCode, line.item_code, rawCode]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  for (const key of lookupKeys) {
+    const mapped = unitMap[normalizeItemCode(key)] || unitMap[key] || null;
+    const tallyName = String(mapped?.tally_item_name || "").trim();
+    if (tallyName) return tallyName;
+  }
 
   const rawName = String(line.item_name || "").trim();
   if (!code) return rawName || "-";
+
+  // Line already holds Tally CODE_NAME in item_code (and often the same in item_name).
+  // Do not append name again — that produced CODE_NAME_CODE_NAME in Excel.
+  if (isTallyStyleItemLabel(rawCode)) {
+    const nameNorm = normalizeItemCode(rawName);
+    if (
+      !rawName
+      || nameNorm === code
+      || nameNorm === shortCode
+      || rawName.toUpperCase().startsWith(`${shortCode}_`)
+      || rawName === codeSplit.itemName
+    ) {
+      return codeSplit.tallyItemName || rawCode;
+    }
+    return `${shortCode}_${rawName}`;
+  }
+
   if (rawName.toUpperCase().startsWith(`${code}_`)) return rawName;
+  if (rawName && normalizeItemCode(rawName) === code) return code;
+  if (isTallyStyleItemLabel(rawName)) return rawName;
   if (rawName) return `${code}_${rawName}`;
   return code;
 }

@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { canManageOrderInvoice, isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
 import {
   applyTallyUnitUpdates,
+  expandTallyItemLookupCodes,
   isMissingTallyUnitColumn,
   parseTallyItemMasterRows,
   rowsFromSheetMatrix,
@@ -133,12 +134,9 @@ export async function GET(request) {
       });
     }
 
-    const codes = [...new Set(
-      codesParam
-        .split(",")
-        .map((code) => String(code || "").trim().toUpperCase())
-        .filter(Boolean),
-    )].slice(0, 500);
+    const codes = expandTallyItemLookupCodes(
+      codesParam.split(",").map((code) => String(code || "").trim()),
+    ).slice(0, 500);
 
     let { data, error } = await admin
       .from("items_master")

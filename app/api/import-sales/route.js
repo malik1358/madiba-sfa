@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
-import { normalizeImportedItemName } from "../../lib/itemName.js";
+import { normalizeImportedItemName, parseCodePrefixedItemLabel } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { resolveDailySupplierOrderEmailSchedule, runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
@@ -676,39 +676,44 @@ export async function POST(request) {
         let itemName = normalizeImportedItemName(itemCombinedRaw || itemNameRaw);
 
         if (itemCombinedRaw) {
-          const cleanedItem =
-            itemCombinedRaw
-              .replace(/^`/, "")
-              .trim();
-
-          const itemMatch =
-            cleanedItem.match(
-              /^([A-Za-z0-9]+)[_\-\s]+(.*)$/
-            );
-
-          if (itemMatch) {
-            itemCode =
-              itemMatch[1].trim();
-
-            itemName =
-              normalizeImportedItemName(itemMatch[2].trim());
+          const parsedCombined = parseCodePrefixedItemLabel(itemCombinedRaw);
+          if (parsedCombined.split) {
+            itemCode = parsedCombined.itemCode;
+            itemName = normalizeImportedItemName(parsedCombined.itemName);
           } else {
-            itemCode = cleanedItem;
-            itemName = normalizeImportedItemName(cleanedItem);
+            itemCode = parsedCombined.itemCode || itemCombinedRaw.replace(/^`/, "").trim();
+            itemName = normalizeImportedItemName(itemCombinedRaw) || itemName;
           }
         }
 
         if (itemCodeRaw) {
-          const explicitCode = itemCodeRaw.replace(/^`/, "").trim();
-          if (explicitCode) {
-            itemCode = explicitCode;
+          const parsedCode = parseCodePrefixedItemLabel(itemCodeRaw);
+          if (parsedCode.split) {
+            // Explicit "Item Code" sometimes holds the full Tally CODE_NAME
+            // (common for slash SKUs like A005215/1_...). Keep the short code.
+            itemCode = parsedCode.itemCode;
+            const nameLooksLikeSameLabel = !itemName
+              || normalizeImportedItemName(itemName) === normalizeImportedItemName(itemCodeRaw)
+              || String(itemName || "").trim().toUpperCase() === parsedCode.itemCode;
+            if (nameLooksLikeSameLabel) {
+              itemName = normalizeImportedItemName(parsedCode.itemName);
+            }
+          } else if (parsedCode.itemCode) {
+            itemCode = parsedCode.itemCode;
           }
         }
 
         if (itemNameRaw) {
-          const explicitName = normalizeImportedItemName(itemNameRaw.trim());
-          if (explicitName) {
-            itemName = explicitName;
+          const parsedName = parseCodePrefixedItemLabel(itemNameRaw);
+          if (parsedName.split) {
+            if (!itemCode) itemCode = parsedName.itemCode;
+            const explicitName = normalizeImportedItemName(parsedName.itemName);
+            if (explicitName) itemName = explicitName;
+          } else {
+            const explicitName = normalizeImportedItemName(itemNameRaw.trim());
+            if (explicitName) {
+              itemName = explicitName;
+            }
           }
         }
 

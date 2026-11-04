@@ -177,6 +177,25 @@ export function salesmanScopeIdentities(profile) {
   return [...new Set(profileGroupKeys(profile))];
 }
 
+/**
+ * Self identity tokens from Auth metadata / email for sales-scope unions.
+ * Do NOT include head_salesman_* — that is the boss, not a visible salesman for BI/customer scope.
+ * Product promoters still see their head via the members branch that resolves peers under the head.
+ */
+export function authSalesmanCodeCandidates(authUser) {
+  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+  const rawEmail = String(authUser?.email || "").trim().toLowerCase();
+  const localPart = rawEmail.includes("@") ? rawEmail.split("@")[0] : rawEmail;
+
+  return [...new Set([
+    normalizeSalesmanCode(metadata.salesman_code),
+    normalizeSalesmanName(metadata.salesman_name),
+    normalizeSalesmanCode(localPart),
+    normalizeSalesmanCode(localPart.replace(/[._-]+/g, " ")),
+    normalizeSalesmanCode(localPart.replace(/[._-]+/g, "")),
+  ].filter(Boolean))];
+}
+
 export function resolveMutualGroupProfiles(allProfiles, currentProfile) {
   const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => matchesMutualGroup(currentProfile, group));
   if (!matchedGroup) return [];

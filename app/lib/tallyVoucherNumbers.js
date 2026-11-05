@@ -15,7 +15,7 @@ export const TALLY_VOUCHER_SERIES = Object.freeze({
   riyadh_cash: { seriesKey: "riyadh_cash", prefix: "RC", seedLast: 147 },
   riyadh_retail: { seriesKey: "riyadh_retail", prefix: "RNFR", seedLast: 1 },
   riyadh_store: { seriesKey: "riyadh_store", prefix: "RS", seedLast: 289 },
-  riyadh_credit: { seriesKey: "riyadh_credit", prefix: "RNFD", seedLast: 679 },
+  riyadh_credit: { seriesKey: "riyadh_credit", prefix: "RNFD", seedLast: 680 },
   non_food: { seriesKey: "non_food", prefix: "NFD", seedLast: 2174 },
 });
 

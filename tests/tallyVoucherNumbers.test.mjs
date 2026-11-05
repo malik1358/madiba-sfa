@@ -58,7 +58,7 @@ test("next voucher numbers after the seed are four digits", () => {
   assert.equal(nextTallyVoucherNumber("riyadh_cash"), "RC/0148");
   assert.equal(nextTallyVoucherNumber("riyadh_retail"), "RNFR/0002");
   assert.equal(nextTallyVoucherNumber("riyadh_store"), "RS/0290");
-  assert.equal(nextTallyVoucherNumber("riyadh_credit"), "RNFD/0680");
+  assert.equal(nextTallyVoucherNumber("riyadh_credit"), "RNFD/0681");
   assert.equal(nextTallyVoucherNumber("non_food"), "NFD/2175");
   assert.equal(formatTallyVoucherNumber("RC", 9), "RC/0009");
 });

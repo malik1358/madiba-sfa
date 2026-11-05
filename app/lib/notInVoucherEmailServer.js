@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   NOT_IN_VOUCHER_EMAIL_KEY_PREFIX,
   buildNotInVoucherEmail,
+  notInVoucherEmailCc,
   notInVoucherEmailRecipients,
 } from "./notInVoucherEmail.js";
 import {
@@ -154,6 +155,7 @@ export async function runNotInVoucherEmailCycle(admin, {
   const reportDate = schedule.date;
   const isTestSend = Boolean(String(env.NOT_IN_VOUCHER_EMAIL_TEST_TO || "").trim());
   const to = notInVoucherEmailRecipients(env);
+  const cc = notInVoucherEmailCc(env, to);
   if (!to.length) {
     return { date: reportDate, skipped: true, reason: "no_recipients", sentCount: 0, voucherCount: 0, trigger };
   }
@@ -199,9 +201,10 @@ export async function runNotInVoucherEmailCycle(admin, {
       vouchers,
       env,
     });
-    const subject = isTestSend || forceSend ? `[TEST] ${message.subject}` : message.subject;
+    const subject = isTestSend ? `[TEST] ${message.subject}` : message.subject;
     await send({
       to,
+      cc,
       subject,
       html: message.html,
       text: message.text,
@@ -222,6 +225,7 @@ export async function runNotInVoucherEmailCycle(admin, {
       lineCount: totals.lineCount,
       salesAmount: totals.salesAmount,
       to,
+      cc,
       trigger,
     };
   } catch (error) {

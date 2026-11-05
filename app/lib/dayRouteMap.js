@@ -1,3 +1,4 @@
+import { isAcceptedCustomerGpsUpdate } from "./acceptedCustomerGpsUpdate.js";
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
 import { formatKsaTime, formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
@@ -11,6 +12,7 @@ const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "COLLECTION_VISIT",
   "ORDER_SUBMITTED",
 ]);
+// An accepted customer GPS update (including Order edited) is also a near stop.
 
 const KIND_COLORS = {
   stop: "#2563eb",
@@ -72,6 +74,7 @@ export function buildDayRoutePoints(entries = [], idleGaps = []) {
         area: String(entry.area || "").trim(),
         street: String(entry.street || "").trim(),
         isFarFromCustomer: Boolean(entry.isFarFromCustomer),
+        gpsLocationUpdateAccepted: isAcceptedCustomerGpsUpdate(entry),
         transactionType: type,
       };
     });
@@ -236,8 +239,9 @@ function workdayEventType(item) {
 }
 
 function isNearCustomerTransaction(item) {
-  if (!NEAR_CUSTOMER_TRANSACTION_TYPES.has(workdayEventType(item))) return false;
-  return !item?.isFarFromCustomer;
+  if (item?.isFarFromCustomer) return false;
+  if (NEAR_CUSTOMER_TRANSACTION_TYPES.has(workdayEventType(item))) return true;
+  return isAcceptedCustomerGpsUpdate(item);
 }
 
 function isAtOrAfterDayRouteWorkingHoursStart(ts) {

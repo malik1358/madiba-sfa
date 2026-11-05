@@ -1,3 +1,4 @@
+import { isAcceptedCustomerGpsUpdate } from "./acceptedCustomerGpsUpdate.js";
 import {
   extractWorkdayTimesFromRoute,
   resolveDayRouteWorkingHours,
@@ -17,8 +18,9 @@ function entryType(entry) {
 }
 
 function isNearCustomerEntry(entry) {
-  if (!NEAR_CUSTOMER_TRANSACTION_TYPES.has(entryType(entry))) return false;
-  return !entry?.isFarFromCustomer;
+  if (entry?.isFarFromCustomer) return false;
+  if (NEAR_CUSTOMER_TRANSACTION_TYPES.has(entryType(entry))) return true;
+  return isAcceptedCustomerGpsUpdate(entry);
 }
 
 function countByType(entries, type) {

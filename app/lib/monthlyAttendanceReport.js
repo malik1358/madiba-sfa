@@ -1,3 +1,4 @@
+import { isAcceptedCustomerGpsUpdate } from "./acceptedCustomerGpsUpdate.js";
 import { findUnloggedIdleGaps } from "./collectionDaySummary.js";
 import { resolveDayRouteWorkingHours, extractWorkdayTimesFromRoute } from "./dayRouteMap.js";
 import {
@@ -103,7 +104,8 @@ export function countCustomerVisits(entries = []) {
   const codes = new Set();
   let anonymous = 0;
   (entries || []).forEach((entry) => {
-    if (!CUSTOMER_VISIT_TYPES.has(visitEntryType(entry))) return;
+    const acceptedGpsVisit = isAcceptedCustomerGpsUpdate(entry) && !entry?.isFarFromCustomer;
+    if (!CUSTOMER_VISIT_TYPES.has(visitEntryType(entry)) && !acceptedGpsVisit) return;
     const code = normalizeCode(entry?.customerCode || entry?.customer_code);
     if (code) codes.add(code);
     else anonymous += 1;

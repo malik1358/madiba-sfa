@@ -1,3 +1,4 @@
+import { isAcceptedCustomerGpsUpdate } from "./acceptedCustomerGpsUpdate.js";
 import { isSuccessfulCollection } from "./collectionDaySummary.js";
 import { formatFieldVisitOutcome } from "./fieldVisitWhatsapp.js";
 import { haversineDistanceKm, hasGpsCoordinates } from "./geo.js";
@@ -214,8 +215,9 @@ export function shouldMarkVisitFarFromCustomer(entry, isFar) {
 }
 
 export function isOnSiteCustomerVisit(entry) {
-  if (!ON_SITE_VISIT_TYPES.has(visitEntryType(entry))) return false;
-  return !entry?.isFarFromCustomer;
+  if (entry?.isFarFromCustomer) return false;
+  if (ON_SITE_VISIT_TYPES.has(visitEntryType(entry))) return true;
+  return isAcceptedCustomerGpsUpdate(entry);
 }
 
 export function assignOnSiteVisitNumbers(entries = []) {

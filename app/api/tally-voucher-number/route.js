@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
-import { allocateTallyVoucherNumberForOrder, resolveTallyVoucherSeries } from "../../lib/tallyVoucherNumbers.js";
+import { resolveTallySalesChannel, resolveTallySalesRouting } from "../../lib/tallyItemUnits.js";
+import { allocateTallyVoucherNumberForOrder } from "../../lib/tallyVoucherNumbers.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,17 +58,28 @@ export async function POST(request) {
     if (access.error) return access.error;
 
     const body = await request.json().catch(() => ({}));
-    const orderId = body?.orderId ?? body?.order_id;
+    const orderId = Number(body?.orderId ?? body?.order_id);
     const pricingRegion = body?.pricingRegion ?? body?.pricing_region;
     const paymentType = body?.paymentType ?? body?.payment_type;
 
-    // Validate series before touching the database.
-    resolveTallyVoucherSeries({ pricingRegion, paymentType });
+    const { data: order, error: orderError } = await admin
+      .from("sales_orders")
+      .select("id,salesman_code,salesman_name")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!order) {
+      return NextResponse.json({ success: false, error: "Order not found." }, { status: 404 });
+    }
 
+    const routing = resolveTallySalesRouting(order, pricingRegion);
+    const channel = resolveTallySalesChannel(order);
     const result = await allocateTallyVoucherNumberForOrder(admin, {
       orderId,
       pricingRegion,
       paymentType,
+      routing,
+      channel,
     });
 
     return NextResponse.json({

@@ -11,7 +11,7 @@ test("voucher series maps city and payment to the seeded prefixes", () => {
   assert.deepEqual(resolveTallyVoucherSeries({ pricingRegion: "dammam", paymentType: "cash" }), {
     seriesKey: "dammam_cash",
     prefix: "DC",
-    seedLast: 67,
+    seedLast: 72,
   });
   assert.equal(
     resolveTallyVoucherSeries({ pricingRegion: "dammam", paymentType: "credit" }).prefix,
@@ -33,15 +33,33 @@ test("voucher series maps city and payment to the seeded prefixes", () => {
     resolveTallyVoucherSeries({ pricingRegion: "riyadh", paymentType: "credit" }).prefix,
     "RNFD",
   );
+  assert.equal(
+    resolveTallyVoucherSeries({ pricingRegion: "riyadh", channel: "retail" }).prefix,
+    "RNFR",
+  );
+  assert.equal(
+    resolveTallyVoucherSeries({ pricingRegion: "riyadh", channel: "store" }).prefix,
+    "RS",
+  );
+  assert.equal(
+    resolveTallyVoucherSeries({
+      pricingRegion: "riyadh",
+      routing: { costCenter: "BM" },
+    }).prefix,
+    "NFD",
+  );
 });
 
 test("next voucher numbers after the seed are four digits", () => {
-  assert.equal(nextTallyVoucherNumber("dammam_cash", 67), "DC/0068");
-  assert.equal(nextTallyVoucherNumber("dammam_credit", 133), "DNFD/0134");
-  assert.equal(nextTallyVoucherNumber("jeddah_cash", 1), "JC/0002");
-  assert.equal(nextTallyVoucherNumber("jeddah_credit", 10), "JNFD/0011");
-  assert.equal(nextTallyVoucherNumber("riyadh_cash", 142), "RC/0143");
-  assert.equal(nextTallyVoucherNumber("riyadh_credit", 637), "RNFD/0638");
+  assert.equal(nextTallyVoucherNumber("dammam_cash"), "DC/0073");
+  assert.equal(nextTallyVoucherNumber("dammam_credit"), "DNFD/0138");
+  assert.equal(nextTallyVoucherNumber("jeddah_cash"), "JC/0008");
+  assert.equal(nextTallyVoucherNumber("jeddah_credit"), "JNFD/0014");
+  assert.equal(nextTallyVoucherNumber("riyadh_cash"), "RC/0148");
+  assert.equal(nextTallyVoucherNumber("riyadh_retail"), "RNFR/0002");
+  assert.equal(nextTallyVoucherNumber("riyadh_store"), "RS/0290");
+  assert.equal(nextTallyVoucherNumber("riyadh_credit"), "RNFD/0680");
+  assert.equal(nextTallyVoucherNumber("non_food"), "NFD/2175");
   assert.equal(formatTallyVoucherNumber("RC", 9), "RC/0009");
 });
 

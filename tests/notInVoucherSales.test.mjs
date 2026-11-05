@@ -5,7 +5,11 @@ import {
   isNotInVoucherSalesRow,
   summarizeNotInVoucherVouchers,
 } from "../app/lib/notInVoucherSales.js";
-import { buildNotInVoucherEmail, notInVoucherEmailRecipients } from "../app/lib/notInVoucherEmail.js";
+import {
+  buildNotInVoucherEmail,
+  notInVoucherEmailCc,
+  notInVoucherEmailRecipients,
+} from "../app/lib/notInVoucherEmail.js";
 
 test("isNotInVoucherSalesRow matches salesman code or name", () => {
   assert.equal(isNotInVoucherSalesRow({ salesman_code: "NOT IN VOUCHER" }), true);
@@ -75,4 +79,12 @@ test("buildNotInVoucherEmail and recipients default to Malik", () => {
   assert.match(mail.subject, /NOT IN VOUCHER/);
   assert.match(mail.html, /DN\/001/);
   assert.deepEqual(notInVoucherEmailRecipients({}), ["malik@pinasz.com"]);
+  assert.deepEqual(notInVoucherEmailCc({}, ["malik@pinasz.com"]), [
+    "vinit.kulkarni@noorshukran.com",
+    "badrish.thapliyal@noorshukran.com",
+  ]);
+  assert.deepEqual(
+    notInVoucherEmailCc({ NOT_IN_VOUCHER_EMAIL_TEST_TO: "only@pinasz.com" }, ["only@pinasz.com"]),
+    [],
+  );
 });

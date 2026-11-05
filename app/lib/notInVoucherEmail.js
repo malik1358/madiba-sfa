@@ -7,6 +7,10 @@ import {
 
 export const NOT_IN_VOUCHER_EMAIL_KEY_PREFIX = "not_in_voucher_email:";
 export const DEFAULT_NOT_IN_VOUCHER_EMAIL_TO = "malik@pinasz.com";
+export const DEFAULT_NOT_IN_VOUCHER_EMAIL_CC = [
+  "vinit.kulkarni@noorshukran.com",
+  "badrish.thapliyal@noorshukran.com",
+];
 export const NOT_IN_VOUCHER_EMAIL_ROW_LIMIT = 300;
 
 function escapeHtml(value) {
@@ -36,6 +40,14 @@ export function notInVoucherEmailRecipients(env = {}) {
   const override = String(env.NOT_IN_VOUCHER_EMAIL_TO || "").trim();
   const list = parseEmailList(testTo || override || DEFAULT_NOT_IN_VOUCHER_EMAIL_TO)
     .filter((email) => isLikelyEmail(email));
+  return [...new Set(list)];
+}
+
+export function notInVoucherEmailCc(env = {}, to = []) {
+  if (String(env.NOT_IN_VOUCHER_EMAIL_TEST_TO || "").trim()) return [];
+  const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
+  const list = [...DEFAULT_NOT_IN_VOUCHER_EMAIL_CC, ...parseEmailList(env.NOT_IN_VOUCHER_EMAIL_CC)]
+    .filter((email) => isLikelyEmail(email) && !recipients.has(email));
   return [...new Set(list)];
 }
 

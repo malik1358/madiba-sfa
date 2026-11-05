@@ -69,12 +69,18 @@ export function buildLatestNearVisitDatesByCustomer(
   (activityLogs || []).forEach((row) => {
     const note = parseNote(row?.note);
     const entryType = String(row?.entry_type || "").trim().toUpperCase();
-    if (!FIELD_VISIT_LOG_TYPES.has(entryType)) return;
+    const accepted = isAcceptedGpsUpdate(note);
+    const acceptedOrderGps = accepted && (
+      entryType === "ORDER_DRAFT"
+      || entryType === "ORDER_EDITED"
+      || entryType === "ORDER_SUBMITTED"
+    );
+    if (!FIELD_VISIT_LOG_TYPES.has(entryType) && !acceptedOrderGps) return;
     consider(
       note?.customer_code || note?.customerCode,
       note?.captured_at || note?.capturedAt || row?.created_at,
       parseGpsFromActivityNote(row?.note),
-      isAcceptedGpsUpdate(note),
+      accepted,
     );
   });
 

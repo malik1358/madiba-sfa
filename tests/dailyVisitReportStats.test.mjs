@@ -25,6 +25,37 @@ test("on-site visit numbers skip far entries", () => {
   assert.equal(numbered[3].onSiteVisitNumber, 2);
 });
 
+test("accepted GPS update is an on-site visit even on an order edit", () => {
+  const numbered = assignOnSiteVisitNumbers([
+    { transactionType: "ORDER_SUBMITTED", customerCode: "1140", isFarFromCustomer: false },
+    { transactionType: "ORDER_EDITED", customerCode: "1531", isFarFromCustomer: false },
+    {
+      transactionType: "ORDER_EDITED",
+      customerCode: "1531",
+      isFarFromCustomer: false,
+      gpsLocationUpdateAccepted: true,
+    },
+    {
+      transactionType: "ORDER_EDITED",
+      customerCode: "1531",
+      isFarFromCustomer: false,
+      meta: { gpsLocationUpdateAccepted: true },
+    },
+    {
+      transactionType: "ORDER_EDITED",
+      customerCode: "1531",
+      isFarFromCustomer: true,
+      gpsLocationUpdateAccepted: true,
+    },
+  ]);
+
+  assert.equal(numbered[0].onSiteVisitNumber, 1);
+  assert.equal(numbered[1].onSiteVisitNumber, null);
+  assert.equal(numbered[2].onSiteVisitNumber, 2);
+  assert.equal(numbered[3].onSiteVisitNumber, 2);
+  assert.equal(numbered[4].onSiteVisitNumber, null);
+});
+
 test("same customer order and collections share one visit number", () => {
   const numbered = assignOnSiteVisitNumbers([
     { transactionType: "ORDER_SUBMITTED", customerCode: "1108C", isFarFromCustomer: false },

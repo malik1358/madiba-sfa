@@ -257,6 +257,44 @@ test("resolveDayRouteWorkingHours exposes counted from and to ranges", () => {
   ]);
 });
 
+test("accepted GPS update counts in working hours when the gap is under two hours", () => {
+  const orderOnly = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:50:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T09:48:00.000Z", transactionType: "ORDER_EDITED", isFarFromCustomer: false },
+  ]);
+  assert.equal(orderOnly.minutes, 0);
+
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:50:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    {
+      savedAt: "2026-09-07T09:48:00.000Z",
+      transactionType: "ORDER_EDITED",
+      isFarFromCustomer: false,
+      gpsLocationUpdateAccepted: true,
+    },
+  ]);
+  assert.equal(hours.minutes, 118);
+  assert.deepEqual(hours.ranges, [
+    { fromAt: "2026-09-07T07:50:00.000Z", toAt: "2026-09-07T09:48:00.000Z" },
+  ]);
+
+  const excluded = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:50:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    {
+      savedAt: "2026-09-07T10:50:00.000Z",
+      transactionType: "ORDER_EDITED",
+      isFarFromCustomer: false,
+      gpsLocationUpdateAccepted: true,
+    },
+  ], [{
+    fromAt: "2026-09-07T07:50:00.000Z",
+    toAt: "2026-09-07T10:50:00.000Z",
+    minutes: 180,
+  }]);
+  assert.equal(excluded.minutes, 0);
+  assert.deepEqual(excluded.ranges, []);
+});
+
 test("resolveDayRouteWorkingHours excludes idle breaks longer than two hours", () => {
   const entries = [
     { savedAt: "2026-09-07T06:40:00.000Z", transactionType: "VISIT_REPORT" },

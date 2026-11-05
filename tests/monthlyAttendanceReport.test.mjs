@@ -112,6 +112,13 @@ test("login without customer stops is zero working hours", () => {
   assert.equal(row.workingHoursMinutes, 0);
   assert.equal(row.customerVisits, 0);
   assert.equal(countCustomerVisits([]), 0);
+  assert.equal(countCustomerVisits([
+    { transactionType: "ORDER_SUBMITTED", customerCode: "1531" },
+    { transactionType: "ORDER_EDITED", customerCode: "1531", gpsLocationUpdateAccepted: true },
+    { transactionType: "ORDER_EDITED", customerCode: "9999" },
+    { transactionType: "ORDER_EDITED", customerCode: "8888", isFarFromCustomer: true, gpsLocationUpdateAccepted: true },
+    { transactionType: "ORDER_EDITED", customerCode: "7777", meta: { customer_gps_update_accepted: true } },
+  ]), 2);
   assert.equal(sumCollectionAmount([]), 0);
   assert.equal(sumOrderAmount([]), 0);
 });

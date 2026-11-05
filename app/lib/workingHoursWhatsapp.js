@@ -1,3 +1,4 @@
+import { isAcceptedCustomerGpsUpdate } from "./acceptedCustomerGpsUpdate.js";
 import { customerHasSavedLocation, isFarFromCustomer } from "./customerLocation.js";
 import { findUnloggedIdleGaps } from "./collectionDaySummary.js";
 import {
@@ -163,14 +164,16 @@ export function applyCustomerFarFlags(entries = [], customers = []) {
   );
   return (entries || []).map((entry) => {
     const type = entryType(entry);
-    if (!NEAR_CUSTOMER_TRANSACTION_TYPES.has(type)) {
+    const accepted = isAcceptedCustomerGpsUpdate(entry);
+    const countsAsCustomerStop = NEAR_CUSTOMER_TRANSACTION_TYPES.has(type) || accepted;
+    if (!countsAsCustomerStop) {
       return { ...entry, isFarFromCustomer: false };
     }
     const location = { latitude: entry.latitude, longitude: entry.longitude };
     if (isAtMadibaStore(location)) {
       return { ...entry, isFarFromCustomer: true };
     }
-    if (entry.customerGpsUpdateAccepted === true) {
+    if (accepted) {
       return { ...entry, isFarFromCustomer: false };
     }
     const customer = byCode.get(String(entry.customerCode || "").trim().toUpperCase());
@@ -208,7 +211,8 @@ export function buildCurrentWorkingHoursEntry({
 } = {}) {
   const type = String(transactionType || "VISIT_REPORT").trim().toUpperCase();
   const accepted = customerGpsUpdateAccepted === true;
-  const far = NEAR_CUSTOMER_TRANSACTION_TYPES.has(type)
+  const countsAsCustomerStop = NEAR_CUSTOMER_TRANSACTION_TYPES.has(type) || accepted;
+  const far = countsAsCustomerStop
     ? (isAtMadibaStore(location) || (!accepted && isFarFromCustomer(location, customer)))
     : false;
   return {

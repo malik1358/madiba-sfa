@@ -20,13 +20,16 @@ export const RETURNS_ABOVE_SALES_SELECT = [
 /** Ignore sub-fils noise when deciding that returns exceed sales. */
 export const RETURNS_ABOVE_SALES_EPSILON = 0.02;
 
+/** Old item codes that are the same product as the current code. */
+export const RETURNS_ABOVE_SALES_ITEM_ALIASES = {
+  A003927: "A003928",
+};
+
 export const RETURNS_ABOVE_SALES_FILTER_KEYS = [
   "customerName",
   "customerCode",
   "itemName",
   "itemCode",
-  "salesQuantity",
-  "returnQuantity",
   "salesAmount",
   "returnAmount",
   "salesVouchers",
@@ -40,10 +43,9 @@ function roundMoney(value) {
   return Math.round(amount * 100) / 100;
 }
 
-function roundQty(value) {
-  const quantity = Number(value);
-  if (!Number.isFinite(quantity)) return 0;
-  return Math.round(quantity * 1000) / 1000;
+export function canonicalReturnsAboveSalesItemCode(value) {
+  const code = normalizeReturnsAboveSalesCode(value);
+  return RETURNS_ABOVE_SALES_ITEM_ALIASES[code] || code;
 }
 
 export function normalizeReturnsAboveSalesCode(value) {
@@ -55,13 +57,68 @@ export function normalizeReturnsAboveSalesDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
+export function voucherIdentity(value) {
+  const text = String(value || "").trim();
+  if (/^\d+$/.test(text)) return text.replace(/^0+/, "") || "0";
+  return text.toUpperCase();
+}
+
+/**
+ * Live imports sometimes store the same note as 043 and 43.
+ * Keep the longer number once per customer, item, day, and amount.
+ * Two lines that already share the exact voucher number both stay.
+ */
+export function collapseDuplicateVoucherLines(rows = []) {
+  const groups = new Map();
+  const passthrough = [];
+  (rows || []).forEach((row) => {
+    if (isReturnsAboveSalesFooter(row)) return;
+    const customerCode = normalizeReturnsAboveSalesCode(row?.customer_code);
+    if (!customerCode) return;
+    const voucher = String(row?.voucher_number || "").trim();
+    if (!voucher || !/^\d+$/.test(voucher)) {
+      passthrough.push(row);
+      return;
+    }
+    const key = [
+      customerCode,
+      canonicalReturnsAboveSalesItemCode(row?.item_code),
+      normalizeReturnsAboveSalesDate(row?.transaction_date),
+      voucherIdentity(voucher),
+      roundMoney(Math.abs(Number(row?.sales_amount) || 0)),
+      isReturnsAboveSalesReturn(row) ? "R" : "S",
+    ].join("\u0000");
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  });
+
+  const kept = [...passthrough];
+  groups.forEach((group) => {
+    const longest = group.reduce((max, row) => Math.max(max, String(row?.voucher_number || "").trim().length), 0);
+    const preferred = group.filter((row) => String(row?.voucher_number || "").trim().length === longest);
+    const seen = new Set();
+    preferred.forEach((row) => {
+      const lineKey = [
+        String(row?.voucher_number || "").trim(),
+        normalizeReturnsAboveSalesCode(row?.reference),
+        Number(row?.sales_amount) || 0,
+      ].join("|");
+      if (seen.has(lineKey)) return;
+      seen.add(lineKey);
+      kept.push(row);
+    });
+  });
+  return kept;
+}
+
 export function isReturnsAboveSalesFooter(row = {}) {
   return String(row?.voucher_number || "").trim().toLowerCase() === "total";
 }
 
 /**
- * A return is a credit note / sales-return voucher type, or a negative qty or amount.
- * A sales voucher whose reference merely mentions a credit note stays a sale.
+ * A return is a credit note / sales-return voucher type, or a negative amount.
+ * Quantity is not used. A positive amount with a negative qty stays a sale.
  */
 export function isReturnsAboveSalesReturn(row = {}) {
   const type = String(row?.voucher_type || "").trim().toUpperCase();
@@ -74,10 +131,7 @@ export function isReturnsAboveSalesReturn(row = {}) {
     return true;
   }
   const amount = Number(row?.sales_amount);
-  if (Number.isFinite(amount) && amount < 0) return true;
-  const quantity = Number(row?.quantity);
-  if (Number.isFinite(quantity) && quantity < 0) return true;
-  return false;
+  return Number.isFinite(amount) && amount < 0;
 }
 
 function preferCustomerName(current, candidate) {
@@ -152,7 +206,7 @@ function voucherList(map) {
 function salePairKey(row) {
   return [
     normalizeReturnsAboveSalesCode(row?.customer_code),
-    normalizeReturnsAboveSalesCode(row?.item_code),
+    canonicalReturnsAboveSalesItemCode(row?.item_code),
     normalizeReturnsAboveSalesCode(row?.voucher_number),
   ].join("\u0000");
 }
@@ -248,8 +302,6 @@ function emptyGroup(customerCode, itemCode) {
     itemName: "",
     salesAmount: 0,
     returnAmount: 0,
-    salesQuantity: 0,
-    returnQuantity: 0,
     salesVouchers: new Map(),
     returnVouchers: new Map(),
   };
@@ -260,11 +312,11 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
   let firstDate = "";
   let lastDate = "";
 
-  (sourceRows || []).forEach((row) => {
+  collapseDuplicateVoucherLines(sourceRows).forEach((row) => {
     if (isReturnsAboveSalesFooter(row)) return;
     const customerCode = normalizeReturnsAboveSalesCode(row?.customer_code);
     if (!customerCode) return;
-    const itemCode = normalizeReturnsAboveSalesCode(row?.item_code);
+    const itemCode = canonicalReturnsAboveSalesItemCode(row?.item_code);
     const date = normalizeReturnsAboveSalesDate(row?.transaction_date);
     if (date && (!firstDate || date < firstDate)) firstDate = date;
     if (date && (!lastDate || date > lastDate)) lastDate = date;
@@ -275,14 +327,11 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
     group.itemName = preferItemName(group.itemName, row?.item_name, itemCode);
 
     const amount = Math.abs(Number(row?.sales_amount) || 0);
-    const quantity = Math.abs(Number(row?.quantity) || 0);
     if (isReturnsAboveSalesReturn(row)) {
       group.returnAmount += amount;
-      group.returnQuantity += quantity;
       addVoucher(group.returnVouchers, row, amount);
     } else {
       group.salesAmount += amount;
-      group.salesQuantity += quantity;
       addVoucher(group.salesVouchers, row, amount);
     }
     groups.set(key, group);
@@ -298,8 +347,6 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
         customerName: group.customerName || group.customerCode,
         itemCode: group.itemCode,
         itemName: group.itemName || group.itemCode,
-        salesQuantity: roundQty(group.salesQuantity),
-        returnQuantity: roundQty(group.returnQuantity),
         salesAmount,
         returnAmount,
         excessAmount,
@@ -318,8 +365,6 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
     totals.salesAmount = roundMoney(totals.salesAmount + row.salesAmount);
     totals.returnAmount = roundMoney(totals.returnAmount + row.returnAmount);
     totals.excessAmount = roundMoney(totals.excessAmount + row.excessAmount);
-    totals.salesQuantity = roundQty(totals.salesQuantity + row.salesQuantity);
-    totals.returnQuantity = roundQty(totals.returnQuantity + row.returnQuantity);
     totals.customers.add(row.customerCode);
     return totals;
   }, {
@@ -328,8 +373,6 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
     salesAmount: 0,
     returnAmount: 0,
     excessAmount: 0,
-    salesQuantity: 0,
-    returnQuantity: 0,
     customers: new Set(),
   });
 
@@ -341,8 +384,6 @@ export function buildReturnsAboveSalesReport(sourceRows = []) {
       salesAmount: summary.salesAmount,
       returnAmount: summary.returnAmount,
       excessAmount: summary.excessAmount,
-      salesQuantity: summary.salesQuantity,
-      returnQuantity: summary.returnQuantity,
     },
     span: {
       firstDate,

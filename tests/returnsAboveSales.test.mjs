@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildReturnsAboveSalesReport,
+  canonicalReturnsAboveSalesItemCode,
   isReturnsAboveSalesReturn,
   missingReferencedVoucherNumbers,
   pickMissingReferencedSales,
@@ -50,8 +51,6 @@ test("return value above sales keeps both voucher lists", () => {
   assert.equal(row.salesAmount, 1050);
   assert.equal(row.returnAmount, 84000);
   assert.equal(row.excessAmount, 82950);
-  assert.equal(row.salesQuantity, 1);
-  assert.equal(row.returnQuantity, 80);
   assert.equal(row.salesVouchers, "100 · 2026-01-10 · INV/1");
   assert.equal(row.returnVouchers, "44 · 2026-02-12 · NFD/105");
   assert.equal(report.summary.customerCount, 1);
@@ -235,6 +234,68 @@ test("a credit note reference pulls the missing sales invoice from another batch
   assert.equal(withActiveOnly.rows.length, 1);
   assert.equal(withActiveOnly.rows[0].salesAmount, 1764);
   assert.equal(withActiveOnly.rows[0].returnAmount, 89376);
+});
+
+test("padded and unpadded credit notes for the same day are counted once", () => {
+  const lines = [
+    ["1730", "Sales", "", 2180],
+    ["1818", "Sales", "", 2180],
+    ["1819", "Sales", "", 2180],
+    ["1820", "Sales", "", 2180],
+    ["043", "Credit Note", "1730", -2180],
+    ["044", "Credit Note", "1730", -2180],
+    ["43", "Credit Note", "1730", -2180],
+    ["44", "Credit Note", "1820", -2180],
+    ["045", "Credit Note", "1819", -2180],
+    ["046", "Credit Note", "1820", -2180],
+  ].map(([voucher, type, reference, amount]) => ({
+    transaction_date: voucher === "045" || voucher === "046" || voucher === "1818" || voucher === "1819" || voucher === "1820"
+      ? "2025-11-19"
+      : "2025-11-13",
+    voucher_number: voucher,
+    voucher_type: type,
+    reference,
+    customer_code: "1198",
+    customer_name: "NAJDLINKS TRADING COMPANY",
+    item_code: "A004234",
+    item_name: "MADIBA TOPSTAR PEN WITH REFILL",
+    quantity: amount > 0 ? 10 : -10,
+    sales_amount: amount,
+  }));
+  const report = buildReturnsAboveSalesReport(lines);
+  assert.equal(report.rows.length, 0);
+});
+
+test("A003927 and A003928 are one item and negative qty does not make a sale a return", () => {
+  assert.equal(canonicalReturnsAboveSalesItemCode("a003927"), "A003928");
+  assert.equal(isReturnsAboveSalesReturn({
+    voucher_type: "Sales",
+    quantity: -72,
+    sales_amount: 100,
+  }), false);
+  const report = buildReturnsAboveSalesReport([
+    {
+      transaction_date: "2026-01-01",
+      voucher_number: "1",
+      voucher_type: "Sales",
+      customer_code: "1261C",
+      item_code: "A003927",
+      item_name: "MADIBA BEAUTY SOAP AQUA TOUCH Do Not Use",
+      quantity: 72,
+      sales_amount: 600,
+    },
+    {
+      transaction_date: "2026-02-01",
+      voucher_number: "2",
+      voucher_type: "Credit Note",
+      customer_code: "1261C",
+      item_code: "A003928",
+      item_name: "MADIBA BEAUTY SOAP AQUA TOUCH 72 pcs x 70 gm",
+      quantity: -10,
+      sales_amount: -200,
+    },
+  ]);
+  assert.equal(report.rows.length, 0);
 });
 
 test("debit note sales stay on the sales side", () => {

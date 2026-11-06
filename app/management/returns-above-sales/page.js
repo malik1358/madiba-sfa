@@ -24,8 +24,6 @@ const TEXT = {
   customerCode: { en: "Customer code", ar: "رمز العميل" },
   item: { en: "Item", ar: "الصنف" },
   itemCode: { en: "Item code", ar: "رمز الصنف" },
-  salesQty: { en: "Sales qty", ar: "كمية البيع" },
-  returnQty: { en: "Return qty", ar: "كمية المرتجع" },
   salesAmount: { en: "Sales SAR", ar: "مبيعات (ر.س)" },
   returnAmount: { en: "Return SAR", ar: "مرتجع (ر.س)" },
   excess: { en: "Excess SAR", ar: "الزيادة (ر.س)" },
@@ -46,8 +44,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "A line is a return when the voucher type is a credit note or sales return, or when quantity or amount is negative. A sales invoice named in the credit-note reference is counted even when it was imported in another batch and is missing from the live batch. Amounts are ex-VAT. Each voucher is shown once as number · date · reference.",
-    ar: "السطر مرتجع عندما يكون نوع السند إشعار دائن أو مرتجع مبيعات، أو عندما تكون الكمية أو المبلغ سالباً. فاتورة البيع المذكورة في مرجع إشعار الدائن تُحتسب حتى لو كانت في دفعة استيراد أخرى وناقصة من الدفعة الحالية. المبالغ بدون الضريبة. كل سند يظهر مرة واحدة: الرقم · التاريخ · المرجع.",
+    en: "A line is a return when the voucher type is a credit note or sales return, or when the amount is negative. Comparison is by value. The same numeric voucher is counted once when it was imported both with and without a leading zero. A003927 is the same item as A003928. A sales invoice named in the credit-note reference is counted when it is missing from the live batch. Amounts are ex-VAT.",
+    ar: "السطر مرتجع عندما يكون نوع السند إشعار دائن أو مرتجع مبيعات، أو عندما يكون المبلغ سالباً. المقارنة بالقيمة. السند الرقمي يُحتسب مرة واحدة إذا استُورد مع صفر في البداية وبدونه. الصنف A003927 هو نفس A003928. فاتورة البيع المذكورة في مرجع إشعار الدائن تُحتسب إذا كانت ناقصة من الدفعة الحالية. المبالغ بدون الضريبة.",
   },
 };
 
@@ -56,18 +54,12 @@ const FILTER_KEYS = [
   "customerCode",
   "itemName",
   "itemCode",
-  "salesQuantity",
-  "returnQuantity",
   "salesAmount",
   "returnAmount",
   "salesVouchers",
   "returnVouchers",
   "excessAmount",
 ];
-
-function formatQty(value) {
-  return Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 3 });
-}
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-SA", {
@@ -81,8 +73,6 @@ function cellValue(row, key) {
   if (key === "customerCode") return row.customerCode || "";
   if (key === "itemName") return row.itemName || "";
   if (key === "itemCode") return row.itemCode || "";
-  if (key === "salesQuantity") return formatQty(row.salesQuantity);
-  if (key === "returnQuantity") return formatQty(row.returnQuantity);
   if (key === "salesAmount") return formatAmount(row.salesAmount);
   if (key === "returnAmount") return formatAmount(row.returnAmount);
   if (key === "excessAmount") return formatAmount(row.excessAmount);
@@ -141,14 +131,10 @@ export default function ReturnsAboveSalesPage() {
   const filterValueOf = useCallback((row, key) => cellValue(row, key), []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, filterValueOf);
   const totals = useMemo(() => visibleRows.reduce((sum, row) => ({
-    salesQuantity: sum.salesQuantity + Number(row.salesQuantity || 0),
-    returnQuantity: sum.returnQuantity + Number(row.returnQuantity || 0),
     salesAmount: sum.salesAmount + Number(row.salesAmount || 0),
     returnAmount: sum.returnAmount + Number(row.returnAmount || 0),
     excessAmount: sum.excessAmount + Number(row.excessAmount || 0),
   }), {
-    salesQuantity: 0,
-    returnQuantity: 0,
     salesAmount: 0,
     returnAmount: 0,
     excessAmount: 0,
@@ -222,8 +208,6 @@ export default function ReturnsAboveSalesPage() {
                       <BiExcelHead label={t("customerCode")} filterKey="customerCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("item")} filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("itemCode")} filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("salesQty")} filterKey="salesQuantity" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("returnQty")} filterKey="returnQuantity" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("salesAmount")} filterKey="salesAmount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("returnAmount")} filterKey="returnAmount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("salesVouchers")} filterKey="salesVouchers" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
@@ -238,8 +222,6 @@ export default function ReturnsAboveSalesPage() {
                         <td>{row.customerCode}</td>
                         <td>{row.itemName}</td>
                         <td>{row.itemCode}</td>
-                        <td>{formatQty(row.salesQuantity)}</td>
-                        <td>{formatQty(row.returnQuantity)}</td>
                         <td>{formatAmount(row.salesAmount)}</td>
                         <td className="moduleBiMonthCell--down">{formatAmount(row.returnAmount)}</td>
                         <td className="moduleBiVoucherCell">{row.salesVouchers || "—"}</td>
@@ -254,8 +236,6 @@ export default function ReturnsAboveSalesPage() {
                       <td>{visibleRows.length}</td>
                       <td />
                       <td />
-                      <td>{formatQty(totals.salesQuantity)}</td>
-                      <td>{formatQty(totals.returnQuantity)}</td>
                       <td>{formatAmount(totals.salesAmount)}</td>
                       <td className="moduleBiMonthCell--down">{formatAmount(totals.returnAmount)}</td>
                       <td />

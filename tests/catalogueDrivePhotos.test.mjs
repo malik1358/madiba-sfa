@@ -7,9 +7,11 @@ import {
   folderNeedsDriveCatchUp,
   driveRevisionChanged,
   isRecentDriveLabel,
+  orderCatalogueDriveFolders,
   parseDriveFileMarker,
   parseDriveFolderListing,
   parseDriveModifiedLabel,
+  parseDriveSyncState,
   shouldOpenDriveFolder,
 } from "../app/lib/catalogueDrivePhotos.js";
 
@@ -64,6 +66,34 @@ test("opens folders with no catalogue photo and recent Drive changes", () => {
   assert.equal(shouldOpenDriveFolder(older, { photoCount: 4, savedLabel: "Oct 16", now }), false);
   assert.equal(shouldOpenDriveFolder(older, { photoCount: 4, savedLabel: "Oct 15", now }), true);
   assert.equal(shouldOpenDriveFolder({ itemCode: "", modified: "Oct 20" }, { photoCount: 0, now }), false);
+  assert.equal(shouldOpenDriveFolder(older, { photoCount: 1, resume: true, now }), true);
+});
+
+test("imports folders with no photo before folders that already have one", () => {
+  const folders = [
+    { id: "old-full", itemCode: "A003100", modified: "Oct 16" },
+    { id: "new-empty", itemCode: "A006284", modified: "5:19 am" },
+    { id: "old-empty", itemCode: "A004100", modified: "Oct 12" },
+    { id: "stopped", itemCode: "A005968", modified: "Nov 4" },
+  ];
+  const counts = { "old-full": 2, "new-empty": 0, "old-empty": 0, stopped: 1 };
+  const ordered = orderCatalogueDriveFolders(folders, {
+    now,
+    pendingIds: new Set(["stopped"]),
+    photoCountFor: (folder) => counts[folder.id],
+  });
+  assert.deepEqual(ordered.map((folder) => folder.id), ["stopped", "new-empty", "old-empty", "old-full"]);
+});
+
+test("keeps an unfinished folder id for the next Drive check", () => {
+  const state = parseDriveSyncState(JSON.stringify({
+    importGeneration: 3,
+    pendingFolderIds: ["folder-1", "folder-1", ""],
+    folders: { "folder-2": "Nov 4" },
+  }));
+  assert.equal(state.importGeneration, 3);
+  assert.deepEqual(state.pendingFolderIds, ["folder-1"]);
+  assert.equal(state.folders["folder-2"], "Nov 4");
 });
 
 test("downloads a new photo and skips an unchanged Drive file", () => {

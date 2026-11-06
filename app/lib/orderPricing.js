@@ -9,6 +9,7 @@ import {
 import {
   getPricedOrderLine,
   lookupDiscountRate,
+  lookupValueDiscountSlabs,
   normalizePaymentType,
   normalizePricingType,
   orderPriceMapFor,
@@ -46,7 +47,7 @@ export function priceOrderLines(lines, {
       quantity,
       paymentType,
       cashDiscountRate: lookupDiscountRate(cashDiscountMap, code),
-      valueDiscountRate: lookupDiscountRate(valueDiscountMap, code),
+      valueDiscountRate: lookupValueDiscountSlabs(valueDiscountMap, code),
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
       excludeCashDiscount: scheme.excludeCashDiscount === true,

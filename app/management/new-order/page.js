@@ -29,6 +29,7 @@ import {
   formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
+  lookupValueDiscountSlabs,
   summarizePricedLines,
   normalizePaymentType,
   PRICING_REGIONS,
@@ -1009,14 +1010,14 @@ export default function NewOrderPage() {
       const quantity = Number(item.order_quantity || 0);
       const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
       const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
-      const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+      const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, item.item_code);
       const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
       const priced = getPricedOrderLine({
         wholesaleRate,
         quantity,
         paymentType,
         cashDiscountRate: cashDiscount,
-        valueDiscountRate: valueDiscount,
+        valueDiscountRate: valueSlabs,
         schemeUnitDiscount: scheme.unitDiscount,
         schemeDiscountedQty: scheme.discountedQty,
         excludeCashDiscount: scheme.excludeCashDiscount === true,
@@ -1030,7 +1031,7 @@ export default function NewOrderPage() {
         item_name: item.item_name,
         category: item.category || "Unclassified",
         cashDiscount,
-        valueDiscount,
+        valueDiscount: priced.valueDiscountRate,
         schemeDetail: formatSchemeDetail(scheme),
         cashApplied: priced.applied.cash,
         valueApplied: priced.applied.value,
@@ -2207,14 +2208,14 @@ export default function NewOrderPage() {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const wholesale = getPrice(regionPriceList, item.item_code);
                               const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
-                              const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                              const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, item.item_code);
                               const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
                               const priced = getPricedOrderLine({
                                 wholesaleRate: wholesale,
                                 quantity: qty,
                                 paymentType,
                                 cashDiscountRate: cashDiscount,
-                                valueDiscountRate: valueDiscount,
+                                valueDiscountRate: valueSlabs,
                                 schemeUnitDiscount: scheme.unitDiscount,
                                 schemeDiscountedQty: scheme.discountedQty,
                                 excludeCashDiscount: scheme.excludeCashDiscount === true,
@@ -2271,7 +2272,7 @@ export default function NewOrderPage() {
                                     ) : null}
                                   </td>
                                   <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
-                                  <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
+                                  <td>{formatDiscountDetail(priced.valueDiscountRate, priced.applied.value, priced.valueDiscountAmount)}</td>
                                   <td>{formatSchemeDetail(scheme)}</td>
                                 </tr>
                               );

@@ -209,7 +209,7 @@ test('parsePricePayload reads regional wholesale prices and scheme discounts', (
   assert.equal(parsed.regionPriceMaps.dammam.A006061, 115.33);
   assert.equal(parsed.regionPriceMaps.jeddah.A006061, 122.33);
   assert.equal(parsed.cashDiscountMap.A006061, 0.02);
-  assert.equal(parsed.valueDiscountMap.A006061, 0.03);
+  assert.deepEqual(parsed.valueDiscountMap.A006061, { "5000": 0.03 });
 });
 
 test('parsePricePayload prefers current Product Category and reads A004409 schemes', () => {
@@ -239,8 +239,49 @@ test('parsePricePayload prefers current Product Category and reads A004409 schem
   const item = parsed.sheetItems.find((entry) => entry.item_code === 'A004409');
 
   assert.equal(parsed.cashDiscountMap.A004409, 0.05);
-  assert.equal(parsed.valueDiscountMap.A004409, 0.05);
+  assert.deepEqual(parsed.valueDiscountMap.A004409, { "5000": 0.05 });
   assert.equal(item?.category, 'Sundry');
+});
+
+test('parsePricePayload reads the three value slabs and the fixed city price columns', () => {
+  const header = [];
+  const data = [];
+  header[1] = 'Product Code';
+  header[2] = 'Item Name';
+  header[10] = 'Wholesale Price Without VAT (Riyadh)';
+  header[79] = 'Riyadh wholesale';
+  header[81] = 'Riyadh retail';
+  header[83] = 'Dammam wholesale';
+  header[85] = 'Dammam retail';
+  header[87] = 'Jeddah wholesale';
+  header[89] = 'Sales Value > 2000 SAR';
+  header[90] = 'Sales Value > 5000 SAR';
+  header[91] = 'Sales Value > 10000 SAR';
+  header[92] = 'Cash Discount';
+
+  data[1] = 'A006061';
+  data[2] = 'PHOTOCOPY PAPER A3 80GSM';
+  data[10] = '1';
+  data[79] = '114.33';
+  data[81] = '130';
+  data[83] = '115.33';
+  data[85] = '140';
+  data[87] = '122.33';
+  data[89] = '2%';
+  data[90] = '4%';
+  data[91] = '6%';
+  data[92] = '8%';
+
+  const parsed = parsePricePayload([header, data]);
+
+  assert.equal(parsed.regionPriceMaps.riyadh.A006061, 114.33);
+  assert.equal(parsed.regionPriceMaps.dammam.A006061, 115.33);
+  assert.equal(parsed.regionPriceMaps.jeddah.A006061, 122.33);
+  assert.equal(parsed.retailRegionPriceMaps.riyadh.A006061, 130);
+  assert.equal(parsed.retailRegionPriceMaps.dammam.A006061, 140);
+  assert.equal(parsed.retailRegionPriceMaps.jeddah.A006061, 122.33);
+  assert.equal(parsed.cashDiscountMap.A006061, 0.08);
+  assert.deepEqual(parsed.valueDiscountMap.A006061, { "2000": 0.02, "5000": 0.04, "10000": 0.06 });
 });
 
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {

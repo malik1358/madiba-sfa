@@ -148,7 +148,8 @@ function cacheKeyFor(customerCode, scope, { fullHistory = false } = {}) {
   }
 
   const historySuffix = fullHistory ? ":full" : "";
-  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}${historySuffix}`;
+  // s24: receipt list drops same-voucher copies stored under the party name.
+  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}:s24${historySuffix}`;
 }
 
 function parseJson(value) {

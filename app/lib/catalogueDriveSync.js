@@ -19,6 +19,7 @@ import {
   DRIVE_SYNC_IMPORT_GENERATION,
   driveSyncIsLocked,
   folderNeedsDriveCatchUp,
+  orderCatalogueDriveFolders,
   parseDriveFileMarker,
   parseDriveFolderListing,
   parseDriveModifiedLabel,
@@ -30,7 +31,7 @@ const DRIVE_HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; MadibaCatalogue/1.0)",
   "Accept-Language": "en-US,en;q=0.9",
 };
-const DOWNLOAD_CAP = 40;
+const DOWNLOAD_CAP = 60;
 
 async function readRows(admin, table, columns, { filters = [], orderColumn = "id" } = {}) {
   const rows = [];
@@ -79,7 +80,9 @@ async function readSyncState(admin) {
   const { data, error } = await admin.from("system_settings").select("setting_value")
     .eq("setting_key", CATALOGUE_DRIVE_SYNC_KEY).maybeSingle();
   if (error) {
-    if (isMissingRelationError(error)) return { status: "", startedAt: "", folders: {} };
+    if (isMissingRelationError(error)) {
+      return { status: "", startedAt: "", folders: {}, pendingFolderIds: [], importGeneration: 0 };
+    }
     throw error;
   }
   return parseDriveSyncState(data?.setting_value);
@@ -142,7 +145,15 @@ export async function syncCatalogueDrivePhotos(admin, {
     return { alreadyRunning: true, added: 0, updated: 0, linked: 0, skipped: 0, limited: false, errors: [] };
   }
   const folders = { ...(state.folders || {}) };
-  await writeSyncState(admin, { status: "running", startedAt: now.toISOString(), folders, checkedAt: state.checkedAt || "" });
+  const stillPending = new Set(state.pendingFolderIds || []);
+  await writeSyncState(admin, {
+    status: "running",
+    startedAt: now.toISOString(),
+    folders,
+    pendingFolderIds: [...stillPending],
+    importGeneration: state.importGeneration || 0,
+    checkedAt: state.checkedAt || "",
+  });
 
   const summary = { alreadyRunning: false, added: 0, updated: 0, linked: 0, skipped: 0, limited: false, errors: [] };
   let downloads = 0;
@@ -151,23 +162,33 @@ export async function syncCatalogueDrivePhotos(admin, {
       .filter((entry) => entry.kind === "folder")
       .map((entry) => ({ ...entry, itemCode: catalogueDriveItemCode(entry.name) }));
     const [knownCodes, photosByCode] = await Promise.all([loadKnownCodes(admin), loadCataloguePhotos(admin)]);
+    const ordered = orderCatalogueDriveFolders(root, {
+      pendingIds: stillPending,
+      now,
+      photoCountFor: (folder) => (folder.itemCode ? (photosByCode.get(folder.itemCode) || []).length : 0),
+    });
 
-    for (const folder of root) {
+    for (const folder of ordered) {
       if (summary.limited) break;
       const photos = folder.itemCode ? (photosByCode.get(folder.itemCode) || []) : [];
+      const savedLabel = Object.prototype.hasOwnProperty.call(folders, folder.id) ? folders[folder.id] : undefined;
       const catchUp = (state.importGeneration || 0) < DRIVE_SYNC_IMPORT_GENERATION && folderNeedsDriveCatchUp(photos);
+      const resume = stillPending.has(folder.id) || (savedLabel == null && folderNeedsDriveCatchUp(photos));
       const open = catchUp || shouldOpenDriveFolder(folder, {
         photoCount: photos.length,
-        savedLabel: Object.prototype.hasOwnProperty.call(folders, folder.id) ? folders[folder.id] : undefined,
+        savedLabel,
+        resume,
         now,
       });
       if (!open) {
         if (folder.itemCode) folders[folder.id] = folder.modified;
+        stillPending.delete(folder.id);
         continue;
       }
       if (!folder.itemCode || !knownCodes.has(folder.itemCode)) {
         summary.skipped += 1;
         folders[folder.id] = folder.modified;
+        stillPending.delete(folder.id);
         continue;
       }
       let children;
@@ -184,7 +205,7 @@ export async function syncCatalogueDrivePhotos(admin, {
         const needed = driveFileNeedsDownload({
           ...file,
           stored: storedPhoto ? parseDriveFileMarker(storedPhoto.original_file_name) : null,
-        }, { photoCount: initialPhotoCount, fillMissing: catchUp, now });
+        }, { photoCount: initialPhotoCount, fillMissing: catchUp || resume, now });
         if (!needed) {
           summary.skipped += 1;
           continue;
@@ -226,7 +247,12 @@ export async function syncCatalogueDrivePhotos(admin, {
           summary.errors.push(`${folder.itemCode} ${file.name}: ${error.message}`);
         }
       }
-      if (folderFinished) folders[folder.id] = folder.modified;
+      if (folderFinished) {
+        folders[folder.id] = folder.modified;
+        stillPending.delete(folder.id);
+      } else {
+        stillPending.add(folder.id);
+      }
       photosByCode.set(folder.itemCode, photos);
     }
 
@@ -235,6 +261,7 @@ export async function syncCatalogueDrivePhotos(admin, {
       startedAt: "",
       checkedAt: now.toISOString(),
       folders,
+      pendingFolderIds: [...stillPending],
       importGeneration: summary.limited ? (state.importGeneration || 0) : DRIVE_SYNC_IMPORT_GENERATION,
       added: summary.added,
       updated: summary.updated,
@@ -242,7 +269,15 @@ export async function syncCatalogueDrivePhotos(admin, {
     });
     return summary;
   } catch (error) {
-    await writeSyncState(admin, { status: "idle", startedAt: "", folders, checkedAt: state.checkedAt || "", error: error.message });
+    await writeSyncState(admin, {
+      status: "idle",
+      startedAt: "",
+      folders,
+      pendingFolderIds: [...stillPending],
+      importGeneration: state.importGeneration || 0,
+      checkedAt: state.checkedAt || "",
+      error: error.message,
+    });
     throw error;
   }
 }

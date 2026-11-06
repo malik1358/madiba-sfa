@@ -141,11 +141,37 @@ export function driveRevisionChanged(stored, nextLabel, now = new Date()) {
   return nextAt.getTime() > previousAt.getTime() + (60 * 1000);
 }
 
-export function shouldOpenDriveFolder(folder, { photoCount = 0, savedLabel = undefined, now = new Date() } = {}) {
+export function shouldOpenDriveFolder(folder, { photoCount = 0, savedLabel = undefined, resume = false, now = new Date() } = {}) {
   if (!folder?.itemCode) return false;
-  if (!photoCount) return true;
+  if (!photoCount || resume) return true;
   if (savedLabel == null) return isRecentDriveLabel(folder.modified, now);
   return cleanDriveLabel(savedLabel) !== cleanDriveLabel(folder.modified);
+}
+
+/** New uploads first, then older empty folders, then folders that already have photos. */
+export function catalogueDriveFolderRank(folder, { photoCount = 0, pending = false, now = new Date() } = {}) {
+  if (pending) return 0;
+  if (!photoCount && isRecentDriveLabel(folder?.modified, now)) return 1;
+  if (!photoCount) return 2;
+  return 3;
+}
+
+export function orderCatalogueDriveFolders(folders, { photoCountFor = () => 0, pendingIds = new Set(), now = new Date() } = {}) {
+  return (folders || [])
+    .map((folder, index) => ({ folder, index }))
+    .sort((left, right) => {
+      const rank = catalogueDriveFolderRank(left.folder, {
+        photoCount: photoCountFor(left.folder),
+        pending: pendingIds.has(left.folder?.id),
+        now,
+      }) - catalogueDriveFolderRank(right.folder, {
+        photoCount: photoCountFor(right.folder),
+        pending: pendingIds.has(right.folder?.id),
+        now,
+      });
+      return rank || (left.index - right.index);
+    })
+    .map((entry) => entry.folder);
 }
 
 export function folderNeedsDriveCatchUp(photos) {
@@ -164,10 +190,16 @@ export function driveFileNeedsDownload(file, { photoCount = 0, fillMissing = fal
 export function parseDriveSyncState(value) {
   const source = typeof value === "string" ? safeJson(value) : (value || {});
   const folders = source.folders && typeof source.folders === "object" ? source.folders : {};
+  const pendingFolderIds = Array.isArray(source.pendingFolderIds)
+    ? [...new Set(source.pendingFolderIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [];
   return {
     status: String(source.status || ""),
     startedAt: source.startedAt || "",
+    checkedAt: source.checkedAt || "",
+    importGeneration: Number(source.importGeneration) || 0,
     folders,
+    pendingFolderIds,
   };
 }
 

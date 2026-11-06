@@ -7562,6 +7562,15 @@ button.moduleBiDashKpi:focus-visible {
   z-index: 5;
 }
 
+.moduleBiVoucherCell {
+  white-space: normal;
+  min-width: 16rem;
+  max-width: 24rem;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 650;
+}
+
 .moduleBiTable th.moduleBiTotalCol,
 .moduleBiTable td.moduleBiTotalCol {
   background: #ecfeff;
@@ -7570,6 +7579,13 @@ button.moduleBiDashKpi:focus-visible {
   position: sticky;
   right: 0;
   z-index: 1;
+}
+
+.moduleBiTable td.moduleBiTotalCol.moduleBiMonthCell--down,
+.moduleBiTable tbody tr:nth-child(even) td.moduleBiTotalCol.moduleBiMonthCell--down,
+.moduleBiTable tbody tr:hover td.moduleBiTotalCol.moduleBiMonthCell--down {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .moduleBiTable thead th.moduleBiTotalCol {

@@ -23,7 +23,7 @@ jobs:
             echo "CRON_SECRET secret is missing"
             exit 1
           fi
-          seconds="$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{time_total}' 'https://madiba-sfa.vercel.app/api/build-info')"
+          seconds="$(curl --fail --silent --show-error --max-time 30 -o /dev/null -w '%{time_total}' 'https://madiba-sfa.vercel.app/api/build-info')"
           external_ms="$(awk -v seconds="$seconds" 'BEGIN { printf "%.0f", seconds * 1000 }')"
           response="$(curl --fail-with-body --silent --show-error --max-time 60 \
             -X POST 'https://madiba-sfa.vercel.app/api/cron/app-performance' \
@@ -31,8 +31,19 @@ jobs:
             -H "content-type: application/json" \
             -d "{\"external_build_info_ms\":${external_ms}}")"
           echo "$response"
-          status="$(printf '%s' "$response" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')"
-          if [[ "$status" == "slower" || "$status" == "error" ]]; then
-            echo "App performance status is $status. An email was requested for malik@pinasz.com."
-            exit 1
-          fi
+          status="$(printf '%s' "$response" | jq -er 'if .success == true then .status else error("Performance check did not succeed") end')"
+          case "$status" in
+            baseline|collecting|steady)
+              ;;
+            slower)
+              echo "::warning::App performance is slower than its historical baseline. Measurements were stored; see the response above for email delivery status."
+              ;;
+            error)
+              echo "::error::App performance probes failed."
+              exit 1
+              ;;
+            *)
+              echo "::error::Invalid app performance status."
+              exit 1
+              ;;
+          esac

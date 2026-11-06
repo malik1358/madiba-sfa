@@ -274,6 +274,7 @@ test("invoice makers can view every management report without setup access", () 
     const access = buildModuleAccess({ role });
     for (const moduleKey of [
       "businessDashboard",
+      "returnsAboveSales",
       "myPerformance",
       "salesmanIncentive",
       "dailyVisitReport",

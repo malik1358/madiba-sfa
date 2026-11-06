@@ -1,6 +1,6 @@
 import { buildModuleAccess, isManagementRole } from "./moduleAccess.js";
 import { rowsFromSheetMatrix } from "./stockTakeMasterImport.js";
-import { getPricedOrderLine, lookupDiscountRate } from "./regionalPricing.js";
+import { getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs } from "./regionalPricing.js";
 import { lookupSchemeApplication } from "./orderSchemes.js";
 
 export const MAX_PRODUCT_PHOTO_BYTES = 3 * 1024 * 1024;
@@ -99,7 +99,7 @@ export function catalogueCardPrice(item, {
     quantity: quantity > 0 ? quantity : 1,
     paymentType,
     cashDiscountRate: lookupDiscountRate(cashDiscountMap, item.item_code),
-    valueDiscountRate: quantity > 0 ? lookupDiscountRate(valueDiscountMap, item.item_code) : 0,
+    valueDiscountRate: quantity > 0 ? lookupValueDiscountSlabs(valueDiscountMap, item.item_code) : 0,
     schemeUnitDiscount: scheme.unitDiscount,
     schemeDiscountedQty: scheme.discountedQty,
     excludeCashDiscount: scheme.excludeCashDiscount === true,

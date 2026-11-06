@@ -1,7 +1,7 @@
 import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
-import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from '../../../lib/regionalPricing';
+import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from '../../../lib/regionalPricing';
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
@@ -83,14 +83,14 @@ export default function QuickOrder({
                         const itemCode = String(item.item_code || '').trim().toUpperCase();
                         const wholesale = Number(priceList[itemCode] || 0);
                         const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
-                        const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                        const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, item.item_code);
                         const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
                         const priced = getPricedOrderLine({
                           wholesaleRate: wholesale,
                           quantity: orderQty,
                           paymentType,
                           cashDiscountRate: cashDiscount,
-                          valueDiscountRate: valueDiscount,
+                          valueDiscountRate: valueSlabs,
                           schemeUnitDiscount: scheme.unitDiscount,
                           schemeDiscountedQty: scheme.discountedQty,
                           excludeCashDiscount: scheme.excludeCashDiscount === true,
@@ -134,7 +134,7 @@ export default function QuickOrder({
                               {priced.applied.scheme ? <div>{formatSchemeDetail(scheme)}</div> : null}
                             </td>
                             <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
-                            <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
+                            <td>{formatAppliedDiscount(priced.applied.value ? priced.valueDiscountRate : previewValueDiscountRate(valueSlabs), priced.applied.value)}</td>
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>

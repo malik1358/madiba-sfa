@@ -2,6 +2,7 @@ export const PRICING_REGIONS = ["riyadh", "dammam", "jeddah"];
 export const DEFAULT_PRICING_REGION = "riyadh";
 export const DEFAULT_PAYMENT_TYPE = "credit";
 export const VALUE_DISCOUNT_THRESHOLD_SAR = 5000;
+export const VALUE_DISCOUNT_SLABS = [2000, 5000, 10000];
 export const VAT_RATE = 0.15;
 
 /** Catalog gloves are sold without VAT. Building-material safety gloves are not. */
@@ -88,8 +89,10 @@ export function orderPriceMapFor(catalog, region, pricingType = "wholesale") {
 }
 
 export const SCHEME_COLUMNS = {
-  valueDiscount: "CL",
-  cashDiscount: "CM",
+  valueDiscount2000: "CL",
+  valueDiscount5000: "CM",
+  valueDiscount10000: "CN",
+  cashDiscount: "CO",
 };
 
 export function normalizePricingRegion(value) {
@@ -201,6 +204,55 @@ export function lookupDiscountRate(discountMap, itemCode) {
   return parseDiscountRate(discountMap?.[code] ?? discountMap?.[itemCode] ?? 0);
 }
 
+export function normalizeValueDiscountSlabs(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const slabs = {};
+    VALUE_DISCOUNT_SLABS.forEach((threshold) => {
+      const rate = parseDiscountRate(value[threshold] ?? value[String(threshold)] ?? 0);
+      if (rate > 0) slabs[String(threshold)] = rate;
+    });
+    return slabs;
+  }
+  const legacyRate = parseDiscountRate(value);
+  return legacyRate > 0 ? { [String(VALUE_DISCOUNT_THRESHOLD_SAR)]: legacyRate } : {};
+}
+
+export function lookupValueDiscountSlabs(discountMap, itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return {};
+  const direct = discountMap?.[code] ?? discountMap?.[itemCode];
+  if (direct != null && direct !== "" && direct !== 0) return normalizeValueDiscountSlabs(direct);
+  const match = Object.entries(discountMap || {}).find(([key]) => String(key || "").trim().toUpperCase() === code);
+  return normalizeValueDiscountSlabs(match ? match[1] : 0);
+}
+
+export function valueDiscountRateForLine(value, lineValue, legacyThreshold = VALUE_DISCOUNT_THRESHOLD_SAR) {
+  const amount = Number(lineValue || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const slabs = normalizeValueDiscountSlabs(value);
+    let rate = 0;
+    VALUE_DISCOUNT_SLABS.forEach((threshold) => {
+      const slabRate = slabs[String(threshold)] || 0;
+      if (amount >= threshold && slabRate > 0) rate = slabRate;
+    });
+    return rate;
+  }
+  const legacyRate = parseDiscountRate(value);
+  const threshold = Number(legacyThreshold);
+  if (!(legacyRate > 0) || !Number.isFinite(threshold)) return 0;
+  return amount >= threshold ? legacyRate : 0;
+}
+
+export function previewValueDiscountRate(value) {
+  const slabs = normalizeValueDiscountSlabs(value);
+  for (const threshold of VALUE_DISCOUNT_SLABS) {
+    const rate = slabs[String(threshold)] || 0;
+    if (rate > 0) return rate;
+  }
+  return 0;
+}
+
 export function lookupQuantity(quantities, itemCode) {
   const code = String(itemCode || "").trim().toUpperCase();
   if (!code) return 0;
@@ -242,12 +294,12 @@ export function getPricedOrderLine({
   const qty = Number(quantity || 0);
   const wholesale = Number(wholesaleRate || 0);
   const cashRate = parseDiscountRate(cashDiscountRate);
-  const valueRate = parseDiscountRate(valueDiscountRate);
   const applied = { cash: false, value: false, scheme: false };
 
   const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
   const wholesaleLineValue = safeQty * wholesale;
-  const valueDiscountApplied = wholesaleLineValue >= valueThreshold && valueRate > 0;
+  const valueRate = valueDiscountRateForLine(valueDiscountRate, wholesaleLineValue, valueThreshold);
+  const valueDiscountApplied = valueRate > 0;
   if (valueDiscountApplied) {
     applied.value = true;
   }
@@ -276,6 +328,7 @@ export function getPricedOrderLine({
     wholesaleRate: wholesale,
     rate,
     quantity: safeQty,
+    valueDiscountRate: valueRate,
     wholesaleLineValue,
     valueDiscountAmount,
     cashDiscountAmount,
@@ -337,12 +390,16 @@ export function buildEffectivePriceList({
     if (!code) return;
 
     const scheme = schemeApplications?.[code] || schemeApplications?.[rawCode] || {};
+    const valueSlabs = {
+      ...lookupValueDiscountSlabs(valueDiscountMap, rawCode),
+      ...lookupValueDiscountSlabs(valueDiscountMap, code),
+    };
     const priced = getPricedOrderLine({
       wholesaleRate,
       quantity: lookupQuantity(quantities, code) || lookupQuantity(quantities, rawCode),
       paymentType,
       cashDiscountRate: lookupDiscountRate(cashDiscountMap, code) || lookupDiscountRate(cashDiscountMap, rawCode),
-      valueDiscountRate: lookupDiscountRate(valueDiscountMap, code) || lookupDiscountRate(valueDiscountMap, rawCode),
+      valueDiscountRate: valueSlabs,
       schemeUnitDiscount: Number(scheme.unitDiscount || 0),
       schemeDiscountedQty: Number(scheme.discountedQty || 0),
       excludeCashDiscount: scheme.excludeCashDiscount === true,

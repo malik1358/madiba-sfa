@@ -20,6 +20,10 @@ function sheetFixture() {
   header[79] = "Wholesale Price Riyadh";
   header[83] = "Wholesale Price Dammam";
   header[87] = "Wholesale Price Jeddah";
+  header[89] = "Sales Value > 2000 SAR";
+  header[90] = "Sales Value > 5000 SAR";
+  header[91] = "Sales Value > 10000 SAR";
+  header[92] = "Cash Discount";
   header[93] = "Product Category";
   row[1] = "A1000";
   row[2] = "Office pen";
@@ -28,8 +32,10 @@ function sheetFixture() {
   row[83] = "110";
   row[85] = "135";
   row[87] = "140";
-  row[89] = "3%";
-  row[90] = "2%";
+  row[89] = "2%";
+  row[90] = "4%";
+  row[91] = "6%";
+  row[92] = "8%";
   row[93] = "Office";
   return [header, row];
 }
@@ -46,8 +52,10 @@ test("provided Apps Script keeps wholesale behavior and exports ex-VAT retail CD
   const payload = context.doGet();
   assert.deepEqual(payload.regionPriceMaps, { riyadh: { A1000: 100 }, dammam: { A1000: 110 }, jeddah: { A1000: 140 } });
   assert.deepEqual(payload.retailRegionPriceMaps, { riyadh: { A1000: 120 }, dammam: { A1000: 135 }, jeddah: { A1000: 140 } });
-  assert.equal(payload.cashDiscountMap.A1000, "2%");
-  assert.equal(payload.valueDiscountMap.A1000, "3%");
+  assert.equal(payload.cashDiscountMap.A1000, "8%");
+  assert.deepEqual(payload.valueDiscountMap.A1000, { "2000": "2%", "5000": "4%", "10000": "6%" });
+  assert.deepEqual(parsePricePayload(payload).valueDiscountMap.A1000, { "2000": 0.02, "5000": 0.04, "10000": 0.06 });
+  assert.equal(parsePricePayload(payload).cashDiscountMap.A1000, 0.08);
   assert.deepEqual(parsePricePayload(payload).retailRegionPriceMaps, parsePricePayload(values).retailRegionPriceMaps);
 });
 

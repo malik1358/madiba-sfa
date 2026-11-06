@@ -13,6 +13,7 @@ import {
   receiptRowIdentity,
   stripPaymentVoucherRows,
   removeUnanchoredDuplicateReceipts,
+  findReceiptsForCustomer,
 } from "../app/lib/receiptRegister.js";
 
 const NEW_FORMAT_HEADER = [
@@ -561,4 +562,39 @@ test("removeUnanchoredDuplicateReceipts keeps the later voucher when the same re
     cleaned.rows.filter((row) => row.customer_code === "1139C").map((row) => row.vch_no),
     ["1938"],
   );
+});
+
+test("findReceiptsForCustomer keeps one copy when the same voucher is stored under the party name", () => {
+  const rows = findReceiptsForCustomer({
+    rows: [
+      {
+        receipt_date: "2026-04-09",
+        vch_type: "Receipt",
+        vch_no: "599",
+        amount: 322,
+        customer_code: "1620",
+        customer_name: "Atlalt Albina Co.",
+      },
+      {
+        receipt_date: "2026-04-09",
+        vch_type: "Receipt",
+        vch_no: "599",
+        amount: 322,
+        customer_code: "ATLALT ALBINA CO.",
+        particulars: "1620 Atlalt Albina Co.",
+      },
+      {
+        receipt_date: "2025-06-14",
+        vch_type: "NSTC JV",
+        vch_no: "00072",
+        amount: 356.34,
+        customer_code: "ATLALT ALBINA CO.",
+        particulars: "1620 Atlalt Albina Co.",
+      },
+    ],
+  }, "1620", "Atlalt Albina Co.");
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.vch_no === "599").customer_code, "1620");
+  assert.equal(rows.find((row) => row.vch_no === "00072").amount, 356.34);
 });

@@ -988,6 +988,14 @@ export function findImmediateCreditNoteReversals(
 }
 
 /**
+ * A supplier Payment often lands a few days before the Purchase voucher.
+ * Customer 1620 Payment 117 (20 Jan 2026) is the advance for Purchase 29 (25 Jan).
+ * Longer gaps stay untouched so an April payment does not swallow June purchases
+ * (customer 1030).
+ */
+export const PAYMENT_PURCHASE_ADVANCE_DAYS = 31;
+
+/**
  * Purchase vouchers from a dual customer+supplier day book / party ledger.
  * They open supplier AP and must not be treated as cash collections.
  */
@@ -1135,7 +1143,9 @@ export function buildSortedReceipts(receipts = []) {
  * A receipt that exactly equals one still-fully-open invoice (VAT-incl) claims
  * that bill before oldest-open FIFO — same idea as Payment↔Purchase Matched —
  * so an exact collection is not parked on an older open bill (1171C 1797→1411).
- * Dual-party Payment vouchers (negative) settle open Purchase bills first; any
+ * Dual-party Payment vouchers (negative) settle open Purchase bills first,
+ * including a Purchase dated up to PAYMENT_PURCHASE_ADVANCE_DAYS later
+ * (supplier advance — 1620 Payment 117 → Purchase 29). Any
  * leftover then settles open sales invoices like a receipt (party-ledger netting).
  * A Purchase still open after those Payments settles sales invoices already
  * dated on or before the purchase (oldest first). It does not prepay a later
@@ -1356,6 +1366,18 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
     return 0;
   }
 
+  /**
+   * Purchases already on the books, plus a supplier advance against a Purchase
+   * booked within PAYMENT_PURCHASE_ADVANCE_DAYS. Exact full-bill matches stay
+   * limited to purchases dated on or before the payment.
+   */
+  function paymentCanSettlePurchase(event, purchase) {
+    if (!purchase?.purchase_date || !event?.date) return true;
+    if (purchase.purchase_date <= event.date) return true;
+    const gap = isoDayOffset(event.date, purchase.purchase_date);
+    return gap != null && gap >= 0 && gap <= PAYMENT_PURCHASE_ADVANCE_DAYS;
+  }
+
   /** Apply Payment to open Purchase bills: exact full match first, then oldest-open FIFO. */
   function applyPaymentToPurchases(event) {
     let remaining = claimExactPurchasePayment(event);
@@ -1365,6 +1387,7 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
       if (!hasSettlementAmount(remaining)) break;
       if (!hasSettlementAmount(purchase.remaining)) continue;
       if (purchase.exact_matched) continue;
+      if (!paymentCanSettlePurchase(event, purchase)) continue;
       const applied = Math.min(remaining, purchase.remaining);
       if (!hasSettlementAmount(applied)) continue;
       purchase.remaining = Math.max(0, purchase.remaining - applied);
@@ -1569,19 +1592,21 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
   }
 
   // Payments close Purchases before any sales credit is replayed, so a covered
-  // Purchase does not also reduce AR. The uncovered remainder is a party credit
-  // on the purchase date and is applied with receipts, not after them.
+  // Purchase does not also reduce AR. Register every purchase first so a Payment
+  // can settle one booked a few days later (1620: 117 → 29). The uncovered
+  // remainder is a party credit on the purchase date and is applied with
+  // receipts, not after them.
   const paymentSalesEvents = [];
   for (const event of events) {
-    if (event.kind === "purchase") {
-      purchases.push({
-        purchase_date: event.date,
-        vch_no: event.vch_no || "",
-        amount: event.amount,
-        remaining: event.amount,
-      });
-      continue;
-    }
+    if (event.kind !== "purchase") continue;
+    purchases.push({
+      purchase_date: event.date,
+      vch_no: event.vch_no || "",
+      amount: event.amount,
+      remaining: event.amount,
+    });
+  }
+  for (const event of events) {
     if (event.kind !== "payment") continue;
     const left = applyPaymentToPurchases(event);
     if (hasSettlementAmount(left)) {

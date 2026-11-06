@@ -515,6 +515,75 @@ test("matchPaymentsFifo Payment leftover on a fully open invoice stays unmatched
   assert.equal(Number(day.collected_amount.toFixed(2)), 0);
 });
 
+test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches the party balance", () => {
+  // Atlalt Albina. Payment 117 is five days before Purchase 29. Leaving it
+  // unadjusted lets later payments close the wrong purchases, and Machine Open
+  // on NFD/1815 falls to about 11,302 instead of the ledger balance 21,398.08.
+  const transactions = [
+    { transaction_date: "2025-11-26", voucher_number: "1929", voucher_type: "Sales", sales_amount: 1560, category: "Sundry", item_code: "A004192" },
+    { transaction_date: "2025-11-26", voucher_number: "1929", voucher_type: "Sales", sales_amount: 780, category: "Sundry", item_code: "A004193" },
+    { transaction_date: "2025-11-26", voucher_number: "1929", voucher_type: "Sales", sales_amount: 840, category: "Building Material", item_code: "A004403" },
+    { transaction_date: "2026-03-30", voucher_number: "NFD/317", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 2940, category: "Building Material", item_code: "A004403" },
+    { transaction_date: "2026-04-13", voucher_number: "NFD/426", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 4200, category: "Building Material", item_code: "A004403" },
+    { transaction_date: "2026-09-21", voucher_number: "NFD/1815", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 21500, category: "Building Material", item_code: "A004403" },
+  ];
+  const receipts = [
+    { receipt_date: "2026-01-20", vch_type: "Payment", vch_no: "117", amount: -36855 },
+    { receipt_date: "2026-01-25", vch_type: "Purchase", vch_no: "29", amount: 90644.15 },
+    { receipt_date: "2026-02-11", vch_type: "Purchase", vch_no: "50", amount: 322 },
+    { receipt_date: "2026-02-19", vch_type: "Payment", vch_no: "293", amount: -322 },
+    { receipt_date: "2026-03-11", vch_type: "Payment", vch_no: "391", amount: -50454.15 },
+    { receipt_date: "2026-04-06", vch_type: "Purchase", vch_no: "98", amount: 6227.25 },
+    { receipt_date: "2026-04-09", vch_type: "Receipt", vch_no: "599", amount: 322 },
+    { receipt_date: "2026-04-12", vch_type: "Receipt", vch_no: "616", amount: 3657 },
+    { receipt_date: "2026-04-21", vch_type: "Purchase", vch_no: "113", amount: 17595 },
+    { receipt_date: "2026-04-21", vch_type: "Purchase", vch_no: "114", amount: 124.2 },
+    { receipt_date: "2026-04-23", vch_type: "Receipt", vch_no: "715", amount: 3657 },
+    { receipt_date: "2026-04-27", vch_type: "Purchase", vch_no: "120", amount: 1794 },
+    { receipt_date: "2026-05-05", vch_type: "Purchase", vch_no: "126", amount: 15180 },
+    { receipt_date: "2026-05-07", vch_type: "Bank Payment", vch_no: "May/Bpmt0025", amount: -9562.25 },
+    { receipt_date: "2026-05-13", vch_type: "Purchase", vch_no: "133", amount: 3156.75 },
+    { receipt_date: "2026-05-21", vch_type: "Purchase", vch_no: "147", amount: 1942.35 },
+    { receipt_date: "2026-07-06", vch_type: "Receipt", vch_no: "1190", amount: 4703 },
+    { receipt_date: "2026-07-06", vch_type: "Journal", vch_no: "1191", amount: 2.8 },
+    { receipt_date: "2026-07-08", vch_type: "Debit Note", vch_no: "5", amount: -322 },
+    { receipt_date: "2026-07-16", vch_type: "Bank Payment", vch_no: "Jul/Bpmt0063", amount: -35000 },
+    { receipt_date: "2026-08-12", vch_type: "Purchase", vch_no: "226", amount: 2330.82 },
+    { receipt_date: "2026-10-05", vch_type: "Bank Payment", vch_no: "Oct/Bpmt0030", amount: -9330 },
+    { receipt_date: "2026-10-06", vch_type: "Purchase", vch_no: "281", amount: 5382 },
+  ];
+
+  const matched = matchPaymentsFifo(transactions, receipts);
+  const advance = matched.purchaseAllocations.find((row) => row.vch_no === "117");
+  assert.equal(advance.purchase_voucher, "29");
+  assert.equal(Number(advance.amount.toFixed(2)), 36855);
+  const open = matched.invoices.find((row) => row.voucher_number === "NFD/1815");
+  assert.equal(Number(open.remaining.toFixed(2)), 21398.08);
+  assert.ok(matched.invoices.filter((row) => row.voucher_number !== "NFD/1815").every((row) => row.remaining <= 0.009));
+
+  const ledger = buildPaymentSettlementLedger({ transactions, receipts, todayIso: "2026-11-06" });
+  const paymentDay = ledger.datewise.find((day) => day.date === "2026-01-20");
+  const payment = paymentDay.receipts.find((row) => row.vch_no === "117");
+  assert.equal(payment.applications.length, 1);
+  assert.equal(payment.applications[0].target_kind, "purchase");
+  assert.equal(payment.applications[0].voucher_number, "29");
+  const purchase281 = ledger.datewise.find((day) => day.date === "2026-10-06").purchases[0];
+  assert.equal(purchase281.applications[0].voucher_number, "NFD/1815");
+  assert.equal(Number(purchase281.applications[0].amount.toFixed(2)), 3175.12);
+});
+
+test("a Payment does not settle a Purchase more than 31 days later", () => {
+  const { purchaseAllocations, purchases } = matchPaymentsFifo(
+    [],
+    [
+      { receipt_date: "2026-04-29", amount: -1000, vch_no: "Apr//Bpmt0125", vch_type: "Payment" },
+      { receipt_date: "2026-06-18", amount: 1000, vch_no: "160", vch_type: "Purchase" },
+    ],
+  );
+  assert.equal(purchaseAllocations.length, 0);
+  assert.equal(Number(purchases[0].remaining.toFixed(2)), 1000);
+});
+
 test("matchPaymentsFifo applies a 0.01 payment to an open purchase instead of dropping it", () => {
   const { purchaseAllocations, paymentAppliedToPurchases, paymentAppliedToSales } = matchPaymentsFifo(
     [],

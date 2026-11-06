@@ -5,6 +5,7 @@ import {
   isSameOutstandingCustomer,
   normalizeCode,
   normalizeName,
+  resolveCustomerAccountCode,
   toNumber,
 } from "./outstanding.js";
 import { parsePartyName, splitPartyByLeadingCode } from "./customerCode.js";
@@ -704,11 +705,56 @@ export function normalizeReceiptDataset(raw) {
   };
 }
 
+function sameVoucherReceiptKey(row) {
+  const date = String(row?.receipt_date || "").slice(0, 10);
+  const vchNo = String(row?.vch_no || "").trim().toUpperCase();
+  if (!date || !vchNo) return "";
+  const vchType = String(row?.vch_type || "").trim().toUpperCase();
+  return `${date}|${vchType}|${vchNo}|${amountCents(row?.amount)}`;
+}
+
+function receiptAccountRank(row, customerCode) {
+  const target = resolveCustomerAccountCode(customerCode);
+  const code = resolveCustomerAccountCode(row?.customer_code);
+  if (target && code && code === target && /\d/.test(target)) return 2;
+  if (/\d/.test(String(row?.customer_code || ""))) return 1;
+  return 0;
+}
+
+/**
+ * The same voucher is sometimes stored twice: once under the account code and
+ * once under the party name (1620 and "ATLALT ALBINA CO." for receipt 599).
+ * Keep one copy, preferring the numeric account code. A voucher that exists
+ * only under the name (1620 NSTC JV 00072) stays.
+ */
+export function dedupeReceiptsForCustomer(rows = [], customerCode = "") {
+  const kept = [];
+  const indexByKey = new Map();
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    const key = sameVoucherReceiptKey(row);
+    if (!key) {
+      kept.push(row);
+      continue;
+    }
+    const previousIndex = indexByKey.get(key);
+    if (previousIndex == null) {
+      indexByKey.set(key, kept.length);
+      kept.push(row);
+      continue;
+    }
+    if (receiptAccountRank(row, customerCode) > receiptAccountRank(kept[previousIndex], customerCode)) {
+      kept[previousIndex] = row;
+    }
+  }
+  return kept;
+}
+
 export function findReceiptsForCustomer(dataset, customerCode, customerName = "") {
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
-  return rows
+  const matched = rows
     .filter((row) => isSameOutstandingCustomer(row.customer_code, row.customer_name || row.particulars, customerCode, customerName))
-    .map(buildReceiptRow)
+    .map(buildReceiptRow);
+  return dedupeReceiptsForCustomer(matched, customerCode)
     .sort((left, right) => {
       if (left.receipt_date !== right.receipt_date) return left.receipt_date.localeCompare(right.receipt_date);
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));

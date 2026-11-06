@@ -19,6 +19,7 @@ import {
   formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
+  lookupValueDiscountSlabs,
   normalizePaymentType,
   normalizePricingRegion,
   normalizePricingType,
@@ -192,14 +193,14 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
     if (!(catalogWholesale > 0)) return existing;
 
     const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
-    const valueDiscount = lookupDiscountRate(valueDiscountMap, code);
+    const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, code);
     const scheme = lookupSchemeApplication(schemeApplications, code);
     const priced = getPricedOrderLine({
       wholesaleRate: catalogWholesale,
       quantity: existing.quantity,
       paymentType: resolvedPayment,
       cashDiscountRate: cashDiscount,
-      valueDiscountRate: valueDiscount,
+      valueDiscountRate: valueSlabs,
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
       excludeCashDiscount: scheme.excludeCashDiscount === true,
@@ -215,7 +216,7 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       item_name: line?.item_name || existing.item_name,
       category: line?.category || existing.category,
       cashDiscount,
-      valueDiscount,
+      valueDiscount: priced.valueDiscountRate,
       cashApplied: priced.applied.cash,
       valueApplied: priced.applied.value,
       lineTotal: priced.lineValue,

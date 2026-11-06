@@ -1,4 +1,4 @@
-import { applyPriceCodeAliases } from "./itemCodeAliases.js";
+import { applyPriceCodeAliases, PRICE_CODE_ALIASES } from "./itemCodeAliases.js";
 import { normalizeCategoryName } from "./categoryIdentity.js";
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { normalizeEodStockAvailability } from "./eodStock.js";
@@ -13,7 +13,9 @@ import {
   REGION_PRICE_COLUMNS,
   RETAIL_PRICE_COLUMNS,
   SCHEME_COLUMNS,
+  VALUE_DISCOUNT_SLABS,
   emptyRegionPriceMaps,
+  normalizeValueDiscountSlabs,
   parseDiscountRate,
   withRegionFallbacks,
 } from "./regionalPricing.js";
@@ -183,11 +185,32 @@ function applyDiscountCodeAliases(discountMap) {
   return next;
 }
 
+function applyValueDiscountAliases(discountMap) {
+  const next = {};
+  Object.entries(discountMap || {}).forEach(([code, value]) => {
+    const slabs = normalizeValueDiscountSlabs(value);
+    const normalized = normalizeCode(code);
+    if (normalized && Object.keys(slabs).length) next[normalized] = slabs;
+  });
+
+  Object.entries(PRICE_CODE_ALIASES).forEach(([targetCode, sourceCodes]) => {
+    const family = [normalizeCode(targetCode), ...(sourceCodes || []).map((code) => normalizeCode(code))].filter(Boolean);
+    const donor = family.find((code) => next[code] && Object.keys(next[code]).length);
+    if (!donor) return;
+    family.forEach((code) => {
+      if (!next[code] || !Object.keys(next[code]).length) next[code] = { ...next[donor] };
+    });
+  });
+
+  return next;
+}
+
 function findRegionWholesaleIndex(rows, region, fallbackColumn, maxRows = 5) {
   const regionToken = String(region || "").trim().toLowerCase();
   const otherTokens = PRICING_REGIONS.filter((entry) => entry !== regionToken);
   const fallbackIndex = sheetColumnIndex(fallbackColumn);
 
+  if (fallbackIndex >= 0 && hasDataAtIndex(rows, fallbackIndex)) return fallbackIndex;
   if (!Array.isArray(rows) || rows.length === 0) return fallbackIndex;
 
   const limit = Math.min(maxRows, rows.length);
@@ -296,6 +319,44 @@ export function parseCsvToRows(text) {
   return rows.filter((entry) => entry.some((value) => String(value || "").trim() !== ""));
 }
 
+function findValueSlabIndex(rows, threshold, fallbackColumn, maxRows = 8) {
+  const amount = Number(threshold);
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  const limit = Math.min(maxRows, Array.isArray(rows) ? rows.length : 0);
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row)) continue;
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const header = normalizeHeaderCell(row[columnIndex]);
+      if (!header.includes("sales value")) continue;
+      const match = header.match(/(\d[\d,]*)/);
+      if (!match) continue;
+      if (Number(match[1].replace(/,/g, "")) !== amount) continue;
+      const score = 1000 + (row.length - columnIndex);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = columnIndex;
+      }
+    }
+  }
+
+  if (bestIndex >= 0) return bestIndex;
+  const fallbackIndex = sheetColumnIndex(fallbackColumn);
+  if (fallbackIndex < 0) return -1;
+  const headerLimit = Math.min(8, Array.isArray(rows) ? rows.length : 0);
+  for (let rowIndex = 0; rowIndex < headerLimit; rowIndex += 1) {
+    const header = normalizeHeaderCell(rows[rowIndex]?.[fallbackIndex]);
+    if (!header) continue;
+    if (header.includes("cash")) return -1;
+    const match = header.match(/(\d[\d,]*)/);
+    if (header.includes("sales value") && match && Number(match[1].replace(/,/g, "")) !== amount) return -1;
+  }
+  const wideEnough = (rows || []).some((row) => Array.isArray(row) && row.length > fallbackIndex);
+  return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
+}
+
 function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   const headerIndex = findHeaderIndex(rows, aliases, maxRows);
   if (headerIndex >= 0) return headerIndex;
@@ -363,7 +424,7 @@ function normalizeCatalogResult(
       region, stripExcludedPrices(applyPriceCodeAliases(retailRegionPriceMaps?.[region] || {})),
     ])),
     cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
-    valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
+    valueDiscountMap: stripExcludedPrices(applyValueDiscountAliases(valueDiscountMap)),
     sheetItems: keptSheetItems,
     schemes: resolveStoredOrderSchemes({ schemes }),
     quantityControls: resolvedQuantityControls,
@@ -541,6 +602,25 @@ export function parsePricePayload(payload) {
     }
   }
 
+  function addValueSlab(rawCode, threshold, rawDiscount) {
+    const code = normalizeCode(rawCode);
+    if (!code || isExcludedItemCode(code)) return;
+    const nextRate = parseDiscountRate(rawDiscount);
+    if (!(nextRate > 0)) return;
+    const current = valueDiscountMap[code] && typeof valueDiscountMap[code] === "object"
+      ? valueDiscountMap[code]
+      : {};
+    valueDiscountMap[code] = { ...current, [String(threshold)]: nextRate };
+  }
+
+  function ingestValueDiscountMap(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return;
+    Object.entries(source).forEach(([code, rate]) => {
+      const slabs = normalizeValueDiscountSlabs(rate);
+      Object.entries(slabs).forEach(([threshold, slabRate]) => addValueSlab(code, threshold, slabRate));
+    });
+  }
+
   function ingestRegionMaps(source) {
     if (!source || typeof source !== "object" || Array.isArray(source)) return;
     PRICING_REGIONS.forEach((region) => {
@@ -615,13 +695,10 @@ export function parsePricePayload(payload) {
           "cash discount",
           "cash disc",
         ], SCHEME_COLUMNS.cashDiscount, 8);
-        const valueDiscountIndex = findSchemeIndex(value, [
-          "sales value > 5000 sar",
-          "sales value > 5000",
-          "sales value 5000",
-          "value discount",
-          "scheme value",
-        ], SCHEME_COLUMNS.valueDiscount, 8);
+        const valueSlabIndexes = VALUE_DISCOUNT_SLABS.map((threshold) => ({
+          threshold,
+          index: findValueSlabIndex(value, threshold, SCHEME_COLUMNS[`valueDiscount${threshold}`]),
+        }));
 
         const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : (hasDataAtIndex(value, codeIndex) ? codeIndex : -1);
         const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : (hasDataAtIndex(value, nameIndex) ? nameIndex : -1);
@@ -681,7 +758,9 @@ export function parsePricePayload(payload) {
             if (toNumber(retailRate) > 0) addMappedRate(retailRegionPriceMaps[region], code, retailRate);
           });
           if (cashDiscountIndex >= 0) addDiscount(cashDiscountMap, code, sheetCell(row, cashDiscountIndex));
-          if (valueDiscountIndex >= 0) addDiscount(valueDiscountMap, code, sheetCell(row, valueDiscountIndex));
+          valueSlabIndexes.forEach(({ threshold, index }) => {
+            if (index >= 0) addValueSlab(code, threshold, sheetCell(row, index));
+          });
         });
         return;
       }
@@ -697,8 +776,10 @@ export function parsePricePayload(payload) {
       const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME", "description", "Description"]);
       const category = readAny(value, ["product_category", "productCategory", "CP", "Product Category", "category", "item_category", "CO", "Category", "ITEM CATEGORY", "Item Category", "group", "Group", "item_group", "Item Group"]);
       const rate = readAny(value, ["rate", "price", "RATE", "Price", "CB", "CF", "D", "Selling Rate"]);
-      const cashDiscount = readAny(value, ["cashDiscount", "cash_discount", "CM", "Cash Discount"]);
-      const valueDiscount = readAny(value, ["valueDiscount", "value_discount", "CL", "Sales Value > 5000 SAR"]);
+      const cashDiscount = readAny(value, ["cashDiscount", "cash_discount", "Cash Discount", "CO", "CM"]);
+      const value2000 = readAny(value, ["valueDiscount2000", "Sales Value > 2000 SAR"]);
+      const value5000 = readAny(value, ["valueDiscount5000", "valueDiscount", "value_discount", "Sales Value > 5000 SAR"]);
+      const value10000 = readAny(value, ["valueDiscount10000", "Sales Value > 10000 SAR", "Sales Value > 10000"]);
 
       if (code) {
         if (!isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
@@ -706,7 +787,9 @@ export function parsePricePayload(payload) {
           addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
           addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
           addDiscount(cashDiscountMap, code, cashDiscount);
-          addDiscount(valueDiscountMap, code, valueDiscount);
+          addValueSlab(code, 2000, value2000);
+          addValueSlab(code, 5000, value5000);
+          addValueSlab(code, 10000, value10000);
           upsertSheetItem(code, name, category);
         }
       }
@@ -738,7 +821,7 @@ export function parsePricePayload(payload) {
       }
 
       if (["valueDiscountMap", "valueDiscounts"].includes(key)) {
-        ingestDiscountMap(valueDiscountMap, entry);
+        ingestValueDiscountMap(entry);
         return;
       }
 

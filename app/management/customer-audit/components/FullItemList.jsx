@@ -4,7 +4,7 @@ import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { getPrice, normalizeCode } from "../lib/helpers";
 import { buildOrderCatalog } from "../lib/orderHelpers";
 import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
-import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from "../../../lib/regionalPricing";
+import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from "../../../lib/regionalPricing";
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
@@ -126,14 +126,14 @@ export default function FullItemList({
                     const orderQty = Number(orderQuantities[code] || 0);
                     const wholesale = getPrice(priceList, code);
                     const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
-                    const valueDiscount = lookupDiscountRate(valueDiscountMap, code);
+                    const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, code);
                     const scheme = lookupSchemeApplication(schemeApplications, code);
                     const priced = getPricedOrderLine({
                       wholesaleRate: wholesale,
                       quantity: orderQty,
                       paymentType,
                       cashDiscountRate: cashDiscount,
-                      valueDiscountRate: valueDiscount,
+                      valueDiscountRate: valueSlabs,
                       schemeUnitDiscount: scheme.unitDiscount,
                       schemeDiscountedQty: scheme.discountedQty,
                       excludeCashDiscount: scheme.excludeCashDiscount === true,
@@ -166,7 +166,7 @@ export default function FullItemList({
                           ) : null}
                         </td>
                         <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
-                        <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
+                        <td>{formatAppliedDiscount(priced.applied.value ? priced.valueDiscountRate : previewValueDiscountRate(valueSlabs), priced.applied.value)}</td>
                         <td>{formatSchemeDetail(scheme)}</td>
                       </tr>
                     );

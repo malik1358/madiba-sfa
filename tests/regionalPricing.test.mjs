@@ -68,6 +68,27 @@ test("formatAppliedDiscount marks the scheme only when it reduced the line", () 
   assert.equal(formatAppliedDiscount(0, false), "—");
 });
 
+test("value discount uses the highest item slab the line reaches", () => {
+  const slabs = { "2000": 0.02, "5000": 0.04, "10000": 0.06 };
+  const below = getPricedOrderLine({ wholesaleRate: 100, quantity: 19, valueDiscountRate: slabs });
+  const at2000 = getPricedOrderLine({ wholesaleRate: 100, quantity: 20, valueDiscountRate: slabs });
+  const at5000 = getPricedOrderLine({ wholesaleRate: 100, quantity: 50, valueDiscountRate: slabs });
+  const at10000 = getPricedOrderLine({ wholesaleRate: 100, quantity: 100, valueDiscountRate: slabs });
+  const fallback = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: 120,
+    valueDiscountRate: { "2000": 0.02, "5000": 0.04 },
+  });
+
+  assert.equal(below.applied.value, false);
+  assert.equal(at2000.applied.value, true);
+  assert.equal(at2000.valueDiscountRate, 0.02);
+  assert.equal(Number(at2000.valueDiscountAmount.toFixed(2)), 40);
+  assert.equal(at5000.valueDiscountRate, 0.04);
+  assert.equal(at10000.valueDiscountRate, 0.06);
+  assert.equal(fallback.valueDiscountRate, 0.04);
+});
+
 test("value discount applies when SKU value exceeds 5000 SAR", () => {
   const below = getPricedOrderLine({
     wholesaleRate: 100,

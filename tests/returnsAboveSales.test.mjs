@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildReturnsAboveSalesReport,
   isReturnsAboveSalesReturn,
+  missingReferencedVoucherNumbers,
+  pickMissingReferencedSales,
 } from "../app/lib/returnsAboveSales.js";
 
 test("return value above sales keeps both voucher lists", () => {
@@ -138,6 +140,101 @@ test("quantity gap with matching value is left out", () => {
     },
   ]);
   assert.equal(report.rows.length, 0);
+});
+
+test("a credit note reference pulls the missing sales invoice from another batch", () => {
+  const activeRows = [
+    {
+      transaction_date: "2026-01-26",
+      voucher_number: "2772",
+      voucher_type: "Sales",
+      customer_code: "1258C",
+      customer_name: "Sheem Al Majd Trading Company",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: 3,
+      sales_amount: 1764,
+    },
+    {
+      transaction_date: "2026-02-12",
+      voucher_number: "44",
+      voucher_type: "Credit Note",
+      reference: "NFD/105",
+      customer_code: "1258C",
+      customer_name: "Sheem Al Majd Trading Company",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: -148,
+      sales_amount: -87024,
+    },
+    {
+      transaction_date: "2026-03-11",
+      voucher_number: "93",
+      voucher_type: "Credit Note",
+      reference: "NFD/107",
+      customer_code: "1258C",
+      customer_name: "Sheem Al Majd Trading Company",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: -4,
+      sales_amount: -2352,
+    },
+  ];
+  const historyRows = [
+    {
+      import_batch_id: 64,
+      transaction_date: "2026-02-12",
+      voucher_number: "NFD/105",
+      voucher_type: "SALES-NON FOOD DIVISION",
+      customer_code: "1258C",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: 148,
+      sales_amount: 87024,
+    },
+    {
+      import_batch_id: 116,
+      transaction_date: "2026-02-12",
+      voucher_number: "NFD/105",
+      voucher_type: "SALES-NON FOOD DIVISION",
+      customer_code: "1258C",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: 148,
+      sales_amount: 87024,
+    },
+    {
+      import_batch_id: 116,
+      transaction_date: "2026-02-12",
+      voucher_number: "NFD/107",
+      voucher_type: "SALES-NON FOOD DIVISION",
+      customer_code: "1258C",
+      item_code: "A004030",
+      item_name: "MADIBA SMART TV 50\"",
+      quantity: 148,
+      sales_amount: 87024,
+    },
+    {
+      import_batch_id: 116,
+      transaction_date: "2026-02-12",
+      voucher_number: "NFD/107",
+      voucher_type: "SALES-NON FOOD DIVISION",
+      customer_code: "9999C",
+      item_code: "A004030",
+      quantity: 10,
+      sales_amount: 5000,
+    },
+  ];
+
+  assert.deepEqual(missingReferencedVoucherNumbers(activeRows).sort(), ["NFD/105", "NFD/107"]);
+  const extra = pickMissingReferencedSales(activeRows, historyRows);
+  assert.equal(extra.length, 2);
+  const report = buildReturnsAboveSalesReport([...activeRows, ...extra]);
+  assert.equal(report.rows.length, 0);
+  const withActiveOnly = buildReturnsAboveSalesReport(activeRows);
+  assert.equal(withActiveOnly.rows.length, 1);
+  assert.equal(withActiveOnly.rows[0].salesAmount, 1764);
+  assert.equal(withActiveOnly.rows[0].returnAmount, 89376);
 });
 
 test("debit note sales stay on the sales side", () => {

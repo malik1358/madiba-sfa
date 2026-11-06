@@ -46,8 +46,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "A line is a return when the voucher type is a credit note or sales return, or when quantity or amount is negative. Amounts are the imported ex-VAT values. Each voucher is shown once as number · date · reference.",
-    ar: "السطر مرتجع عندما يكون نوع السند إشعار دائن أو مرتجع مبيعات، أو عندما تكون الكمية أو المبلغ سالباً. المبالغ هي القيم المستوردة بدون الضريبة. كل سند يظهر مرة واحدة: الرقم · التاريخ · المرجع.",
+    en: "A line is a return when the voucher type is a credit note or sales return, or when quantity or amount is negative. A sales invoice named in the credit-note reference is counted even when it was imported in another batch and is missing from the live batch. Amounts are ex-VAT. Each voucher is shown once as number · date · reference.",
+    ar: "السطر مرتجع عندما يكون نوع السند إشعار دائن أو مرتجع مبيعات، أو عندما تكون الكمية أو المبلغ سالباً. فاتورة البيع المذكورة في مرجع إشعار الدائن تُحتسب حتى لو كانت في دفعة استيراد أخرى وناقصة من الدفعة الحالية. المبالغ بدون الضريبة. كل سند يظهر مرة واحدة: الرقم · التاريخ · المرجع.",
   },
 };
 

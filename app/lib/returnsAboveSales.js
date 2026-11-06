@@ -149,6 +149,97 @@ function voucherList(map) {
     .join("; ");
 }
 
+function salePairKey(row) {
+  return [
+    normalizeReturnsAboveSalesCode(row?.customer_code),
+    normalizeReturnsAboveSalesCode(row?.item_code),
+    normalizeReturnsAboveSalesCode(row?.voucher_number),
+  ].join("\u0000");
+}
+
+/**
+ * Credit notes often name the original sales voucher in `reference` (NFD/105).
+ * That invoice can sit in a later import batch while the live batch only has
+ * the credit note. Those missing sales lines are part of the comparison.
+ */
+export function missingReferencedVoucherNumbers(activeRows = []) {
+  const present = new Set();
+  const needed = new Map();
+  (activeRows || []).forEach((row) => {
+    if (isReturnsAboveSalesFooter(row)) return;
+    const voucher = normalizeReturnsAboveSalesCode(row?.voucher_number);
+    const referenceText = String(row?.reference || "").trim();
+    const reference = normalizeReturnsAboveSalesCode(referenceText);
+    if (!isReturnsAboveSalesReturn(row)) {
+      if (voucher) present.add(salePairKey(row));
+      return;
+    }
+    if (!reference || reference === voucher) return;
+    const key = salePairKey({
+      customer_code: row?.customer_code,
+      item_code: row?.item_code,
+      voucher_number: referenceText,
+    });
+    if (!needed.has(key)) needed.set(key, referenceText);
+  });
+
+  const vouchers = new Set();
+  needed.forEach((referenceText, key) => {
+    if (!present.has(key)) vouchers.add(referenceText);
+  });
+  return [...vouchers];
+}
+
+export function pickMissingReferencedSales(activeRows = [], historyRows = []) {
+  const needed = new Set();
+  const present = new Set();
+  (activeRows || []).forEach((row) => {
+    if (isReturnsAboveSalesFooter(row)) return;
+    if (isReturnsAboveSalesReturn(row)) {
+      const reference = normalizeReturnsAboveSalesCode(row?.reference);
+      const voucher = normalizeReturnsAboveSalesCode(row?.voucher_number);
+      if (!reference || reference === voucher) return;
+      needed.add(salePairKey({
+        customer_code: row?.customer_code,
+        item_code: row?.item_code,
+        voucher_number: reference,
+      }));
+      return;
+    }
+    if (normalizeReturnsAboveSalesCode(row?.voucher_number)) present.add(salePairKey(row));
+  });
+
+  const chosen = new Map();
+  (historyRows || []).forEach((row) => {
+    if (isReturnsAboveSalesFooter(row) || isReturnsAboveSalesReturn(row)) return;
+    const key = salePairKey(row);
+    if (!needed.has(key) || present.has(key)) return;
+    const batch = Number(row?.import_batch_id) || 0;
+    const current = chosen.get(key);
+    if (!current || batch > current.batch) {
+      chosen.set(key, { batch, rows: [row] });
+      return;
+    }
+    if (batch === current.batch) current.rows.push(row);
+  });
+
+  const extra = [];
+  chosen.forEach((group) => {
+    const seen = new Set();
+    group.rows.forEach((row) => {
+      const lineKey = [
+        normalizeReturnsAboveSalesDate(row?.transaction_date),
+        Number(row?.quantity) || 0,
+        Number(row?.sales_amount) || 0,
+      ].join("|");
+      if (seen.has(lineKey)) return;
+      seen.add(lineKey);
+      extra.push(row);
+    });
+  });
+  return extra;
+}
+
 function emptyGroup(customerCode, itemCode) {
   return {
     customerCode,

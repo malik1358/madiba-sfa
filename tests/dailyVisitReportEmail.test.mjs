@@ -15,6 +15,7 @@ import {
   runDailyVisitReportEmailCycle,
   resolveDailyVisitReportEmailSchedule,
   resolveVisitReportChainEmails,
+  shouldSkipEmptyPotentialSalesTargetsDigest,
 } from "../app/lib/dailyVisitReportEmailServer.js";
 import { buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
 import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
@@ -762,6 +763,51 @@ test("runDailyVisitReportEmailCycle digestOnlyTo sends only the all-teams digest
   assert.deepEqual(sent[0].to, ["boss@madiba.com"]);
   assert.match(sent[0].subject, /All teams/);
   assert.match(sent[0].html, /Belal/);
+});
+
+test("shouldSkipEmptyPotentialSalesTargetsDigest only blocks empty digests from missing or wiped outstanding", () => {
+  assert.equal(shouldSkipEmptyPotentialSalesTargetsDigest({ records: null, customerCount: 0 }), true);
+  assert.equal(shouldSkipEmptyPotentialSalesTargetsDigest({ records: [], customerCount: 0 }), true);
+  assert.equal(shouldSkipEmptyPotentialSalesTargetsDigest({
+    records: Array.from({ length: 1 }, (_, index) => ({ customer_code: `C${index}` })),
+    customerCount: 0,
+  }), true);
+  assert.equal(shouldSkipEmptyPotentialSalesTargetsDigest({
+    records: Array.from({ length: 100 }, (_, index) => ({ customer_code: `C${index}` })),
+    customerCount: 0,
+  }), false);
+  assert.equal(shouldSkipEmptyPotentialSalesTargetsDigest({
+    records: Array.from({ length: 1 }, (_, index) => ({ customer_code: `C${index}` })),
+    customerCount: 3,
+  }), false);
+});
+
+test("empty potential targets digest is skipped when outstanding source never loaded", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-10-08",
+    now: new Date("2026-10-09T21:10:00Z"),
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_POTENTIAL_SALES_TARGETS_TO: "malik@pinasz.com",
+    },
+    send: async (message) => { sent.push(message); return { provider: "test" }; },
+    loadReport: async () => ({ date: "2026-10-08", thresholdKm: 0.5, users: [] }),
+    loadProfiles: async () => [],
+    loadAuthUsers: async () => [],
+    loadSummary: async () => ({ daySummary: { lines: [] } }),
+    loadKpis: async () => [],
+    loadTeamTargets: async () => new Map(),
+    loadDueCollectionCustomers: async () => [],
+    loadPotentialSalesTargets: async () => [],
+  });
+
+  assert.equal(sent.length, 0);
+  assert.equal(result.sentCount, 0);
+  const skipped = result.results.find((row) => row.kind === "potential_sales_targets_digest");
+  assert.equal(skipped?.status, "skipped");
+  assert.equal(skipped?.reason, "outstanding_source_sparse");
 });
 
 test("runDailyVisitReportEmailCycle sends full customer-wise potential target digest to its configured recipient", async () => {

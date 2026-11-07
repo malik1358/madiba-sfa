@@ -21,6 +21,7 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offl
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { rebuildReceivableDaysDataset } from "../../lib/receivableDaysServer.js";
+import { shouldRejectOutstandingUpload } from "../../lib/outstandingDatasetGuard.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -249,6 +250,13 @@ export async function POST(request) {
     const parsed = parsedSheets.length === 1
       ? parsedSheets[0]
       : mergeParsedOutstandingSheets(parsedSheets);
+
+    const previousDataset = await readDataset(admin);
+    const rejectReason = shouldRejectOutstandingUpload(previousDataset, parsed);
+    if (rejectReason) {
+      return NextResponse.json({ success: false, error: rejectReason }, { status: 400 });
+    }
+
     const nowIso = new Date().toISOString();
 
     let storedFilePath = "";

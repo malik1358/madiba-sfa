@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   buildAdvanceCollectionQueueRecord,
+  buildCollectionInvoicesFromMachineOpen,
   buildCollectionPriority,
   buildCollectionQueues,
   buildExposureScore,
   buildExposureScoreFromInvoices,
+  buildMachineOpenCollectionSourceRecord,
   collectionAgingWeight,
   collectionRowMatchesCustomerQuery,
   customerMatchesCollectionScope,
@@ -341,6 +343,53 @@ test("buildCollectionQueues places not-yet-due customers in notDueCustomers queu
   assert.equal(queues.notDueCustomers[0].customer_code, "1538");
   assert.equal(queues.notDueCustomers[0].total_not_due_amount, 1000);
   assert.equal(queues.notDueCustomers[0].invoices.length, 1);
+});
+
+test("Machine Open receivables enter the due queue when Tally OS omitted the customer", () => {
+  const invoices = buildCollectionInvoicesFromMachineOpen([
+    {
+      voucher_number: "DNFD/120",
+      invoice_date: "2026-10-05",
+      remaining: 5697.75,
+      open_days: 33,
+      status: "Open",
+    },
+  ], {
+    customerCode: "1640",
+    customerName: "Al-Munazah Al-Jamil Trading Company",
+    salesmanName: "Moinudin Khaja",
+  });
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].ref_no, "DNFD/120");
+  assert.equal(invoices[0].pending_amount, 5697.75);
+  assert.equal(invoices[0].open_source, "machine_open");
+
+  const source = buildMachineOpenCollectionSourceRecord({
+    customer: {
+      customer_code: "1640",
+      customer_name: "Al-Munazah Al-Jamil Trading Company",
+      current_salesman_code: "MOINUDIN KHAJA",
+    },
+    salesmanName: "Moinudin Khaja",
+    salesmanCode: "MOINUDIN KHAJA",
+    invoices,
+  });
+  assert.equal(source.is_machine_open_entry, true);
+  assert.equal(source.is_advance_entry, false);
+
+  const queues = buildCollectionQueues([source], "2026-11-07T10:00:00Z");
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1640");
+  assert.equal(queues.dueCustomers[0].is_machine_open_entry, true);
+  assert.equal(queues.notDueCustomers.length, 0);
+
+  const merged = injectAdvanceCustomerIntoQueues({
+    dueCustomers: [],
+    notDueCustomers: [],
+    legalCustomers: [],
+  }, queues.dueCustomers[0]);
+  assert.equal(merged.dueCustomers[0].customer_code, "1640");
 });
 
 test("buildCollectionQueues ranks exposure before cash bucket tie-breaker", () => {

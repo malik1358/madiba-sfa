@@ -136,16 +136,17 @@ const TEXT = {
     ar: "لا يوجد عملاء مطابقون لهذا التصفية. امسح مربع اسم/كود العميل لعرض القائمة كاملة.",
   },
   advanceLookupHint: {
-    en: "No outstanding for this code. If you received an advance, open the customer to upload Funds Received.",
-    ar: "لا يوجد رصيد مستحق لهذا الكود. إذا استلمت دفعة مقدمة، افتح العميل لرفع المبلغ المستلم.",
+    en: "Not in the Tally outstanding file. Open the customer to load Machine Open receivables or an advance upload.",
+    ar: "غير موجود في ملف المستحقات. افتح العميل لتحميل مستحقات التسوية أو رفع دفعة مقدمة.",
   },
-  openAdvanceCustomer: { en: "Open for advance upload", ar: "فتح لرفع الدفعة المقدمة" },
+  openAdvanceCustomer: { en: "Open customer / receivables", ar: "فتح العميل / المستحقات" },
   lookingUpAdvance: { en: "Looking up customer…", ar: "جاري البحث عن العميل…" },
   advanceLookupFailed: {
-    en: "Could not open that customer for advance upload.",
-    ar: "تعذر فتح هذا العميل لرفع الدفعة المقدمة.",
+    en: "Could not open that customer for collection.",
+    ar: "تعذر فتح هذا العميل للتحصيل.",
   },
   advanceBadge: { en: "Advance / no outstanding", ar: "دفعة مقدمة / بدون مستحقات" },
+  machineOpenBadge: { en: "Receivable from settlement (not in Tally OS)", ar: "مستحق من التسوية (غير موجود في ملف المستحقات)" },
   clearCustomerFilter: { en: "Clear customer filter", ar: "مسح تصفية العميل" },
   legalSearchMatch: { en: "Legal", ar: "قانوني" },
   notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
@@ -1545,14 +1546,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
         throw new Error(t("advanceLookupFailed"));
       }
 
-      setDueCustomers((current) => {
-        if (current.some((row) => matchesCollectionCustomerQuery(row, advanceRow.customer_code))) {
-          return current;
-        }
-        return [advanceRow, ...current];
-      });
+      await applyQueuePayload({
+        dueCustomers: Array.isArray(payload.dueCustomers) ? payload.dueCustomers : [],
+        notDueCustomers: Array.isArray(payload.notDueCustomers) ? payload.notDueCustomers : [],
+        legalCustomers: Array.isArray(payload.legalCustomers) ? payload.legalCustomers : [],
+      }, openRow ? rowKey(advanceRow) : undefined);
       setCustomerFilter(String(advanceRow.customer_code || query).trim());
-      if (openRow) setActiveRowKey(rowKey(advanceRow));
       setError("");
       return advanceRow;
     } catch (err) {
@@ -1892,6 +1891,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
     prefilledCollectionOpenedRef.current = true;
     void lookupAdvanceCustomerForFilter(query, { openRow: true });
   }, [loading, advanceLookupBusy, customerFilter, dueCustomers, notDueCustomers, legalCustomers]);
+
+  useEffect(() => {
+    if (loading || advanceLookupBusy || view !== "due") return;
+    const query = String(customerFilter || "").trim();
+    if (!query || query.length < 2) return;
+    if (visibleRows.length > 0 || visibleNotDueRows.length > 0) return;
+    if (advanceLookupAttemptedRef.current === query) return;
+
+    const timer = window.setTimeout(() => {
+      if (advanceLookupAttemptedRef.current === query) return;
+      advanceLookupAttemptedRef.current = query;
+      void lookupAdvanceCustomerForFilter(query, { openRow: true });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    advanceLookupBusy,
+    customerFilter,
+    loading,
+    view,
+    visibleNotDueRows.length,
+    visibleRows.length,
+  ]);
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
   const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0
@@ -3343,6 +3364,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             {row.customer_name || row.customer_code}
                             {row.is_advance_entry ? (
                               <div className="moduleHint">{t("advanceBadge")}</div>
+                            ) : null}
+                            {row.is_machine_open_entry ? (
+                              <div className="moduleHint">{t("machineOpenBadge")}</div>
                             ) : null}
                             {isNotDue ? (
                               <div className="moduleHint">{t("notYetDueBadge")}</div>

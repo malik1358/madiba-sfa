@@ -21,9 +21,7 @@ import {
   formatDiscountPercent,
   formatMoneyAmount,
   lookupDiscountRate,
-  lookupValueDiscountSlabs,
   normalizePaymentType,
-  previewValueDiscountRate,
   pricingRegionLabel,
 } from "../lib/regionalPricing";
 import {
@@ -748,10 +746,8 @@ export default function ProductCatalogue({
           });
           const cashRate = lookupDiscountRate(cashDiscountMap, item.item_code);
           const isCashPayment = normalizePaymentType(paymentType) === "cash";
-          const valuePreviewRate = previewValueDiscountRate(lookupValueDiscountSlabs(valueDiscountMap, item.item_code));
-          const valueRateShown = priced.applied.value ? priced.valueDiscountRate : valuePreviewRate;
           const showCashDiscountRow = isCashPayment && cashRate > 0;
-          const showVolumeDiscountRow = qty > 0 && valueRateShown > 0;
+          const showVolumeDiscountRow = priced.applied.value && Number(priced.valueDiscountAmount) > 0;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
@@ -797,8 +793,8 @@ export default function ProductCatalogue({
                     {showVolumeDiscountRow && (
                       <div className={styles.linePricingRow}>
                         <span>{ar ? "خصم الكمية" : "Volume discount"}</span>
-                        <span className={priced.applied.value ? undefined : styles.linePricingMuted}>
-                          {formatDiscountPercent(valueRateShown)}
+                        <span>
+                          {formatDiscountPercent(priced.valueDiscountRate)}
                           {` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`}
                         </span>
                       </div>

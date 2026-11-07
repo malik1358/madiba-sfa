@@ -581,6 +581,7 @@ test("findReceiptsForCustomer keeps one copy when the same voucher is stored und
         vch_no: "599",
         amount: 322,
         customer_code: "ATLALT ALBINA CO.",
+        customer_name: "Atlalt Albina Co.",
         particulars: "1620 Atlalt Albina Co.",
       },
       {
@@ -589,6 +590,7 @@ test("findReceiptsForCustomer keeps one copy when the same voucher is stored und
         vch_no: "00072",
         amount: 356.34,
         customer_code: "ATLALT ALBINA CO.",
+        customer_name: "Atlalt Albina Co.",
         particulars: "1620 Atlalt Albina Co.",
       },
     ],

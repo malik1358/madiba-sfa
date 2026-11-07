@@ -2,7 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 import {
   assertCollectionVisitRemark,
   buildAdvanceCollectionQueueRecord,
+  buildCollectionInvoicesFromMachineOpen,
   buildCollectionQueues,
+  buildMachineOpenCollectionSourceRecord,
   customerMatchesCollectionScope,
   filterCollectionQueueInvoices,
   findAllLegalTransferCustomerCodes,
@@ -11,7 +13,17 @@ import {
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
 import { collectionCustomerAccessScope, ensureCustomerVisibleToScope } from "../../lib/customerAccess.js";
-import { enrichCollectionRecordsWithAvgDays } from "../../lib/collectionAvgDays.js";
+import {
+  enrichCollectionRecordsWithAvgDays,
+  loadReceiptRowsByCustomer,
+  loadSalesRowsByCustomer,
+  lookupByCustomerCode,
+} from "../../lib/collectionAvgDays.js";
+import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  isPartialOutstandingDataset,
+  recoverPartialOutstandingDataset,
+} from "../../lib/outstandingDatasetGuard.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireGpsAccessGate, shouldRequireTransactionGps, isManagementRole } from "../../lib/moduleAccess.js";
@@ -225,14 +237,24 @@ async function readOutstandingDataset(admin) {
     return { invoices: [], rows: [] };
   }
 
+  let activeParsed = parsed;
+  if (isPartialOutstandingDataset(parsed)) {
+    try {
+      const recovered = await recoverPartialOutstandingDataset(admin, parsed);
+      if (recovered) activeParsed = recovered;
+    } catch (recoverError) {
+      console.error("Unable to recover partial outstanding dataset:", recoverError);
+    }
+  }
+
   const hasUploadedDataset = Boolean(
-    (Array.isArray(parsed?.invoices) && parsed.invoices.length > 0)
-    || (Array.isArray(parsed?.rows) && parsed.rows.length > 0),
+    (Array.isArray(activeParsed?.invoices) && activeParsed.invoices.length > 0)
+    || (Array.isArray(activeParsed?.rows) && activeParsed.rows.length > 0),
   );
 
   if (hasUploadedDataset) {
-    const hydrated = hydrateOutstandingInvoices(parsed);
-    const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+    const hydrated = hydrateOutstandingInvoices(activeParsed);
+    const rows = Array.isArray(activeParsed?.rows) ? activeParsed.rows : [];
     if (hydrated.length > 0) {
       // The uploaded outstanding workbook is the collection-queue source.
       // Merging the invoices table here re-read every open invoice and the
@@ -563,6 +585,41 @@ export async function resolveAdvanceCollectionQueueCustomer(admin, scope, custom
       (profile) => normalizeCode(profile?.salesman_code) === masterCode,
     );
     salesmanName = String(match?.salesman_name || customer.current_salesman_code || "").trim();
+  }
+
+  try {
+    const code = customer.customer_code || requested;
+    const [salesByCustomer, receiptsByCustomer] = await Promise.all([
+      loadSalesRowsByCustomer(admin, [code]),
+      loadReceiptRowsByCustomer(admin),
+    ]);
+    const ledger = buildPaymentSettlementLedger({
+      transactions: lookupByCustomerCode(salesByCustomer, code),
+      receipts: lookupByCustomerCode(receiptsByCustomer, code),
+      outstandingCustomer: null,
+      outstandingInvoices: [],
+    });
+    const openInvoices = buildCollectionInvoicesFromMachineOpen(ledger.invoices || [], {
+      customerCode: code,
+      customerName: customer.customer_name,
+      salesmanName,
+    });
+    if (openInvoices.length > 0) {
+      const source = buildMachineOpenCollectionSourceRecord({
+        customer,
+        visits,
+        salesmanCode: masterCode,
+        salesmanName,
+        invoices: openInvoices,
+      });
+      const built = buildCollectionQueues([source]);
+      return built.dueCustomers[0]
+        || built.notDueCustomers[0]
+        || built.legalCustomers[0]
+        || source;
+    }
+  } catch (machineOpenError) {
+    console.error("Unable to resolve Machine Open collection customer:", machineOpenError);
   }
 
   return buildAdvanceCollectionQueueRecord({

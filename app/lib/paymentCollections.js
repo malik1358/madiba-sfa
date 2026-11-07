@@ -659,6 +659,71 @@ export function buildAdvanceCollectionQueueRecord({
   };
 }
 
+/**
+ * Map Machine Open settlement invoices onto the collection-queue invoice shape
+ * so a receivable known from sales+receipts can appear even when Tally OS omitted it.
+ */
+export function buildCollectionInvoicesFromMachineOpen(settlementInvoices = [], {
+  customerCode = "",
+  customerName = "",
+  salesmanName = "",
+} = {}) {
+  return (Array.isArray(settlementInvoices) ? settlementInvoices : [])
+    .map((invoice) => {
+      const pendingAmount = toNumber(
+        invoice?.remaining ?? invoice?.fifo_remaining ?? invoice?.outstanding_pending,
+      );
+      if (pendingAmount <= 0.009) return null;
+      const status = String(invoice?.status || "").trim();
+      if (status === "Paid") return null;
+
+      const invoiceDate = dateOnly(invoice?.invoice_date) || "";
+      const openDays = Math.max(0, Number(invoice?.open_days || 0));
+      const refNo = String(invoice?.voucher_number || invoice?.ref_no || "").trim();
+      if (!refNo) return null;
+
+      return {
+        invoice_number: refNo,
+        ref_no: refNo,
+        invoice_date: invoiceDate,
+        due_date: invoiceDate,
+        pending_amount: pendingAmount,
+        invoice_day: openDays || null,
+        overdue_days: openDays || 0,
+        salesman: String(salesmanName || "").trim(),
+        customer_code: normalizeCode(customerCode),
+        customer_name: String(customerName || "").trim(),
+        open_source: "machine_open",
+      };
+    })
+    .filter(Boolean);
+}
+
+export function buildMachineOpenCollectionSourceRecord({
+  customer = {},
+  visits = [],
+  salesmanName = "",
+  salesmanCode = "",
+  invoices = [],
+} = {}) {
+  const base = buildAdvanceCollectionQueueRecord({
+    customer,
+    visits,
+    salesmanName,
+    salesmanCode,
+  });
+  const openInvoices = Array.isArray(invoices) ? invoices.filter((invoice) => toNumber(invoice?.pending_amount) > 0.009) : [];
+  const totalOutstanding = openInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
+
+  return {
+    ...base,
+    invoices: openInvoices,
+    is_advance_entry: false,
+    is_machine_open_entry: true,
+    total_outstanding: totalOutstanding,
+  };
+}
+
 export function injectAdvanceCustomerIntoQueues(queues, advanceRow) {
   if (!advanceRow?.customer_code) return queues || { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
@@ -670,6 +735,30 @@ export function injectAdvanceCustomerIntoQueues(queues, advanceRow) {
 
   if (alreadyPresent) {
     return { dueCustomers, notDueCustomers, legalCustomers };
+  }
+
+  if (advanceRow.is_advance_entry) {
+    return {
+      dueCustomers: [advanceRow, ...dueCustomers],
+      notDueCustomers,
+      legalCustomers,
+    };
+  }
+
+  if (advanceRow.queue_kind === "not_due") {
+    return {
+      dueCustomers,
+      notDueCustomers: [advanceRow, ...notDueCustomers],
+      legalCustomers,
+    };
+  }
+
+  if (advanceRow.legal_transfer?.is_transferred) {
+    return {
+      dueCustomers,
+      notDueCustomers,
+      legalCustomers: [advanceRow, ...legalCustomers],
+    };
   }
 
   return {

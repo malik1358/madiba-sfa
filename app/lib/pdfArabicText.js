@@ -1,6 +1,8 @@
 const ARABIC_FONT = "NotoNaskhArabic";
 const ARABIC_FILE = "NotoNaskhArabic-Regular.ttf";
 const ARABIC_RUN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+(?:[ \t]+[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+)*/g;
+/** Western + Eastern/Persian digits, optionally joined by decimal/thousands separators. */
+const DIGIT_RUN = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,\u066B\u066C][0-9\u0660-\u0669\u06F0-\u06F9]+)*/g;
 
 export function containsArabicText(value) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(value ?? ""));
@@ -20,13 +22,23 @@ export function splitPdfTextRuns(text) {
   return runs;
 }
 
+/**
+ * Reverse shaped Arabic for LTR PDF drawing while keeping number runs logical.
+ * Eastern Arabic-Indic digits sit in the Arabic Unicode block, so a naive
+ * character reverse turns 5,491.80 into 5,194.08 and 2026 into 6202.
+ */
+export function reverseArabicPreservingDigits(text) {
+  const reversed = Array.from(String(text ?? "")).reverse().join("");
+  return reversed.replace(DIGIT_RUN, (run) => Array.from(run).reverse().join(""));
+}
+
 function arabicFontStyle(style) {
   return style === "bold" || style === "bolditalic" ? "bold" : "normal";
 }
 
 function visualArabic(doc, text) {
   const shaped = typeof doc.processArabic === "function" ? doc.processArabic(String(text)) : String(text);
-  return Array.from(shaped).reverse().join("");
+  return reverseArabicPreservingDigits(shaped);
 }
 
 export function registerArabicPdfFont(doc, fontBase64) {

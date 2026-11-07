@@ -244,7 +244,7 @@ test("catalogue customer search reuses scoped code/name suggestions and explicit
   assert.match(component, /Selected customer:/);
   assert.match(component, /Clear customer/);
   assert.match(component, /No matching customers/);
-  assert.match(component, /\[search, category, pricingRegion, pricingType, selectedCustomer\?\.customer_code\]/);
+  assert.match(component, /\[search, category, pricingRegion, pricingType, selectedCustomer\?\.customer_code, eodStock\]/);
   assert.doesNotMatch(component, /customers\.map/);
 });
 
@@ -574,6 +574,13 @@ test("catalogue carousel advances and share lines put price and packing on the i
     priceAmount: "12.50",
     originalAmount: "15.00",
     cashDiscount: true,
+    cashDiscountRate: 0.08,
+    volumeSlabs: [
+      { threshold: 2000, rate: 0.02 },
+      { threshold: 5000, rate: 0.04 },
+      { threshold: 10000, rate: 0.05 },
+    ],
+    paymentType: "credit",
     pricingType: "wholesale",
     region: "riyadh",
   });
@@ -587,6 +594,12 @@ test("catalogue carousel advances and share lines put price and packing on the i
   assert.match(text, /12\.50 ر\.س/);
   assert.match(text, /Before discount: 15\.00 SAR/);
   assert.match(text, /قبل الخصم: 15\.00 ر\.س/);
+  assert.match(text, /Cash discount: 8% · Cash only/);
+  assert.match(text, /خصم نقدي: 8% · نقداً فقط/);
+  assert.match(text, /Volume ≥ 2,000\.00: 2%/);
+  assert.match(text, /Volume ≥ 5,000\.00: 4%/);
+  assert.match(text, /Volume ≥ 10,000\.00: 5%/);
+  assert.match(text, /خصم الكمية ≥ 2,000\.00: 2%/);
   assert.match(text, /Wholesale · Riyadh · Ex VAT/);
   assert.match(text, /الجملة · الرياض · قبل الضريبة/);
   const withoutPrice = buildCatalogueShareLines({
@@ -594,10 +607,12 @@ test("catalogue carousel advances and share lines put price and packing on the i
     code: "G1",
     packing: "100 PCS / CTN",
     priceAmount: "12.50",
+    cashDiscountRate: 0.08,
+    volumeSlabs: [{ threshold: 2000, rate: 0.02 }],
     includePrice: false,
   }).map((line) => line.text).join("\n");
   assert.match(withoutPrice, /Packing: 100 PCS \/ CTN/);
-  assert.doesNotMatch(withoutPrice, /12\.50|SAR|Price unavailable|السعر/);
+  assert.doesNotMatch(withoutPrice, /12\.50|SAR|Price unavailable|السعر|Cash discount|Volume ≥/);
   const wrapped = wrapShareText("Packing: BOX ".repeat(12), 80, (value) => value.length * 8);
   assert.ok(wrapped.length > 1);
   assert.equal(wrapped.join(" "), "Packing: BOX ".repeat(12).trim());

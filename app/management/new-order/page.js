@@ -74,7 +74,6 @@ import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCata
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
-  hasPositiveEodStockQty,
   isEodStockQtyOverAvailable,
 } from "../../lib/eodStock.js";
 
@@ -877,7 +876,6 @@ export default function NewOrderPage() {
 
     return mergedItemsMaster.filter((item) => {
       if (catalogueMode && !isVisibleCatalogueItem(item, regionPriceList[item.item_code])) return false;
-      if (catalogueMode && !hasPositiveEodStockQty(eodStock, pricingRegion, item.item_code)) return false;
       if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       return !q || (
@@ -886,7 +884,7 @@ export default function NewOrderPage() {
         String(item.category || "").toLowerCase().includes(q)
       );
     });
-  }, [mergedItemsMaster, categoryFilter, itemSearch, catalogueMode, regionPriceList, eodStock, pricingRegion]);
+  }, [mergedItemsMaster, categoryFilter, itemSearch, catalogueMode, regionPriceList]);
 
   const groupedItems = useMemo(() => {
     const map = new Map();

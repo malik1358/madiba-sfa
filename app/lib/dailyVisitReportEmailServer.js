@@ -32,6 +32,7 @@ import {
 import { buildCollectionQueues } from "./paymentCollections.js";
 import { buildPotentialBadDebtsSection, filterBadDebtRowsForProfile } from "./badDebtReportEmail.js";
 import { loadDebtReports } from "./badDebtReportServer.js";
+import { PARTIAL_OUTSTANDING_ROW_CEILING } from "./outstandingDatasetGuard.js";
 import { buildPotentialSalesTargetsDigest, buildPotentialSalesTargetsSection, potentialSalesTargetMatchesSalesman } from "./potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
 import {
@@ -42,6 +43,15 @@ import {
   getPreviousKsaDateString,
   isKsaOrderDay,
 } from "./workdayActivity.js";
+
+export function shouldSkipEmptyPotentialSalesTargetsDigest({
+  records = null,
+  customerCount = 0,
+} = {}) {
+  if (Number(customerCount) > 0) return false;
+  if (!Array.isArray(records)) return true;
+  return records.length === 0 || records.length <= PARTIAL_OUTSTANDING_ROW_CEILING;
+}
 
 export function parseReportDateParam(value, now = new Date()) {
   const date = String(value || "").trim();
@@ -752,16 +762,30 @@ export async function runDailyVisitReportEmailCycle(admin, {
   }
 
   if (potentialSalesTargets && potentialSalesTargetsEmails.length) {
-    await sendDigestEmail({
-      userId: "potential-sales-targets",
-      userName: "Potential Sales Targets",
-      to: potentialSalesTargetsEmails,
-      kind: "potential_sales_targets_digest",
-      message: buildPotentialSalesTargetsDigest({
-        rows: potentialSalesTargets,
-        todayKey: staleAsOfKey,
-      }),
+    const potentialTargetsMessage = buildPotentialSalesTargetsDigest({
+      rows: potentialSalesTargets,
+      todayKey: staleAsOfKey,
     });
+    if (shouldSkipEmptyPotentialSalesTargetsDigest({
+      records: collectionRecords,
+      customerCount: potentialTargetsMessage.customerCount,
+    })) {
+      results.push({
+        userId: "potential-sales-targets",
+        userName: "Potential Sales Targets",
+        status: "skipped",
+        reason: "outstanding_source_sparse",
+        kind: "potential_sales_targets_digest",
+      });
+    } else {
+      await sendDigestEmail({
+        userId: "potential-sales-targets",
+        userName: "Potential Sales Targets",
+        to: potentialSalesTargetsEmails,
+        kind: "potential_sales_targets_digest",
+        message: potentialTargetsMessage,
+      });
+    }
   }
 
   const usedDigestEmails = new Set();

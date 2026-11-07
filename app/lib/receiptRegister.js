@@ -749,10 +749,27 @@ export function dedupeReceiptsForCustomer(rows = [], customerCode = "") {
   return kept;
 }
 
+function receiptRowMatchesCustomer(row, customerCode, customerName = "") {
+  const name = row?.customer_name || row?.particulars || "";
+  if (isSameOutstandingCustomer(row?.customer_code, name, customerCode, customerName)) return true;
+  // Prefer particulars when the stored code is the party name (1620 NSTC JVs).
+  const particulars = String(row?.particulars || "").trim();
+  if (particulars && particulars !== name) {
+    if (isSameOutstandingCustomer(row?.customer_code, particulars, customerCode, customerName)) return true;
+  }
+  const fromParticulars = extractLeadingCustomerCodeAndName(particulars);
+  if (fromParticulars.customer_code) {
+    if (isSameOutstandingCustomer(fromParticulars.customer_code, fromParticulars.customer_name || particulars, customerCode, customerName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function findReceiptsForCustomer(dataset, customerCode, customerName = "") {
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
   const matched = rows
-    .filter((row) => isSameOutstandingCustomer(row.customer_code, row.customer_name || row.particulars, customerCode, customerName))
+    .filter((row) => receiptRowMatchesCustomer(row, customerCode, customerName))
     .map(buildReceiptRow);
   return dedupeReceiptsForCustomer(matched, customerCode)
     .sort((left, right) => {

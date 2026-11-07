@@ -2870,6 +2870,32 @@ export function buildPaymentSettlementLedger({
     purchaseSalesByKey.set(key, list);
   });
 
+  const purchasePaymentsByKey = new Map();
+  const pushPurchasePayment = (purchaseDate, purchaseVoucher, application) => {
+    const key = `${purchaseDate}::${String(purchaseVoucher || "").trim()}`;
+    const list = purchasePaymentsByKey.get(key) || [];
+    list.push(application);
+    purchasePaymentsByKey.set(key, list);
+  };
+  matchedPurchasePayments.forEach((row) => {
+    pushPurchasePayment(row.purchase_date, row.purchase_voucher, {
+      target_kind: "payment",
+      voucher_number: row.payment_voucher || "",
+      target_date: row.payment_date || "",
+      amount: toNumber(row.amount),
+      status: row.status || "Matched",
+    });
+  });
+  purchaseAllocations.forEach((row) => {
+    pushPurchasePayment(row.purchase_date, row.purchase_voucher, {
+      target_kind: "payment",
+      voucher_number: row.vch_no || "",
+      target_date: row.payment_date || "",
+      amount: toNumber(row.amount),
+      status: "Applied",
+    });
+  });
+
   const purchasesByDateMap = new Map();
   buildPurchaseRegisterRows(receipts).forEach((row) => {
     const current = purchasesByDateMap.get(row.purchase_date) || {
@@ -2880,12 +2906,17 @@ export function buildPaymentSettlementLedger({
     };
     current.purchase_count += 1;
     current.purchase_amount += toNumber(row.amount);
+    const key = `${row.purchase_date}::${row.vch_no}`;
     current.purchases.push({
       vch_no: row.vch_no,
       amount: toNumber(row.amount),
       vch_type: row.vch_type || "Purchase",
       kind: "purchase",
-      applications: purchaseSalesByKey.get(`${row.purchase_date}::${row.vch_no}`) || [],
+      // Payments that closed this Purchase first, then any leftover applied to sales.
+      applications: [
+        ...(purchasePaymentsByKey.get(key) || []),
+        ...(purchaseSalesByKey.get(key) || []),
+      ],
     });
     purchasesByDateMap.set(row.purchase_date, current);
   });

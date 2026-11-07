@@ -568,8 +568,16 @@ test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches th
   assert.equal(payment.applications[0].target_kind, "purchase");
   assert.equal(payment.applications[0].voucher_number, "29");
   const purchase281 = ledger.datewise.find((day) => day.date === "2026-10-06").purchases[0];
-  assert.equal(purchase281.applications[0].voucher_number, "NFD/1815");
-  assert.equal(Number(purchase281.applications[0].amount.toFixed(2)), 3175.12);
+  const paymentOn281 = purchase281.applications.find((row) => row.target_kind === "payment");
+  const salesOn281 = purchase281.applications.find((row) => row.target_kind === "sales");
+  assert.equal(paymentOn281.voucher_number, "Oct/Bpmt0030");
+  assert.equal(Number(paymentOn281.amount.toFixed(2)), 2206.88);
+  assert.equal(salesOn281.voucher_number, "NFD/1815");
+  assert.equal(Number(salesOn281.amount.toFixed(2)), 3175.12);
+
+  const purchase29 = ledger.datewise.find((day) => day.date === "2026-01-25").purchases[0];
+  assert.ok(purchase29.applications.every((row) => row.target_kind === "payment"));
+  assert.ok(purchase29.applications.some((row) => row.voucher_number === "117"));
 });
 
 test("a Payment does not settle a Purchase more than 31 days later", () => {

@@ -148,8 +148,8 @@ function cacheKeyFor(customerCode, scope, { fullHistory = false } = {}) {
   }
 
   const historySuffix = fullHistory ? ":full" : "";
-  // s24: receipt list drops same-voucher copies stored under the party name.
-  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}:s24${historySuffix}`;
+  // s25: party-name-as-code receipts (1620 NSTC under ATLALT ALBINA CO.) match.
+  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}:s25${historySuffix}`;
 }
 
 function parseJson(value) {

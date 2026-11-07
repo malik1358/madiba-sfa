@@ -1054,6 +1054,27 @@ test("different Al Tawfeer account codes do not share outstanding invoices", () 
   );
 });
 
+test("party name stored as customer_code still matches the numeric account (1620 Atlalt)", () => {
+  assert.equal(
+    isSameOutstandingCustomer(
+      "ATLALT ALBINA CO.",
+      "Atlalt Albina Co.",
+      "1620",
+      "Atlalt Albina Co.",
+    ),
+    true,
+  );
+  assert.equal(
+    isSameOutstandingCustomer(
+      "ATLALT ALBINA CO.",
+      "1620 Atlalt Albina Co.",
+      "1620",
+      "Atlalt Albina Co.",
+    ),
+    true,
+  );
+});
+
 test("prospect customers do not inherit outstanding from similar customer names", () => {
   const dataset = {
     rows: [{

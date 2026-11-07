@@ -32,6 +32,9 @@ function purchaseDetail(purchase) {
   const unapplied = Math.max(0, Number(purchase.amount || 0) - applied);
   const targets = applications.map((application) => {
     const voucher = application.voucher_number ? ` ${application.voucher_number}` : "";
+    if (application.target_kind === "payment") {
+      return `Payment${voucher} (${formatMoney(application.amount)})`;
+    }
     return `Invoice${voucher} (${formatMoney(application.amount)})`;
   });
   if (unapplied > 0.009) targets.push(`unapplied ${formatMoney(unapplied)}`);

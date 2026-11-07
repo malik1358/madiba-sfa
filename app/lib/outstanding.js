@@ -1518,11 +1518,28 @@ export function buildOutstandingSummaryCustomer(raw) {
   };
 }
 
+function looksLikeCustomerAccountCode(value) {
+  return /\d/.test(String(value || "").trim());
+}
+
+/**
+ * Prefer a real account code (digits). A dirty store of the party name as
+ * customer_code (1620 rows coded "ATLALT ALBINA CO.") must not become a fake
+ * account "ATLALT" that blocks matching the same party under code 1620.
+ */
 function outstandingPartyAccountCode(customerCode, customerName) {
-  return resolveOutstandingInvoiceCustomerCode({
-    customer_code: customerCode,
-    customer_name: customerName,
-  }) || resolveCustomerAccountCode(customerCode) || resolveCustomerAccountCode(customerName);
+  const candidates = [
+    resolveOutstandingInvoiceCustomerCode({
+      customer_code: customerCode,
+      customer_name: customerName,
+    }),
+    resolveCustomerAccountCode(customerCode),
+    resolveCustomerAccountCode(customerName),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && looksLikeCustomerAccountCode(candidate)) return candidate;
+  }
+  return "";
 }
 
 function outstandingPartyComparableName(customerCode, customerName) {

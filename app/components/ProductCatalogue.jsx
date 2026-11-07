@@ -23,7 +23,6 @@ import {
   lookupDiscountRate,
   lookupValueDiscountSlabs,
   normalizePaymentType,
-  previewValueDiscountRate,
   pricingRegionLabel,
   VALUE_DISCOUNT_SLABS,
 } from "../lib/regionalPricing";
@@ -756,27 +755,25 @@ export default function ProductCatalogue({
           const cashRate = lookupDiscountRate(cashDiscountMap, item.item_code);
           const isCashPayment = normalizePaymentType(paymentType) === "cash";
           const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, item.item_code);
-          const valuePreviewRate = previewValueDiscountRate(valueSlabs);
-          const valueRateShown = priced.applied.value ? priced.valueDiscountRate : valuePreviewRate;
-          const volumeThreshold = VALUE_DISCOUNT_SLABS.find((threshold) => Number(valueSlabs[String(threshold)] || 0) > 0) || null;
-          const showCashDiscountRow = isCashPayment && cashRate > 0;
-          const showVolumeDiscountRow = valueRateShown > 0;
+          const volumeSlabRows = VALUE_DISCOUNT_SLABS
+            .map((threshold) => ({
+              threshold,
+              rate: Number(valueSlabs[String(threshold)] || 0),
+            }))
+            .filter((slab) => slab.rate > 0);
+          const showCashDiscountRow = cashRate > 0;
+          const showVolumeDiscountRows = volumeSlabRows.length > 0;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
-          const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRow);
-          const cashAmountLabel = qty > 0
-            ? ` · ${formatMoneyAmount(priced.cashDiscountAmount)} ﷼`
-            : (ar ? " · أدخل الكمية" : " · enter qty");
-          const volumeAmountLabel = qty <= 0
-            ? (ar ? " · أدخل الكمية" : " · enter qty")
-            : priced.applied.value
-              ? ` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`
-              : volumeThreshold
-                ? (ar ? ` · من ${formatMoneyAmount(volumeThreshold)} ﷼` : ` · from ${formatMoneyAmount(volumeThreshold)} ﷼`)
-                : ` · ${formatMoneyAmount(0)} ﷼`;
+          const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
+          const cashAmountLabel = !isCashPayment
+            ? (ar ? " · نقداً فقط" : " · Cash only")
+            : qty > 0
+              ? ` · ${formatMoneyAmount(priced.cashDiscountAmount)} ﷼`
+              : (ar ? " · أدخل الكمية" : " · enter qty");
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
               <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
@@ -811,15 +808,27 @@ export default function ProductCatalogue({
                         </span>
                       </div>
                     )}
-                    {showVolumeDiscountRow && (
-                      <div className={styles.linePricingRow}>
-                        <span>{ar ? "خصم الكمية" : "Volume discount"}</span>
-                        <span className={priced.applied.value ? undefined : styles.linePricingMuted}>
-                          {formatDiscountPercent(valueRateShown)}
-                          {volumeAmountLabel}
-                        </span>
-                      </div>
-                    )}
+                    {volumeSlabRows.map((slab) => {
+                      const slabApplied = priced.applied.value
+                        && Number(priced.valueDiscountRate) > 0
+                        && Math.abs(Number(priced.valueDiscountRate) - slab.rate) < 0.000001;
+                      const slabAmountLabel = qty <= 0
+                        ? (ar ? " · أدخل الكمية" : " · enter qty")
+                        : slabApplied
+                          ? ` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`
+                          : "";
+                      return (
+                        <div key={`volume-${slab.threshold}`} className={styles.linePricingRow}>
+                          <span>
+                            {ar ? "خصم الكمية" : "Volume"} ≥ {formatMoneyAmount(slab.threshold)}
+                          </span>
+                          <span className={slabApplied ? undefined : styles.linePricingMuted}>
+                            {formatDiscountPercent(slab.rate)}
+                            {slabAmountLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
                     {qty > 0 && (
                       <div className={`${styles.linePricingRow} ${styles.linePricingTotal}`}>
                         <span>{ar ? "إجمالي الصنف" : "Item total"}</span>

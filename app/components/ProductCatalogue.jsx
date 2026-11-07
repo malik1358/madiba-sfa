@@ -22,6 +22,7 @@ import {
   formatMoneyAmount,
   lookupDiscountRate,
   lookupValueDiscountSlabs,
+  normalizePaymentType,
   previewValueDiscountRate,
   pricingRegionLabel,
 } from "../lib/regionalPricing";
@@ -746,14 +747,17 @@ export default function ProductCatalogue({
             price, quantity: qty, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
           });
           const cashRate = lookupDiscountRate(cashDiscountMap, item.item_code);
+          const isCashPayment = normalizePaymentType(paymentType) === "cash";
           const valuePreviewRate = previewValueDiscountRate(lookupValueDiscountSlabs(valueDiscountMap, item.item_code));
           const valueRateShown = priced.applied.value ? priced.valueDiscountRate : valuePreviewRate;
+          const showCashDiscountRow = isCashPayment && cashRate > 0;
+          const showVolumeDiscountRow = qty > 0 && valueRateShown > 0;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
-          const showLinePricing = hasPrice && (qty > 0 || cashRate > 0 || valuePreviewRate > 0);
+          const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow);
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
               <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
@@ -779,7 +783,7 @@ export default function ProductCatalogue({
                 </span>}
                 {showLinePricing && (
                   <div className={styles.linePricing} aria-live="polite">
-                    {cashRate > 0 && (
+                    {showCashDiscountRow && (
                       <div className={styles.linePricingRow}>
                         <span>{ar ? "خصم نقدي" : "Cash discount"}</span>
                         <span className={priced.applied.cash ? undefined : styles.linePricingMuted}>
@@ -790,14 +794,12 @@ export default function ProductCatalogue({
                         </span>
                       </div>
                     )}
-                    {valueRateShown > 0 && (
+                    {showVolumeDiscountRow && (
                       <div className={styles.linePricingRow}>
                         <span>{ar ? "خصم الكمية" : "Volume discount"}</span>
                         <span className={priced.applied.value ? undefined : styles.linePricingMuted}>
                           {formatDiscountPercent(valueRateShown)}
-                          {qty > 0
-                            ? ` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`
-                            : (ar ? " · أدخل الكمية" : " · enter qty")}
+                          {` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`}
                         </span>
                       </div>
                     )}

@@ -17,7 +17,14 @@ import {
   readCatalogueOffline, readCataloguePhotoBlob, writeCataloguePhotoBlob,
 } from "../lib/catalogueOffline";
 import { CATALOGUE_PHOTO_SYNC_EVENT, startCataloguePhotoSync } from "../lib/catalogueOfflineClient";
-import { formatMoneyAmount, pricingRegionLabel } from "../lib/regionalPricing";
+import {
+  formatDiscountPercent,
+  formatMoneyAmount,
+  lookupDiscountRate,
+  lookupValueDiscountSlabs,
+  previewValueDiscountRate,
+  pricingRegionLabel,
+} from "../lib/regionalPricing";
 import {
   availableEodStockQty,
   formatEodStockAvailableLabel,
@@ -708,7 +715,7 @@ export default function ProductCatalogue({
         </button>
       </div>
       <p className="moduleHint">
-        {ar ? "الأسعار قبل الضريبة. نوع التسعير والمدينة يطبقان على الطلب. الخصومات والعروض تحسب في مراجعة الطلب." : "Prices exclude VAT. Pricing type and city apply to your order. Cash discounts, value discounts, and schemes are calculated in the order review."}
+        {ar ? "الأسعار قبل الضريبة. نوع التسعير والمدينة يطبقان على الطلب. كل بطاقة تعرض نسبة ومبلغ خصم النقد وخصم الكمية وإجمالي الصنف." : "Prices exclude VAT. Pricing type and city apply to your order. Each card shows cash and volume discount percent and amount, plus the item total."}
       </p>
       {!retailAvailable && <p className={styles.notice}>{ar ? "أسعار التجزئة غير متاحة لهذه المدينة. أعد المحاولة بعد مزامنة الأسعار." : "Retail prices are unavailable for this city. Retry after price sync."}</p>}
       {unpricedCartCodes.length > 0 && <p role="alert" className={styles.error}>
@@ -738,11 +745,15 @@ export default function ProductCatalogue({
           const priced = catalogueCardPrice(item, {
             price, quantity: qty, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
           });
+          const cashRate = lookupDiscountRate(cashDiscountMap, item.item_code);
+          const valuePreviewRate = previewValueDiscountRate(lookupValueDiscountSlabs(valueDiscountMap, item.item_code));
+          const valueRateShown = priced.applied.value ? priced.valueDiscountRate : valuePreviewRate;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
+          const showLinePricing = hasPrice && (qty > 0 || cashRate > 0 || valuePreviewRate > 0);
           return (
             <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
               <PhotoCarousel photos={detail.photos || []} name={item.item_name} language={language} busy={Boolean(busy)} syncing={savingPhotos}
@@ -761,11 +772,43 @@ export default function ProductCatalogue({
                 </div>
                 {discounted && <span className={styles.discountLabel}>
                   {[
-                    priced.applied.cash && (ar ? "خصم نقدي" : "Cash discount"),
-                    priced.applied.value && (ar ? "خصم الكمية" : "Volume discount"),
+                    priced.applied.cash && `${ar ? "خصم نقدي" : "Cash discount"} ${formatDiscountPercent(cashRate)}`,
+                    priced.applied.value && `${ar ? "خصم الكمية" : "Volume discount"} ${formatDiscountPercent(priced.valueDiscountRate)}`,
                     priced.applied.scheme && (ar ? "عرض" : "Scheme"),
                   ].filter(Boolean).join(" + ")}
                 </span>}
+                {showLinePricing && (
+                  <div className={styles.linePricing} aria-live="polite">
+                    {cashRate > 0 && (
+                      <div className={styles.linePricingRow}>
+                        <span>{ar ? "خصم نقدي" : "Cash discount"}</span>
+                        <span className={priced.applied.cash ? undefined : styles.linePricingMuted}>
+                          {formatDiscountPercent(cashRate)}
+                          {qty > 0
+                            ? ` · ${formatMoneyAmount(priced.cashDiscountAmount)} ﷼`
+                            : (ar ? " · أدخل الكمية" : " · enter qty")}
+                        </span>
+                      </div>
+                    )}
+                    {valueRateShown > 0 && (
+                      <div className={styles.linePricingRow}>
+                        <span>{ar ? "خصم الكمية" : "Volume discount"}</span>
+                        <span className={priced.applied.value ? undefined : styles.linePricingMuted}>
+                          {formatDiscountPercent(valueRateShown)}
+                          {qty > 0
+                            ? ` · ${formatMoneyAmount(priced.valueDiscountAmount)} ﷼`
+                            : (ar ? " · أدخل الكمية" : " · enter qty")}
+                        </span>
+                      </div>
+                    )}
+                    {qty > 0 && (
+                      <div className={`${styles.linePricingRow} ${styles.linePricingTotal}`}>
+                        <span>{ar ? "إجمالي الصنف" : "Item total"}</span>
+                        <strong>{formatMoneyAmount(priced.lineValue)} ﷼</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {hasPrice && detail.sellingUnit && <span className="moduleCode">{ar ? "لكل" : "per"} {detail.sellingUnit}</span>}
                 <button
                   type="button"

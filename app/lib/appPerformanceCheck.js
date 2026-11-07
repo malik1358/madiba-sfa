@@ -17,7 +17,35 @@ export const APP_PERFORMANCE_SPEED_KEYS = [
   "recent_orders_ms",
 ];
 
+/**
+ * Relative + absolute floors stop GitHub Actions / pooler jitter from emailing
+ * "MADIBA app is slower" when the public app is still under ~1s.
+ * Production history (90 samples): external p50≈196 ms / p90≈390 ms; DB probes
+ * p50≈300 ms with stdev≈130–170 ms. The old 1.5× and +200 ms rule marked ~40% of
+ * runs slower.
+ */
+export const APP_PERFORMANCE_DEFAULT_RATIO = 2;
+export const APP_PERFORMANCE_DEFAULT_MIN_DELTA_MS = 500;
+export const APP_PERFORMANCE_METRIC_RULES = {
+  external_build_info_ms: { ratio: 2, minDeltaMs: 500, minAbsMs: 1000 },
+  build_info_ms: { ratio: 2, minDeltaMs: 300, minAbsMs: 400 },
+  auth_health_ms: { ratio: 2, minDeltaMs: 500, minAbsMs: 1000 },
+  db_ping_ms: { ratio: 2, minDeltaMs: 500, minAbsMs: 1000 },
+  customers_count_ms: { ratio: 2, minDeltaMs: 500, minAbsMs: 1000 },
+  recent_orders_ms: { ratio: 2, minDeltaMs: 500, minAbsMs: 1000 },
+};
+export const APP_PERFORMANCE_EXTERNAL_PROBE_ATTEMPTS = 3;
+
 const DEFAULT_APP_ORIGIN = "https://madiba-sfa.vercel.app";
+
+export function metricJudgeRule(key, overrides = {}) {
+  const named = APP_PERFORMANCE_METRIC_RULES[key] || {};
+  return {
+    ratio: Number(overrides.ratio ?? named.ratio ?? APP_PERFORMANCE_DEFAULT_RATIO),
+    minDeltaMs: Number(overrides.minDeltaMs ?? named.minDeltaMs ?? APP_PERFORMANCE_DEFAULT_MIN_DELTA_MS),
+    minAbsMs: Number(overrides.minAbsMs ?? named.minAbsMs ?? 0),
+  };
+}
 
 export function median(numbers) {
   const values = (Array.isArray(numbers) ? numbers : [])
@@ -89,7 +117,7 @@ export function buildPerformanceEmail(check, to = APP_PERFORMANCE_EMAIL_TO) {
     `Checked at ${when} (KSA date ${check.date}).`,
     detail,
     check.status === "slower"
-      ? "This run is both 50% and at least 200 ms above the median of earlier samples."
+      ? "This run is at least 2× the median, at least 500 ms above that median, and above the metric absolute floor (1s for network/DB probes)."
       : "",
   ].filter(Boolean).join("\n");
   return {
@@ -102,11 +130,14 @@ export function buildPerformanceEmail(check, to = APP_PERFORMANCE_EMAIL_TO) {
 
 export function judgeDailySpeed(priorChecks, metrics, {
   minSamples = 3,
-  ratio = 1.5,
-  minDeltaMs = 200,
+  ratio,
+  minDeltaMs,
+  minAbsMs,
+  metricRules,
 } = {}) {
   const prior = Array.isArray(priorChecks) ? priorChecks : [];
   const slower = [];
+  const overrideRules = metricRules && typeof metricRules === "object" ? metricRules : null;
 
   for (const key of APP_PERFORMANCE_SPEED_KEYS) {
     const current = Number(metrics?.[key]);
@@ -117,7 +148,19 @@ export function judgeDailySpeed(priorChecks, metrics, {
     if (samples.length < minSamples) continue;
     const base = median(samples);
     if (!Number.isFinite(base)) continue;
-    if (current > base * ratio && current > base + minDeltaMs) slower.push(key);
+    const rule = metricJudgeRule(key, {
+      ...(overrideRules?.[key] || {}),
+      ...(ratio != null ? { ratio } : {}),
+      ...(minDeltaMs != null ? { minDeltaMs } : {}),
+      ...(minAbsMs != null ? { minAbsMs } : {}),
+    });
+    if (
+      current >= rule.minAbsMs
+      && current > base * rule.ratio
+      && current > base + rule.minDeltaMs
+    ) {
+      slower.push(key);
+    }
   }
 
   if (prior.length < minSamples) {

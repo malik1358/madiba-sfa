@@ -23,8 +23,15 @@ jobs:
             echo "CRON_SECRET secret is missing"
             exit 1
           fi
-          seconds="$(curl --fail --silent --show-error --max-time 30 -o /dev/null -w '%{time_total}' 'https://madiba-sfa.vercel.app/api/build-info')"
-          external_ms="$(awk -v seconds="$seconds" 'BEGIN { printf "%.0f", seconds * 1000 }')"
+          # Fastest of three public hits so one slow GitHub→Vercel hop does not mark the hour slower.
+          external_ms=""
+          for _ in 1 2 3; do
+            seconds="$(curl --fail --silent --show-error --max-time 30 -o /dev/null -w '%{time_total}' 'https://madiba-sfa.vercel.app/api/build-info')"
+            attempt_ms="$(awk -v seconds="$seconds" 'BEGIN { printf "%.0f", seconds * 1000 }')"
+            if [[ -z "$external_ms" || "$attempt_ms" -lt "$external_ms" ]]; then
+              external_ms="$attempt_ms"
+            fi
+          done
           response="$(curl --fail-with-body --silent --show-error --max-time 60 \
             -X POST 'https://madiba-sfa.vercel.app/api/cron/app-performance' \
             -H "x-cron-secret: $CRON_SECRET" \

@@ -321,3 +321,32 @@ test("Android preparation keeps the summary as text and the receipt as the image
   assert.equal(prepared.files.length, 1);
   assert.equal(prepared.files[0].name, "receipt.jpg");
 });
+
+test("collection preparation stacks several photos into one JPEG", async () => {
+  const files = [
+    new File([new Blob(["a"], { type: "image/jpeg" })], "receipt-a.jpg", { type: "image/jpeg" }),
+    new File([new Blob(["b"], { type: "image/jpeg" })], "receipt-b.jpg", { type: "image/jpeg" }),
+  ];
+  const prepared = await prepareWhatsappAttachmentShare("Visit summary", files, {
+    document: createShareCanvasDocument(),
+    loadImage: async () => ({ width: 400, height: 300 }),
+  });
+  assert.equal(prepared.files.length, 1);
+  assert.equal(prepared.files[0].name, "collection-attachments.jpg");
+  assert.equal(prepared.files[0].type, "image/jpeg");
+});
+
+test("catalogue export keeps each product photo as a separate file", async () => {
+  const files = [
+    new File([new Blob(["a"], { type: "image/jpeg" })], "A003944.jpg", { type: "image/jpeg" }),
+    new File([new Blob(["b"], { type: "image/jpeg" })], "A003945.jpg", { type: "image/jpeg" }),
+  ];
+  const prepared = await prepareWhatsappAttachmentShare("", files, {
+    keepSeparateFiles: true,
+    document: createShareCanvasDocument(),
+    loadImage: async () => ({ width: 400, height: 300 }),
+  });
+  assert.equal(prepared.files.length, 2);
+  assert.equal(prepared.files[0].name, "A003944.jpg");
+  assert.equal(prepared.files[1].name, "A003945.jpg");
+});

@@ -587,6 +587,7 @@ export default function ProductCatalogue({
       const result = await shareTextAndFilesOnWhatsapp("", files, {
         title: ar ? "كتالوج المنتجات" : "Product catalogue",
         dialogTitle,
+        keepSeparateFiles: true,
       });
       if (!(result.success || result.reason === "cancelled")) {
         notice = {
@@ -595,6 +596,7 @@ export default function ProductCatalogue({
             ? "الصور جاهزة وفيها التفاصيل بالإنجليزية والعربية. اضغط مشاركة على واتساب. لن يُرسل نص منفصل."
             : "The photos are ready with the details in English and Arabic. Tap Share on WhatsApp. No separate text is sent.",
           whatsappFiles: files,
+          whatsappKeepSeparateFiles: true,
         };
       }
     } catch (err) {

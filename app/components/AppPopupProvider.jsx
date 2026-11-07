@@ -76,6 +76,7 @@ export function AppPopupProvider({ children }) {
           variant: payload.variant || "info",
           whatsappText: String(payload.whatsappText || "").trim(),
           whatsappFiles: normalizeWhatsappFiles(payload),
+          whatsappKeepSeparateFiles: Boolean(payload.whatsappKeepSeparateFiles),
           autoShareWhatsapp: Boolean(payload.autoShareWhatsapp),
           choices,
           resolveChoice: resolve,
@@ -98,6 +99,7 @@ export function AppPopupProvider({ children }) {
       return shareTextAndFilesOnWhatsapp(text, files, {
         title,
         dialogTitle,
+        keepSeparateFiles: Boolean(payload?.whatsappKeepSeparateFiles),
         ...options,
       });
     }

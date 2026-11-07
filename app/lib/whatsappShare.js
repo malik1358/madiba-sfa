@@ -346,10 +346,11 @@ export async function buildReceiptSummaryShareImage(files, summaryText, options 
   }
 }
 
-async function filesForNativeWhatsappShare(files) {
-  if (files.length <= 1 || !files.every(isWhatsappImageFile)) return files;
+async function filesForNativeWhatsappShare(files, options = {}) {
+  const { keepSeparateFiles = false, ...stackOptions } = options;
+  if (keepSeparateFiles || files.length <= 1 || !files.every(isWhatsappImageFile)) return files;
   try {
-    const combined = await combineImageFilesForWhatsapp(files);
+    const combined = await combineImageFilesForWhatsapp(files, stackOptions);
     return combined ? [combined] : files;
   } catch {
     return files;
@@ -358,15 +359,18 @@ async function filesForNativeWhatsappShare(files) {
 
 /**
  * Share the receipt photo as an image and the visit summary as text.
- * Several photos are stacked into one JPEG so Android WhatsApp does not drop them.
+ * Several photos are stacked into one JPEG so Android WhatsApp does not drop them,
+ * unless keepSeparateFiles is set (catalogue Export needs one photo per product).
  */
-export async function prepareWhatsappAttachmentShare(text, files = []) {
+export async function prepareWhatsappAttachmentShare(text, files = [], options = {}) {
   const message = String(text || "").trim();
   const shareFiles = normalizeShareFiles(files);
 
   return {
     message,
-    files: shareFiles.length <= 1 ? shareFiles : await filesForNativeWhatsappShare(shareFiles),
+    files: shareFiles.length <= 1
+      ? shareFiles
+      : await filesForNativeWhatsappShare(shareFiles, options),
     embeddedSummary: false,
     textCopied: false,
   };
@@ -558,7 +562,9 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
-  const prepared = await prepareWhatsappAttachmentShare(originalMessage, incomingFiles);
+  const prepared = await prepareWhatsappAttachmentShare(originalMessage, incomingFiles, {
+    keepSeparateFiles: Boolean(options.keepSeparateFiles),
+  });
   const shareFiles = prepared.files;
   const shareMessage = prepared.message;
 

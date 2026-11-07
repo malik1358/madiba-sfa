@@ -767,6 +767,20 @@ export function availableEodStockQty(availability, pricingRegion, itemCode) {
   return Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
 }
 
+/**
+ * Catalogue browse/export: keep the item when no EOD snapshot is loaded, or when
+ * the latest city qty for the pricing region is strictly greater than zero.
+ */
+export function hasPositiveEodStockQty(availability, pricingRegion, itemCode) {
+  const available = availableEodStockQty(availability, pricingRegion, itemCode);
+  if (available == null) return true;
+  return available > 0;
+}
+
+export function filterItemsWithPositiveEodStock(items, availability, pricingRegion) {
+  return (items || []).filter((item) => hasPositiveEodStockQty(availability, pricingRegion, item?.item_code));
+}
+
 export function isEodStockQtyOverAvailable(orderedQty, available) {
   if (available == null) return false;
   const qty = Number(orderedQty || 0);

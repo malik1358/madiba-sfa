@@ -8,9 +8,11 @@ import {
   buildEodStockReportRows,
   eodQtyMovement,
   eodStockTemplateMatrix,
+  filterItemsWithPositiveEodStock,
   formatEodDelta,
   formatEodStockAsOfDate,
   formatEodStockAvailableLabel,
+  hasPositiveEodStockQty,
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
   parseEodQtyCell,
@@ -179,6 +181,26 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(availableEodStockQty(availability, "riyadh", "MISSING"), 0);
   assert.equal(availableEodStockQty(availability, "riyadh", "NEG1"), 0);
   assert.equal(availableEodStockQty(null, "riyadh", "A004426"), null);
+  assert.equal(hasPositiveEodStockQty(availability, "riyadh", "A004426"), true);
+  assert.equal(hasPositiveEodStockQty(availability, "jeddah", "A004426"), false);
+  assert.equal(hasPositiveEodStockQty(availability, "riyadh", "MISSING"), false);
+  assert.equal(hasPositiveEodStockQty(null, "riyadh", "A004426"), true);
+  assert.deepEqual(
+    filterItemsWithPositiveEodStock(
+      [{ item_code: "A004426" }, { item_code: "MISSING" }, { item_code: "NEG1" }],
+      availability,
+      "riyadh",
+    ).map((item) => item.item_code),
+    ["A004426"],
+  );
+  assert.deepEqual(
+    filterItemsWithPositiveEodStock(
+      [{ item_code: "A004426" }, { item_code: "MISSING" }],
+      null,
+      "riyadh",
+    ).map((item) => item.item_code),
+    ["A004426", "MISSING"],
+  );
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);

@@ -359,12 +359,25 @@ export default function ProductCatalogue({
       price, quantity: qty, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications,
     });
     const discounted = hasPrice && priced.rate < price - 0.000001;
+    const cashRate = lookupDiscountRate(cashDiscountMap, item.item_code);
+    const valueSlabs = lookupValueDiscountSlabs(valueDiscountMap, item.item_code);
+    const volumeSlabs = includePrice
+      ? VALUE_DISCOUNT_SLABS
+        .map((threshold) => ({
+          threshold,
+          rate: Number(valueSlabs[String(threshold)] || 0),
+        }))
+        .filter((slab) => slab.rate > 0)
+      : [];
     return {
       priceAmount: includePrice && hasPrice ? formatMoneyAmount(priced.rate) : "",
       originalAmount: includePrice && discounted ? formatMoneyAmount(price) : "",
       cashDiscount: includePrice && discounted && priced.applied.cash,
       valueDiscount: includePrice && discounted && priced.applied.value,
       schemeDiscount: includePrice && discounted && priced.applied.scheme,
+      cashDiscountRate: includePrice && cashRate > 0 ? cashRate : 0,
+      volumeSlabs,
+      paymentType: includePrice ? paymentType : "",
     };
   }
 

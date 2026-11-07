@@ -1,3 +1,9 @@
+import {
+  formatDiscountPercent,
+  formatMoneyAmount,
+  normalizePaymentType,
+} from "./regionalPricing.js";
+
 export const CATALOGUE_CAROUSEL_MS = 3500;
 export const CATALOGUE_SHARE_PHOTO_LIMIT = 8;
 
@@ -185,6 +191,9 @@ export function buildCatalogueShareLines({
   cashDiscount = false,
   valueDiscount = false,
   schemeDiscount = false,
+  cashDiscountRate = 0,
+  volumeSlabs = [],
+  paymentType = "",
   pricingType = "wholesale",
   region = "riyadh",
   nameArabic = "",
@@ -213,17 +222,51 @@ export function buildCatalogueShareLines({
     else lines.push(...bilingual("price", "Price unavailable", "السعر غير متوفر"));
     const previous = String(originalAmount || "").trim();
     if (previous) lines.push(...bilingual("was", `Before discount: ${previous} SAR`, `قبل الخصم: ${previous} ر.س`));
-    const discountEnglish = [
-      cashDiscount && "Cash discount",
-      valueDiscount && "Volume discount",
-      schemeDiscount && "Scheme",
-    ].filter(Boolean).join(" + ");
-    const discountArabic = [
-      cashDiscount && "خصم نقدي",
-      valueDiscount && "خصم الكمية",
-      schemeDiscount && "عرض",
-    ].filter(Boolean).join(" + ");
-    if (discountEnglish) lines.push(...bilingual("discount", discountEnglish, discountArabic));
+
+    const cashRate = Number(cashDiscountRate || 0);
+    const slabRows = Array.isArray(volumeSlabs)
+      ? volumeSlabs
+        .map((slab) => ({
+          threshold: Number(slab?.threshold || 0),
+          rate: Number(slab?.rate || 0),
+        }))
+        .filter((slab) => slab.threshold > 0 && slab.rate > 0)
+      : [];
+    const hasSlabPreview = cashRate > 0 || slabRows.length > 0;
+
+    if (cashRate > 0) {
+      const cashOnly = normalizePaymentType(paymentType) !== "cash";
+      lines.push(...bilingual(
+        "discount",
+        `Cash discount: ${formatDiscountPercent(cashRate)}${cashOnly ? " · Cash only" : ""}`,
+        `خصم نقدي: ${formatDiscountPercent(cashRate)}${cashOnly ? " · نقداً فقط" : ""}`,
+      ));
+    }
+    for (const slab of slabRows) {
+      const threshold = formatMoneyAmount(slab.threshold);
+      const rateLabel = formatDiscountPercent(slab.rate);
+      lines.push(...bilingual(
+        "discount",
+        `Volume ≥ ${threshold}: ${rateLabel}`,
+        `خصم الكمية ≥ ${threshold}: ${rateLabel}`,
+      ));
+    }
+
+    if (!hasSlabPreview) {
+      const discountEnglish = [
+        cashDiscount && "Cash discount",
+        valueDiscount && "Volume discount",
+        schemeDiscount && "Scheme",
+      ].filter(Boolean).join(" + ");
+      const discountArabic = [
+        cashDiscount && "خصم نقدي",
+        valueDiscount && "خصم الكمية",
+        schemeDiscount && "عرض",
+      ].filter(Boolean).join(" + ");
+      if (discountEnglish) lines.push(...bilingual("discount", discountEnglish, discountArabic));
+    } else if (schemeDiscount) {
+      lines.push(...bilingual("discount", "Scheme", "عرض"));
+    }
   }
   const city = REGION_LABELS[String(region || "").trim().toLowerCase()] || REGION_LABELS.riyadh;
   const wholesale = pricingType === "retail" ? ["Retail", "التجزئة"] : ["Wholesale", "الجملة"];

@@ -23,7 +23,41 @@
 .price { font-size: 21px; color: #0f4c5c; margin-top: auto; }
 .priceRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: auto; }
 .originalPrice { color: #687f87; font-size: 14px; }
-.discountLabel { color: #0f766e; font-size: 12px; font-weight: 700; }
+.discountLabel {
+  display: inline-block;
+  color: #0f766e;
+  background: #e6f4f2;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.linePricing {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #edf6f7;
+  color: #0f4c5c;
+  font-size: 12px;
+}
+.linePricingRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.linePricingRow strong { font-size: 13px; }
+.linePricingTotal {
+  padding-top: 2px;
+  border-top: 1px solid #d0e3e7;
+  margin-top: 2px;
+  color: #0f4c5c;
+  font-weight: 700;
+}
+.linePricingMuted { color: #687f87; font-weight: 600; }
 .share { margin-top: 4px; border: 0; border-radius: 8px; background: #128C7E; color: white; min-height: 40px; padding: 8px 10px; font-weight: 700; cursor: pointer; }
 .share:disabled { opacity: .55; cursor: not-allowed; }
 .qty { display: flex; margin-top: 8px; height: 42px; gap: 6px; }

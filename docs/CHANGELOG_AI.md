@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-07** — Catalogue cards preview cash (Cash terms only) and volume discount rates before they are earned; the same row fills the SAR amount when applied (`enter qty` / `from 2,000` until then). No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-07** — Product Catalogue shows only items with available EOD stock **> 0** for the selected pricing city (cards, recommendations, categories, export). With no EOD snapshot loaded, priced items stay visible. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-07** — Catalogue volume-discount row shows only when the line has earned a value slab (hides `2% · 0.00` under the threshold). Cash row still Cash-only. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-07** — Catalogue cash-discount row shows only when payment terms are Cash; volume-discount row shows only after quantity is entered (no zero-qty “enter qty” preview). No migration. See `docs/BUSINESS_RULES.md`.

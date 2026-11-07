@@ -1,11 +1,25 @@
 const ARABIC_FONT = "NotoNaskhArabic";
 const ARABIC_FILE = "NotoNaskhArabic-Regular.ttf";
-const ARABIC_RUN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+(?:[ \t]+[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+)*/g;
+/**
+ * Arabic letters / marks / presentation forms only.
+ * Eastern (U+0660–0669) and Persian (U+06F0–06F9) digits are excluded so they
+ * stay logical LTR runs and are not character-reversed with surrounding words.
+ */
+const ARABIC_LETTER = /[\u0600-\u065F\u066A-\u06EF\u06FA-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const ARABIC_RUN = new RegExp(
+  `${ARABIC_LETTER.source}+(?:[ \\t]+${ARABIC_LETTER.source}+)*`,
+  "g",
+);
+const EASTERN_DIGIT = /[\u0660-\u0669\u06F0-\u06F9]/;
 /** Western + Eastern/Persian digits, optionally joined by decimal/thousands separators. */
 const DIGIT_RUN = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,\u066B\u066C][0-9\u0660-\u0669\u06F0-\u06F9]+)*/g;
 
 export function containsArabicText(value) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(value ?? ""));
+}
+
+export function containsArabicLetters(value) {
+  return ARABIC_LETTER.test(String(value ?? ""));
 }
 
 export function splitPdfTextRuns(text) {
@@ -34,6 +48,10 @@ export function reverseArabicPreservingDigits(text) {
 
 function arabicFontStyle(style) {
   return style === "bold" || style === "bolditalic" ? "bold" : "normal";
+}
+
+function usesArabicFont(run) {
+  return Boolean(run?.arabic) || EASTERN_DIGIT.test(String(run?.text ?? ""));
 }
 
 function visualArabic(doc, text) {
@@ -65,14 +83,15 @@ export function installArabicPdfText(doc) {
     };
   }
 
-  function widthOf(text, arabic, font) {
-    doc.setFont(arabic ? ARABIC_FONT : font.fontName, arabic ? arabicFontStyle(font.fontStyle) : font.fontStyle);
-    const drawn = arabic ? visualArabic(doc, text) : String(text ?? "");
-    return { drawn, width: originalWidth(drawn) };
+  function widthOf(run, font) {
+    const arabicFont = usesArabicFont(run);
+    doc.setFont(arabicFont ? ARABIC_FONT : font.fontName, arabicFont ? arabicFontStyle(font.fontStyle) : font.fontStyle);
+    const drawn = run.arabic ? visualArabic(doc, run.text) : String(run.text ?? "");
+    return { drawn, width: originalWidth(drawn), arabicFont };
   }
 
   function measure(text, font) {
-    return splitPdfTextRuns(text).reduce((sum, run) => sum + widthOf(run.text, run.arabic, font).width, 0);
+    return splitPdfTextRuns(text).reduce((sum, run) => sum + widthOf(run, font).width, 0);
   }
 
   function wrapMixed(text, maxWidth, font) {
@@ -137,16 +156,25 @@ export function installArabicPdfText(doc) {
     lines.forEach((line) => {
       const prepared = splitPdfTextRuns(line).map((run) => ({
         ...run,
-        ...widthOf(run.text, run.arabic, font),
+        ...widthOf(run, font),
       }));
       const lineWidth = prepared.reduce((sum, run) => sum + run.width, 0);
       let cursorX = Number(x) || 0;
       if (align === "right") cursorX -= lineWidth;
       if (align === "center") cursorX -= lineWidth / 2;
 
-      prepared.forEach((run) => {
+      // Right-aligned Arabic: draw logical runs right-to-left so the sentence
+      // starts on the right while each Arabic letter run stays visually shaped.
+      const drawOrder = (align === "right" || align === "center") && containsArabicLetters(line)
+        ? prepared.slice().reverse()
+        : prepared;
+
+      drawOrder.forEach((run) => {
         if (!run.drawn) return;
-        doc.setFont(run.arabic ? ARABIC_FONT : font.fontName, run.arabic ? arabicFontStyle(font.fontStyle) : font.fontStyle);
+        doc.setFont(
+          run.arabicFont ? ARABIC_FONT : font.fontName,
+          run.arabicFont ? arabicFontStyle(font.fontStyle) : font.fontStyle,
+        );
         originalText(run.drawn, cursorX, cursorY, run.arabic ? { isInputVisual: false } : undefined);
         cursorX += run.width;
       });

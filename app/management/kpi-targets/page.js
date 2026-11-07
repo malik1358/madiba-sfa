@@ -42,8 +42,8 @@ const TEXT = {
   lastTransactionDate: { en: "Last sales date", ar: "آخر تاريخ مبيعات" },
   lastReceiptDate: { en: "Last receipt date", ar: "آخر تاريخ تحصيل" },
   subtitle: {
-    en: "Ach. % is actual vs the full month target. Expected pace is that salesman's own average share of monthly sales by this date over the last 6 months, or working days if he has no history.",
-    ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. المسار المتوقع هو متوسط حصة المندوب نفسه من مبيعات الشهر حتى هذا التاريخ خلال آخر 6 أشهر، أو أيام العمل إن لم يوجد تاريخ.",
+    en: "Ach. % is actual vs the full month target. Expected pace is that salesman's own average share of monthly sales by the last sales date (through Friday when that date is Thursday — no Friday sales) over the last 6 months, or working days if he has no history.",
+    ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. المسار المتوقع هو متوسط حصة المندوب نفسه من مبيعات الشهر حتى آخر تاريخ مبيعات (حتى الجمعة إذا كان ذلك اليوم خميسًا — لا مبيعات يوم الجمعة) خلال آخر 6 أشهر، أو أيام العمل إن لم يوجد تاريخ.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   performance: { en: "My Performance", ar: "أدائي" },

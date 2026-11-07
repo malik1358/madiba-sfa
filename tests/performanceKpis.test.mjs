@@ -27,6 +27,7 @@ import {
   priorCustomerItemCodesFromSales,
   resolveExpectedPacePercent,
   resolveKpiPaceDate,
+  extendPaceDateThroughFridayHoliday,
   isKsaWorkday,
   latestReceiptDateInRange,
   resolveReceiptPaceAsOfDate,
@@ -257,6 +258,42 @@ test("pace through the last calendar day of the month is always 100%", () => {
       target: 2_000_000,
       expected: lagged,
     }) > 1_000_000,
+  );
+});
+
+test("Thursday last sales/receipt date advances pace through Friday holiday", () => {
+  // 2026-11-05 is Thursday; Friday 2026-11-06 has no field sales.
+  assert.equal(extendPaceDateThroughFridayHoliday("2026-11-05", "2026-11-30"), "2026-11-06");
+  assert.equal(extendPaceDateThroughFridayHoliday("2026-11-04", "2026-11-30"), "2026-11-04");
+  assert.equal(extendPaceDateThroughFridayHoliday("2026-11-06", "2026-11-30"), "2026-11-06");
+  // Month ending Thursday must not spill into the next month.
+  assert.equal(extendPaceDateThroughFridayHoliday("2026-04-30", "2026-04-30"), "2026-04-30");
+
+  assert.equal(resolveSalesPaceAsOfDate("2026-11-01", "2026-11-07", "2026-11-05"), "2026-11-06");
+  assert.equal(resolveReceiptPaceAsOfDate("2026-11-01", "2026-11-07", "2026-11-05"), "2026-11-06");
+  // Even on Thursday itself, Friday is already known to have zero sales.
+  assert.equal(resolveSalesPaceAsOfDate("2026-11-01", "2026-11-05", "2026-11-05"), "2026-11-06");
+
+  const shares = { 5: 0.2, 6: 0.21, 7: 0.3 };
+  assert.equal(
+    resolveExpectedPacePercent("totalSales", {
+      reportDate: "2026-11-01",
+      todayIso: "2026-11-07",
+      paceShares: shares,
+      salesAsOfDate: "2026-11-05",
+    }),
+    21,
+  );
+  assert.equal(
+    kpiStatus({
+      actual: 20,
+      target: 100,
+      reportDate: "2026-11-01",
+      todayIso: "2026-11-07",
+      paceShares: shares,
+      salesAsOfDate: "2026-11-05",
+    }).expected,
+    21,
   );
 });
 

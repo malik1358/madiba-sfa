@@ -6,7 +6,7 @@ import {
   matchPaymentsFifo,
 } from "./paymentBehavior.js";
 import { applySalesmanSpellingAliasesToUpper } from "./salesmanSpellingAliases.js";
-import { isKsaOrderDay, KSA_TIMEZONE } from "./workdayActivity.js";
+import { getKsaWeekdayIndexForDateString, isKsaOrderDay, KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
   const message = String(error?.message || error?.details || error?.hint || "").toLowerCase();
@@ -182,9 +182,26 @@ export function resolveKpiPaceDate(monthDate, todayIso) {
 }
 
 /**
+ * Thursday uploads already cover the week through the Friday holiday (no field
+ * sales). Pace formulas therefore count through Friday in the same month.
+ * Displayed last-sales / last-receipt dates stay on the real upload day.
+ */
+export function extendPaceDateThroughFridayHoliday(asOfDate, monthEnd = "") {
+  const date = String(asOfDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  // Thu = 4 in getKsaWeekdayIndexForDateString (Fri = 5).
+  if (getKsaWeekdayIndexForDateString(date) !== 4) return date;
+  const friday = nextIsoDate(date);
+  const end = String(monthEnd || currentMonthDateRange(date).to).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(end) && friday > end) return date;
+  return friday;
+}
+
+/**
  * Pace for upload-backed KPIs stops at the latest data date in the open month
  * (sales transaction date, or receipt register date). A missing date means no
  * current-month rows are on file yet. Undefined leaves the calendar date unchanged.
+ * A Thursday data date advances through Friday (holiday, no sales).
  */
 export function resolveSalesPaceAsOfDate(reportDate, todayIso, salesAsOfDate) {
   const calendar = resolveKpiPaceDate(reportDate, todayIso);
@@ -193,7 +210,8 @@ export function resolveSalesPaceAsOfDate(reportDate, todayIso, salesAsOfDate) {
   const month = currentMonthDateRange(reportDate);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) return month.from;
   if (salesDate < month.from || salesDate > month.to) return month.from;
-  return salesDate < calendar ? salesDate : calendar;
+  const capped = salesDate < calendar ? salesDate : calendar;
+  return extendPaceDateThroughFridayHoliday(capped, month.to);
 }
 
 /** Same clamp as sales pace, for the latest receipt_date in the open month. */

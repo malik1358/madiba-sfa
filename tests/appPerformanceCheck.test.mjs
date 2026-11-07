@@ -62,7 +62,7 @@ test("the first stored day is a baseline", () => {
 test("a large jump after three steady days is slower", () => {
   const judged = judgeDailySpeed(priorDays(3), {
     ...steadyMetrics,
-    recent_orders_ms: 900,
+    recent_orders_ms: 2000,
   });
   assert.equal(judged.status, "slower");
   assert.deepEqual(judged.slower, ["recent_orders_ms"]);
@@ -72,6 +72,24 @@ test("small jitter stays steady", () => {
   const judged = judgeDailySpeed(priorDays(4), {
     ...steadyMetrics,
     recent_orders_ms: 140,
+  });
+  assert.equal(judged.status, "steady");
+  assert.deepEqual(judged.slower, []);
+});
+
+test("public-path jitter under the absolute floor stays steady", () => {
+  const judged = judgeDailySpeed(priorDays(8), {
+    ...steadyMetrics,
+    external_build_info_ms: 457,
+  });
+  assert.equal(judged.status, "steady");
+  assert.deepEqual(judged.slower, []);
+});
+
+test("customer-count noise under 1s stays steady", () => {
+  const judged = judgeDailySpeed(priorDays(8), {
+    ...steadyMetrics,
+    customers_count_ms: 730,
   });
   assert.equal(judged.status, "steady");
   assert.deepEqual(judged.slower, []);
@@ -97,7 +115,7 @@ test("a slower run is emailed once to malik@pinasz.com", () => {
   const check = buildDailyPerformanceRecord({
     date: "2026-10-16",
     checkedAt: "2026-10-16T12:00:00.000Z",
-    metrics: { ...steadyMetrics, recent_orders_ms: 900 },
+    metrics: { ...steadyMetrics, recent_orders_ms: 2000 },
     counts: { customers: 10, recent_orders: 2 },
     errors: {},
     priorChecks: priorDays(3),
@@ -106,7 +124,7 @@ test("a slower run is emailed once to malik@pinasz.com", () => {
   const message = buildPerformanceEmail(check);
   assert.equal(message.to, "malik@pinasz.com");
   assert.match(message.subject, /slower/);
-  assert.match(message.text, /900 ms/);
+  assert.match(message.text, /2000 ms/);
   assert.equal(shouldEmailPerformanceCheck({ ...check, status: "steady" }, null), false);
   assert.equal(shouldEmailPerformanceCheck(check, { emailedAt: "2026-10-16T12:00:01.000Z" }), false);
 });

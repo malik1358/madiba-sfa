@@ -1,10 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import path from "node:path";
 
-const workflow = await readFile(new URL("../.github/workflows/app-performance.yml", import.meta.url), "utf8");
+/** GitHub runners already have jq; local Windows Git Bash often does not. */
+function pathWithJq(basePath = process.env.PATH || "") {
+  const wingetPackages = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WinGet", "Packages");
+  if (!existsSync(wingetPackages)) return basePath;
+  for (const name of readdirSync(wingetPackages)) {
+    if (!name.startsWith("jqlang.jq")) continue;
+    const dir = path.join(wingetPackages, name);
+    if (existsSync(path.join(dir, "jq.exe"))) return `${dir};${basePath}`;
+  }
+  return basePath;
+}
+
+const workflow = (await readFile(new URL("../.github/workflows/app-performance.yml", import.meta.url), "utf8"))
+  .replace(/\r\n/g, "\n");
 const runBlock = workflow.split("        run: |\n")[1];
 assert.ok(runBlock, "workflow must contain the endpoint shell step");
 const script = runBlock.replace(/^          /gm, "");
@@ -29,7 +44,11 @@ async function runWorkflow(t, result, env = {}) {
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const child = spawn("bash", ["-e", "-c", script.replaceAll("https://madiba-sfa.vercel.app", origin)], {
-    env: { PATH: process.env.PATH, CRON_SECRET: "workflow-test-value", ...env },
+    env: {
+      PATH: pathWithJq(process.env.PATH),
+      CRON_SECRET: "workflow-test-value",
+      ...env,
+    },
   });
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
@@ -56,8 +75,9 @@ for (const emailed of [false, true]) {
     assert.match(result.output, /::warning::App performance is slower/);
     assert.match(result.output, new RegExp(`"emailed":${emailed}`));
     assert.doesNotMatch(result.output, /An email was requested/);
-    assert.equal(result.requests.length, 2);
-    const request = result.requests[1];
+    assert.equal(result.requests.length, 4);
+    assert.equal(result.requests.filter((row) => row.url === "/api/build-info").length, 3);
+    const request = result.requests[3];
     assert.equal(request.url, "/api/cron/app-performance");
     assert.equal(request.method, "POST");
     assert.equal(request.headers["x-cron-secret"], "workflow-test-value");

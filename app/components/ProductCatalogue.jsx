@@ -28,7 +28,6 @@ import {
 } from "../lib/regionalPricing";
 import {
   availableEodStockQty,
-  filterItemsWithPositiveEodStock,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../lib/eodStock.js";
@@ -255,7 +254,7 @@ export default function ProductCatalogue({
     };
   }, [hydratePhotoUrls, publishMeta, refresh, rememberPhotoUrl]);
 
-  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code, eodStock]);
+  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
 
   async function upload(itemCode, file) {
     if (!file || !canManagePhotos || writeInFlight.current) return;
@@ -441,19 +440,14 @@ export default function ProductCatalogue({
     if (notice) await showPopup(notice);
   }
 
-  const stockedItems = filterItemsWithPositiveEodStock(items, eodStock, pricingRegion);
-  const pricedRecommendation = (list) => filterItemsWithPositiveEodStock(
-    (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code])),
-    eodStock,
-    pricingRegion,
-  );
+  const pricedRecommendation = (list) => (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code]));
   const {
     recommended: recommendedItems,
     notBoughtRecently: staleItems,
     buyingLess: decliningItems,
     browse: browseItems,
   } = catalogueItemGroups(
-    stockedItems,
+    items,
     pricedRecommendation(newItems),
     historyReady,
     pricedRecommendation(notBoughtRecently),
@@ -660,7 +654,7 @@ export default function ProductCatalogue({
     <section className={`moduleSection ${styles.catalogue}`}>
       <div className="moduleSectionHeader">
         <h2>{ar ? "تصفح المنتجات" : "Shop the catalogue"}</h2>
-        <span>{stockedItems.length} {ar ? "منتج" : "products"} · {pricingRegionLabel(pricingRegion)}</span>
+        <span>{items.length} {ar ? "منتج" : "products"} · {pricingRegionLabel(pricingRegion)}</span>
       </div>
       {nearestCustomers}
       <div className={styles.customer}>
@@ -898,7 +892,7 @@ export default function ProductCatalogue({
         })}
         </div>
       </section>)}
-      {stockedItems.length === 0 && <p>{ar ? "لا توجد منتجات تطابق البحث." : "No products match these filters."}</p>}
+      {items.length === 0 && <p>{ar ? "لا توجد منتجات تطابق البحث." : "No products match these filters."}</p>}
       {lastPage > 0 && <div className={styles.pagination}>
         <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{ar ? "السابق" : "Previous"}</button>
         <span aria-live="polite">{currentPage + 1} / {lastPage + 1}</span>

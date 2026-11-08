@@ -39,6 +39,7 @@ import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
 import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
 import { loadLatestNearVisitDatesByCustomer } from "../../../lib/latestCustomerVisits.js";
+import { managementRoleIgnoresAuthUserListFailure } from "../../../lib/customersVisibleScope.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -148,6 +149,8 @@ async function resolveScopeForUser(admin, user) {
   const role = normalizeRole(currentProfile.role);
   const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
 
+  const managementRole = managementRoleIgnoresAuthUserListFailure(role);
+
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
@@ -157,18 +160,20 @@ async function resolveScopeForUser(admin, user) {
   ]);
 
   if (profilesRes.error) throw profilesRes.error;
-  if (usersRes.error) throw usersRes.error;
+  // Auth Admin listUsers is a frequent cold-start failure. Management roles already
+  // see every sales-team profile, so an empty auth user list is safe for them.
+  if (usersRes.error && !managementRole) throw usersRes.error;
 
   const allProfiles = profilesRes.data || [];
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
-  const authUsers = usersRes.data?.users || [];
+  const authUsers = usersRes.error ? [] : (usersRes.data?.users || []);
   const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
   const currentAuthUser = authMap.get(currentProfile.id) || user;
   const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
   const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
-  if (["admin", "report-user", "report_user", "manager"].includes(role)) {
+  if (managementRole) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
     const headProfile = {
@@ -214,7 +219,7 @@ async function resolveScopeForUser(admin, user) {
   )];
 
   return {
-    hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role),
+    hasAllAccess: managementRole || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
     sharedCustomerCodes,
     identitySearchPatterns,

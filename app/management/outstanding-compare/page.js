@@ -9,7 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
-import { resolveAuthSession } from "../../lib/authSession";
+import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import {
   BILL_MISMATCH_DAY_INCOMPLETE,
@@ -360,16 +360,32 @@ export default function OutstandingComparePage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible?includeOutstanding=1&includeInactive=1", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load customers.");
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      let lastError = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          if (attempt > 0) await wait(750);
+          const { response, payload } = await fetchJsonWithTimeout(
+            "/api/customers/visible?includeOutstanding=1&includeInactive=1",
+            { headers: { Authorization: `Bearer ${session.access_token}` } },
+            60000,
+          );
+          if (!response.ok || !payload.success) {
+            throw new Error(
+              payload.error || `Unable to load customers (HTTP ${response.status || "error"}).`,
+            );
+          }
+          setCustomers(Array.isArray(payload.customers) ? payload.customers : []);
+          setDeltaByCode({});
+          deltaStartedRef.current = new Set();
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+        }
       }
-      setCustomers(Array.isArray(payload.customers) ? payload.customers : []);
-      setDeltaByCode({});
-      deltaStartedRef.current = new Set();
+      if (lastError) throw lastError;
     } catch (err) {
       setError(err.message || "Unable to load customers.");
       setCustomers([]);

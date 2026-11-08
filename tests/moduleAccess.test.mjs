@@ -104,6 +104,19 @@ test("ordered not in sales is open to management report roles and listed in ware
   assert.equal(warehouse.items.some((item) => item.moduleKey === "orderedNotInSales"), true);
 });
 
+test("active customers is a management report in Reports", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("activeCustomers"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("activeCustomers"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("activeCustomers"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("activeCustomers"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("activeCustomers"), false);
+  assert.equal(moduleLabelForPath("/management/active-customers", "en"), "Active Customers");
+  assert.equal(localizedModuleLabel("activeCustomers", "ar"), "العملاء النشطون");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
+    .find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "activeCustomers"), true);
+});
+
 test("promoter coverage is available to all app roles", () => {
   const roles = ["admin", "report-user", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
@@ -275,6 +288,7 @@ test("invoice makers can view every management report without setup access", () 
     for (const moduleKey of [
       "businessDashboard",
       "returnsAboveSales",
+      "activeCustomers",
       "myPerformance",
       "salesmanIncentive",
       "dailyVisitReport",

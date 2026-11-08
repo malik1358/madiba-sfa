@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   KPI_UPLOAD_SUMMARY_DEBOUNCE_MS,
   buildAverageCollectionDaysSummaryRow,
+  buildAverageCollectionDaysSummaryRows,
   buildKpiUploadSummaryEmail,
   buildKpiUploadSummaryTable,
   compareAverageCollectionDaysToPriorMonth,
@@ -126,10 +127,12 @@ test("average collection days treats lower days as improving", () => {
 test("summary table appends avg collection days with MoM indicator", () => {
   const receivableDaysReport = buildReceivableDaysReport({
     monthlyCreditSales: {
+      "2026-08": 300_000,
       "2026-09": 300_000,
       "2026-10": 300_000,
     },
     monthlyReceivables: {
+      "2026-08": 360_000,
       "2026-09": 300_000,
       "2026-10": 240_000,
     },
@@ -148,20 +151,36 @@ test("summary table appends avg collection days with MoM indicator", () => {
     receivableDaysReport,
   });
 
-  assert.equal(summary.rows.length, 4);
-  const daysRow = summary.rows[3];
-  assert.equal(daysRow.key, "averageCollectionDays");
-  assert.equal(daysRow.label, "Avg collection days");
-  assert.equal(daysRow.kind, "collectionDays");
-  assert.equal(daysRow.month, "2026-10");
-  assert.ok(daysRow.totalFiltered.actual != null);
-  assert.equal(daysRow.paceEstimate.estimate, null);
-  assert.equal(daysRow.vsLastMonth.direction, "up");
-  assert.ok(daysRow.vsLastMonth.delta < 0);
+  assert.equal(summary.rows.length, 6);
+  const daysRows = summary.rows.slice(3);
+  assert.deepEqual(daysRows.map((row) => row.key), [
+    "averageCollectionDays",
+    "averageCollectionDays3m",
+    "averageCollectionDays12m",
+  ]);
+  assert.deepEqual(daysRows.map((row) => row.label), [
+    "Avg collection days (YTD)",
+    "Avg collection days (Rolling 3m)",
+    "Avg collection days (Rolling 12m)",
+  ]);
+  daysRows.forEach((daysRow) => {
+    assert.equal(daysRow.kind, "collectionDays");
+    assert.equal(daysRow.month, "2026-10");
+    assert.ok(daysRow.totalFiltered.actual != null);
+    assert.equal(daysRow.paceEstimate.estimate, null);
+    assert.equal(daysRow.vsLastMonth.direction, "up");
+    assert.ok(daysRow.vsLastMonth.delta < 0);
+  });
 
   const alone = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
   assert.equal(alone.key, "averageCollectionDays");
+  assert.equal(alone.label, "Avg collection days (YTD)");
   assert.equal(alone.vsLastMonth.direction, "up");
+
+  const allThree = buildAverageCollectionDaysSummaryRows(receivableDaysReport);
+  assert.equal(allThree.length, 3);
+  assert.equal(allThree[1].key, "averageCollectionDays3m");
+  assert.equal(allThree[2].key, "averageCollectionDays12m");
 });
 
 test("summary table reads nested snapshot targets like the KPI Targets page", () => {
@@ -213,7 +232,7 @@ test("email HTML uses transposed header labels", () => {
     },
     receivableDaysReport,
   });
-  assert.equal(summary.rows.at(-1).vsLastMonth.direction, "down");
+  assert.equal(summary.rows.find((row) => row.key === "averageCollectionDays")?.vsLastMonth.direction, "down");
   const message = buildKpiUploadSummaryEmail({
     summary,
     triggers: ["sales-upload", "receipt-upload"],
@@ -226,11 +245,15 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /Total sales/);
   assert.match(message.html, /Collection/);
   assert.match(message.html, /Total cash collected/);
-  assert.match(message.html, /Avg collection days/);
+  assert.match(message.html, /Avg collection days \(YTD\)/);
+  assert.match(message.html, /Avg collection days \(Rolling 3m\)/);
+  assert.match(message.html, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.html, /getting worse vs last month/);
   assert.match(message.html, /#0f4c5c/);
   assert.match(message.text, /Uploads: sales-upload, receipt-upload|sales-upload/);
-  assert.match(message.text, /Avg collection days/);
+  assert.match(message.text, /Avg collection days \(YTD\)/);
+  assert.match(message.text, /Avg collection days \(Rolling 3m\)/);
+  assert.match(message.text, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.text, /getting worse vs last month/);
 });
 

@@ -10,6 +10,8 @@ import {
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
 } from "./kpiTargetsTable.js";
+import { previousMonthKey } from "./categoryGrowth.js";
+import { receivableDaysChangeTone } from "./receivableDays.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 
@@ -35,6 +37,10 @@ export const KPI_UPLOAD_SUMMARY_KPI_KEYS = [
   "collection",
   "totalCashCollected",
 ];
+
+/** Company-wide YTD DSO row appended after the salesman KPI footer rows. */
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY = "averageCollectionDays";
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days";
 
 export const KPI_UPLOAD_SUMMARY_PENDING_KEY = "kpi_upload_summary_email_pending_v1";
 export const KPI_UPLOAD_SUMMARY_LAST_SENT_KEY = "kpi_upload_summary_email_last_sent";
@@ -137,8 +143,85 @@ export function withFlatKpiTargets(row = {}) {
 }
 
 /**
+ * MoM comparison for average collection days (YTD DSO).
+ * Lower days is improvement: direction "up" = improving (green), "down" = getting worse.
+ */
+export function compareAverageCollectionDaysToPriorMonth(currentDays, previousDays) {
+  if (currentDays == null || currentDays === "") return null;
+  const value = Number(currentDays);
+  if (!Number.isFinite(value)) return null;
+  if (previousDays == null || previousDays === "") {
+    return {
+      estimate: value,
+      priorActual: null,
+      delta: null,
+      percent: null,
+      direction: "flat",
+      polarity: "lower-is-better",
+    };
+  }
+  const prior = Number(previousDays);
+  if (!Number.isFinite(prior)) {
+    return {
+      estimate: value,
+      priorActual: null,
+      delta: null,
+      percent: null,
+      direction: "flat",
+      polarity: "lower-is-better",
+    };
+  }
+  const delta = Math.round((value - prior) * 10) / 10;
+  const percent = prior > 0
+    ? (delta / prior) * 100
+    : (value === 0 ? 0 : null);
+  const tone = receivableDaysChangeTone(value, prior);
+  return {
+    estimate: value,
+    priorActual: prior,
+    delta,
+    percent,
+    direction: tone === "up" || tone === "down" ? tone : "flat",
+    polarity: "lower-is-better",
+  };
+}
+
+/**
+ * Build the company-wide Avg collection days email row from the BI receivable-days report.
+ * Uses the latest month that has uploaded outstanding (same YTD DSO as Net receivable days).
+ */
+export function buildAverageCollectionDaysSummaryRow(report = null) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const latest = [...rows].reverse().find((row) => row?.receivable_days != null) || null;
+  if (!latest) return null;
+  const currentDays = Number(latest.receivable_days);
+  if (!Number.isFinite(currentDays)) return null;
+  const previousDays = latest.previous_receivable_days;
+  return {
+    key: KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY,
+    label: KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL,
+    kind: "collectionDays",
+    month: String(latest.month || "").slice(0, 7),
+    totalFiltered: {
+      actual: currentDays,
+      target: 0,
+      achievement: null,
+      statusLabel: "Lower is better · YTD DSO",
+      statusTone: "neutral",
+    },
+    paceEstimate: {
+      estimate: null,
+      target: 0,
+      achievement: null,
+    },
+    vsLastMonth: compareAverageCollectionDaysToPriorMonth(currentDays, previousDays),
+  };
+}
+
+/**
  * Build the three KPI Targets footer summaries, then transpose so those row
- * labels become email columns (one email row per KPI).
+ * labels become email columns (one email row per KPI). Optionally append
+ * company Avg collection days (YTD DSO) with MoM improve/worsen.
  */
 export function buildKpiUploadSummaryTable({
   rows = [],
@@ -149,6 +232,7 @@ export function buildKpiUploadSummaryTable({
   receiptAsOfDate,
   priorMonth = "",
   priorMonthActualsByCode = {},
+  receivableDaysReport = null,
 } = {}) {
   const people = (rows || []).filter((row) => !row?.isTeam).map(withFlatKpiTargets);
   const totals = sumFilteredKpiColumns(people, columns);
@@ -196,6 +280,9 @@ export function buildKpiUploadSummaryTable({
     };
   });
 
+  const collectionDaysRow = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
+  if (collectionDaysRow) tableRows.push(collectionDaysRow);
+
   return {
     salesmanCount: people.length,
     priorMonth: String(priorMonth || "").slice(0, 7),
@@ -237,13 +324,35 @@ function toneColor(tone) {
   return "#475569";
 }
 
+function isCollectionDaysRow(row) {
+  return row?.key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY || row?.kind === "collectionDays";
+}
+
+function formatCollectionDaysValue(value) {
+  if (value == null || value === "" || !Number.isFinite(Number(value))) return "—";
+  const number = Number(value);
+  const text = Number.isInteger(number) ? String(number) : number.toFixed(1);
+  return `${text} days`;
+}
+
 function formatSignedMoney(key, value) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
+  if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) {
+    const abs = formatCollectionDaysValue(Math.abs(number));
+    if (number > 0) return `+${abs}`;
+    if (number < 0) return `−${abs}`;
+    return abs;
+  }
   const abs = formatPerformanceKpiValue(key, Math.abs(number));
   if (number > 0) return `+${abs}`;
   if (number < 0) return `−${abs}`;
   return abs;
+}
+
+function formatKpiCellValue(key, value) {
+  if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) return formatCollectionDaysValue(value);
+  return formatPerformanceKpiValue(key, value);
 }
 
 function formatSignedPercent(value) {
@@ -255,19 +364,34 @@ function formatSignedPercent(value) {
   return abs;
 }
 
+function vsLastMonthDirectionLabel(cell) {
+  if (!cell) return "same as last month";
+  if (cell.polarity === "lower-is-better") {
+    if (cell.direction === "up") return "improving vs last month";
+    if (cell.direction === "down") return "getting worse vs last month";
+    return "same as last month";
+  }
+  if (cell.direction === "up") return "higher than last month";
+  if (cell.direction === "down") return "lower than last month";
+  return "same as last month";
+}
+
 function totalFilteredHtml(row) {
   const cell = row.totalFiltered || {};
-  const actual = formatPerformanceKpiValue(row.key, cell.actual);
+  const actual = formatKpiCellValue(row.key, cell.actual);
   const hasTarget = Number(cell.target) > 0;
   const target = hasTarget
-    ? formatPerformanceKpiValue(row.key, cell.target)
+    ? formatKpiCellValue(row.key, cell.target)
     : "—";
   const achievement = formatAchievementPercent(cell.achievement);
   const status = String(cell.statusLabel || "No target");
+  const infoLine = isCollectionDaysRow(row)
+    ? (row.month ? `As of ${escapeHtml(row.month)}` : "Company YTD DSO")
+    : "Information only";
   return `
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(actual)}</div>
     ${hasTarget ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">Target ${escapeHtml(target)}</div>
-    <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : `<div style="color:#64748b;font-size:12px;margin-top:2px;">Information only</div>`}
+    <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : `<div style="color:#64748b;font-size:12px;margin-top:2px;">${infoLine}</div>`}
     <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#fee2e2;color:${toneColor(cell.statusTone)};font-size:11px;font-weight:600;">
       ${escapeHtml(status)}
     </div>
@@ -276,10 +400,18 @@ function totalFilteredHtml(row) {
 
 function paceEstimateHtml(row) {
   const cell = row.paceEstimate || {};
+  if (isCollectionDaysRow(row)) {
+    return `
+      <div style="color:#94a3b8;">—</div>
+      <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#e2e8f0;color:#475569;font-size:11px;font-weight:600;">
+        No pace estimate
+      </div>
+    `;
+  }
   if (cell.estimate == null) {
     return `<div style="color:#94a3b8;">—</div>`;
   }
-  const estimate = formatPerformanceKpiValue(row.key, cell.estimate);
+  const estimate = formatKpiCellValue(row.key, cell.estimate);
   const hasTarget = Number(cell.target) > 0;
   const achievement = formatAchievementPercent(cell.achievement);
   return `
@@ -299,14 +431,18 @@ function vsLastMonthHtml(row, priorMonth) {
   const color = cell.direction === "up"
     ? "#15803d"
     : (cell.direction === "down" ? "#b91c1c" : "#475569");
-  const directionLabel = cell.direction === "up"
-    ? "higher than last month"
-    : (cell.direction === "down" ? "lower than last month" : "same as last month");
-  const priorLabel = priorMonth ? ` (${escapeHtml(priorMonth)})` : "";
+  const directionLabel = vsLastMonthDirectionLabel(cell);
+  const comparisonMonth = isCollectionDaysRow(row) && row.month
+    ? previousMonthKey(row.month)
+    : priorMonth;
+  const priorLabel = comparisonMonth ? ` (${escapeHtml(comparisonMonth)})` : "";
+  const priorValue = cell.priorActual == null
+    ? "—"
+    : formatKpiCellValue(row.key, cell.priorActual);
   return `
     <div style="font-weight:700;font-size:15px;color:${color};">${escapeHtml(formatSignedMoney(row.key, cell.delta))}</div>
     <div style="color:#64748b;font-size:12px;margin-top:2px;">
-      last month${priorLabel}: ${escapeHtml(formatPerformanceKpiValue(row.key, cell.priorActual))}
+      last month${priorLabel}: ${escapeHtml(priorValue)}
     </div>
     <div style="margin-top:4px;font-weight:700;color:${color};">${escapeHtml(formatSignedPercent(cell.percent))}</div>
     <div style="color:#64748b;font-size:12px;">${escapeHtml(directionLabel)}</div>
@@ -317,21 +453,24 @@ function totalFilteredText(row) {
   const cell = row.totalFiltered || {};
   const hasTarget = Number(cell.target) > 0;
   return [
-    formatPerformanceKpiValue(row.key, cell.actual),
+    formatKpiCellValue(row.key, cell.actual),
     hasTarget
-      ? `target ${formatPerformanceKpiValue(row.key, cell.target)}`
-      : "information only",
+      ? `target ${formatKpiCellValue(row.key, cell.target)}`
+      : (isCollectionDaysRow(row)
+        ? (row.month ? `as of ${row.month}` : "company YTD DSO")
+        : "information only"),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     cell.statusLabel || "No target",
   ].filter(Boolean).join("; ");
 }
 
 function paceEstimateText(row) {
+  if (isCollectionDaysRow(row)) return "—; No pace estimate";
   const cell = row.paceEstimate || {};
   if (cell.estimate == null) return "—";
   const hasTarget = Number(cell.target) > 0;
   return [
-    formatPerformanceKpiValue(row.key, cell.estimate),
+    formatKpiCellValue(row.key, cell.estimate),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     "Estimate at current pace",
   ].filter(Boolean).join("; ");
@@ -340,12 +479,16 @@ function paceEstimateText(row) {
 function vsLastMonthText(row, priorMonth) {
   const cell = row.vsLastMonth;
   if (!cell) return "—";
-  const directionLabel = cell.direction === "up"
-    ? "higher than last month"
-    : (cell.direction === "down" ? "lower than last month" : "same as last month");
+  const directionLabel = vsLastMonthDirectionLabel(cell);
+  const comparisonMonth = isCollectionDaysRow(row) && row.month
+    ? previousMonthKey(row.month)
+    : priorMonth;
+  const priorValue = cell.priorActual == null
+    ? "—"
+    : formatKpiCellValue(row.key, cell.priorActual);
   return [
     formatSignedMoney(row.key, cell.delta),
-    `last month${priorMonth ? ` (${priorMonth})` : ""}: ${formatPerformanceKpiValue(row.key, cell.priorActual)}`,
+    `last month${comparisonMonth ? ` (${comparisonMonth})` : ""}: ${priorValue}`,
     formatSignedPercent(cell.percent),
     directionLabel,
   ].join("; ");
@@ -393,7 +536,7 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets, transposed so Total / Estimate / vs last month are columns.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days), transposed so Total / Estimate / vs last month are columns. Lower collection days is better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>

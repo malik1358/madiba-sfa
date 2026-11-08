@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   KPI_UPLOAD_SUMMARY_DEBOUNCE_MS,
+  buildAverageCollectionDaysSummaryRow,
   buildKpiUploadSummaryEmail,
   buildKpiUploadSummaryTable,
+  compareAverageCollectionDaysToPriorMonth,
   isKpiUploadSummaryDue,
   kpiUploadSummarySignature,
   mergeKpiUploadSummaryPending,
@@ -11,6 +13,7 @@ import {
   resolveKpiUploadSummaryEmailCc,
   resolveKpiUploadSummaryEmailRecipients,
 } from "../app/lib/kpiUploadSummaryEmail.js";
+import { buildReceivableDaysReport } from "../app/lib/receivableDays.js";
 import { runKpiUploadSummaryEmailCycle } from "../app/lib/kpiUploadSummaryEmailServer.js";
 
 const ahmed = {
@@ -109,6 +112,58 @@ test("summary table transposes footer rows into columns for sales, collection, a
   assert.equal(summary.rows[2].vsLastMonth.priorActual, 250_000);
 });
 
+test("average collection days treats lower days as improving", () => {
+  const improving = compareAverageCollectionDaysToPriorMonth(40, 50);
+  assert.equal(improving.direction, "up");
+  assert.equal(improving.delta, -10);
+  assert.equal(improving.polarity, "lower-is-better");
+
+  const worsening = compareAverageCollectionDaysToPriorMonth(55, 50);
+  assert.equal(worsening.direction, "down");
+  assert.equal(worsening.delta, 5);
+});
+
+test("summary table appends avg collection days with MoM indicator", () => {
+  const receivableDaysReport = buildReceivableDaysReport({
+    monthlyCreditSales: {
+      "2026-09": 300_000,
+      "2026-10": 300_000,
+    },
+    monthlyReceivables: {
+      "2026-09": 300_000,
+      "2026-10": 240_000,
+    },
+    asOfDate: "2026-10-20",
+  });
+  const summary = buildKpiUploadSummaryTable({
+    rows: [ahmed],
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+    salesAsOfDate: "2026-10-15",
+    receiptAsOfDate: "2026-10-14",
+    priorMonth: "2026-09",
+    priorMonthActualsByCode: {
+      AHMED: { totalSales: 180_000, collection: 250_000, cashCollection: 0 },
+    },
+    receivableDaysReport,
+  });
+
+  assert.equal(summary.rows.length, 4);
+  const daysRow = summary.rows[3];
+  assert.equal(daysRow.key, "averageCollectionDays");
+  assert.equal(daysRow.label, "Avg collection days");
+  assert.equal(daysRow.kind, "collectionDays");
+  assert.equal(daysRow.month, "2026-10");
+  assert.ok(daysRow.totalFiltered.actual != null);
+  assert.equal(daysRow.paceEstimate.estimate, null);
+  assert.equal(daysRow.vsLastMonth.direction, "up");
+  assert.ok(daysRow.vsLastMonth.delta < 0);
+
+  const alone = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
+  assert.equal(alone.key, "averageCollectionDays");
+  assert.equal(alone.vsLastMonth.direction, "up");
+});
+
 test("summary table reads nested snapshot targets like the KPI Targets page", () => {
   const summary = buildKpiUploadSummaryTable({
     rows: [{
@@ -134,6 +189,18 @@ test("summary table reads nested snapshot targets like the KPI Targets page", ()
 });
 
 test("email HTML uses transposed header labels", () => {
+  // Higher October AR vs thin October credit sales makes YTD DSO worsen vs September.
+  const receivableDaysReport = buildReceivableDaysReport({
+    monthlyCreditSales: {
+      "2026-09": 600_000,
+      "2026-10": 50_000,
+    },
+    monthlyReceivables: {
+      "2026-09": 200_000,
+      "2026-10": 500_000,
+    },
+    asOfDate: "2026-10-20",
+  });
   const summary = buildKpiUploadSummaryTable({
     rows: [ahmed],
     reportDate: "2026-10-01",
@@ -144,7 +211,9 @@ test("email HTML uses transposed header labels", () => {
     priorMonthActualsByCode: {
       AHMED: { totalSales: 180_000, collection: 250_000 },
     },
+    receivableDaysReport,
   });
+  assert.equal(summary.rows.at(-1).vsLastMonth.direction, "down");
   const message = buildKpiUploadSummaryEmail({
     summary,
     triggers: ["sales-upload", "receipt-upload"],
@@ -157,8 +226,12 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /Total sales/);
   assert.match(message.html, /Collection/);
   assert.match(message.html, /Total cash collected/);
+  assert.match(message.html, /Avg collection days/);
+  assert.match(message.html, /getting worse vs last month/);
   assert.match(message.html, /#0f4c5c/);
   assert.match(message.text, /Uploads: sales-upload, receipt-upload|sales-upload/);
+  assert.match(message.text, /Avg collection days/);
+  assert.match(message.text, /getting worse vs last month/);
 });
 
 test("recipients default to malik and accept overrides", () => {

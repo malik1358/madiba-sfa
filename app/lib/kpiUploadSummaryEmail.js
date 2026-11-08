@@ -5,6 +5,7 @@ import {
   formatPerformanceKpiValue,
 } from "./performanceKpis.js";
 import {
+  compareKpiActualToPriorMonth,
   compareKpiEstimateToPriorMonth,
   sumFilteredKpiColumns,
   sumFilteredKpiEstimateVsPriorMonth,
@@ -41,6 +42,10 @@ export const KPI_UPLOAD_SUMMARY_KPI_KEYS = [
 /** Company-wide YTD DSO row appended after the salesman KPI footer rows. */
 export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY = "averageCollectionDays";
 export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days";
+
+/** Company rolling 4-month active customers with MoM vs the prior complete month. */
+export const KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY = "activeCustomers";
+export const KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_LABEL = "Active customers";
 
 export const KPI_UPLOAD_SUMMARY_PENDING_KEY = "kpi_upload_summary_email_pending_v1";
 export const KPI_UPLOAD_SUMMARY_LAST_SENT_KEY = "kpi_upload_summary_email_last_sent";
@@ -85,6 +90,10 @@ export function resolveKpiUploadSummaryEmailCc(env = process.env, to = []) {
 
 export function buildKpiUploadSummaryReportUrl(env = process.env) {
   return `${resolveAppOrigin(env).replace(/\/+$/, "")}/management/kpi-targets`;
+}
+
+export function buildKpiUploadSummaryActiveCustomersReportUrl(env = process.env) {
+  return `${resolveAppOrigin(env).replace(/\/+$/, "")}/management/active-customers`;
 }
 
 export function nextKpiUploadSummarySendAfter(now = new Date(), debounceMs = KPI_UPLOAD_SUMMARY_DEBOUNCE_MS) {
@@ -219,9 +228,68 @@ export function buildAverageCollectionDaysSummaryRow(report = null) {
 }
 
 /**
+ * MoM for active customers (rolling 4-month distinct buyers).
+ * Higher count is better: direction "up" = growing (green).
+ */
+export function compareActiveCustomersToPriorMonth(currentCount, previousCount) {
+  const comparison = compareKpiActualToPriorMonth(currentCount, previousCount);
+  if (!comparison) return null;
+  return {
+    ...comparison,
+    polarity: "higher-is-better",
+  };
+}
+
+/**
+ * Build the company Active customers email row from the Active Customers report.
+ * Uses the latest complete KSA month vs the month before (same MoM as the report cards).
+ */
+export function buildActiveCustomersSummaryRow(report = null) {
+  const company = report?.company;
+  const latestCompleteMonth = String(report?.latestCompleteMonth || "").slice(0, 7);
+  if (!company || !/^\d{4}-\d{2}$/.test(latestCompleteMonth)) return null;
+
+  const currentCount = Number(
+    company.monthValues?.[latestCompleteMonth] ?? company.latestCompleteCount ?? 0,
+  );
+  if (!Number.isFinite(currentCount)) return null;
+
+  const priorCompleteMonth = String(report?.priorCompleteMonth || previousMonthKey(latestCompleteMonth) || "").slice(0, 7);
+  const priorRaw = priorCompleteMonth
+    ? company.monthValues?.[priorCompleteMonth]
+    : null;
+  const priorCount = priorRaw == null || priorRaw === ""
+    ? null
+    : Number(priorRaw);
+
+  return {
+    key: KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY,
+    label: KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_LABEL,
+    kind: "activeCustomers",
+    month: latestCompleteMonth,
+    totalFiltered: {
+      actual: currentCount,
+      target: 0,
+      achievement: null,
+      statusLabel: "Higher is better · 4-month active",
+      statusTone: "neutral",
+    },
+    paceEstimate: {
+      estimate: null,
+      target: 0,
+      achievement: null,
+    },
+    vsLastMonth: compareActiveCustomersToPriorMonth(
+      currentCount,
+      Number.isFinite(priorCount) ? priorCount : null,
+    ),
+  };
+}
+
+/**
  * Build the three KPI Targets footer summaries, then transpose so those row
  * labels become email columns (one email row per KPI). Optionally append
- * company Avg collection days (YTD DSO) with MoM improve/worsen.
+ * company Avg collection days (YTD DSO) and Active customers with MoM.
  */
 export function buildKpiUploadSummaryTable({
   rows = [],
@@ -233,6 +301,7 @@ export function buildKpiUploadSummaryTable({
   priorMonth = "",
   priorMonthActualsByCode = {},
   receivableDaysReport = null,
+  activeCustomersReport = null,
 } = {}) {
   const people = (rows || []).filter((row) => !row?.isTeam).map(withFlatKpiTargets);
   const totals = sumFilteredKpiColumns(people, columns);
@@ -283,6 +352,9 @@ export function buildKpiUploadSummaryTable({
   const collectionDaysRow = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
   if (collectionDaysRow) tableRows.push(collectionDaysRow);
 
+  const activeCustomersRow = buildActiveCustomersSummaryRow(activeCustomersReport);
+  if (activeCustomersRow) tableRows.push(activeCustomersRow);
+
   return {
     salesmanCount: people.length,
     priorMonth: String(priorMonth || "").slice(0, 7),
@@ -328,6 +400,14 @@ function isCollectionDaysRow(row) {
   return row?.key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY || row?.kind === "collectionDays";
 }
 
+function isActiveCustomersRow(row) {
+  return row?.key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY || row?.kind === "activeCustomers";
+}
+
+function isInfoOnlySummaryRow(row) {
+  return isCollectionDaysRow(row) || isActiveCustomersRow(row);
+}
+
 function formatCollectionDaysValue(value) {
   if (value == null || value === "" || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
@@ -335,11 +415,24 @@ function formatCollectionDaysValue(value) {
   return `${text} days`;
 }
 
+function formatActiveCustomersValue(value) {
+  if (value == null || value === "" || !Number.isFinite(Number(value))) return "—";
+  const count = Math.round(Number(value));
+  const text = count.toLocaleString("en-SA");
+  return `${text} customer${count === 1 ? "" : "s"}`;
+}
+
 function formatSignedMoney(key, value) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
   if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) {
     const abs = formatCollectionDaysValue(Math.abs(number));
+    if (number > 0) return `+${abs}`;
+    if (number < 0) return `−${abs}`;
+    return abs;
+  }
+  if (key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY) {
+    const abs = formatActiveCustomersValue(Math.abs(number));
     if (number > 0) return `+${abs}`;
     if (number < 0) return `−${abs}`;
     return abs;
@@ -352,6 +445,7 @@ function formatSignedMoney(key, value) {
 
 function formatKpiCellValue(key, value) {
   if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) return formatCollectionDaysValue(value);
+  if (key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY) return formatActiveCustomersValue(value);
   return formatPerformanceKpiValue(key, value);
 }
 
@@ -371,9 +465,24 @@ function vsLastMonthDirectionLabel(cell) {
     if (cell.direction === "down") return "getting worse vs last month";
     return "same as last month";
   }
+  if (cell.polarity === "higher-is-better") {
+    if (cell.direction === "up") return "growing vs last month";
+    if (cell.direction === "down") return "shrinking vs last month";
+    return "same as last month";
+  }
   if (cell.direction === "up") return "higher than last month";
   if (cell.direction === "down") return "lower than last month";
   return "same as last month";
+}
+
+function infoOnlyAsOfLabel(row) {
+  if (isCollectionDaysRow(row)) {
+    return row.month ? `As of ${row.month}` : "Company YTD DSO";
+  }
+  if (isActiveCustomersRow(row)) {
+    return row.month ? `As of ${row.month}` : "Rolling 4-month active";
+  }
+  return "Information only";
 }
 
 function totalFilteredHtml(row) {
@@ -385,9 +494,7 @@ function totalFilteredHtml(row) {
     : "—";
   const achievement = formatAchievementPercent(cell.achievement);
   const status = String(cell.statusLabel || "No target");
-  const infoLine = isCollectionDaysRow(row)
-    ? (row.month ? `As of ${escapeHtml(row.month)}` : "Company YTD DSO")
-    : "Information only";
+  const infoLine = escapeHtml(infoOnlyAsOfLabel(row));
   return `
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(actual)}</div>
     ${hasTarget ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">Target ${escapeHtml(target)}</div>
@@ -400,7 +507,7 @@ function totalFilteredHtml(row) {
 
 function paceEstimateHtml(row) {
   const cell = row.paceEstimate || {};
-  if (isCollectionDaysRow(row)) {
+  if (isInfoOnlySummaryRow(row)) {
     return `
       <div style="color:#94a3b8;">—</div>
       <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#e2e8f0;color:#475569;font-size:11px;font-weight:600;">
@@ -432,7 +539,7 @@ function vsLastMonthHtml(row, priorMonth) {
     ? "#15803d"
     : (cell.direction === "down" ? "#b91c1c" : "#475569");
   const directionLabel = vsLastMonthDirectionLabel(cell);
-  const comparisonMonth = isCollectionDaysRow(row) && row.month
+  const comparisonMonth = isInfoOnlySummaryRow(row) && row.month
     ? previousMonthKey(row.month)
     : priorMonth;
   const priorLabel = comparisonMonth ? ` (${escapeHtml(comparisonMonth)})` : "";
@@ -456,16 +563,14 @@ function totalFilteredText(row) {
     formatKpiCellValue(row.key, cell.actual),
     hasTarget
       ? `target ${formatKpiCellValue(row.key, cell.target)}`
-      : (isCollectionDaysRow(row)
-        ? (row.month ? `as of ${row.month}` : "company YTD DSO")
-        : "information only"),
+      : infoOnlyAsOfLabel(row).toLowerCase(),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     cell.statusLabel || "No target",
   ].filter(Boolean).join("; ");
 }
 
 function paceEstimateText(row) {
-  if (isCollectionDaysRow(row)) return "—; No pace estimate";
+  if (isInfoOnlySummaryRow(row)) return "—; No pace estimate";
   const cell = row.paceEstimate || {};
   if (cell.estimate == null) return "—";
   const hasTarget = Number(cell.target) > 0;
@@ -480,7 +585,7 @@ function vsLastMonthText(row, priorMonth) {
   const cell = row.vsLastMonth;
   if (!cell) return "—";
   const directionLabel = vsLastMonthDirectionLabel(cell);
-  const comparisonMonth = isCollectionDaysRow(row) && row.month
+  const comparisonMonth = isInfoOnlySummaryRow(row) && row.month
     ? previousMonthKey(row.month)
     : priorMonth;
   const priorValue = cell.priorActual == null
@@ -502,6 +607,7 @@ export function buildKpiUploadSummaryEmail({
 } = {}) {
   const month = String(summary?.reportDate || "").slice(0, 7);
   const reportUrl = buildKpiUploadSummaryReportUrl(env);
+  const activeCustomersUrl = buildKpiUploadSummaryActiveCustomersReportUrl(env);
   const triggerList = [...new Set([
     ...(Array.isArray(triggers) ? triggers : []),
     String(trigger || "").trim(),
@@ -536,12 +642,16 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days), transposed so Total / Estimate / vs last month are columns. Lower collection days is better.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days and Active customers), transposed so Total / Estimate / vs last month are columns. Lower collection days is better; higher active customers is better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>
     </table>
-    <p style="margin:16px 0 0;font-size:12px;"><a href="${escapeHtml(reportUrl)}" style="color:#0f4c5c;">Open KPI Targets</a></p>
+    <p style="margin:16px 0 0;font-size:12px;">
+      <a href="${escapeHtml(reportUrl)}" style="color:#0f4c5c;">Open KPI Targets</a>
+      ·
+      <a href="${escapeHtml(activeCustomersUrl)}" style="color:#0f4c5c;">Open Active Customers</a>
+    </p>
   </div>
 </body></html>`;
 
@@ -562,6 +672,7 @@ export function buildKpiUploadSummaryEmail({
       ...textRows,
       "",
       reportUrl,
+      activeCustomersUrl,
     ].join("\n"),
   };
 }

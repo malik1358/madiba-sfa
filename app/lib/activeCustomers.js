@@ -130,11 +130,12 @@ function decorateSeriesRow({
 /**
  * Build the Active Customers report from active_sales-like rows.
  * @param {Array<object>} rows
- * @param {{ teamMembers?: Array<object>, asOfDate?: string }} [options]
+ * @param {{ teamMembers?: Array<object>, asOfDate?: string, companyOnly?: boolean }} [options]
  */
 export function buildActiveCustomersReport(rows = [], options = {}) {
   const asOfDate = salesDateKey(options.asOfDate) || getKsaDateString();
   const teamMembers = Array.isArray(options.teamMembers) ? options.teamMembers : [];
+  const companyOnly = Boolean(options.companyOnly);
 
   const companyCustomers = new Map();
   const salesmanBuckets = new Map();
@@ -155,6 +156,8 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
     if (!lastDate || dateKey > lastDate) lastDate = dateKey;
 
     addPurchaseMonth(companyCustomers, customerCode, month);
+
+    if (companyOnly) continue;
 
     const identity = salesmanRowIdentity({
       ...row,
@@ -209,6 +212,15 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
     }
   }
 
+  // Ensure MoM for the latest complete month has its prior month count even when
+  // that prior sits just outside the displayed 12-month window.
+  if (priorCompleteMonth && companyMonthValues[priorCompleteMonth] == null) {
+    companyMonthValues[priorCompleteMonth] = countActiveInWindow(
+      companyCustomers,
+      rollingWindowMonths(priorCompleteMonth),
+    );
+  }
+
   const companyRow = decorateSeriesRow({
     key: "company",
     label: "Company",
@@ -220,62 +232,66 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
     extra: { customerCount: companyCustomers.size },
   });
 
-  const salesmanRows = [...salesmanBuckets.values()]
-    .map((bucket) => {
-      const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
-      if (displayMonths[0]) {
-        const lead = previousMonthKey(displayMonths[0]);
-        if (lead) {
-          monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+  const salesmanRows = companyOnly
+    ? []
+    : [...salesmanBuckets.values()]
+      .map((bucket) => {
+        const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
+        if (displayMonths[0]) {
+          const lead = previousMonthKey(displayMonths[0]);
+          if (lead) {
+            monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+          }
         }
-      }
-      return decorateSeriesRow({
-        key: bucket.label,
-        label: bucket.label,
-        monthValues,
-        displayMonths,
-        currentMonth,
-        latestCompleteMonth,
-        priorCompleteMonth,
-        extra: { customerCount: bucket.customers.size },
+        return decorateSeriesRow({
+          key: bucket.label,
+          label: bucket.label,
+          monthValues,
+          displayMonths,
+          currentMonth,
+          latestCompleteMonth,
+          priorCompleteMonth,
+          extra: { customerCount: bucket.customers.size },
+        });
+      })
+      .filter((row) => displayMonths.some((month) => Number(row.monthValues[month] || 0) > 0))
+      .sort((left, right) => {
+        const delta = Number(right.latestCompleteCount || 0) - Number(left.latestCompleteCount || 0);
+        if (delta !== 0) return delta;
+        return String(left.label).localeCompare(String(right.label));
       });
-    })
-    .filter((row) => displayMonths.some((month) => Number(row.monthValues[month] || 0) > 0))
-    .sort((left, right) => {
-      const delta = Number(right.latestCompleteCount || 0) - Number(left.latestCompleteCount || 0);
-      if (delta !== 0) return delta;
-      return String(left.label).localeCompare(String(right.label));
-    });
 
-  const teamRows = [...teamBuckets.values()]
-    .map((bucket) => {
-      const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
-      if (displayMonths[0]) {
-        const lead = previousMonthKey(displayMonths[0]);
-        if (lead) {
-          monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+  const teamRows = companyOnly
+    ? []
+    : [...teamBuckets.values()]
+      .map((bucket) => {
+        const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
+        if (displayMonths[0]) {
+          const lead = previousMonthKey(displayMonths[0]);
+          if (lead) {
+            monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+          }
         }
-      }
-      return decorateSeriesRow({
-        key: bucket.teamKey,
-        label: bucket.label,
-        monthValues,
-        displayMonths,
-        currentMonth,
-        latestCompleteMonth,
-        priorCompleteMonth,
-        extra: {
-          teamKey: bucket.teamKey,
-          customerCount: bucket.customers.size,
-        },
+        return decorateSeriesRow({
+          key: bucket.teamKey,
+          label: bucket.label,
+          monthValues,
+          displayMonths,
+          currentMonth,
+          latestCompleteMonth,
+          priorCompleteMonth,
+          extra: {
+            teamKey: bucket.teamKey,
+            customerCount: bucket.customers.size,
+          },
+        });
+      })
+      .filter((row) => displayMonths.some((month) => Number(row.monthValues[month] || 0) > 0))
+      .sort((left, right) => {
+        const delta = Number(right.latestCompleteCount || 0) - Number(left.latestCompleteCount || 0);
+        if (delta !== 0) return delta;
+        return String(left.label).localeCompare(String(right.label));
       });
-    })
-    .filter((row) => displayMonths.some((month) => Number(row.monthValues[month] || 0) > 0))
-    .sort((left, right) => {
-      const delta = Number(right.latestCompleteCount || 0) - Number(left.latestCompleteCount || 0);
-      if (delta !== 0) return delta;
-      return String(left.label).localeCompare(String(right.label));
-    });
 
   const currentActive = Number(companyRow.currentCount || 0);
   const priorActive = Number(companyRow.latestCompleteCount || 0);

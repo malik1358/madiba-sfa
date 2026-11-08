@@ -19,6 +19,7 @@ import {
   loadPerformanceSnapshotsForSalesmen,
   loadStoredKpiActualsByCode,
 } from "./performanceKpisServer.js";
+import { loadActiveCustomersCompanyReport } from "./activeCustomersServer.js";
 import { buildReceivableDaysReport } from "./receivableDays.js";
 import { readReceivableDaysDataset } from "./receivableDaysServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
@@ -137,7 +138,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
   }));
   const priorMonth = previousMonthKey(String(monthStartDate(monthDate) || monthDate).slice(0, 7));
   const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
-  const [snapshots, priorMonthActualsByCode, receivableDaysReport] = await Promise.all([
+  const [snapshots, priorMonthActualsByCode, receivableDaysReport, activeCustomersReport] = await Promise.all([
     loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmanPayload,
       reportDate: monthDate,
@@ -147,6 +148,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
       ? loadStoredKpiActualsByCode(admin, priorReportDate)
       : Promise.resolve({}),
     loadReceivableDaysReportForKpiSummary(admin, { asOfDate: todayIso }),
+    loadActiveCustomersCompanyReport(admin, { asOfDate: todayIso }),
   ]);
 
   const salesAsOfDate = String(
@@ -165,6 +167,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
     priorMonth,
     priorMonthActualsByCode,
     receivableDaysReport,
+    activeCustomersReport,
   });
 
   return { summary, monthDate, todayIso };

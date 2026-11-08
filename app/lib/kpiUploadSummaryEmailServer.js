@@ -19,6 +19,8 @@ import {
   loadPerformanceSnapshotsForSalesmen,
   loadStoredKpiActualsByCode,
 } from "./performanceKpisServer.js";
+import { buildReceivableDaysReport } from "./receivableDays.js";
+import { readReceivableDaysDataset } from "./receivableDaysServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function createServiceAdmin(env = process.env) {
@@ -99,6 +101,28 @@ async function listKpiUploadSummarySalesmen(admin) {
   return mergeKpiTargetProfiles((data || []).filter(isKpiTargetProfile));
 }
 
+/**
+ * Read company Avg collection days from the prepared receivable-days cache only.
+ * Do not rebuild here — sales/outstanding uploads already refresh that dataset.
+ */
+export async function loadReceivableDaysReportForKpiSummary(admin, {
+  asOfDate = "",
+} = {}) {
+  try {
+    const dataset = await readReceivableDaysDataset(admin);
+    if (!dataset?.monthlyReceivables || !dataset?.monthlyCreditSales) return null;
+    const asOf = String(asOfDate || getKsaDateString()).slice(0, 10);
+    return buildReceivableDaysReport({
+      monthlyCreditSales: dataset.monthlyCreditSales,
+      monthlyReceivables: dataset.monthlyReceivables,
+      asOfDate: asOf,
+    });
+  } catch (error) {
+    console.error("KPI upload summary: receivable days cache unavailable:", error);
+    return null;
+  }
+}
+
 export async function loadKpiUploadSummaryPayload(admin, {
   reportDate = "",
 } = {}) {
@@ -113,7 +137,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
   }));
   const priorMonth = previousMonthKey(String(monthStartDate(monthDate) || monthDate).slice(0, 7));
   const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
-  const [snapshots, priorMonthActualsByCode] = await Promise.all([
+  const [snapshots, priorMonthActualsByCode, receivableDaysReport] = await Promise.all([
     loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmanPayload,
       reportDate: monthDate,
@@ -122,6 +146,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
     priorReportDate
       ? loadStoredKpiActualsByCode(admin, priorReportDate)
       : Promise.resolve({}),
+    loadReceivableDaysReportForKpiSummary(admin, { asOfDate: todayIso }),
   ]);
 
   const salesAsOfDate = String(
@@ -139,6 +164,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
     receiptAsOfDate,
     priorMonth,
     priorMonthActualsByCode,
+    receivableDaysReport,
   });
 
   return { summary, monthDate, todayIso };

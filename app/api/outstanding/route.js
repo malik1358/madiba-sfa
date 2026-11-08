@@ -21,6 +21,7 @@ import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offl
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { rebuildReceivableDaysDataset } from "../../lib/receivableDaysServer.js";
+import { scheduleKpiUploadSummaryEmail } from "../../lib/kpiUploadSummaryEmailServer.js";
 import { shouldRejectOutstandingUpload } from "../../lib/outstandingDatasetGuard.js";
 
 export const runtime = "nodejs";
@@ -324,10 +325,19 @@ export async function POST(request) {
 
       try {
         if (!supabaseUrl || !serviceKey) return;
-        await rebuildReceivableDaysDataset(createClient(supabaseUrl, serviceKey, {
+        const receivableAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
-        }), { trigger: "outstanding-upload" });
+        });
+        await rebuildReceivableDaysDataset(receivableAdmin, { trigger: "outstanding-upload" });
         console.info("Receivable days dataset rebuilt after outstanding upload.");
+        try {
+          const scheduled = await scheduleKpiUploadSummaryEmail(receivableAdmin, {
+            trigger: "outstanding-upload",
+          });
+          console.info("KPI upload summary email scheduled after outstanding upload:", scheduled);
+        } catch (kpiEmailError) {
+          console.error("KPI upload summary schedule after outstanding upload failed:", kpiEmailError);
+        }
       } catch (receivableError) {
         console.error("Receivable days rebuild after outstanding upload failed:", receivableError);
       }

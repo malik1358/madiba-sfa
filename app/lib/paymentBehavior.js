@@ -1161,6 +1161,14 @@ export function buildSortedReceipts(receipts = []) {
  * unmatched overcollection first (1424 Jun/Bpmt0057 refunds the 3,340.75 leftover
  * from receipt 957 after cash CNFD/APR/014 was already paid by 675). That reduces
  * Collected without reopening paid invoices.
+ * A receipt dated before the earliest sales invoice is a short advance only when
+ * that first invoice is within PAYMENT_PURCHASE_ADVANCE_DAYS (same window as
+ * Payment→Purchase advances). Older pre-history credits (often NSTC JV reclass
+ * onto the party months before the first booked sale) stay unmatched and must
+ * not prepaid-FIFO onto later invoices — otherwise customer 1620’s June 2025
+ * NSTC JVs 00072/00068/00077 cut NFD/1815 Machine Open by 712.68 below the
+ * Tally outstanding 21,398.08. A day-before advance onto the first invoice
+ * (receipt 537 → NFD/334) still settles.
  * A voucher is never discarded because it is SAR 0.02 or less.
  */
 export function matchPaymentsFifo(transactions = [], receipts = [], options = {}) {
@@ -1190,6 +1198,14 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
         cash_first_receipt_used: false,
       };
     });
+  // Earliest open sales date in this settlement set. Receipts before it are
+  // outside the sales history window and must not settle later invoices.
+  const earliestInvoiceDate = invoices.reduce((earliest, invoice) => {
+    const date = dateOnly(invoice?.invoice_date);
+    if (!date) return earliest;
+    if (!earliest || date < earliest) return date;
+    return earliest;
+  }, "");
   const pairedCreditNoteKeys = new Set(
     reversals.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
   );
@@ -1694,6 +1710,15 @@ export function matchPaymentsFifo(transactions = [], receipts = [], options = {}
 
     // Receipts: first receipt after each cash invoice settles that cash bill first.
     if (event.kind === "receipt") {
+      // Pre-history credit: only a short advance onto the first invoice is
+      // allowed. Older credits (1620 NSTC JV 00072/00068/00077) stay unmatched.
+      if (earliestInvoiceDate && event.date && event.date < earliestInvoiceDate) {
+        const advanceGap = isoDayOffset(event.date, earliestInvoiceDate);
+        if (advanceGap == null || advanceGap > PAYMENT_PURCHASE_ADVANCE_DAYS) {
+          if (hasSettlementAmount(remaining)) unmatchedReceiptAmount += remaining;
+          continue;
+        }
+      }
       for (const invoice of invoices) {
         if (!hasSettlementAmount(remaining)) break;
         if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;

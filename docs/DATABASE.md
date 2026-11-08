@@ -45,6 +45,8 @@ Helper functions in the baseline migration:
 
 One-off production delete (2026-11-06): customer `1231` credit notes `739` (−67.60 ex-VAT) and `740` (−64.90 ex-VAT), both 2026-10-31, were removed from active batch 10 (`sales_raw` ids 465597, 465599, 465598, 465600). They are not in `sales_transactions`, `invoices`, or `receipt_register_dataset_v1`. `customer_history_cache:1231%` was cleared. Re-importing that date from a file that still has them will restore them.
 
+One-off production delete (2026-11-08): customer `1367` (Wubl Al Khaleej Trading Company) outstanding invoice `RNFD/0642` (2026-11-04, pending 506) was removed from `outstanding_customerwise_dataset_v1`. It had no matching sales voucher (live sale for that day/amount is `RNFD/676`), so Payment Settlement showed a tally-only Open row with Sales 0 / Open 506. Customer row totals were recomputed to the remaining bill `RNFD/470` (1,487.8; one open invoice). `customer_history_cache:1367%` was cleared. Re-uploading an outstanding file that still lists `RNFD/0642` will restore it.
+
 `sales_raw` columns in the baseline: `reference`, `voucher_number`, `voucher_type`, `transaction_date`, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `item_code`, `item_name`, `category`, `local_import`, `quantity`, `rate`, `sales_amount`, `first_purchase_date`, `abc_class`, `source_data` jsonb.
 
 **Not in migrations:** `sql/add_sales_profit_amount.sql` adds `profit_amount numeric not null default 0` and recreates `active_sales` to expose it. BI profit depends on this script. Cost and margin percent are intentionally not stored.

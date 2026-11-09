@@ -57,7 +57,13 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
+import {
+  createOrderPdfDocument,
+  enrichOrderPdfLiveData,
+  formatHistoryChange,
+  preloadOrderPdfLibrary,
+  resolveLiveOrderPdfSnapshot,
+} from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { resolveOrderMakerFromScope } from "../../lib/orderSalesman";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
@@ -1143,17 +1149,35 @@ export default function NewOrderPage() {
       setDownloadingPdf(true);
       try {
         if (options.fast) {
-          const orderNumber = formatSalesOrderNumberForDisplay(snapshot) || "syncing";
-          // Keep the already-loaded customer analytics so the Monthly Performance
-          // (historic sales) table still appears without waiting on live lookups.
-          const doc = await createOrderPdfDocument(snapshot, { analytics: analytics || null });
+          // Fast share still loads Receipts not yet in Tally (one light API). Skip
+          // outstanding/history/pricing refreshes so WhatsApp after save stays quick.
+          const supabase = getSupabaseClient();
+          const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+          let fastSnapshot = snapshot;
+          if (accessToken) {
+            try {
+              const enriched = await enrichOrderPdfLiveData(snapshot, {
+                accessToken,
+                analyticsFallback: analytics,
+                skipOutstanding: true,
+                skipHistory: true,
+                skipPricing: true,
+                skipPendingTallyReceipts: false,
+              });
+              fastSnapshot = enriched.snapshot;
+            } catch {
+              // Keep the local snapshot if pending Tally receipts cannot be refreshed.
+            }
+          }
+          const orderNumber = formatSalesOrderNumberForDisplay(fastSnapshot) || "syncing";
+          const doc = await createOrderPdfDocument(fastSnapshot, { analytics: analytics || null });
           const fileName = buildOrderPdfFileName({
             orderId: orderNumber,
-            customerCode: snapshot.customerCode,
+            customerCode: fastSnapshot.customerCode || snapshot.customerCode,
             savedAtIso: new Date().toISOString(),
-            pendingSync: isQueuedPendingOrderId(snapshot.orderId),
+            pendingSync: isQueuedPendingOrderId(fastSnapshot.orderId || snapshot.orderId),
           });
-          const summaryText = buildOrderWhatsappSummary(snapshot, language, {
+          const summaryText = buildOrderWhatsappSummary(fastSnapshot, language, {
             analytics: analytics || null,
           });
           const blob = doc.output("blob");
@@ -1162,7 +1186,7 @@ export default function NewOrderPage() {
             file: new File([blob], fileName, { type: "application/pdf" }),
             fileName,
             summaryText,
-            snapshot,
+            snapshot: fastSnapshot,
           };
         }
 

@@ -26,9 +26,14 @@ const TEXT = {
   downloadReceiptTemplate: { en: "Download Receipt template", ar: "تنزيل قالب سندات القبض" },
   downloadPaymentTemplate: { en: "Download Payment template", ar: "تنزيل قالب سندات الصرف" },
   lastStockUpload: { en: "Last end-of-day stock upload", ar: "آخر رفع لمخزون نهاية اليوم" },
+  lastStockByCity: { en: "Last file by city", ar: "آخر ملف لكل مدينة" },
   noStockUploadYet: { en: "No end-of-day stock upload yet.", ar: "لا يوجد رفع لمخزون نهاية اليوم بعد." },
   downloadStockTemplate: { en: "Download stock template", ar: "تنزيل قالب المخزون" },
   viewStock: { en: "View city stock", ar: "عرض المخزون حسب المدينة" },
+  cityRiyadh: { en: "Riyadh", ar: "الرياض" },
+  cityDammam: { en: "Dammam", ar: "الدمام" },
+  cityJeddah: { en: "Jeddah", ar: "جدة" },
+  stockItemsShort: { en: "items", ar: "أصناف" },
   stockDateLabel: { en: "Stock date if the file has none", ar: "تاريخ المخزون إذا لم يوجد في الملف" },
   stockTitle: { en: "End-of-day stock, city wise", ar: "مخزون نهاية اليوم حسب المدينة" },
   stockBody: {
@@ -218,16 +223,22 @@ export default function UploadSalesPage() {
       );
 
       const stockPayload = await stockResponse.json().catch(() => ({}));
+      const cityUploads = stockPayload.cityUploads && typeof stockPayload.cityUploads === "object"
+        ? stockPayload.cityUploads
+        : {};
       setLastStockUpload(
         stockResponse.ok
         && stockPayload.success
-        && stockPayload.uploadedAt
+        && (stockPayload.uploadedAt || Object.values(cityUploads).some(Boolean))
           ? {
               fileName: stockPayload.fileName || "",
               uploadedAt: stockPayload.uploadedAt,
               stockDate: stockPayload.stockDate || "",
               itemCount: stockPayload.itemCount || 0,
               canDownload: Boolean(stockPayload.canDownload),
+              cityUploads,
+              cityItemCounts: stockPayload.cityItemCounts || {},
+              cityLabels: stockPayload.cityLabels || {},
             }
           : null,
       );
@@ -246,11 +257,13 @@ export default function UploadSalesPage() {
     loadLastUploadInfo();
   }, []);
 
-  async function downloadUploadedFile(kind, fallbackName) {
+  async function downloadUploadedFile(kind, fallbackName, city = "") {
     const normalizedKind = String(kind || "").trim().toLowerCase();
+    const normalizedCity = String(city || "").trim().toLowerCase();
+    const downloadKey = normalizedCity ? `${normalizedKind}:${normalizedCity}` : normalizedKind;
     if (!["sales", "outstanding", "receipt", "eod-stock"].includes(normalizedKind) || downloadingKind) return;
 
-    setDownloadingKind(normalizedKind);
+    setDownloadingKind(downloadKey);
     setError("");
     setOutstandingError("");
     setReceiptError("");
@@ -268,7 +281,10 @@ export default function UploadSalesPage() {
         throw new Error("Your login session has expired. Please login again.");
       }
 
-      const response = await fetch(`/api/upload-files?kind=${normalizedKind}`, {
+      const cityQuery = normalizedKind === "eod-stock" && normalizedCity
+        ? `&city=${encodeURIComponent(normalizedCity)}`
+        : "";
+      const response = await fetch(`/api/upload-files?kind=${normalizedKind}${cityQuery}`, {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
@@ -1252,25 +1268,55 @@ export default function UploadSalesPage() {
             {loadingLastUploads ? (
               <p>{t("loadingLastUploads")}</p>
             ) : lastStockUpload ? (
-              <div className="uploadMetaRow">
-                <p>
-                  <strong>{t("lastStockUpload")}:</strong>{" "}
-                  {formatUploadTimestamp(lastStockUpload.uploadedAt)}
-                  {lastStockUpload.stockDate ? ` | ${lastStockUpload.stockDate}` : ""}
-                  {lastStockUpload.fileName ? ` | ${lastStockUpload.fileName}` : ""}
-                  {lastStockUpload.itemCount ? ` | ${Number(lastStockUpload.itemCount).toLocaleString()} items` : ""}
-                </p>
-                {lastStockUpload.canDownload ? (
-                  <button
-                    type="button"
-                    className="uploadDownloadButton"
-                    onClick={() => downloadUploadedFile("eod-stock", lastStockUpload.fileName)}
-                    disabled={Boolean(downloadingKind)}
-                  >
-                    {downloadingKind === "eod-stock" ? t("downloadingFile") : t("downloadFile")}
-                  </button>
-                ) : null}
-              </div>
+              <>
+                <div className="uploadMetaRow">
+                  <p>
+                    <strong>{t("lastStockUpload")}:</strong>{" "}
+                    {formatUploadTimestamp(lastStockUpload.uploadedAt)}
+                    {lastStockUpload.stockDate ? ` | ${lastStockUpload.stockDate}` : ""}
+                    {lastStockUpload.fileName ? ` | ${lastStockUpload.fileName}` : ""}
+                    {lastStockUpload.itemCount ? ` | ${Number(lastStockUpload.itemCount).toLocaleString()} ${t("stockItemsShort")}` : ""}
+                  </p>
+                  {lastStockUpload.canDownload && lastStockUpload.fileName ? (
+                    <button
+                      type="button"
+                      className="uploadDownloadButton"
+                      onClick={() => downloadUploadedFile("eod-stock", lastStockUpload.fileName)}
+                      disabled={Boolean(downloadingKind)}
+                    >
+                      {downloadingKind === "eod-stock" ? t("downloadingFile") : t("downloadFile")}
+                    </button>
+                  ) : null}
+                </div>
+                <p style={{ margin: "10px 0 6px", fontWeight: 600 }}>{t("lastStockByCity")}</p>
+                {["riyadh", "dammam", "jeddah"].map((city) => {
+                  const upload = lastStockUpload.cityUploads?.[city] || null;
+                  const label = lastStockUpload.cityLabels?.[city]
+                    || (city === "riyadh" ? t("cityRiyadh") : city === "dammam" ? t("cityDammam") : t("cityJeddah"));
+                  const itemCount = Number(upload?.itemCount || lastStockUpload.cityItemCounts?.[city] || 0);
+                  const downloadKey = `eod-stock:${city}`;
+                  return (
+                    <div className="uploadMetaRow" key={city}>
+                      <p>
+                        <strong>{label}:</strong>{" "}
+                        {upload
+                          ? `${formatUploadTimestamp(upload.uploadedAt)}${upload.stockDate ? ` | ${upload.stockDate}` : ""}${upload.fileName ? ` | ${upload.fileName}` : ""}${itemCount ? ` | ${itemCount.toLocaleString()} ${t("stockItemsShort")}` : ""}`
+                          : "—"}
+                      </p>
+                      {upload?.canDownload || upload?.filePath ? (
+                        <button
+                          type="button"
+                          className="uploadDownloadButton"
+                          onClick={() => downloadUploadedFile("eod-stock", upload.fileName, city)}
+                          disabled={Boolean(downloadingKind)}
+                        >
+                          {downloadingKind === downloadKey ? t("downloadingFile") : t("downloadFile")}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </>
             ) : (
               <p>{t("noStockUploadYet")}</p>
             )}

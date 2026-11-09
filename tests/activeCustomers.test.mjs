@@ -1,21 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  ACTIVE_CUSTOMERS_WINDOW_MONTHS,
+  ACTIVE_CUSTOMERS_WINDOW_DAYS,
   buildActiveCustomersReport,
-  countActiveInWindow,
+  countActiveInDateWindow,
+  monthEndDateKey,
   purchaseCountsTowardActive,
-  rollingWindowMonths,
+  resolveMonthAsOfDate,
+  rollingWindowBounds,
+  shiftDateKey,
 } from "../app/lib/activeCustomers.js";
 
-test("rolling window is four calendar months ending at as-of", () => {
-  assert.equal(ACTIVE_CUSTOMERS_WINDOW_MONTHS, 4);
-  assert.deepEqual(rollingWindowMonths("2026-11"), [
-    "2026-08",
-    "2026-09",
-    "2026-10",
-    "2026-11",
-  ]);
+test("rolling window is 120 inclusive days ending at as-of", () => {
+  assert.equal(ACTIVE_CUSTOMERS_WINDOW_DAYS, 120);
+  assert.equal(monthEndDateKey("2026-10"), "2026-10-31");
+  assert.deepEqual(rollingWindowBounds("2026-10-31"), {
+    start: "2026-07-04",
+    end: "2026-10-31",
+  });
+  assert.equal(shiftDateKey("2026-10-31", -119), "2026-07-04");
+  assert.equal(resolveMonthAsOfDate("2026-10", "2026-11-09"), "2026-10-31");
+  assert.equal(resolveMonthAsOfDate("2026-11", "2026-11-09"), "2026-11-09");
 });
 
 test("credit notes and non-positive amounts do not count as a purchase", () => {
@@ -37,16 +42,21 @@ test("credit notes and non-positive amounts do not count as a purchase", () => {
   }), false);
 });
 
-test("countActiveInWindow keeps a customer once when they bought in the window", () => {
+test("countActiveInDateWindow keeps a customer once when they bought in the window", () => {
   const customers = new Map([
-    ["A", new Set(["2026-08", "2026-10"])],
-    ["B", new Set(["2026-07"])],
-    ["C", new Set(["2026-11"])],
+    ["A", new Set(["2026-08-05", "2026-10-01"])],
+    ["B", new Set(["2026-07-01"])],
+    ["C", new Set(["2026-07-10"])],
+    ["D", new Set(["2026-11-01"])],
   ]);
-  assert.equal(countActiveInWindow(customers, rollingWindowMonths("2026-11")), 2);
+  // Window 2026-07-04 … 2026-10-31: A and C only (B is before start; D is after end).
+  assert.equal(
+    countActiveInDateWindow(customers, "2026-07-04", "2026-10-31"),
+    2,
+  );
 });
 
-test("company trend rises when a new buyer enters the rolling window", () => {
+test("company count and sales use the same 120-day window ending month-end", () => {
   const rows = [
     {
       transaction_date: "2026-05-10",
@@ -91,16 +101,19 @@ test("company trend rises when a new buyer enters the rolling window", () => {
   ];
 
   const report = buildActiveCustomersReport(rows, { asOfDate: "2026-10-31" });
-  assert.equal(report.windowMonths, 4);
+  assert.equal(report.windowDays, 120);
   assert.equal(report.currentMonth, "2026-10");
+  // Aug 31 window starts 2026-05-04 → includes May + Aug for customer 1001.
   assert.equal(report.company.monthValues["2026-08"], 1);
+  assert.equal(report.company.monthSales["2026-08"], 350);
+  // Sep 30 window starts 2026-06-03 → May falls out; Aug + Sep remain.
   assert.equal(report.company.monthValues["2026-09"], 2);
+  assert.equal(report.company.monthSales["2026-09"], 230);
+  // Oct 31 window starts 2026-07-04 → Aug/Sep/Oct activity for 3 customers.
   assert.equal(report.company.monthValues["2026-10"], 3);
-  assert.equal(report.company.monthSales["2026-08"], 150);
-  assert.equal(report.company.monthSales["2026-09"], 80);
-  assert.equal(report.company.monthSales["2026-10"], 50);
+  assert.equal(report.company.monthSales["2026-10"], 280);
   assert.equal(report.summary.currentActive, 3);
-  assert.equal(report.summary.currentSales, 50);
+  assert.equal(report.summary.currentSales, 280);
   assert.equal(report.summary.change > 0, true);
 
   const ali = report.salesmanRows.find((row) => row.label.includes("Ali"));
@@ -108,7 +121,7 @@ test("company trend rises when a new buyer enters the rolling window", () => {
   assert.ok(ali);
   assert.ok(omar);
   assert.equal(ali.monthValues["2026-10"], 2);
-  assert.equal(ali.monthSales["2026-10"], -40);
+  assert.equal(ali.monthSales["2026-10"], 190);
   assert.equal(omar.monthValues["2026-10"], 1);
   assert.equal(omar.monthSales["2026-10"], 90);
 });
@@ -178,6 +191,7 @@ test("team view unions distinct customers across members", () => {
   const team = report.teamRows.find((row) => row.key === "leader-1");
   assert.ok(team);
   assert.equal(team.monthValues["2026-10"], 2);
+  // Sep window still includes both Sep sales; Oct window includes Sep + Oct.
   assert.equal(team.monthSales["2026-09"], 110);
-  assert.equal(team.monthSales["2026-10"], 70);
+  assert.equal(team.monthSales["2026-10"], 180);
 });

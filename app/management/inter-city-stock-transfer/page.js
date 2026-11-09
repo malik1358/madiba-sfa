@@ -44,9 +44,19 @@ const TEXT = {
   items: { en: "Items", ar: "الأصناف" },
   suggestedTotal: { en: "Suggested qty", ar: "الكمية المقترحة" },
   noRows: {
-    en: "No items are stocked in only one of Riyadh or Dammam on the latest end-of-day file.",
-    ar: "لا توجد أصناف متوفرة في مدينة واحدة فقط من الرياض أو الدمام في آخر ملف مخزون.",
+    en: "No catalogue items are stocked in the source city only on the latest end-of-day file.",
+    ar: "لا توجد أصناف كتالوج متوفرة في مدينة المصدر فقط في آخر ملف مخزون.",
   },
+  thinSource: {
+    en: "EOD catalogue stock in {city} is almost empty ({count} items). Re-upload that city’s end-of-day stock file (Imports → End-of-day Stock). A Dammam-only upload does not restore Riyadh lines.",
+    ar: "مخزون نهاية اليوم في {city} شبه فارغ ({count} أصناف). أعد رفع ملف مخزون تلك المدينة (الاستيراد ← مخزون نهاية اليوم). رفع الدمام وحده لا يعيد أصناف الرياض.",
+  },
+  stockCoverage: {
+    en: "Catalogue stock rows",
+    ar: "صفوف مخزون الكتالوج",
+  },
+  lastUpload: { en: "Last upload", ar: "آخر رفع" },
+  citiesInFile: { en: "Cities in last file", ar: "المدن في آخر ملف" },
   noStock: {
     en: "Upload end-of-day stock for Riyadh and Dammam first (Imports → End-of-day Stock).",
     ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام (الاستيراد ← مخزون نهاية اليوم).",
@@ -112,6 +122,7 @@ function DirectionTable({
   rows,
   t,
   filename,
+  emptyHint = "",
 }) {
   const cities = DIRECTION_CITIES[directionKey] || DIRECTION_CITIES.riyadhToDammam;
   const sourceCityName = t(cities.source);
@@ -141,7 +152,7 @@ function DirectionTable({
   }, [visibleRows]);
 
   if (!rows.length) {
-    return <div className="moduleHint">{t("noRows")}</div>;
+    return <div className="moduleHint">{emptyHint || t("noRows")}</div>;
   }
 
   return (
@@ -289,6 +300,17 @@ export default function InterCityStockTransferPage() {
     ? `${report.window.fromDate} → ${report.window.toDate}`
     : "";
   const summary = report?.summary || {};
+  const cities = DIRECTION_CITIES[direction] || DIRECTION_CITIES.riyadhToDammam;
+  const sourceStockCount = direction === "riyadhToDammam"
+    ? Number(summary.riyadhStockItems || 0)
+    : Number(summary.dammamStockItems || 0);
+  const thinSourceHint = sourceStockCount < 20
+    ? withCity(t("thinSource"), t(cities.source)).replace("{count}", String(sourceStockCount))
+    : "";
+  const emptyHint = thinSourceHint || t("noRows");
+  const citiesPresentLabel = Array.isArray(report?.citiesPresent) && report.citiesPresent.length
+    ? report.citiesPresent.map((city) => t(city) || city).join(", ")
+    : "—";
 
   return (
     <MorningAttendanceGate requireMorningAttendance={false}>
@@ -314,10 +336,16 @@ export default function InterCityStockTransferPage() {
             </div>
             <p className="moduleHint">
               {t("stockDate")}: {report?.stockDate || "—"}
+              {report?.fileName ? ` · ${t("lastUpload")}: ${report.fileName}` : ""}
+              {` · ${t("citiesInFile")}: ${citiesPresentLabel}`}
               {windowLabel ? ` · ${t("salesWindow")}: ${windowLabel}` : ""}
+            </p>
+            <p className="moduleHint">
+              {`${t("stockCoverage")}: ${t("riyadh")} ${summary.riyadhStockItems || 0} · ${t("dammam")} ${summary.dammamStockItems || 0}`}
               {` · ${t("riyadhToDammam")}: ${summary.riyadhToDammamItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToDammamSuggestedQty || 0)})`}
               {` · ${t("dammamToRiyadh")}: ${summary.dammamToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.dammamToRiyadhSuggestedQty || 0)})`}
             </p>
+            {thinSourceHint && !loading ? <p className="moduleHint">{thinSourceHint}</p> : null}
 
             <div className="moduleInlineActions" style={{ marginBottom: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button
@@ -347,6 +375,7 @@ export default function InterCityStockTransferPage() {
                 rows={rows}
                 t={t}
                 filename={`inter-city-stock-${direction}`}
+                emptyHint={emptyHint}
               />
             )}
           </section>

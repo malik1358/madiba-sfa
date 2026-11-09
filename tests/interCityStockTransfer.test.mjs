@@ -175,8 +175,12 @@ test("builds both direction reports with suggested quantities", () => {
   assert.equal(report.directions.riyadhToDammam.rows[0].itemCode, "A200");
   assert.equal(report.directions.riyadhToDammam.rows[0].suggestedQty, 75);
   assert.equal(report.directions.riyadhToDammam.rows[0].peakWeeklyQty, 35);
+  assert.equal(report.directions.riyadhToDammam.rows[0].sourceLabel, "Riyadh");
+  assert.equal(report.directions.riyadhToDammam.rows[0].destinationLabel, "Dammam");
   assert.equal(report.directions.dammamToRiyadh.itemCount, 1);
   assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 30);
+  assert.equal(report.directions.dammamToRiyadh.rows[0].sourceLabel, "Dammam");
+  assert.equal(report.directions.dammamToRiyadh.rows[0].destinationLabel, "Riyadh");
   assert.equal(report.summary.riyadhToDammamSuggestedQty, 75);
   assert.equal(report.summary.dammamToRiyadhSuggestedQty, 30);
 });

@@ -24,19 +24,21 @@ const TEXT = {
   code: { en: "Item code", ar: "رمز الصنف" },
   item: { en: "Item", ar: "الصنف" },
   unit: { en: "Unit", ar: "الوحدة" },
-  sourceQty: { en: "Source qty", ar: "كمية المصدر" },
-  destQty: { en: "Dest qty", ar: "كمية الوجهة" },
+  sourceQty: { en: "{city} qty", ar: "كمية {city}" },
+  destQty: { en: "{city} qty", ar: "كمية {city}" },
   peakWeekly: { en: "Peak weekly sales", ar: "أعلى مبيعات أسبوعية" },
   peakWeek: { en: "Peak week", ar: "أسبوع الذروة" },
   dailyDemand: { en: "Daily demand", ar: "الطلب اليومي" },
   targetCover: { en: "15-day target", ar: "هدف 15 يوماً" },
   suggested: { en: "Suggested transfer", ar: "النقل المقترح" },
-  afterDest: { en: "After at dest", ar: "بعد النقل عند الوجهة" },
-  remainSource: { en: "Left at source", ar: "المتبقي في المصدر" },
+  afterDest: { en: "After at {city}", ar: "بعد النقل في {city}" },
+  remainSource: { en: "Left at {city}", ar: "المتبقي في {city}" },
   daysCover: { en: "Days cover after", ar: "أيام التغطية بعد النقل" },
   total: { en: "Total", ar: "الإجمالي" },
   stockDate: { en: "Stock date", ar: "تاريخ المخزون" },
   salesWindow: { en: "Sales window", ar: "فترة المبيعات" },
+  riyadh: { en: "Riyadh", ar: "الرياض" },
+  dammam: { en: "Dammam", ar: "الدمام" },
   riyadhToDammam: { en: "Riyadh → Dammam", ar: "الرياض ← الدمام" },
   dammamToRiyadh: { en: "Dammam → Riyadh", ar: "الدمام ← الرياض" },
   items: { en: "Items", ar: "الأصناف" },
@@ -57,6 +59,15 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
 };
+
+const DIRECTION_CITIES = {
+  riyadhToDammam: { source: "riyadh", destination: "dammam" },
+  dammamToRiyadh: { source: "dammam", destination: "riyadh" },
+};
+
+function withCity(template, cityName) {
+  return String(template || "").replaceAll("{city}", cityName);
+}
 
 const FILTER_KEYS = [
   "itemCode",
@@ -101,6 +112,13 @@ function DirectionTable({
   t,
   filename,
 }) {
+  const cities = DIRECTION_CITIES[directionKey] || DIRECTION_CITIES.riyadhToDammam;
+  const sourceCityName = t(cities.source);
+  const destinationCityName = t(cities.destination);
+  const sourceQtyLabel = withCity(t("sourceQty"), sourceCityName);
+  const destQtyLabel = withCity(t("destQty"), destinationCityName);
+  const afterDestLabel = withCity(t("afterDest"), destinationCityName);
+  const remainSourceLabel = withCity(t("remainSource"), sourceCityName);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, cellValue);
   const totals = useMemo(() => {
     let sourceQty = 0;
@@ -133,15 +151,15 @@ function DirectionTable({
             <BiExcelHead label={t("code")} filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("item")} filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("unit")} filterKey="unit" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("sourceQty")} filterKey="sourceQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("destQty")} filterKey="destinationQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={sourceQtyLabel} filterKey="sourceQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={destQtyLabel} filterKey="destinationQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("peakWeekly")} filterKey="peakWeeklyQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("peakWeek")} filterKey="peakWeekKey" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("dailyDemand")} filterKey="dailyDemand" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("targetCover")} filterKey="targetCoverQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("suggested")} filterKey="suggestedQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-            <BiExcelHead label={t("afterDest")} filterKey="afterAtDestination" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("remainSource")} filterKey="remainingAtSource" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={afterDestLabel} filterKey="afterAtDestination" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={remainSourceLabel} filterKey="remainingAtSource" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("daysCover")} filterKey="daysCoverAfter" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
           </tr>
         </thead>

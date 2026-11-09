@@ -4,6 +4,17 @@
 
 `.github/workflows/google-drive-backup.yml` schedules PostgreSQL backups every six hours and full database/Storage/Git/configuration backups nightly, encrypted to Google Drive. The workflow is inactive until configured and enabled with repository variable `BACKUP_ENABLED=true` on `main`; production credentials belong only in the protected `production-backup` GitHub environment, never local env files. Recovery archives omit secret values and Android signing material. Cleanup is opt-in and disabled by default. `backup-health.yml` alerts through GitHub issues on failed or overdue exports. Setup, Free-plan quota risks, retention, custody, and the isolated restore drill are documented in `docs/BACKUP_RECOVERY.md`. No database migration or app-runtime behavior change.
 
+## Supabase Free-plan egress lockout
+
+Production Auth and REST return HTTP **402** with `exceed_egress_quota` when the MADIBA organization Free plan hits its egress allowance (or a spend cap blocks further usage). The login screen used to map every Auth API failure to “Incorrect email or password”, which hid this outage. `app/lib/loginError.js` now shows an explicit usage-limit message for 402 / egress / spend-cap / paused-project responses.
+
+Operator recovery (not a code deploy):
+
+1. Open the production project billing page: [SFA project billing](https://supabase.com/dashboard/project/ynmtlzyqvmurpmfretji/settings/billing).
+2. Upgrade off Free, or remove any spend cap that is blocking the project.
+3. Confirm `POST /auth/v1/token?grant_type=password` and a simple REST select return something other than 402.
+4. Users can sign in again. A password reset alone does not clear an egress lockout.
+
 ## Environments
 
 There is **no permanent cloud staging environment**. Local PC covers development and staging. Cloud is production only.

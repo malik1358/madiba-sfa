@@ -16,8 +16,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Active Customers", ar: "العملاء النشطون" },
   subtitle: {
-    en: "Customers who bought at least once in the last four months, with monthly active counts and net sales by company, salesman, and team.",
-    ar: "العملاء الذين اشتروا مرة واحدة على الأقل خلال الأشهر الأربعة الأخيرة، مع عدد النشطين وصافي المبيعات الشهري للشركة والمندوب والفريق.",
+    en: "Customers who bought at least once in the last 120 days ending at each month-end, with matching active counts and net sales by company, salesman, and team.",
+    ar: "العملاء الذين اشتروا مرة واحدة على الأقل خلال آخر 120 يوماً تنتهي بنهاية كل شهر، مع عدد النشطين وصافي المبيعات المتطابقين للشركة والمندوب والفريق.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -27,7 +27,8 @@ const TEXT = {
   team: { en: "Team", ar: "الفريق" },
   salesmen: { en: "Salesmen", ar: "المندوبون" },
   teams: { en: "Teams", ar: "الفرق" },
-  current: { en: "Active now (4 mo)", ar: "نشط الآن (4 أشهر)" },
+  current: { en: "Active now (120d)", ar: "نشط الآن (120 يوماً)" },
+  days: { en: "days", ar: "يوماً" },
   lastComplete: { en: "Last complete month", ar: "آخر شهر مكتمل" },
   monthBefore: { en: "Month before", ar: "الشهر السابق" },
   mom: { en: "MoM", ar: "مقابل الشهر السابق" },
@@ -48,8 +49,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "A customer is active in a month when they have at least one positive ordinary sale in that month or any of the prior three months. Each month cell also shows that calendar month’s net sales (ex-VAT; credit notes reduce the total). Green is higher than the previous month; red is lower. The open month is month-to-date. Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
-    ar: "العميل نشط في الشهر إذا اشترى مرة واحدة على الأقل في ذلك الشهر أو في أي من الأشهر الثلاثة السابقة. كل خلية شهر تعرض أيضاً صافي مبيعات ذلك الشهر (قبل الضريبة؛ إشعارات الدائن تخفّض الإجمالي). الأخضر أعلى من الشهر السابق والأحمر أقل. الشهر المفتوح حتى اليوم فقط. أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
+    en: "For each month column, the as-of date is that month’s last day (today for the open month). Active customers and net sales both use the inclusive 120 days ending on that date, so the count and sales match. Credit notes do not count as activity but reduce sales. Green/red on month cells follows sales vs the previous month. Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
+    ar: "لكل عمود شهر، تاريخ القطع هو آخر يوم في ذلك الشهر (اليوم للشهر المفتوح). عدد العملاء النشطين وصافي المبيعات يستخدمان معاً آخر 120 يوماً شاملة حتى ذلك التاريخ، فيتطابق العدّ والمبيعات. إشعارات الدائن لا تُحتسب نشاطاً لكنها تخفّض المبيعات. الأخضر/الأحمر في خلايا الشهر يتبع المبيعات مقابل الشهر السابق. أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
   },
   window: { en: "Active window", ar: "نافذة النشاط" },
   asOf: { en: "As of", ar: "حتى" },
@@ -226,12 +227,12 @@ function SeriesTable({
               </td>
               {months.map((month, index) => {
                 const previous = index > 0 ? months[index - 1] : previousMonthKey(month);
-                const tone = row.monthTones?.[month]
+                const tone = row.monthSalesTones?.[month]
                   || (month === currentMonth
                     ? "current"
-                    : (Number(row.monthValues?.[month] || 0) > Number(row.monthValues?.[previous] || 0)
+                    : (Number(row.monthSales?.[month] || 0) > Number(row.monthSales?.[previous] || 0)
                       ? "up"
-                      : Number(row.monthValues?.[month] || 0) < Number(row.monthValues?.[previous] || 0)
+                      : Number(row.monthSales?.[month] || 0) < Number(row.monthSales?.[previous] || 0)
                         ? "down"
                         : ""));
                 return (
@@ -385,7 +386,7 @@ export default function ActiveCustomersPage() {
               <button type="button" className="moduleInlineButton" onClick={loadReport}>{t("refresh")}</button>
             </div>
             <p className="moduleHint">
-              {t("window")}: {report?.windowMonths || 4} {language === "ar" ? "أشهر" : "months"}
+              {t("window")}: {report?.windowDays || 120} {t("days")}
               {" · "}
               {t("asOf")}: {report?.asOfDate || "—"}
               {" · "}

@@ -48,8 +48,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "A customer is active in a month when they have at least one positive ordinary sale in that month or any of the prior three months. Each month cell also shows that calendar month’s net sales (ex-VAT; credit notes reduce the total). Green is higher than the previous month; red is lower. The open month is month-to-date. Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
-    ar: "العميل نشط في الشهر إذا اشترى مرة واحدة على الأقل في ذلك الشهر أو في أي من الأشهر الثلاثة السابقة. كل خلية شهر تعرض أيضاً صافي مبيعات ذلك الشهر (قبل الضريبة؛ إشعارات الدائن تخفّض الإجمالي). الأخضر أعلى من الشهر السابق والأحمر أقل. الشهر المفتوح حتى اليوم فقط. أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
+    en: "A customer is active in a month when they have at least one positive ordinary sale in that month or any of the prior three months. Each month cell also shows that calendar month’s net sales (ex-VAT; credit notes reduce the total). Green/red on month cells follows sales vs the previous month; the open month is month-to-date. Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
+    ar: "العميل نشط في الشهر إذا اشترى مرة واحدة على الأقل في ذلك الشهر أو في أي من الأشهر الثلاثة السابقة. كل خلية شهر تعرض أيضاً صافي مبيعات ذلك الشهر (قبل الضريبة؛ إشعارات الدائن تخفّض الإجمالي). الأخضر/الأحمر في خلايا الشهر يتبع المبيعات مقابل الشهر السابق؛ الشهر المفتوح حتى اليوم فقط. أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
   },
   window: { en: "Active window", ar: "نافذة النشاط" },
   asOf: { en: "As of", ar: "حتى" },
@@ -226,12 +226,12 @@ function SeriesTable({
               </td>
               {months.map((month, index) => {
                 const previous = index > 0 ? months[index - 1] : previousMonthKey(month);
-                const tone = row.monthTones?.[month]
+                const tone = row.monthSalesTones?.[month]
                   || (month === currentMonth
                     ? "current"
-                    : (Number(row.monthValues?.[month] || 0) > Number(row.monthValues?.[previous] || 0)
+                    : (Number(row.monthSales?.[month] || 0) > Number(row.monthSales?.[previous] || 0)
                       ? "up"
-                      : Number(row.monthValues?.[month] || 0) < Number(row.monthValues?.[previous] || 0)
+                      : Number(row.monthSales?.[month] || 0) < Number(row.monthSales?.[previous] || 0)
                         ? "down"
                         : ""));
                 return (

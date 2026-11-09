@@ -115,6 +115,9 @@ test("company count and sales use the same 120-day window ending month-end", () 
   assert.equal(report.summary.currentActive, 3);
   assert.equal(report.summary.currentSales, 280);
   assert.equal(report.summary.change > 0, true);
+  // Oct sales 280 > Sep sales 230 → current complete month is up/green.
+  assert.equal(report.company.monthSalesTones["2026-10"], "up");
+  assert.equal(report.company.currentSalesTone, "up");
 
   const ali = report.salesmanRows.find((row) => row.label.includes("Ali"));
   const omar = report.salesmanRows.find((row) => row.label.includes("Omar"));

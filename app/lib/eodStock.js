@@ -585,14 +585,126 @@ function mergeStockRows(baseRows, incomingRows, citiesPresent) {
   return rows;
 }
 
+function uniqueCities(values) {
+  const seen = new Set();
+  const out = [];
+  (values || []).forEach((city) => {
+    const normalized = normalizeEodCity(city) || String(city || "").trim().toLowerCase();
+    if (!EOD_STOCK_CITIES.includes(normalized) || seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  return out;
+}
+
+function countPositiveCityItems(rows, city) {
+  return (rows || []).reduce((count, row) => (
+    roundEodQty(row?.cities?.[city]?.qty || 0) > 0 ? count + 1 : count
+  ), 0);
+}
+
+/** Infer Riyadh/Dammam/Jeddah from an uploaded Excel file name (dammam1, Riyadh.xlsx, …). */
+export function inferEodCityFromFileName(fileName) {
+  const base = String(fileName || "")
+    .trim()
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.(xlsx|xls)$/i, "");
+  const text = normalizeImportHeader(base);
+  if (!text) return "";
+  if (/(?:^|[^a-z])(?:riyadh|riyad|ruh)(?:[^a-z]|$)/.test(` ${text} `)) return "riyadh";
+  if (/(?:^|[^a-z])(?:dammam|damman|damma|damm|dmm)(?:[^a-z]|$)/.test(` ${text} `)) return "dammam";
+  if (/(?:^|[^a-z])(?:jeddah|jedda|jiddah|jed)(?:[^a-z]|$)/.test(` ${text} `)) return "jeddah";
+  return normalizeEodCity(base);
+}
+
+export function emptyEodCityUploads() {
+  return {
+    riyadh: null,
+    dammam: null,
+    jeddah: null,
+  };
+}
+
+export function readEodCityUploads(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const out = emptyEodCityUploads();
+  EOD_STOCK_CITIES.forEach((city) => {
+    const entry = source[city];
+    if (!entry || typeof entry !== "object") return;
+    const filePath = String(entry.filePath || "").trim();
+    const fileName = String(entry.fileName || "").trim();
+    if (!filePath && !fileName) return;
+    out[city] = {
+      fileName,
+      filePath,
+      uploadedAt: String(entry.uploadedAt || "").trim(),
+      stockDate: String(entry.stockDate || "").trim(),
+      itemCount: Math.max(0, Number(entry.itemCount) || 0),
+      canDownload: Boolean(filePath),
+    };
+  });
+  return out;
+}
+
+export function mergeEodCityUploads(previousUploads, citiesPresent, fileMeta = {}) {
+  const next = readEodCityUploads(previousUploads);
+  const cities = uniqueCities(citiesPresent);
+  if (!cities.length) return next;
+
+  const fileName = String(fileMeta.fileName || "").trim();
+  const filePath = String(fileMeta.filePath || "").trim();
+  const uploadedAt = String(fileMeta.uploadedAt || "").trim();
+  const stockDate = String(fileMeta.stockDate || "").trim();
+  const itemCounts = fileMeta.itemCounts && typeof fileMeta.itemCounts === "object"
+    ? fileMeta.itemCounts
+    : {};
+
+  cities.forEach((city) => {
+    next[city] = {
+      fileName,
+      filePath,
+      uploadedAt,
+      stockDate,
+      itemCount: Math.max(0, Number(itemCounts[city]) || Number(fileMeta.itemCount) || 0),
+      canDownload: Boolean(filePath),
+    };
+  });
+  return next;
+}
+
+export function summarizeEodCityUploads(dataset) {
+  const source = dataset && typeof dataset === "object" ? dataset : {};
+  const uploads = readEodCityUploads(source.cityUploads);
+  // Legacy datasets only kept the latest file pointer — still show it on matching cities.
+  if (!EOD_STOCK_CITIES.some((city) => uploads[city])) {
+    const legacyPath = String(source.filePath || "").trim();
+    const legacyName = String(source.fileName || "").trim();
+    const inferred = inferEodCityFromFileName(legacyName) || uniqueCities(source.citiesPresent)[0] || "";
+    if (legacyPath && inferred) {
+      uploads[inferred] = {
+        fileName: legacyName,
+        filePath: legacyPath,
+        uploadedAt: String(source.uploadedAt || "").trim(),
+        stockDate: String(source.stockDate || "").trim(),
+        itemCount: countPositiveCityItems(source.rows, inferred),
+        canDownload: true,
+      };
+    }
+  }
+  return uploads;
+}
+
 export function applyEodStockUpload(previousDataset, parsed) {
   const previous = previousDataset && typeof previousDataset === "object" ? previousDataset : {};
   const stockDate = parsed.stockDate;
   const fullFile = EOD_STOCK_CITIES.every((city) => parsed.citiesPresent.includes(city));
-  const canCarryCities = Boolean(previous.stockDate) && stockDate >= previous.stockDate && !fullFile;
+  // One-city / two-city files always keep the other cities from the current snapshot,
+  // even when the incoming stock date is older than the snapshot date.
+  const canCarryCities = !fullFile && Array.isArray(previous.rows) && previous.rows.length > 0;
   const baseRows = canCarryCities ? (previous.rows || []) : [];
   let previousStockDate = "";
   let previousRows = [];
+  let nextStockDate = stockDate;
 
   if (previous.stockDate && stockDate > previous.stockDate) {
     previousStockDate = previous.stockDate;
@@ -600,19 +712,33 @@ export function applyEodStockUpload(previousDataset, parsed) {
   } else if (previous.stockDate && stockDate === previous.stockDate) {
     previousStockDate = previous.previousStockDate || "";
     previousRows = previous.previousRows || [];
+  } else if (previous.stockDate && stockDate < previous.stockDate && canCarryCities) {
+    // Partial older file: keep the snapshot's stock date and day-over-day baseline.
+    nextStockDate = previous.stockDate;
+    previousStockDate = previous.previousStockDate || "";
+    previousRows = previous.previousRows || [];
   }
 
+  const rows = mergeStockRows(baseRows, parsed.rows, parsed.citiesPresent);
+  const citiesPresent = canCarryCities
+    ? uniqueCities([
+      ...(previous.citiesPresent || []),
+      ...EOD_STOCK_CITIES.filter((city) => countPositiveCityItems(rows, city) > 0),
+      ...(parsed.citiesPresent || []),
+    ])
+    : uniqueCities(parsed.citiesPresent);
+
   return {
-    stockDate,
+    stockDate: nextStockDate,
     previousStockDate,
-    rows: mergeStockRows(baseRows, parsed.rows, parsed.citiesPresent),
+    rows,
     previousRows: previousStockDate ? previousRows.map((row) => ({
       itemCode: row.itemCode,
       itemName: row.itemName,
       unit: row.unit || "",
       cities: copyCities(row.cities),
     })) : [],
-    citiesPresent: parsed.citiesPresent,
+    citiesPresent,
   };
 }
 
@@ -629,20 +755,36 @@ export function summarizeEodStock(dataset) {
     dammam: { qty: 0, value: 0 },
     jeddah: { qty: 0, value: 0 },
   };
+  const itemCounts = {
+    riyadh: 0,
+    dammam: 0,
+    jeddah: 0,
+  };
   (source.rows || []).forEach((row) => {
     EOD_STOCK_CITIES.forEach((city) => {
-      totals[city].qty = roundEodQty(totals[city].qty + (row.cities?.[city]?.qty || 0));
+      const qty = roundEodQty(row.cities?.[city]?.qty || 0);
+      totals[city].qty = roundEodQty(totals[city].qty + qty);
       totals[city].value = roundEodQty(totals[city].value + (row.cities?.[city]?.value || 0));
+      if (qty > 0) itemCounts[city] += 1;
     });
+  });
+  const cityUploads = summarizeEodCityUploads(source);
+  EOD_STOCK_CITIES.forEach((city) => {
+    if (cityUploads[city] && !cityUploads[city].itemCount) {
+      cityUploads[city] = { ...cityUploads[city], itemCount: itemCounts[city] };
+    }
   });
   return {
     stockDate: source.stockDate || "",
     previousStockDate: source.previousStockDate || "",
     uploadedAt: source.uploadedAt || "",
     fileName: source.fileName || "",
-    canDownload: Boolean(String(source.filePath || "").trim()),
+    canDownload: Boolean(String(source.filePath || "").trim())
+      || EOD_STOCK_CITIES.some((city) => cityUploads[city]?.canDownload),
     itemCount: Array.isArray(source.rows) ? source.rows.length : 0,
     cities: totals,
+    cityItemCounts: itemCounts,
+    cityUploads,
   };
 }
 

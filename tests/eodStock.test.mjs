@@ -14,6 +14,7 @@ import {
   formatEodDelta,
   formatEodStockAsOfDate,
   formatEodStockAvailableLabel,
+  formatEodStockCityBreakdown,
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
   parseEodQtyCell,
@@ -205,18 +206,23 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(isEodStockOlderThanHours(availability, 24, freshNow), false);
   assert.equal(isEodStockOlderThanHours(availability, 24, staleNow), true);
   assert.equal(formatEodStockAsOfDate("2026-10-27", "en"), "27 Oct 2026");
-  assert.equal(formatEodStockAvailableLabel(30, "en", null, availability, freshNow), "Available: 30");
+  assert.equal(formatEodStockCityBreakdown(availability, "A004426"), "R:30 D:6 J:0");
+  assert.equal(formatEodStockCityBreakdown(null, "A004426"), "");
   assert.equal(
-    formatEodStockAvailableLabel(30, "en", null, availability, staleNow),
-    `Available: 30 · ${formatEodStockAsOfDate("2026-10-27", "en")}`,
+    formatEodStockAvailableLabel(36, "en", null, availability, "A004426", freshNow),
+    "Available: 36 · R:30 D:6 J:0",
   );
   assert.equal(
-    formatEodStockAvailableLabel(30, "en", 40, availability, staleNow),
-    `Available: 30 · ${formatEodStockAsOfDate("2026-10-27", "en")} — over stock`,
+    formatEodStockAvailableLabel(36, "en", null, availability, "A004426", staleNow),
+    `Available: 36 · R:30 D:6 J:0 · ${formatEodStockAsOfDate("2026-10-27", "en")}`,
+  );
+  assert.equal(
+    formatEodStockAvailableLabel(36, "en", 40, availability, "A004426", staleNow),
+    `Available: 36 · R:30 D:6 J:0 · ${formatEodStockAsOfDate("2026-10-27", "en")} — over stock`,
   );
   assert.match(
-    formatEodStockAvailableLabel(30, "ar", 40, availability, staleNow),
-    /المتاح: 30 · .+ — أكثر من المخزون/,
+    formatEodStockAvailableLabel(36, "ar", 40, availability, "A004426", staleNow),
+    /المتاح: 36 · R:30 D:6 J:0 · .+ — أكثر من المخزون/,
   );
 });
 

@@ -15,6 +15,7 @@ import {
   selectRecentGrowthMonths,
 } from "./categoryGrowth.js";
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
+import { netKpiSalesAmount } from "./performanceKpis.js";
 import { reportSalesmanLabel } from "./salesmanReportIdentity.js";
 import { isExcludedSalesmanMomRow } from "./salesmanMom.js";
 import {
@@ -87,6 +88,21 @@ export function buildMonthCountSeries(customerMonths, displayMonths = []) {
   return values;
 }
 
+/** Calendar-month net sales (not the rolling active window). */
+export function buildMonthSalesSeries(salesByMonth = {}, displayMonths = []) {
+  const values = {};
+  for (const month of displayMonths) {
+    values[month] = Number(salesByMonth[month] || 0);
+  }
+  return values;
+}
+
+function addMonthSales(salesByMonth, month, amount) {
+  const value = Number(amount || 0);
+  if (!month || !Number.isFinite(value) || value === 0) return;
+  salesByMonth[month] = Number(salesByMonth[month] || 0) + value;
+}
+
 function shouldListSalesmanRow(identity) {
   if (isStoreSalesVoucher(identity) || isEcomSalesmanIdentity(identity)) return false;
   return !isExcludedSalesmanMomRow(identity);
@@ -96,6 +112,7 @@ function decorateSeriesRow({
   key,
   label,
   monthValues,
+  monthSales = {},
   displayMonths,
   currentMonth,
   latestCompleteMonth,
@@ -105,24 +122,39 @@ function decorateSeriesRow({
   const latestCompleteCount = Number(monthValues[latestCompleteMonth] || 0);
   const priorCompleteCount = Number(monthValues[priorCompleteMonth] || 0);
   const currentCount = Number(monthValues[currentMonth] || 0);
+  const latestCompleteSales = Number(monthSales[latestCompleteMonth] || 0);
+  const priorCompleteSales = Number(monthSales[priorCompleteMonth] || 0);
+  const currentSales = Number(monthSales[currentMonth] || 0);
   const momPercent = growthPercent(latestCompleteCount, priorCompleteCount);
+  const salesMomPercent = growthPercent(latestCompleteSales, priorCompleteSales);
   const tones = {};
+  const salesTones = {};
   displayMonths.forEach((month, index) => {
     const previous = index > 0 ? displayMonths[index - 1] : previousMonthKey(month);
     tones[month] = month === currentMonth
       ? "current"
       : monthChangeTone(monthValues[month], monthValues[previous], Boolean(previous));
+    salesTones[month] = month === currentMonth
+      ? "current"
+      : monthChangeTone(monthSales[month], monthSales[previous], Boolean(previous));
   });
   return {
     key,
     label,
     monthValues,
+    monthSales,
     monthTones: tones,
+    monthSalesTones: salesTones,
     currentCount,
+    currentSales,
     latestCompleteCount,
+    latestCompleteSales,
     priorCompleteCount,
+    priorCompleteSales,
     momPercent,
+    salesMomPercent,
     change: latestCompleteCount - priorCompleteCount,
+    salesChange: latestCompleteSales - priorCompleteSales,
     ...extra,
   };
 }
@@ -137,6 +169,7 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
   const teamMembers = Array.isArray(options.teamMembers) ? options.teamMembers : [];
 
   const companyCustomers = new Map();
+  const companySalesByMonth = {};
   const salesmanBuckets = new Map();
   const teamBuckets = new Map();
 
@@ -144,17 +177,23 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
   let lastDate = "";
 
   for (const row of rows || []) {
-    if (!purchaseCountsTowardActive(row)) continue;
     const dateKey = salesDateKey(row.transaction_date);
     const month = monthKeyFromDateKey(dateKey);
     const customerCode = normalizeActiveCustomerCode(row.customer_code);
     if (!customerCode || !month) continue;
     if (dateKey > asOfDate) continue;
 
+    const countsAsPurchase = purchaseCountsTowardActive(row);
+    const netSales = netKpiSalesAmount(row);
+    if (!countsAsPurchase && netSales === 0) continue;
+
     if (!firstDate || dateKey < firstDate) firstDate = dateKey;
     if (!lastDate || dateKey > lastDate) lastDate = dateKey;
 
-    addPurchaseMonth(companyCustomers, customerCode, month);
+    if (countsAsPurchase) {
+      addPurchaseMonth(companyCustomers, customerCode, month);
+    }
+    addMonthSales(companySalesByMonth, month, netSales);
 
     const identity = salesmanRowIdentity({
       ...row,
@@ -168,9 +207,14 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
         salesmanBuckets.set(salesmanLabel, {
           label: salesmanLabel,
           customers: new Map(),
+          salesByMonth: {},
         });
       }
-      addPurchaseMonth(salesmanBuckets.get(salesmanLabel).customers, customerCode, month);
+      const salesmanBucket = salesmanBuckets.get(salesmanLabel);
+      if (countsAsPurchase) {
+        addPurchaseMonth(salesmanBucket.customers, customerCode, month);
+      }
+      addMonthSales(salesmanBucket.salesByMonth, month, netSales);
     }
 
     const team = resolveTeamBucket(identity, teamMembers);
@@ -179,9 +223,14 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
         teamKey: team.teamKey,
         label: team.teamLabel,
         customers: new Map(),
+        salesByMonth: {},
       });
     }
-    addPurchaseMonth(teamBuckets.get(team.teamKey).customers, customerCode, month);
+    const teamBucket = teamBuckets.get(team.teamKey);
+    if (countsAsPurchase) {
+      addPurchaseMonth(teamBucket.customers, customerCode, month);
+    }
+    addMonthSales(teamBucket.salesByMonth, month, netSales);
   }
 
   const lastDataMonth = lastDate ? lastDate.slice(0, 7) : "";
@@ -201,11 +250,13 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
   });
 
   const companyMonthValues = buildMonthCountSeries(companyCustomers, displayMonths);
+  const companyMonthSales = buildMonthSalesSeries(companySalesByMonth, displayMonths);
   // Include the month before the first display month so MoM tone on the first column works.
   if (displayMonths[0]) {
     const lead = previousMonthKey(displayMonths[0]);
     if (lead) {
       companyMonthValues[lead] = countActiveInWindow(companyCustomers, rollingWindowMonths(lead));
+      companyMonthSales[lead] = Number(companySalesByMonth[lead] || 0);
     }
   }
 
@@ -213,6 +264,7 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
     key: "company",
     label: "Company",
     monthValues: companyMonthValues,
+    monthSales: companyMonthSales,
     displayMonths,
     currentMonth,
     latestCompleteMonth,
@@ -223,16 +275,19 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
   const salesmanRows = [...salesmanBuckets.values()]
     .map((bucket) => {
       const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
+      const monthSales = buildMonthSalesSeries(bucket.salesByMonth, displayMonths);
       if (displayMonths[0]) {
         const lead = previousMonthKey(displayMonths[0]);
         if (lead) {
           monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+          monthSales[lead] = Number(bucket.salesByMonth?.[lead] || 0);
         }
       }
       return decorateSeriesRow({
         key: bucket.label,
         label: bucket.label,
         monthValues,
+        monthSales,
         displayMonths,
         currentMonth,
         latestCompleteMonth,
@@ -250,16 +305,19 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
   const teamRows = [...teamBuckets.values()]
     .map((bucket) => {
       const monthValues = buildMonthCountSeries(bucket.customers, displayMonths);
+      const monthSales = buildMonthSalesSeries(bucket.salesByMonth, displayMonths);
       if (displayMonths[0]) {
         const lead = previousMonthKey(displayMonths[0]);
         if (lead) {
           monthValues[lead] = countActiveInWindow(bucket.customers, rollingWindowMonths(lead));
+          monthSales[lead] = Number(bucket.salesByMonth?.[lead] || 0);
         }
       }
       return decorateSeriesRow({
         key: bucket.teamKey,
         label: bucket.label,
         monthValues,
+        monthSales,
         displayMonths,
         currentMonth,
         latestCompleteMonth,
@@ -295,10 +353,15 @@ export function buildActiveCustomersReport(rows = [], options = {}) {
     teamRows,
     summary: {
       currentActive,
+      currentSales: Number(companyRow.currentSales || 0),
       latestCompleteActive: priorActive,
+      latestCompleteSales: Number(companyRow.latestCompleteSales || 0),
       priorCompleteActive: priorPriorActive,
+      priorCompleteSales: Number(companyRow.priorCompleteSales || 0),
       change: priorActive - priorPriorActive,
+      salesChange: Number(companyRow.salesChange || 0),
       momPercent: growthPercent(priorActive, priorPriorActive),
+      salesMomPercent: Number(companyRow.salesMomPercent || 0),
       salesmanCount: salesmanRows.length,
       teamCount: teamRows.length,
       everBoughtCount: companyCustomers.size,

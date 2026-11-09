@@ -8,7 +8,7 @@ import {
 
 const PAGE_SIZE = 1000;
 const CODE_CHUNK = 200;
-const SALES_SELECT = "item_code,item_name,quantity,sales_amount,transaction_date,voucher_type";
+const SALES_SELECT = "item_code,item_name,category,quantity,sales_amount,transaction_date,voucher_type";
 
 function chunkList(items, size) {
   const chunks = [];

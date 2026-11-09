@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-09** — Inter-city Stock Transfer excludes building-material items (`isBuildingMaterialItem`: category, name patterns, `LP*` codes), same as catalogue / Missing Catalogue Photos. Sales `category` helps catch category-only BM rows. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-09** — Active Customers open-month / Active-now cells also go green/red from sales vs last complete month (lower trailing 120d sales = red); they are no longer locked to the neutral current tone. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-09** — Active Customers uses an inclusive **120-day** window ending on each month’s last day (today for MTD). Count and net sales in each cell share that window; month green/red follows sales MoM. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT_OVERVIEW.md`.
 - **2026-11-09** — Active Customers month-cell green/red follows **sales** MoM, not the active-customer count. Change/MoM columns stay count-based. No migration. See `docs/BUSINESS_RULES.md`.

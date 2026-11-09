@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Items with stock in Riyadh but not Dammam (and vice versa). Suggested transfer qty covers at least 15 days using the destination city’s highest weekly sales in the past 6 months.",
-    ar: "أصناف متوفرة في الرياض وغير متوفرة في الدمام (والعكس). الكمية المقترحة للنقل تغطي 15 يوماً على الأقل حسب أعلى مبيعات أسبوعية للمدينة المستهدفة خلال آخر 6 أشهر.",
+    en: "Items with stock in Riyadh but not Dammam (and vice versa). Suggested transfer qty covers at least 15 days using the destination city’s highest weekly sales in the past 6 months. Building materials are excluded.",
+    ar: "أصناف متوفرة في الرياض وغير متوفرة في الدمام (والعكس). الكمية المقترحة للنقل تغطي 15 يوماً على الأقل حسب أعلى مبيعات أسبوعية للمدينة المستهدفة خلال آخر 6 أشهر. مواد البناء مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },

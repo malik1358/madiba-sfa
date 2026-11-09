@@ -72,7 +72,7 @@ import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClien
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
 import {
-  availableEodStockQty,
+  countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../../lib/eodStock.js";
@@ -2227,7 +2227,7 @@ export default function NewOrderPage() {
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
-                              const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
+                              const availableStock = countryEodStockQty(eodStock, item.item_code);
                               const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
                               const overStock = isEodStockQtyOverAvailable(qty, availableStock);
 

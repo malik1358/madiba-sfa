@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   applyEodStockUpload,
   availableEodStockQty,
+  countryEodStockQty,
+  filterItemsWithPositiveCountryEodStock,
+  hasPositiveCountryEodStockQty,
   buildEodStockAvailability,
   buildEodStockReportRows,
   eodQtyMovement,
@@ -179,6 +182,20 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(availableEodStockQty(availability, "riyadh", "MISSING"), 0);
   assert.equal(availableEodStockQty(availability, "riyadh", "NEG1"), 0);
   assert.equal(availableEodStockQty(null, "riyadh", "A004426"), null);
+  assert.equal(countryEodStockQty(availability, "A004426"), 36);
+  assert.equal(countryEodStockQty(availability, "MISSING"), 0);
+  assert.equal(countryEodStockQty(availability, "NEG1"), 0);
+  assert.equal(countryEodStockQty(null, "A004426"), null);
+  assert.equal(hasPositiveCountryEodStockQty(availability, "A004426"), true);
+  assert.equal(hasPositiveCountryEodStockQty(availability, "MISSING"), false);
+  assert.equal(hasPositiveCountryEodStockQty(null, "A004426"), true);
+  assert.deepEqual(
+    filterItemsWithPositiveCountryEodStock(
+      [{ item_code: "A004426" }, { item_code: "MISSING" }, { item_code: "NEG1" }],
+      availability,
+    ).map((item) => item.item_code),
+    ["A004426"],
+  );
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);

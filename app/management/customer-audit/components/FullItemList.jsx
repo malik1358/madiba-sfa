@@ -6,7 +6,7 @@ import { buildOrderCatalog } from "../lib/orderHelpers";
 import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from "../../../lib/regionalPricing";
 import {
-  availableEodStockQty,
+  countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../../../lib/eodStock.js";
@@ -139,7 +139,7 @@ export default function FullItemList({
                       excludeCashDiscount: scheme.excludeCashDiscount === true,
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
-                    const availableStock = availableEodStockQty(eodStock, pricingRegion, code);
+                    const availableStock = countryEodStockQty(eodStock, code);
                     const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock);
                     const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
                     return (

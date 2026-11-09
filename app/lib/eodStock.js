@@ -767,6 +767,36 @@ export function availableEodStockQty(availability, pricingRegion, itemCode) {
   return Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
 }
 
+/**
+ * Countrywide (Riyadh + Dammam + Jeddah) available qty for an item.
+ * Returns null when no end-of-day stock snapshot is loaded.
+ */
+export function countryEodStockQty(availability, itemCode) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return null;
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return 0;
+  let total = 0;
+  for (const city of EOD_STOCK_CITIES) {
+    total += Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+  }
+  return roundEodQty(total);
+}
+
+/**
+ * Catalogue browse/export: keep the item when no EOD snapshot is loaded, or when
+ * countrywide qty (any city) is strictly greater than zero.
+ */
+export function hasPositiveCountryEodStockQty(availability, itemCode) {
+  const available = countryEodStockQty(availability, itemCode);
+  if (available == null) return true;
+  return available > 0;
+}
+
+export function filterItemsWithPositiveCountryEodStock(items, availability) {
+  return (items || []).filter((item) => hasPositiveCountryEodStockQty(availability, item?.item_code));
+}
+
 export function isEodStockQtyOverAvailable(orderedQty, available) {
   if (available == null) return false;
   const qty = Number(orderedQty || 0);

@@ -86,6 +86,7 @@ import {
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 const OUTSTANDING_API = "/api/outstanding";
+const PENDING_TALLY_RECEIPTS_API = "/api/customer-pending-tally-receipts";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -675,6 +676,7 @@ export default function NewOrderPage() {
     needsInvoiceRowsReupload: false,
     rowsCount: 0,
   });
+  const [pendingTallyReceipts, setPendingTallyReceipts] = useState([]);
   const [customerDocumentCompliance, setCustomerDocumentCompliance] = useState(null);
   const [accessScope, setAccessScope] = useState(null);
   const [orderBlock, setOrderBlock] = useState(null);
@@ -1121,6 +1123,9 @@ export default function NewOrderPage() {
           customer: outstandingInfo?.customer || null,
           customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
         },
+        // Prefetched with the customer so fast WhatsApp PDFs still show
+        // Receipts not yet in Tally even if the live enrich call fails.
+        pendingTallyReceipts: Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : [],
         visitDistance: visitDistance || null,
         workingHours: workingHours || null,
       };
@@ -1132,6 +1137,7 @@ export default function NewOrderPage() {
       orderSummary.itemCount,
       orderSummary.totalQuantity,
       outstandingInfo,
+      pendingTallyReceipts,
       creditApproval.remark,
       pricedOrderLines,
       paymentType,
@@ -1247,10 +1253,16 @@ export default function NewOrderPage() {
     if (!snapshot) return;
 
     setMessage("");
-    setLastSavedOrder(snapshot);
+    const shareSnapshot = {
+      ...snapshot,
+      pendingTallyReceipts: Array.isArray(snapshot.pendingTallyReceipts) && snapshot.pendingTallyReceipts.length
+        ? snapshot.pendingTallyReceipts
+        : (Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : []),
+    };
+    setLastSavedOrder(shareSnapshot);
 
     const [prepared, isNative] = await Promise.all([
-      downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true }),
+      downloadOrderPdf(shareSnapshot, { returnFileOnly: true, fast: true }),
       isNativeMobilePlatform(),
     ]);
     if (prepared?.snapshot) {
@@ -1273,7 +1285,7 @@ export default function NewOrderPage() {
       whatsappFile: prepared.file,
       autoShareWhatsapp: isNative || queued,
     });
-  }, [downloadOrderPdf, language, showPopup]);
+  }, [downloadOrderPdf, language, pendingTallyReceipts, showPopup]);
 
   const handleSaveDraft = useCallback(async () => {
     const saved = await saveDraft({ silent: true });
@@ -1302,6 +1314,7 @@ export default function NewOrderPage() {
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
+
 
   const handleSubmitOrder = useCallback(async () => {
     const saved = await submitOrder({
@@ -1414,6 +1427,42 @@ export default function NewOrderPage() {
       setOutstandingLoading(false);
     }
   }, [setError]);
+
+  const fetchPendingTallyReceiptsForCustomer = useCallback(async (customer) => {
+    if (!customer?.customer_code) {
+      setPendingTallyReceipts([]);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) {
+        setPendingTallyReceipts([]);
+        return;
+      }
+
+      const response = await fetch(
+        `${PENDING_TALLY_RECEIPTS_API}?customerCode=${encodeURIComponent(customer.customer_code || "")}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        setPendingTallyReceipts([]);
+        return;
+      }
+      setPendingTallyReceipts(
+        Array.isArray(payload.pendingTallyReceipts) ? payload.pendingTallyReceipts : [],
+      );
+    } catch {
+      setPendingTallyReceipts([]);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadOrderBlockStatus() {
@@ -1773,6 +1822,10 @@ export default function NewOrderPage() {
   useEffect(() => {
     fetchOutstandingForCustomer(selectedCustomer);
   }, [fetchOutstandingForCustomer, selectedCustomer]);
+
+  useEffect(() => {
+    fetchPendingTallyReceiptsForCustomer(selectedCustomer);
+  }, [fetchPendingTallyReceiptsForCustomer, selectedCustomer]);
 
   useEffect(() => {
     fetchCustomerDocuments(selectedCustomer);

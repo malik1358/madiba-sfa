@@ -803,25 +803,59 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   return Number.isFinite(qty) && qty > available;
 }
 
+const EOD_CITY_SHORT = {
+  riyadh: "R",
+  dammam: "D",
+  jeddah: "J",
+};
+
+/**
+ * Compact city stock fragments, e.g. "R:30 D:6 J:0".
+ * Empty when no EOD snapshot is loaded or the item code is blank.
+ */
+export function formatEodStockCityBreakdown(availability, itemCode) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return "";
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return "";
+  return EOD_STOCK_CITIES.map((city) => {
+    const qty = Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+    return `${EOD_CITY_SHORT[city]}:${formatEodQty(qty)}`;
+  }).join(" ");
+}
+
 /**
  * Label beside order qty. Keeps the last uploaded stock qty until a newer import replaces it.
- * Shows the stock date when that snapshot is older than 24 hours. Warns when ordered qty exceeds available.
+ * Shows country total plus city breakdown (R:/D:/J:), stock date when older than 24 hours,
+ * and warns when ordered qty exceeds available.
  */
-export function formatEodStockAvailableLabel(available, language = "en", orderedQty = null, availability = null, nowMs = Date.now()) {
+export function formatEodStockAvailableLabel(
+  available,
+  language = "en",
+  orderedQty = null,
+  availability = null,
+  itemCode = "",
+  nowMs = Date.now(),
+) {
   if (available == null) return "";
   const qtyText = formatEodQty(available);
   const stock = normalizeEodStockAvailability(availability);
   const stale = isEodStockOlderThanHours(stock, 24, nowMs);
   const asOf = stale ? formatEodStockAsOfDate(stock.stockDate, language) : "";
+  const cities = formatEodStockCityBreakdown(availability, itemCode);
   const over = isEodStockQtyOverAvailable(orderedQty, available);
 
   if (language === "ar") {
-    let label = asOf ? `المتاح: ${qtyText} · ${asOf}` : `المتاح: ${qtyText}`;
+    let label = `المتاح: ${qtyText}`;
+    if (cities) label = `${label} · ${cities}`;
+    if (asOf) label = `${label} · ${asOf}`;
     if (over) label = `${label} — أكثر من المخزون`;
     return label;
   }
 
-  let label = asOf ? `Available: ${qtyText} · ${asOf}` : `Available: ${qtyText}`;
+  let label = `Available: ${qtyText}`;
+  if (cities) label = `${label} · ${cities}`;
+  if (asOf) label = `${label} · ${asOf}`;
   if (over) label = `${label} — over stock`;
   return label;
 }

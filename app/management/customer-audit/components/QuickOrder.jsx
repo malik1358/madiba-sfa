@@ -96,7 +96,7 @@ export default function QuickOrder({
                           excludeCashDiscount: scheme.excludeCashDiscount === true,
                         });
                         const availableStock = countryEodStockQty(eodStock, item.item_code);
-                        const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock);
+                        const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, item.item_code);
                         const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>

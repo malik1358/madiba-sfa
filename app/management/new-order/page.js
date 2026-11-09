@@ -2228,7 +2228,7 @@ export default function NewOrderPage() {
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
                               const availableStock = countryEodStockQty(eodStock, item.item_code);
-                              const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
+                              const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
                               const overStock = isEodStockQtyOverAvailable(qty, availableStock);
 
                               return (

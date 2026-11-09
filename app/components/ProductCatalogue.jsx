@@ -780,7 +780,7 @@ export default function ProductCatalogue({
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = countryEodStockQty(eodStock, item.item_code);
-          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment

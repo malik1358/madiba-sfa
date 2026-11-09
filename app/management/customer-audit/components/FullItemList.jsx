@@ -140,7 +140,7 @@ export default function FullItemList({
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     const availableStock = countryEodStockQty(eodStock, code);
-                    const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock);
+                    const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, code);
                     const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
                     return (
                       <tr key={code} className="moduleItemRow">

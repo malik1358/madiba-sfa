@@ -96,7 +96,11 @@ test("company trend rises when a new buyer enters the rolling window", () => {
   assert.equal(report.company.monthValues["2026-08"], 1);
   assert.equal(report.company.monthValues["2026-09"], 2);
   assert.equal(report.company.monthValues["2026-10"], 3);
+  assert.equal(report.company.monthSales["2026-08"], 150);
+  assert.equal(report.company.monthSales["2026-09"], 80);
+  assert.equal(report.company.monthSales["2026-10"], 50);
   assert.equal(report.summary.currentActive, 3);
+  assert.equal(report.summary.currentSales, 50);
   assert.equal(report.summary.change > 0, true);
 
   const ali = report.salesmanRows.find((row) => row.label.includes("Ali"));
@@ -104,7 +108,9 @@ test("company trend rises when a new buyer enters the rolling window", () => {
   assert.ok(ali);
   assert.ok(omar);
   assert.equal(ali.monthValues["2026-10"], 2);
+  assert.equal(ali.monthSales["2026-10"], -40);
   assert.equal(omar.monthValues["2026-10"], 1);
+  assert.equal(omar.monthSales["2026-10"], 90);
 });
 
 test("team view unions distinct customers across members", () => {
@@ -172,4 +178,6 @@ test("team view unions distinct customers across members", () => {
   const team = report.teamRows.find((row) => row.key === "leader-1");
   assert.ok(team);
   assert.equal(team.monthValues["2026-10"], 2);
+  assert.equal(team.monthSales["2026-09"], 110);
+  assert.equal(team.monthSales["2026-10"], 70);
 });

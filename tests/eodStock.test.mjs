@@ -153,6 +153,28 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.deepEqual(dammam.citiesPresent, ["dammam"]);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003234").cities.dammam.qty, 140);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003283").cities.dammam.qty, 6);
+
+  const wideTally = parseEodStockSheets([{
+    name: "Riyadh-Region",
+    matrix: [
+      ["ABC LTD"],
+      ["Riyadh-Region"],
+      ["Location Summary"],
+      ["1-Jan-26 to 9-Nov-26"],
+      ["Particulars", "1-Jan-26 to 9-Nov-26"],
+      ["", "Opening Balance", "", "Inwards", "", "Closing Balance", ""],
+      ["", "Quantity", "(Alt. Units)", "Quantity", "(Alt. Units)", "Quantity", "(Alt. Units)"],
+      ["NON FOOD DIVISION"],
+      ["A005353_Westpoint Split AC 24K COOL ONLY", "", "", 240, 240, 239, 239],
+      ["A003622_GRADE-E2 5 MM", "", "", 3999, "", 13, ""],
+      ["16-Inch portable Ventilation Fan", "", "", 47, "", 6, ""],
+    ],
+  }]);
+  assert.equal(wideTally.ok, true);
+  assert.equal(wideTally.stockDate, "2026-11-09");
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "A005353").cities.riyadh.qty, 239);
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "A003622").cities.riyadh.qty, 13);
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "16-INCH PORTABLE VENTILATION FAN").cities.riyadh.qty, 6);
 });
 
 test("order qty stock hint keeps last upload and shows date when older than 24 hours", () => {

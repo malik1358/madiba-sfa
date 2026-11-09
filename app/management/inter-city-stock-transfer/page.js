@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Items with stock in Riyadh but not Dammam (and vice versa). Suggested transfer qty covers at least 15 days using the destination city’s highest weekly sales in the past 6 months. Building materials are excluded.",
-    ar: "أصناف متوفرة في الرياض وغير متوفرة في الدمام (والعكس). الكمية المقترحة للنقل تغطي 15 يوماً على الأقل حسب أعلى مبيعات أسبوعية للمدينة المستهدفة خلال آخر 6 أشهر. مواد البناء مستثناة.",
+    en: "Real catalogue items with stock in Riyadh but not Dammam (and vice versa). Suggested transfer covers ≥15 days from the destination city’s peak weekly sales in 6 months; never-sold items get a minimum of 5. Building materials and Tally section titles are excluded.",
+    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس). النقل المقترح يغطي 15 يوماً على الأقل من أعلى مبيعات أسبوعية للوجهة خلال 6 أشهر؛ الأصناف غير المباعة تحصل على حد أدنى 5. مواد البناء وعناوين أقسام تالي مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -52,6 +52,7 @@ const TEXT = {
     ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام (الاستيراد ← مخزون نهاية اليوم).",
   },
   capped: { en: "Capped by source stock", ar: "محدود بمخزون المصدر" },
+  unsoldMin: { en: "Min 5 (not sold yet)", ar: "حد أدنى 5 (لم يُبع بعد)" },
   accessDenied: {
     en: "Only admin, manager, or invoice maker can open this report.",
     ar: "هذا التقرير للمدير أو الأدمن أو معد الفواتير.",
@@ -179,6 +180,7 @@ function DirectionTable({
                 <div className="moduleBiAmountDelta">
                   <span>{formatQty(row.suggestedQty)}</span>
                   {row.cappedBySource ? <em>{t("capped")}</em> : null}
+                  {!row.cappedBySource && row.usedUnsoldMinimum ? <em>{t("unsoldMin")}</em> : null}
                 </div>
               </td>
               <td className="moduleBiMonthCell--up">{formatQty(row.afterAtDestination)}</td>

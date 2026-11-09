@@ -236,7 +236,7 @@ function titleDate(matrix, headerIndexValue) {
   return found;
 }
 
-/** Tally Location Summary: Particulars in A, Quantity in B a few rows below, city in the title. */
+/** Tally Location Summary: Particulars in A, Closing Balance Quantity a few rows below, city in the title. */
 function findTallyLocationLayout(matrix, sheetName = "") {
   const limit = Math.min(matrix.length, 30);
   let particularsRow = -1;
@@ -254,31 +254,59 @@ function findTallyLocationLayout(matrix, sheetName = "") {
   }
   if (particularsRow < 0) return null;
 
-  let qtyRow = -1;
-  let qtyIndex = -1;
   const qtySearchEnd = Math.min(particularsRow + 8, matrix.length - 1);
+  let closingStart = -1;
+  let closingEnd = -1;
+  for (let index = particularsRow; index <= qtySearchEnd; index += 1) {
+    const row = matrix[index] || [];
+    for (let column = 0; column < row.length; column += 1) {
+      if (normalizeImportHeader(row[column]) !== "closing balance") continue;
+      closingStart = column;
+      closingEnd = row.length - 1;
+      for (let next = column + 1; next < row.length; next += 1) {
+        const label = normalizeImportHeader(row[next]);
+        if (!label) continue;
+        if (
+          label === "opening balance"
+          || label === "inwards"
+          || label === "outwards"
+          || label === "closing balance"
+          || label.endsWith(" balance")
+        ) {
+          closingEnd = next - 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const qtyCandidates = [];
   for (let index = particularsRow; index <= qtySearchEnd; index += 1) {
     const row = matrix[index] || [];
     for (let column = 0; column < row.length; column += 1) {
       const label = normalizeImportHeader(row[column]);
       if (label !== "quantity" && label !== "qty") continue;
-      if (qtyIndex < 0 || column === 1) {
-        qtyRow = index;
-        qtyIndex = column;
-      }
-      if (column === 1) break;
+      qtyCandidates.push({ row: index, column });
     }
-    if (qtyIndex === 1) break;
   }
-  if (qtyIndex < 0) return null;
+  if (!qtyCandidates.length) return null;
+
+  const underClosing = closingStart >= 0
+    ? qtyCandidates.filter((candidate) => (
+      candidate.column >= closingStart && candidate.column <= closingEnd
+    ))
+    : [];
+  // Prefer Closing Balance Quantity. Older one-city exports only have Quantity in column B.
+  const chosen = underClosing[0]
+    || (qtyCandidates.length > 1 ? qtyCandidates[qtyCandidates.length - 1] : qtyCandidates[0]);
 
   const city = normalizeEodCity(sheetName) || findTitleCity(matrix, particularsRow);
   if (!city) return null;
 
   return {
-    headerRow: qtyRow,
+    headerRow: chosen.row,
     nameIndex,
-    qtyIndex,
+    qtyIndex: chosen.column,
     city,
     particularsRow,
   };

@@ -328,6 +328,13 @@ export function isEodStockSectionLabel(value) {
     || text === "quantity"
     || text === "alt units"
     || text === "altunits"
+    || text === "building material"
+    || text === "building materials"
+    || text === "personal care"
+    || text === "office supplies"
+    || text === "stationery"
+    || text === "electronics"
+    || text === "sundry"
   ) {
     return true;
   }

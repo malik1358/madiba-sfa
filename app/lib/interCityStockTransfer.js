@@ -261,14 +261,41 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
   });
 }
 
+export function summarizeInterCityStockCoverage(stockRows = []) {
+  let riyadhItems = 0;
+  let dammamItems = 0;
+  let bothItems = 0;
+  let skippedNonCatalogue = 0;
+  (stockRows || []).forEach((row) => {
+    const itemCode = normalizeInterCityItemCode(row?.itemCode || row?.item_code);
+    const itemName = String(row?.itemName || row?.item_name || itemCode).trim() || itemCode;
+    if (!itemCode) return;
+    if (isInterCityExcludedItem({ itemCode, itemName, category: row?.category || "" })) {
+      skippedNonCatalogue += 1;
+      return;
+    }
+    const riyadhQty = roundEodQty(row?.cities?.riyadh?.qty ?? row?.riyadh ?? 0);
+    const dammamQty = roundEodQty(row?.cities?.dammam?.qty ?? row?.dammam ?? 0);
+    const hasR = stockQtyPositive(riyadhQty);
+    const hasD = stockQtyPositive(dammamQty);
+    if (hasR) riyadhItems += 1;
+    if (hasD) dammamItems += 1;
+    if (hasR && hasD) bothItems += 1;
+  });
+  return { riyadhItems, dammamItems, bothItems, skippedNonCatalogue };
+}
+
 export function buildInterCityStockTransferReport({
   stockRows = [],
   saleRows = [],
   now = new Date(),
   stockDate = "",
+  citiesPresent = [],
+  fileName = "",
 } = {}) {
   const window = resolveInterCitySalesWindow({ now });
   const categoryByCode = categoryByItemCodeFromSales(saleRows);
+  const coverage = summarizeInterCityStockCoverage(stockRows);
   const imbalances = findInterCityStockImbalances(stockRows, { categoryByCode });
   const peaks = buildPeakWeeklySalesByItemCity(saleRows);
   const riyadhToDammam = decorateInterCityTransferRows(imbalances.riyadhToDammam, peaks);
@@ -280,8 +307,11 @@ export function buildInterCityStockTransferReport({
 
   return {
     stockDate: String(stockDate || "").trim(),
+    fileName: String(fileName || "").trim(),
+    citiesPresent: Array.isArray(citiesPresent) ? citiesPresent.map((city) => String(city || "").trim()).filter(Boolean) : [],
     window,
     coverDays: INTER_CITY_TRANSFER_COVER_DAYS,
+    coverage,
     directions: {
       riyadhToDammam: {
         ...INTER_CITY_TRANSFER_DIRECTIONS.riyadhToDammam,
@@ -303,6 +333,9 @@ export function buildInterCityStockTransferReport({
       dammamToRiyadhItems: dammamToRiyadh.length,
       riyadhToDammamSuggestedQty: sumSuggested(riyadhToDammam),
       dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
+      riyadhStockItems: coverage.riyadhItems,
+      dammamStockItems: coverage.dammamItems,
+      bothCityStockItems: coverage.bothItems,
     },
   };
 }

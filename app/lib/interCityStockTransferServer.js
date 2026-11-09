@@ -97,5 +97,7 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
     saleRows,
     now,
     stockDate: dataset?.stockDate || "",
+    fileName: dataset?.fileName || "",
+    citiesPresent: Array.isArray(dataset?.citiesPresent) ? dataset.citiesPresent : [],
   });
 }

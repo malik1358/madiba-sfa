@@ -47,6 +47,43 @@ test("finds stock available in one city and not the other", () => {
   assert.equal(riyadhToDammam[0].destinationQty, 0);
 });
 
+test("excludes building-material items by category, name, and LP code", () => {
+  const { riyadhToDammam, dammamToRiyadh } = findInterCityStockImbalances(
+    [
+      {
+        itemCode: "A100",
+        itemName: "Office stapler",
+        cities: { riyadh: { qty: 10 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      },
+      {
+        itemCode: "A101",
+        itemName: "Rebar 12mm",
+        cities: { riyadh: { qty: 20 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      },
+      {
+        itemCode: "A102",
+        itemName: "Generic pack",
+        category: "Building Material",
+        cities: { riyadh: { qty: 0 }, dammam: { qty: 8 }, jeddah: { qty: 0 } },
+      },
+      {
+        itemCode: "LP00318",
+        itemName: "Latex gloves",
+        cities: { riyadh: { qty: 5 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      },
+      {
+        itemCode: "A103",
+        itemName: "Sales-tagged board",
+        cities: { riyadh: { qty: 0 }, dammam: { qty: 4 }, jeddah: { qty: 0 } },
+      },
+    ],
+    { categoryByCode: new Map([["A103", "Building Material"]]) },
+  );
+
+  assert.deepEqual(riyadhToDammam.map((row) => row.itemCode), ["A100"]);
+  assert.deepEqual(dammamToRiyadh.map((row) => row.itemCode), []);
+});
+
 test("peak weekly sales uses the highest week for the destination city", () => {
   const peaks = buildPeakWeeklySalesByItemCity([
     { item_code: "A1", quantity: 10, sales_amount: 100, transaction_date: "2026-05-05", voucher_type: "DAMMAM W/S CREDIT" },
@@ -101,36 +138,49 @@ test("builds both direction reports with suggested quantities", () => {
     now: new Date("2026-11-09T08:00:00+03:00"),
     stockRows: [
       {
-        itemCode: "LP1",
+        itemCode: "A200",
         itemName: "Gloves",
         unit: "CTN",
         cities: { riyadh: { qty: 100 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
       },
       {
-        itemCode: "LP2",
+        itemCode: "A201",
         itemName: "Tape",
         unit: "PCS",
         cities: { riyadh: { qty: 0 }, dammam: { qty: 50 }, jeddah: { qty: 0 } },
       },
+      {
+        itemCode: "A202",
+        itemName: "Plywood sheet",
+        unit: "PCS",
+        cities: { riyadh: { qty: 80 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      },
     ],
     saleRows: [
-      // Dammam peak week for LP1: 35 → daily 5 → 15-day target 75
-      { item_code: "LP1", quantity: 20, sales_amount: 200, transaction_date: "2026-08-03", voucher_type: "DAMMAM W/S CREDIT" },
-      { item_code: "LP1", quantity: 15, sales_amount: 150, transaction_date: "2026-08-05", voucher_type: "DAMMAM W/S CREDIT" },
-      { item_code: "LP1", quantity: 4, sales_amount: 40, transaction_date: "2026-09-10", voucher_type: "DAMMAM W/S CREDIT" },
-      // Riyadh peak week for LP2: 14 → daily 2 → 15-day target 30
-      { item_code: "LP2", quantity: 14, sales_amount: 140, transaction_date: "2026-07-14", voucher_type: "RIYADH CASH SALES" },
-      { item_code: "LP2", quantity: 3, sales_amount: 30, transaction_date: "2026-10-01", voucher_type: "RIYADH W/S CREDIT" },
+      // Dammam peak week for A200: 35 → daily 5 → 15-day target 75
+      { item_code: "A200", quantity: 20, sales_amount: 200, transaction_date: "2026-08-03", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      { item_code: "A200", quantity: 15, sales_amount: 150, transaction_date: "2026-08-05", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      { item_code: "A200", quantity: 4, sales_amount: 40, transaction_date: "2026-09-10", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      // Riyadh peak week for A201: 14 → daily 2 → 15-day target 30
+      { item_code: "A201", quantity: 14, sales_amount: 140, transaction_date: "2026-07-14", voucher_type: "RIYADH CASH SALES", category: "Office supplies" },
+      { item_code: "A201", quantity: 3, sales_amount: 30, transaction_date: "2026-10-01", voucher_type: "RIYADH W/S CREDIT", category: "Office supplies" },
+      // Building material sales must not create a transfer row
+      { item_code: "A202", quantity: 40, sales_amount: 400, transaction_date: "2026-08-04", voucher_type: "DAMMAM W/S CREDIT", category: "Building Material" },
     ],
   });
 
   assert.equal(report.stockDate, "2026-11-08");
   assert.equal(report.coverDays, 15);
   assert.equal(report.directions.riyadhToDammam.itemCount, 1);
+  assert.equal(report.directions.riyadhToDammam.rows[0].itemCode, "A200");
   assert.equal(report.directions.riyadhToDammam.rows[0].suggestedQty, 75);
   assert.equal(report.directions.riyadhToDammam.rows[0].peakWeeklyQty, 35);
+  assert.equal(report.directions.riyadhToDammam.rows[0].sourceLabel, "Riyadh");
+  assert.equal(report.directions.riyadhToDammam.rows[0].destinationLabel, "Dammam");
   assert.equal(report.directions.dammamToRiyadh.itemCount, 1);
   assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 30);
+  assert.equal(report.directions.dammamToRiyadh.rows[0].sourceLabel, "Dammam");
+  assert.equal(report.directions.dammamToRiyadh.rows[0].destinationLabel, "Riyadh");
   assert.equal(report.summary.riyadhToDammamSuggestedQty, 75);
   assert.equal(report.summary.dammamToRiyadhSuggestedQty, 30);
 });

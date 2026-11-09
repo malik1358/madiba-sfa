@@ -1,4 +1,5 @@
 import { normalizeEodCity, roundEodQty } from "./eodStock.js";
+import { isBuildingMaterialItem } from "./pricePayload.js";
 import { isReturnsAboveSalesReturn } from "./returnsAboveSales.js";
 import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString } from "./workdayActivity.js";
 
@@ -21,6 +22,30 @@ export function interCityTransferCityLabel(city) {
 
 export function normalizeInterCityItemCode(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+/** Same building-material / LP exclusions as catalogue and Missing Catalogue Photos. */
+export function isInterCityExcludedItem({
+  itemCode = "",
+  itemName = "",
+  category = "",
+} = {}) {
+  return isBuildingMaterialItem({
+    item_code: itemCode,
+    item_name: itemName,
+    category,
+  });
+}
+
+export function categoryByItemCodeFromSales(saleRows = []) {
+  const byCode = new Map();
+  (saleRows || []).forEach((row) => {
+    const code = normalizeInterCityItemCode(row?.item_code || row?.itemCode);
+    const category = String(row?.category || "").trim();
+    if (!code || !category || byCode.has(code)) return;
+    byCode.set(code, category);
+  });
+  return byCode;
 }
 
 export function resolveInterCitySalesWindow({ now = new Date(), months = INTER_CITY_TRANSFER_SALES_MONTHS } = {}) {
@@ -65,11 +90,13 @@ export function stockQtyPositive(value) {
 
 /**
  * Items with stock in one city and none in the other (Riyadh ↔ Dammam).
+ * Building-material items (category, name pattern, or LP* codes) are omitted.
  * @returns {{ riyadhToDammam: object[], dammamToRiyadh: object[] }}
  */
-export function findInterCityStockImbalances(stockRows = []) {
+export function findInterCityStockImbalances(stockRows = [], { categoryByCode = null } = {}) {
   const riyadhToDammam = [];
   const dammamToRiyadh = [];
+  const categories = categoryByCode instanceof Map ? categoryByCode : null;
 
   (stockRows || []).forEach((row) => {
     const itemCode = normalizeInterCityItemCode(row?.itemCode || row?.item_code);
@@ -77,8 +104,14 @@ export function findInterCityStockImbalances(stockRows = []) {
     const riyadhQty = roundEodQty(row?.cities?.riyadh?.qty ?? row?.riyadh ?? 0);
     const dammamQty = roundEodQty(row?.cities?.dammam?.qty ?? row?.dammam ?? 0);
     const itemName = String(row?.itemName || row?.item_name || itemCode).trim() || itemCode;
+    const category = String(
+      row?.category
+      || categories?.get(itemCode)
+      || "",
+    ).trim();
+    if (isInterCityExcludedItem({ itemCode, itemName, category })) return;
     const unit = String(row?.unit || "").trim();
-    const base = { itemCode, itemName, unit, riyadhQty, dammamQty };
+    const base = { itemCode, itemName, unit, category, riyadhQty, dammamQty };
 
     if (stockQtyPositive(riyadhQty) && !stockQtyPositive(dammamQty)) {
       riyadhToDammam.push({
@@ -218,7 +251,8 @@ export function buildInterCityStockTransferReport({
   stockDate = "",
 } = {}) {
   const window = resolveInterCitySalesWindow({ now });
-  const imbalances = findInterCityStockImbalances(stockRows);
+  const categoryByCode = categoryByItemCodeFromSales(saleRows);
+  const imbalances = findInterCityStockImbalances(stockRows, { categoryByCode });
   const peaks = buildPeakWeeklySalesByItemCity(saleRows);
   const riyadhToDammam = decorateInterCityTransferRows(imbalances.riyadhToDammam, peaks);
   const dammamToRiyadh = decorateInterCityTransferRows(imbalances.dammamToRiyadh, peaks);

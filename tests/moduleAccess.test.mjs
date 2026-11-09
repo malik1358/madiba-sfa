@@ -104,6 +104,19 @@ test("ordered not in sales is open to management report roles and listed in ware
   assert.equal(warehouse.items.some((item) => item.moduleKey === "orderedNotInSales"), true);
 });
 
+test("inter-city stock transfer is open to management report roles and listed in warehouse", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("interCityStockTransfer"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("interCityStockTransfer"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("interCityStockTransfer"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("interCityStockTransfer"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("interCityStockTransfer"), false);
+  assert.equal(moduleLabelForPath("/management/inter-city-stock-transfer", "en"), "Inter-city Stock Transfer");
+  assert.equal(localizedModuleLabel("interCityStockTransfer", "ar"), "نقل المخزون بين المدن");
+  const warehouse = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
+    .find((group) => group.key === "warehouse");
+  assert.equal(warehouse.items.some((item) => item.moduleKey === "interCityStockTransfer"), true);
+});
+
 test("active customers is a management report in Reports", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("activeCustomers"), true);
   assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("activeCustomers"), true);
@@ -300,6 +313,7 @@ test("invoice makers can view every management report without setup access", () 
       "legalTransfers",
       "missingCataloguePhotos",
       "orderedNotInSales",
+      "interCityStockTransfer",
       "eodStock",
       "gpsMap",
       "collectionReport",

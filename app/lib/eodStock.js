@@ -312,6 +312,38 @@ function isTotalLabel(value) {
   return text === "total" || text === "grand total" || text === "particulars" || text === "item name";
 }
 
+/** Tally Location Summary section titles / godown lines — not stock items. */
+export function isEodStockSectionLabel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  const text = normalizeImportHeader(raw);
+  if (!text) return false;
+  if (isTotalLabel(raw)) return true;
+  if (
+    text === "non food division"
+    || text === "food division"
+    || text === "location summary"
+    || text === "closing balance"
+    || text === "fifo"
+    || text === "quantity"
+    || text === "alt units"
+    || text === "altunits"
+  ) {
+    return true;
+  }
+  if (/^location\b/.test(text)) return true;
+  // Whole label is a city or godown title (RIYADH, RIYADH W/H 1). Product names that
+  // merely mention a city (e.g. "Only Riyadh") must stay as items.
+  if (!normalizeEodCity(raw)) return false;
+  const remainder = text
+    .replace(/\b(riyadh|riyad|ruh|dammam|damman|dmm|jeddah|jedda|jiddah|jed)\b/g, " ")
+    .replace(/\b(w\s*h|wh|warehouse|godown|region)\b/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return !remainder;
+}
+
 function addMeasure(target, measure, amount) {
   if (measure === "value") target.value = roundEodQty(target.value + amount);
   else target.qty = roundEodQty(target.qty + amount);
@@ -360,7 +392,7 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
 
   function ensureItem(code, name, unit) {
     const key = String(code || "").trim().toUpperCase() || String(name || "").trim().toUpperCase().replace(/\s+/g, " ");
-    if (!key || isTotalLabel(key) || isTotalLabel(name)) return null;
+    if (!key || isEodStockSectionLabel(key) || isEodStockSectionLabel(name)) return null;
     if (!items.has(key)) {
       items.set(key, {
         itemCode: key,

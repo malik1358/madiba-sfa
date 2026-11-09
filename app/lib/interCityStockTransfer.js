@@ -1,11 +1,14 @@
-import { normalizeEodCity, roundEodQty } from "./eodStock.js";
+import { isEodStockSectionLabel, normalizeEodCity, roundEodQty } from "./eodStock.js";
 import { isBuildingMaterialItem } from "./pricePayload.js";
+import { isCatalogueProductCode } from "./productCatalogue.js";
 import { isReturnsAboveSalesReturn } from "./returnsAboveSales.js";
 import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString } from "./workdayActivity.js";
 
 export const INTER_CITY_TRANSFER_CITIES = ["riyadh", "dammam"];
 export const INTER_CITY_TRANSFER_COVER_DAYS = 15;
 export const INTER_CITY_TRANSFER_SALES_MONTHS = 6;
+/** Minimum destination stock (cartons/units) when the destination has no sales in the 6-month window. */
+export const INTER_CITY_TRANSFER_UNSOLD_MIN_QTY = 5;
 export const INTER_CITY_TRANSFER_DIRECTIONS = {
   riyadhToDammam: { key: "riyadhToDammam", source: "riyadh", destination: "dammam" },
   dammamToRiyadh: { key: "dammamToRiyadh", source: "dammam", destination: "riyadh" },
@@ -24,12 +27,17 @@ export function normalizeInterCityItemCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
-/** Same building-material / LP exclusions as catalogue and Missing Catalogue Photos. */
+/**
+ * Drop Tally section titles (e.g. NON FOOD DIVISION, RIYADH W/H 1), non-catalogue
+ * codes, and building-material items (same rules as catalogue / Missing Catalogue Photos).
+ */
 export function isInterCityExcludedItem({
   itemCode = "",
   itemName = "",
   category = "",
 } = {}) {
+  if (!isCatalogueProductCode(itemCode)) return true;
+  if (isEodStockSectionLabel(itemCode) || isEodStockSectionLabel(itemName)) return true;
   return isBuildingMaterialItem({
     item_code: itemCode,
     item_name: itemName,
@@ -182,14 +190,20 @@ export function suggestTransferQty({
   destinationQty = 0,
   peakWeeklyQty = 0,
   coverDays = INTER_CITY_TRANSFER_COVER_DAYS,
+  unsoldMinQty = INTER_CITY_TRANSFER_UNSOLD_MIN_QTY,
 } = {}) {
   const source = Math.max(0, roundEodQty(sourceQty));
   const destination = Math.max(0, roundEodQty(destinationQty));
   const peakWeekly = Math.max(0, roundEodQty(peakWeeklyQty));
   const days = Math.max(1, Number(coverDays) || INTER_CITY_TRANSFER_COVER_DAYS);
+  const minUnsold = Math.max(0, roundEodQty(unsoldMinQty));
   const dailyDemand = roundEodQty(peakWeekly / 7);
   // Ceil to whole units when demand is fractional so cover is at least the requested days.
-  const targetCoverQty = dailyDemand > 0 ? Math.ceil(dailyDemand * days - 1e-9) : 0;
+  // Never-sold at destination still gets a starter stock of unsoldMinQty (default 5 CTN).
+  let targetCoverQty = dailyDemand > 0 ? Math.ceil(dailyDemand * days - 1e-9) : 0;
+  if (peakWeekly <= 0 && minUnsold > 0) {
+    targetCoverQty = Math.max(targetCoverQty, minUnsold);
+  }
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destination));
   const suggestedQty = roundEodQty(Math.min(source, shortfall));
   const remainingAtSource = roundEodQty(source - suggestedQty);
@@ -202,12 +216,14 @@ export function suggestTransferQty({
     peakWeeklyQty: peakWeekly,
     dailyDemand,
     coverDays: days,
+    unsoldMinQty: minUnsold,
     targetCoverQty,
     suggestedQty,
     remainingAtSource,
     afterAtDestination,
     daysCoverAfter,
     cappedBySource: shortfall > source && shortfall > 0,
+    usedUnsoldMinimum: peakWeekly <= 0 && minUnsold > 0 && suggestedQty > 0,
   };
 }
 
@@ -234,6 +250,7 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
       afterAtDestination: suggestion.afterAtDestination,
       daysCoverAfter: suggestion.daysCoverAfter,
       cappedBySource: suggestion.cappedBySource,
+      usedUnsoldMinimum: suggestion.usedUnsoldMinimum,
       sourceLabel: interCityTransferCityLabel(row.sourceCity),
       destinationLabel: interCityTransferCityLabel(row.destinationCity),
     };

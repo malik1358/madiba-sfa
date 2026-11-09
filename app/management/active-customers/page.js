@@ -49,8 +49,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "For each month column, the as-of date is that month’s last day (today for the open month). Active customers and net sales both use the inclusive 120 days ending on that date, so the count and sales match. Credit notes do not count as activity but reduce sales. Green/red on month cells follows sales vs the previous month. Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
-    ar: "لكل عمود شهر، تاريخ القطع هو آخر يوم في ذلك الشهر (اليوم للشهر المفتوح). عدد العملاء النشطين وصافي المبيعات يستخدمان معاً آخر 120 يوماً شاملة حتى ذلك التاريخ، فيتطابق العدّ والمبيعات. إشعارات الدائن لا تُحتسب نشاطاً لكنها تخفّض المبيعات. الأخضر/الأحمر في خلايا الشهر يتبع المبيعات مقابل الشهر السابق. أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
+    en: "For each month column, the as-of date is that month’s last day (today for the open month). Active customers and net sales both use the inclusive 120 days ending on that date, so the count and sales match. Credit notes do not count as activity but reduce sales. Green/red follows sales vs the previous month — including the open month vs last complete month (lower trailing sales = red). Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
+    ar: "لكل عمود شهر، تاريخ القطع هو آخر يوم في ذلك الشهر (اليوم للشهر المفتوح). عدد العملاء النشطين وصافي المبيعات يستخدمان معاً آخر 120 يوماً شاملة حتى ذلك التاريخ، فيتطابق العدّ والمبيعات. إشعارات الدائن لا تُحتسب نشاطاً لكنها تخفّض المبيعات. الأخضر/الأحمر يتبع المبيعات مقابل الشهر السابق — بما فيها الشهر المفتوح مقابل آخر شهر مكتمل (مبيعات متأخرة أقل = أحمر). أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
   },
   window: { en: "Active window", ar: "نافذة النشاط" },
   asOf: { en: "As of", ar: "حتى" },
@@ -222,19 +222,17 @@ function SeriesTable({
               <td className={periodCellClass(row.momPercent > 0 ? "up" : row.momPercent < 0 ? "down" : "")}>
                 {formatGrowthPercent(row.momPercent)}
               </td>
-              <td className="moduleBiTotalCol moduleBiMonthCell--current">
+              <td className={`moduleBiTotalCol ${periodCellClass(row.currentSalesTone || "")}`}>
                 <CountSalesCell count={row.currentCount} sales={row.currentSales} />
               </td>
               {months.map((month, index) => {
                 const previous = index > 0 ? months[index - 1] : previousMonthKey(month);
                 const tone = row.monthSalesTones?.[month]
-                  || (month === currentMonth
-                    ? "current"
-                    : (Number(row.monthSales?.[month] || 0) > Number(row.monthSales?.[previous] || 0)
-                      ? "up"
-                      : Number(row.monthSales?.[month] || 0) < Number(row.monthSales?.[previous] || 0)
-                        ? "down"
-                        : ""));
+                  || (Number(row.monthSales?.[month] || 0) > Number(row.monthSales?.[previous] || 0)
+                    ? "up"
+                    : Number(row.monthSales?.[month] || 0) < Number(row.monthSales?.[previous] || 0)
+                      ? "down"
+                      : "");
                 return (
                   <td key={month} className={periodCellClass(tone)}>
                     <CountSalesCell
@@ -261,7 +259,13 @@ function SeriesTable({
                 {formatSigned(footerTotals.change)}
               </td>
               <td />
-              <td className="moduleBiTotalCol moduleBiMonthCell--current">
+              <td className={`moduleBiTotalCol ${periodCellClass(
+                Number(footerTotals.currentSales || 0) > Number(footerTotals.latestCompleteSales || 0)
+                  ? "up"
+                  : Number(footerTotals.currentSales || 0) < Number(footerTotals.latestCompleteSales || 0)
+                    ? "down"
+                    : "",
+              )}`}>
                 <CountSalesCell count={footerTotals.currentCount} sales={footerTotals.currentSales} />
               </td>
               {months.map((month) => (

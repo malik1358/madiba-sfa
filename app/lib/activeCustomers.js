@@ -211,13 +211,11 @@ function decorateSeriesRow({
   const salesTones = {};
   displayMonths.forEach((month, index) => {
     const previous = index > 0 ? displayMonths[index - 1] : previousMonthKey(month);
-    tones[month] = month === currentMonth
-      ? "current"
-      : monthChangeTone(monthValues[month], monthValues[previous], Boolean(previous));
-    salesTones[month] = month === currentMonth
-      ? "current"
-      : monthChangeTone(monthSales[month], monthSales[previous], Boolean(previous));
+    tones[month] = monthChangeTone(monthValues[month], monthValues[previous], Boolean(previous));
+    // Open month also compares sales to the prior month: lower trailing 120d sales = down/red.
+    salesTones[month] = monthChangeTone(monthSales[month], monthSales[previous], Boolean(previous));
   });
+  const currentSalesTone = monthChangeTone(currentSales, latestCompleteSales, latestCompleteMonth != null);
   return {
     key,
     label,
@@ -227,6 +225,7 @@ function decorateSeriesRow({
     monthSalesTones: salesTones,
     currentCount,
     currentSales,
+    currentSalesTone,
     latestCompleteCount,
     latestCompleteSales,
     priorCompleteCount,

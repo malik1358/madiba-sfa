@@ -174,7 +174,11 @@ function sameDayActivityEntry(left, right) {
 
 /**
  * Running day totals for WhatsApp: visits with order (+ value), visits without
- * order, and successful collections (+ value). Matches Daily Visit Report counts.
+ * order, and collection visits (+ collected value).
+ *
+ * Collection *count* includes every COLLECTION_VISIT (funds received and
+ * without payment). Collection *value* is only money received — same split as
+ * Daily Visit Report, but WhatsApp shows one Collections line for both.
  */
 export function resolveDayActivityTillMessage({
   entries = [],
@@ -219,13 +223,16 @@ export function resolveDayActivityTillMessage({
     };
 
   const split = buildVisitDaySplit(prior, splitOrderStats);
+  const collectionVisits = Number(split.collectionCount || 0)
+    + Number(split.collectionVisitWithoutPaymentCount || 0);
   return {
     known: true,
     visitWithoutOrderCount: Number(split.visitWithoutOrderCount || 0),
     orderCount: Number(split.orderCount || 0),
     orderValue: Number(split.orderValue || 0),
-    collectionCount: Number(split.collectionCount || 0),
+    collectionCount: collectionVisits,
     collectionValue: Number(split.collectionValue || 0),
+    collectionVisitWithoutPaymentCount: Number(split.collectionVisitWithoutPaymentCount || 0),
   };
 }
 

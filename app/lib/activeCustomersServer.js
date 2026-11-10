@@ -46,3 +46,25 @@ export async function loadActiveCustomersReport(admin, { asOfDate = "" } = {}) {
     throw error;
   }
 }
+
+/**
+ * Company-only active-customer series for the KPI upload summary email.
+ * Skips salesman/team rollups so the scan stays lighter than the full report.
+ */
+export async function loadActiveCustomersCompanyReport(admin, { asOfDate = "" } = {}) {
+  try {
+    const sourceRows = await fetchActiveSalesPages(admin);
+    return buildActiveCustomersReport(sourceRows, {
+      teamMembers: [],
+      companyOnly: true,
+      asOfDate: asOfDate || getKsaDateString(),
+    });
+  } catch (error) {
+    if (isMissingRelation(error)) {
+      console.error("KPI upload summary: active sales unavailable for active customers.");
+      return null;
+    }
+    console.error("KPI upload summary: active customers load failed:", error);
+    return null;
+  }
+}

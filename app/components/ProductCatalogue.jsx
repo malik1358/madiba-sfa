@@ -27,7 +27,8 @@ import {
   VALUE_DISCOUNT_SLABS,
 } from "../lib/regionalPricing";
 import {
-  availableEodStockQty,
+  countryEodStockQty,
+  filterItemsWithPositiveCountryEodStock,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../lib/eodStock.js";
@@ -440,20 +441,24 @@ export default function ProductCatalogue({
     if (notice) await showPopup(notice);
   }
 
-  const pricedRecommendation = (list) => (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code]));
+  const stockedItems = filterItemsWithPositiveCountryEodStock(items, eodStock);
+  const pricedRecommendation = (list) => filterItemsWithPositiveCountryEodStock(
+    (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code])),
+    eodStock,
+  );
   const {
     recommended: recommendedItems,
     notBoughtRecently: staleItems,
     buyingLess: decliningItems,
     browse: browseItems,
   } = catalogueItemGroups(
-    items,
+    stockedItems,
     pricedRecommendation(newItems),
     historyReady,
     pricedRecommendation(notBoughtRecently),
     pricedRecommendation(buyingLess),
   );
-  const filteredCodes = new Set(items.map((item) => normalizeCatalogueCode(item.item_code)));
+  const filteredCodes = new Set(stockedItems.map((item) => normalizeCatalogueCode(item.item_code)));
   const recommendationRows = [...recommendedItems, ...staleItems, ...decliningItems];
   const catalogueExportCandidates = [
     ...recommendationRows.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
@@ -654,7 +659,7 @@ export default function ProductCatalogue({
     <section className={`moduleSection ${styles.catalogue}`}>
       <div className="moduleSectionHeader">
         <h2>{ar ? "تصفح المنتجات" : "Shop the catalogue"}</h2>
-        <span>{items.length} {ar ? "منتج" : "products"} · {pricingRegionLabel(pricingRegion)}</span>
+        <span>{stockedItems.length} {ar ? "منتج" : "products"} · {pricingRegionLabel(pricingRegion)}</span>
       </div>
       {nearestCustomers}
       <div className={styles.customer}>
@@ -774,8 +779,8 @@ export default function ProductCatalogue({
           const showVolumeDiscountRows = volumeSlabRows.length > 0;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
-          const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
+          const availableStock = countryEodStockQty(eodStock, item.item_code);
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment
@@ -892,7 +897,7 @@ export default function ProductCatalogue({
         })}
         </div>
       </section>)}
-      {items.length === 0 && <p>{ar ? "لا توجد منتجات تطابق البحث." : "No products match these filters."}</p>}
+      {stockedItems.length === 0 && <p>{ar ? "لا توجد منتجات تطابق البحث." : "No products match these filters."}</p>}
       {lastPage > 0 && <div className={styles.pagination}>
         <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{ar ? "السابق" : "Previous"}</button>
         <span aria-live="polite">{currentPage + 1} / {lastPage + 1}</span>

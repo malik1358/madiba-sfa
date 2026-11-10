@@ -11,3 +11,14 @@ test("network failures do not claim the password is wrong", () => {
 test("rejected credentials retain the invalid login message", () => {
   assert.equal(loginErrorMessage({ name: "AuthApiError", message: "Invalid login credentials", status: 400 }), "Incorrect email or password");
 });
+
+test("Supabase egress / spend-cap blocks do not look like a wrong password", () => {
+  const quotaError = {
+    name: "AuthApiError",
+    status: 402,
+    message: "Service for this project is restricted due to the following violations: exceed_egress_quota. The project owner must upgrade their plan or remove spend caps to restore service.",
+  };
+  assert.match(loginErrorMessage(quotaError), /usage limit/i);
+  assert.match(loginErrorMessage(quotaError, true), /حد الاستخدام/);
+  assert.doesNotMatch(loginErrorMessage(quotaError), /Incorrect email or password/);
+});

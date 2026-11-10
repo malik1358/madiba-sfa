@@ -4,6 +4,17 @@
 
 `.github/workflows/google-drive-backup.yml` schedules PostgreSQL backups every six hours and full database/Storage/Git/configuration backups nightly, encrypted to Google Drive. The workflow is inactive until configured and enabled with repository variable `BACKUP_ENABLED=true` on `main`; production credentials belong only in the protected `production-backup` GitHub environment, never local env files. Recovery archives omit secret values and Android signing material. Cleanup is opt-in and disabled by default. `backup-health.yml` alerts through GitHub issues on failed or overdue exports. Setup, Free-plan quota risks, retention, custody, and the isolated restore drill are documented in `docs/BACKUP_RECOVERY.md`. No database migration or app-runtime behavior change.
 
+## Supabase Free-plan egress lockout
+
+Production Auth and REST return HTTP **402** with `exceed_egress_quota` when the MADIBA organization Free plan hits its egress allowance (or a spend cap blocks further usage). The login screen used to map every Auth API failure to “Incorrect email or password”, which hid this outage. `app/lib/loginError.js` now shows an explicit usage-limit message for 402 / egress / spend-cap / paused-project responses.
+
+Operator recovery (not a code deploy):
+
+1. Open the production project billing page: [SFA project billing](https://supabase.com/dashboard/project/ynmtlzyqvmurpmfretji/settings/billing).
+2. Upgrade off Free, or remove any spend cap that is blocking the project.
+3. Confirm `POST /auth/v1/token?grant_type=password` and a simple REST select return something other than 402.
+4. Users can sign in again. A password reset alone does not clear an egress lockout.
+
 ## Environments
 
 There is **no permanent cloud staging environment**. Local PC covers development and staging. Cloud is production only.
@@ -259,7 +270,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `items-sold-at-loss-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Previous KSA day negative-GP sales with positive qty (returns excluded). Skips send when zero lines. Default To `malik@pinasz.com`. Optional `ITEMS_SOLD_AT_LOSS_EMAIL_TO`. | `/api/cron/items-sold-at-loss-email` |
 | `not-in-voucher-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Open `NOT IN VOUCHER` salesman vouchers. Skips send when zero. Default To `malik@pinasz.com`. CC `vinit.kulkarni@noorshukran.com`, `badrish.thapliyal@noorshukran.com`. Optional `NOT_IN_VOUCHER_EMAIL_TO` / `_CC`. | `/api/cron/not-in-voucher-email` |
 | `returns-above-sales-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Current Returns Above Sales list. Sends when empty. Default To `vinit.kulkarni@noorshukran.com`, `badrish.thapliyal@noorshukran.com`, `malik@pinasz.com`. Optional `RETURNS_ABOVE_SALES_EMAIL_TO` / `_CC`. `maxDuration` 300s; curl `--max-time` 360. | `/api/cron/returns-above-sales-email` |
-| `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection + Total cash collected + Avg collection days + Active customers). Normal sends are scheduled 18 minutes after sales/receipt/outstanding uploads and flushed by `/api/cron/inactivity-push`. | `/api/cron/kpi-upload-summary-email` |
+| `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection + Total cash collected + Avg collection days YTD/3m/12m + Active customers). Normal sends are scheduled 18 minutes after sales/receipt/outstanding uploads and flushed by `/api/cron/inactivity-push`. | `/api/cron/kpi-upload-summary-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `catalogue-drive-photos.yml` | `0 */8 * * *` | Every 8 hours (03:00, 11:00, 19:00 KSA). Uses existing `CRON_SECRET`. Optional `CATALOGUE_DRIVE_PHOTOS_URL`. | `/api/cron/catalogue-drive-photos` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |

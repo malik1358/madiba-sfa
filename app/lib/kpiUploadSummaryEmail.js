@@ -39,9 +39,38 @@ export const KPI_UPLOAD_SUMMARY_KPI_KEYS = [
   "totalCashCollected",
 ];
 
-/** Company-wide YTD DSO row appended after the salesman KPI footer rows. */
+/** Company-wide DSO rows appended after the salesman KPI footer rows (same three views as BI). */
 export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY = "averageCollectionDays";
-export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days";
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days (YTD)";
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS = [
+  {
+    key: "averageCollectionDays",
+    label: "Avg collection days (YTD)",
+    field: "receivable_days",
+    previousField: "previous_receivable_days",
+    statusLabel: "Lower is better · YTD DSO",
+  },
+  {
+    key: "averageCollectionDays3m",
+    label: "Avg collection days (Rolling 3m)",
+    field: "receivable_days_3m",
+    previousField: "receivable_days_3m",
+    usePriorMonthRow: true,
+    statusLabel: "Lower is better · Rolling 3m DSO",
+  },
+  {
+    key: "averageCollectionDays12m",
+    label: "Avg collection days (Rolling 12m)",
+    field: "receivable_days_12m",
+    previousField: "receivable_days_12m",
+    usePriorMonthRow: true,
+    statusLabel: "Lower is better · Rolling 12m DSO",
+  },
+];
+
+const COLLECTION_DAYS_KEYS = new Set(
+  KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS.map((variant) => variant.key),
+);
 
 /** Company rolling 4-month active customers with MoM vs the prior complete month. */
 export const KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY = "activeCustomers";
@@ -195,27 +224,57 @@ export function compareAverageCollectionDaysToPriorMonth(currentDays, previousDa
   };
 }
 
-/**
- * Build the company-wide Avg collection days email row from the BI receivable-days report.
- * Uses the latest month that has uploaded outstanding (same YTD DSO as Net receivable days).
- */
-export function buildAverageCollectionDaysSummaryRow(report = null) {
+function latestReceivableMonthRow(report = null) {
   const rows = Array.isArray(report?.rows) ? report.rows : [];
-  const latest = [...rows].reverse().find((row) => row?.receivable_days != null) || null;
+  return [...rows].reverse().find((row) => (
+    row?.receivable_days != null
+    || row?.receivable_days_3m != null
+    || row?.receivable_days_12m != null
+  )) || null;
+}
+
+function priorReceivableMonthRow(report = null, monthKey = "") {
+  const priorMonth = previousMonthKey(monthKey);
+  if (!priorMonth) return null;
+  const monthly = report?.monthly && typeof report.monthly === "object" ? report.monthly : null;
+  if (monthly?.[priorMonth]) return monthly[priorMonth];
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  return rows.find((row) => String(row?.month || "").slice(0, 7) === priorMonth) || null;
+}
+
+/**
+ * Build one company Avg collection days email row (YTD / 3m / 12m) from the BI report.
+ */
+export function buildAverageCollectionDaysSummaryRow(report = null, variant = KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS[0]) {
+  const config = variant && typeof variant === "object"
+    ? variant
+    : KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS[0];
+  const latest = latestReceivableMonthRow(report);
   if (!latest) return null;
-  const currentDays = Number(latest.receivable_days);
+  const currentRaw = latest[config.field];
+  if (currentRaw == null || currentRaw === "") return null;
+  const currentDays = Number(currentRaw);
   if (!Number.isFinite(currentDays)) return null;
-  const previousDays = latest.previous_receivable_days;
+
+  let previousDays = null;
+  if (config.usePriorMonthRow) {
+    const priorRow = priorReceivableMonthRow(report, latest.month);
+    const priorRaw = priorRow?.[config.previousField];
+    previousDays = priorRaw == null || priorRaw === "" ? null : priorRaw;
+  } else if (Object.prototype.hasOwnProperty.call(latest, config.previousField)) {
+    previousDays = latest[config.previousField];
+  }
+
   return {
-    key: KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY,
-    label: KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL,
+    key: config.key,
+    label: config.label,
     kind: "collectionDays",
     month: String(latest.month || "").slice(0, 7),
     totalFiltered: {
       actual: currentDays,
       target: 0,
       achievement: null,
-      statusLabel: "Lower is better · YTD DSO",
+      statusLabel: config.statusLabel,
       statusTone: "neutral",
     },
     paceEstimate: {
@@ -225,6 +284,15 @@ export function buildAverageCollectionDaysSummaryRow(report = null) {
     },
     vsLastMonth: compareAverageCollectionDaysToPriorMonth(currentDays, previousDays),
   };
+}
+
+/**
+ * Build all three company Avg collection days rows (YTD, rolling 3m, rolling 12m).
+ */
+export function buildAverageCollectionDaysSummaryRows(report = null) {
+  return KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS
+    .map((variant) => buildAverageCollectionDaysSummaryRow(report, variant))
+    .filter(Boolean);
 }
 
 /**
@@ -289,7 +357,8 @@ export function buildActiveCustomersSummaryRow(report = null) {
 /**
  * Build the three KPI Targets footer summaries, then transpose so those row
  * labels become email columns (one email row per KPI). Optionally append
- * company Avg collection days (YTD DSO) and Active customers with MoM.
+ * company Avg collection days for YTD, rolling 3m, and rolling 12m DSO with
+ * MoM improve/worsen on each, and company Active customers with MoM.
  */
 export function buildKpiUploadSummaryTable({
   rows = [],
@@ -349,8 +418,7 @@ export function buildKpiUploadSummaryTable({
     };
   });
 
-  const collectionDaysRow = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
-  if (collectionDaysRow) tableRows.push(collectionDaysRow);
+  tableRows.push(...buildAverageCollectionDaysSummaryRows(receivableDaysReport));
 
   const activeCustomersRow = buildActiveCustomersSummaryRow(activeCustomersReport);
   if (activeCustomersRow) tableRows.push(activeCustomersRow);
@@ -397,7 +465,7 @@ function toneColor(tone) {
 }
 
 function isCollectionDaysRow(row) {
-  return row?.key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY || row?.kind === "collectionDays";
+  return COLLECTION_DAYS_KEYS.has(row?.key) || row?.kind === "collectionDays";
 }
 
 function isActiveCustomersRow(row) {
@@ -425,7 +493,7 @@ function formatActiveCustomersValue(value) {
 function formatSignedMoney(key, value) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
-  if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) {
+  if (COLLECTION_DAYS_KEYS.has(key)) {
     const abs = formatCollectionDaysValue(Math.abs(number));
     if (number > 0) return `+${abs}`;
     if (number < 0) return `−${abs}`;
@@ -444,7 +512,7 @@ function formatSignedMoney(key, value) {
 }
 
 function formatKpiCellValue(key, value) {
-  if (key === KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY) return formatCollectionDaysValue(value);
+  if (COLLECTION_DAYS_KEYS.has(key)) return formatCollectionDaysValue(value);
   if (key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY) return formatActiveCustomersValue(value);
   return formatPerformanceKpiValue(key, value);
 }
@@ -642,7 +710,7 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days and Active customers), transposed so Total / Estimate / vs last month are columns. Lower collection days is better; higher active customers is better.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days: YTD, Rolling 3m, Rolling 12m, and Active customers), transposed so Total / Estimate / vs last month are columns. Lower collection days is better; higher active customers is better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>

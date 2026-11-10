@@ -5554,6 +5554,24 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 600;
 }
 
+.activeCustomersMetricCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+.activeCustomersMetricCell strong {
+  font-weight: 700;
+}
+
+.activeCustomersMetricCell span {
+  color: #5b7178;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .moduleKpiActualLink {
   color: #075e75;
   font-weight: 800;

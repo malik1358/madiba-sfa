@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   applyEodStockUpload,
   availableEodStockQty,
+  countryEodStockQty,
+  filterItemsWithPositiveCountryEodStock,
+  hasPositiveCountryEodStockQty,
   buildEodStockAvailability,
   buildEodStockReportRows,
   eodQtyMovement,
@@ -11,12 +14,17 @@ import {
   formatEodDelta,
   formatEodStockAsOfDate,
   formatEodStockAvailableLabel,
+  formatEodStockCityBreakdown,
+  inferEodCityFromFileName,
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
+  mergeEodCityUploads,
   parseEodQtyCell,
   parseEodStockDate,
   parseEodStockSheets,
   splitEodItemLabel,
+  summarizeEodCityUploads,
+  summarizeEodStock,
 } from "../app/lib/eodStock.js";
 
 test("parseEodStockDate reads KSA day-first dates, month names, and Excel serials", () => {
@@ -145,6 +153,28 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.deepEqual(dammam.citiesPresent, ["dammam"]);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003234").cities.dammam.qty, 140);
   assert.equal(dammam.rows.find((row) => row.itemCode === "A003283").cities.dammam.qty, 6);
+
+  const wideTally = parseEodStockSheets([{
+    name: "Riyadh-Region",
+    matrix: [
+      ["ABC LTD"],
+      ["Riyadh-Region"],
+      ["Location Summary"],
+      ["1-Jan-26 to 9-Nov-26"],
+      ["Particulars", "1-Jan-26 to 9-Nov-26"],
+      ["", "Opening Balance", "", "Inwards", "", "Closing Balance", ""],
+      ["", "Quantity", "(Alt. Units)", "Quantity", "(Alt. Units)", "Quantity", "(Alt. Units)"],
+      ["NON FOOD DIVISION"],
+      ["A005353_Westpoint Split AC 24K COOL ONLY", "", "", 240, 240, 239, 239],
+      ["A003622_GRADE-E2 5 MM", "", "", 3999, "", 13, ""],
+      ["16-Inch portable Ventilation Fan", "", "", 47, "", 6, ""],
+    ],
+  }]);
+  assert.equal(wideTally.ok, true);
+  assert.equal(wideTally.stockDate, "2026-11-09");
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "A005353").cities.riyadh.qty, 239);
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "A003622").cities.riyadh.qty, 13);
+  assert.equal(wideTally.rows.find((row) => row.itemCode === "16-INCH PORTABLE VENTILATION FAN").cities.riyadh.qty, 6);
 });
 
 test("order qty stock hint keeps last upload and shows date when older than 24 hours", () => {
@@ -179,6 +209,20 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(availableEodStockQty(availability, "riyadh", "MISSING"), 0);
   assert.equal(availableEodStockQty(availability, "riyadh", "NEG1"), 0);
   assert.equal(availableEodStockQty(null, "riyadh", "A004426"), null);
+  assert.equal(countryEodStockQty(availability, "A004426"), 36);
+  assert.equal(countryEodStockQty(availability, "MISSING"), 0);
+  assert.equal(countryEodStockQty(availability, "NEG1"), 0);
+  assert.equal(countryEodStockQty(null, "A004426"), null);
+  assert.equal(hasPositiveCountryEodStockQty(availability, "A004426"), true);
+  assert.equal(hasPositiveCountryEodStockQty(availability, "MISSING"), false);
+  assert.equal(hasPositiveCountryEodStockQty(null, "A004426"), true);
+  assert.deepEqual(
+    filterItemsWithPositiveCountryEodStock(
+      [{ item_code: "A004426" }, { item_code: "MISSING" }, { item_code: "NEG1" }],
+      availability,
+    ).map((item) => item.item_code),
+    ["A004426"],
+  );
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);
@@ -188,18 +232,23 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(isEodStockOlderThanHours(availability, 24, freshNow), false);
   assert.equal(isEodStockOlderThanHours(availability, 24, staleNow), true);
   assert.equal(formatEodStockAsOfDate("2026-10-27", "en"), "27 Oct 2026");
-  assert.equal(formatEodStockAvailableLabel(30, "en", null, availability, freshNow), "Available: 30");
+  assert.equal(formatEodStockCityBreakdown(availability, "A004426"), "R:30 D:6 J:0");
+  assert.equal(formatEodStockCityBreakdown(null, "A004426"), "");
   assert.equal(
-    formatEodStockAvailableLabel(30, "en", null, availability, staleNow),
-    `Available: 30 · ${formatEodStockAsOfDate("2026-10-27", "en")}`,
+    formatEodStockAvailableLabel(36, "en", null, availability, "A004426", freshNow),
+    "Available: 36 · R:30 D:6 J:0",
   );
   assert.equal(
-    formatEodStockAvailableLabel(30, "en", 40, availability, staleNow),
-    `Available: 30 · ${formatEodStockAsOfDate("2026-10-27", "en")} — over stock`,
+    formatEodStockAvailableLabel(36, "en", null, availability, "A004426", staleNow),
+    `Available: 36 · R:30 D:6 J:0 · ${formatEodStockAsOfDate("2026-10-27", "en")}`,
+  );
+  assert.equal(
+    formatEodStockAvailableLabel(36, "en", 40, availability, "A004426", staleNow),
+    `Available: 36 · R:30 D:6 J:0 · ${formatEodStockAsOfDate("2026-10-27", "en")} — over stock`,
   );
   assert.match(
-    formatEodStockAvailableLabel(30, "ar", 40, availability, staleNow),
-    /المتاح: 30 · .+ — أكثر من المخزون/,
+    formatEodStockAvailableLabel(36, "ar", 40, availability, "A004426", staleNow),
+    /المتاح: 36 · R:30 D:6 J:0 · .+ — أكثر من المخزون/,
   );
 });
 
@@ -254,9 +303,12 @@ test("template, missing date, and snapshot comparison", () => {
   assert.equal(sameDay.rows.find((row) => row.itemCode === "AB100").cities.jeddah.qty, 11);
 
   const older = applyEodStockUpload(sameDay, { ...undated, stockDate: "2026-10-20" });
-  assert.equal(older.previousStockDate, "");
-  assert.equal(older.rows[0].cities.jeddah.qty, 4);
-  assert.equal(older.rows[0].cities.riyadh.qty, 0);
+  assert.equal(older.stockDate, "2026-10-27");
+  assert.equal(older.previousStockDate, "2026-10-26");
+  assert.equal(older.rows.find((row) => row.itemCode === "AB100").cities.jeddah.qty, 4);
+  assert.equal(older.rows.find((row) => row.itemCode === "AB100").cities.riyadh.qty, 30);
+  assert.ok(older.citiesPresent.includes("riyadh"));
+  assert.ok(older.citiesPresent.includes("jeddah"));
 
   const report = buildEodStockReportRows(nextDay);
   const gloves = report.find((row) => row.itemCode === "LP00318");
@@ -267,4 +319,60 @@ test("template, missing date, and snapshot comparison", () => {
   assert.equal(formatEodDelta(gloves.riyadh, gloves.riyadhPrev), "-2");
   assert.equal(eodQtyMovement(gloves.dammam, gloves.dammamPrev, true), "current");
   assert.equal(eodQtyMovement(4, 0, false), "current");
+});
+
+test("city file names and per-city upload pointers stay after a later sibling upload", () => {
+  assert.equal(inferEodCityFromFileName("Riyadh.xlsx"), "riyadh");
+  assert.equal(inferEodCityFromFileName("dammam1.xlsx"), "dammam");
+  assert.equal(inferEodCityFromFileName("eod-stock/2026-11-09T12-04-26-285Z_Riyadh.xlsx"), "riyadh");
+  assert.equal(inferEodCityFromFileName("GdwnSum.xlsx"), "");
+
+  const withRiyadh = mergeEodCityUploads(null, ["riyadh"], {
+    fileName: "Riyadh.xlsx",
+    filePath: "eod-stock/riyadh.xlsx",
+    uploadedAt: "2026-11-09T12:04:26.285Z",
+    stockDate: "2026-11-09",
+    itemCount: 400,
+  });
+  const withDammam = mergeEodCityUploads(withRiyadh, ["dammam"], {
+    fileName: "dammam1.xlsx",
+    filePath: "eod-stock/dammam1.xlsx",
+    uploadedAt: "2026-11-09T12:05:02.240Z",
+    stockDate: "2026-12-31",
+    itemCount: 233,
+  });
+  assert.equal(withDammam.riyadh.fileName, "Riyadh.xlsx");
+  assert.equal(withDammam.dammam.fileName, "dammam1.xlsx");
+
+  const summary = summarizeEodStock({
+    fileName: "dammam1.xlsx",
+    filePath: "eod-stock/dammam1.xlsx",
+    uploadedAt: "2026-11-09T12:05:02.240Z",
+    stockDate: "2026-12-31",
+    citiesPresent: ["dammam"],
+    cityUploads: withDammam,
+    rows: [{
+      itemCode: "A1",
+      itemName: "Item",
+      unit: "CTN",
+      cities: {
+        riyadh: { qty: 2, value: 0 },
+        dammam: { qty: 5, value: 0 },
+        jeddah: { qty: 0, value: 0 },
+      },
+    }],
+  });
+  assert.equal(summary.cityUploads.riyadh.fileName, "Riyadh.xlsx");
+  assert.equal(summary.cityUploads.dammam.canDownload, true);
+  assert.equal(summary.cityItemCounts.riyadh, 1);
+  assert.equal(summary.cityItemCounts.dammam, 1);
+
+  const legacy = summarizeEodCityUploads({
+    fileName: "dammam1.xlsx",
+    filePath: "eod-stock/dammam1.xlsx",
+    uploadedAt: "2026-11-09T12:05:02.240Z",
+    citiesPresent: ["dammam"],
+  });
+  assert.equal(legacy.dammam.fileName, "dammam1.xlsx");
+  assert.equal(legacy.riyadh, null);
 });

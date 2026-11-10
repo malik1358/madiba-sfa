@@ -9,14 +9,15 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { formatGrowthPercent, previousMonthKey } from "../../lib/categoryGrowth";
+import { formatMoneyAmount } from "../../lib/regionalPricing";
 import { getSupabaseClient } from "../../lib/supabase";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 
 const TEXT = {
   title: { en: "Active Customers", ar: "العملاء النشطون" },
   subtitle: {
-    en: "Customers who bought at least once in the last four months, with a monthly trend by company, salesman, and team.",
-    ar: "العملاء الذين اشتروا مرة واحدة على الأقل خلال الأشهر الأربعة الأخيرة، مع اتجاه شهري للشركة والمندوب والفريق.",
+    en: "Customers who bought at least once in the last 120 days ending at each month-end, with matching active counts and net sales by company, salesman, and team.",
+    ar: "العملاء الذين اشتروا مرة واحدة على الأقل خلال آخر 120 يوماً تنتهي بنهاية كل شهر، مع عدد النشطين وصافي المبيعات المتطابقين للشركة والمندوب والفريق.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -26,11 +27,13 @@ const TEXT = {
   team: { en: "Team", ar: "الفريق" },
   salesmen: { en: "Salesmen", ar: "المندوبون" },
   teams: { en: "Teams", ar: "الفرق" },
-  current: { en: "Active now (4 mo)", ar: "نشط الآن (4 أشهر)" },
+  current: { en: "Active now (120d)", ar: "نشط الآن (120 يوماً)" },
+  days: { en: "days", ar: "يوماً" },
   lastComplete: { en: "Last complete month", ar: "آخر شهر مكتمل" },
   monthBefore: { en: "Month before", ar: "الشهر السابق" },
   mom: { en: "MoM", ar: "مقابل الشهر السابق" },
   change: { en: "Change", ar: "التغيّر" },
+  sales: { en: "Sales", ar: "المبيعات" },
   total: { en: "Total", ar: "الإجمالي" },
   increasing: { en: "Increasing", ar: "في ارتفاع" },
   decreasing: { en: "Decreasing", ar: "في انخفاض" },
@@ -46,8 +49,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "A customer is active in a month when they have at least one positive ordinary sale in that month or any of the prior three months. Credit notes and returns do not count. Green is higher than the previous month; red is lower. The open month is month-to-date. Salesman counts use the invoice salesman; team counts are distinct customers across the team.",
-    ar: "العميل نشط في الشهر إذا اشترى مرة واحدة على الأقل في ذلك الشهر أو في أي من الأشهر الثلاثة السابقة. إشعارات الدائن والمرتجعات لا تُحتسب. الأخضر أعلى من الشهر السابق والأحمر أقل. الشهر المفتوح حتى اليوم فقط. عدد المندوب من مندوب الفاتورة؛ عدد الفريق عملاء مميزون عبر الفريق.",
+    en: "For each month column, the as-of date is that month’s last day (today for the open month). Active customers and net sales both use the inclusive 120 days ending on that date, so the count and sales match. Credit notes do not count as activity but reduce sales. Green/red follows sales vs the previous month — including the open month vs last complete month (lower trailing sales = red). Salesman figures use the invoice salesman; team figures are distinct customers and net sales across the team.",
+    ar: "لكل عمود شهر، تاريخ القطع هو آخر يوم في ذلك الشهر (اليوم للشهر المفتوح). عدد العملاء النشطين وصافي المبيعات يستخدمان معاً آخر 120 يوماً شاملة حتى ذلك التاريخ، فيتطابق العدّ والمبيعات. إشعارات الدائن لا تُحتسب نشاطاً لكنها تخفّض المبيعات. الأخضر/الأحمر يتبع المبيعات مقابل الشهر السابق — بما فيها الشهر المفتوح مقابل آخر شهر مكتمل (مبيعات متأخرة أقل = أحمر). أرقام المندوب من مندوب الفاتورة؛ أرقام الفريق عملاء مميزون وصافي مبيعات عبر الفريق.",
   },
   window: { en: "Active window", ar: "نافذة النشاط" },
   asOf: { en: "As of", ar: "حتى" },
@@ -85,6 +88,15 @@ function trendLabel(change, t) {
   return t("flat");
 }
 
+function CountSalesCell({ count, sales }) {
+  return (
+    <div className="activeCustomersMetricCell">
+      <strong>{formatCount(count)}</strong>
+      <span>{formatMoneyAmount(sales)}</span>
+    </div>
+  );
+}
+
 function SeriesTable({
   filename,
   sheetName,
@@ -96,17 +108,35 @@ function SeriesTable({
   showTotal = false,
 }) {
   const filterKeys = useMemo(
-    () => ["label", "latestCompleteCount", "priorCompleteCount", "change", "momPercent", "currentCount", ...months],
+    () => [
+      "label",
+      "latestCompleteCount",
+      "latestCompleteSales",
+      "priorCompleteCount",
+      "priorCompleteSales",
+      "change",
+      "momPercent",
+      "currentCount",
+      "currentSales",
+      ...months.flatMap((month) => [month, `${month}:sales`]),
+    ],
     [months],
   );
 
   const filterValueOf = useCallback((row, key) => {
     if (key === "label") return row.label || "";
     if (key === "latestCompleteCount") return formatCount(row.latestCompleteCount);
+    if (key === "latestCompleteSales") return formatMoneyAmount(row.latestCompleteSales);
     if (key === "priorCompleteCount") return formatCount(row.priorCompleteCount);
+    if (key === "priorCompleteSales") return formatMoneyAmount(row.priorCompleteSales);
     if (key === "change") return formatSigned(row.change);
     if (key === "momPercent") return formatGrowthPercent(row.momPercent);
     if (key === "currentCount") return formatCount(row.currentCount);
+    if (key === "currentSales") return formatMoneyAmount(row.currentSales);
+    if (key.endsWith(":sales")) {
+      const month = key.slice(0, -":sales".length);
+      return formatMoneyAmount(row.monthSales?.[month]);
+    }
     if (months.includes(key)) return formatCount(row.monthValues?.[key]);
     return "";
   }, [months]);
@@ -116,23 +146,35 @@ function SeriesTable({
   const footerTotals = useMemo(() => {
     if (!showTotal) return null;
     const monthValues = Object.fromEntries(months.map((month) => [month, 0]));
+    const monthSales = Object.fromEntries(months.map((month) => [month, 0]));
     let latestCompleteCount = 0;
     let priorCompleteCount = 0;
     let currentCount = 0;
+    let latestCompleteSales = 0;
+    let priorCompleteSales = 0;
+    let currentSales = 0;
     visibleRows.forEach((row) => {
       latestCompleteCount += Number(row.latestCompleteCount || 0);
       priorCompleteCount += Number(row.priorCompleteCount || 0);
       currentCount += Number(row.currentCount || 0);
+      latestCompleteSales += Number(row.latestCompleteSales || 0);
+      priorCompleteSales += Number(row.priorCompleteSales || 0);
+      currentSales += Number(row.currentSales || 0);
       months.forEach((month) => {
         monthValues[month] += Number(row.monthValues?.[month] || 0);
+        monthSales[month] += Number(row.monthSales?.[month] || 0);
       });
     });
     return {
       latestCompleteCount,
       priorCompleteCount,
       currentCount,
+      latestCompleteSales,
+      priorCompleteSales,
+      currentSales,
       change: latestCompleteCount - priorCompleteCount,
       monthValues,
+      monthSales,
     };
   }, [months, showTotal, visibleRows]);
 
@@ -146,15 +188,15 @@ function SeriesTable({
         <thead>
           <tr>
             <BiExcelHead label={labelHeader} filterKey="label" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("lastComplete")} filterKey="latestCompleteCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("monthBefore")} filterKey="priorCompleteCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={`${t("lastComplete")} / ${t("sales")}`} filterKey="latestCompleteCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={`${t("monthBefore")} / ${t("sales")}`} filterKey="priorCompleteCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("change")} filterKey="change" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("mom")} filterKey="momPercent" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("current")} filterKey="currentCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            <BiExcelHead label={`${t("current")} / ${t("sales")}`} filterKey="currentCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             {months.map((month) => (
               <BiExcelHead
                 key={month}
-                label={monthLabel(month, currentMonth)}
+                label={`${monthLabel(month, currentMonth)} / ${t("sales")}`}
                 filterKey={month}
                 options={options}
                 filters={filters}
@@ -168,28 +210,35 @@ function SeriesTable({
           {visibleRows.map((row) => (
             <tr key={row.key || row.label}>
               <td>{row.label}</td>
-              <td>{formatCount(row.latestCompleteCount)}</td>
-              <td>{formatCount(row.priorCompleteCount)}</td>
+              <td>
+                <CountSalesCell count={row.latestCompleteCount} sales={row.latestCompleteSales} />
+              </td>
+              <td>
+                <CountSalesCell count={row.priorCompleteCount} sales={row.priorCompleteSales} />
+              </td>
               <td className={periodCellClass(row.change > 0 ? "up" : row.change < 0 ? "down" : "")}>
                 {formatSigned(row.change)}
               </td>
               <td className={periodCellClass(row.momPercent > 0 ? "up" : row.momPercent < 0 ? "down" : "")}>
                 {formatGrowthPercent(row.momPercent)}
               </td>
-              <td className="moduleBiTotalCol moduleBiMonthCell--current">{formatCount(row.currentCount)}</td>
+              <td className={`moduleBiTotalCol ${periodCellClass(row.currentSalesTone || "")}`}>
+                <CountSalesCell count={row.currentCount} sales={row.currentSales} />
+              </td>
               {months.map((month, index) => {
                 const previous = index > 0 ? months[index - 1] : previousMonthKey(month);
-                const tone = row.monthTones?.[month]
-                  || (month === currentMonth
-                    ? "current"
-                    : (Number(row.monthValues?.[month] || 0) > Number(row.monthValues?.[previous] || 0)
-                      ? "up"
-                      : Number(row.monthValues?.[month] || 0) < Number(row.monthValues?.[previous] || 0)
-                        ? "down"
-                        : ""));
+                const tone = row.monthSalesTones?.[month]
+                  || (Number(row.monthSales?.[month] || 0) > Number(row.monthSales?.[previous] || 0)
+                    ? "up"
+                    : Number(row.monthSales?.[month] || 0) < Number(row.monthSales?.[previous] || 0)
+                      ? "down"
+                      : "");
                 return (
                   <td key={month} className={periodCellClass(tone)}>
-                    {formatCount(row.monthValues?.[month])}
+                    <CountSalesCell
+                      count={row.monthValues?.[month]}
+                      sales={row.monthSales?.[month]}
+                    />
                   </td>
                 );
               })}
@@ -200,15 +249,32 @@ function SeriesTable({
           <tfoot>
             <tr>
               <td>{t("total")}</td>
-              <td>{formatCount(footerTotals.latestCompleteCount)}</td>
-              <td>{formatCount(footerTotals.priorCompleteCount)}</td>
+              <td>
+                <CountSalesCell count={footerTotals.latestCompleteCount} sales={footerTotals.latestCompleteSales} />
+              </td>
+              <td>
+                <CountSalesCell count={footerTotals.priorCompleteCount} sales={footerTotals.priorCompleteSales} />
+              </td>
               <td className={periodCellClass(footerTotals.change > 0 ? "up" : footerTotals.change < 0 ? "down" : "")}>
                 {formatSigned(footerTotals.change)}
               </td>
               <td />
-              <td className="moduleBiTotalCol moduleBiMonthCell--current">{formatCount(footerTotals.currentCount)}</td>
+              <td className={`moduleBiTotalCol ${periodCellClass(
+                Number(footerTotals.currentSales || 0) > Number(footerTotals.latestCompleteSales || 0)
+                  ? "up"
+                  : Number(footerTotals.currentSales || 0) < Number(footerTotals.latestCompleteSales || 0)
+                    ? "down"
+                    : "",
+              )}`}>
+                <CountSalesCell count={footerTotals.currentCount} sales={footerTotals.currentSales} />
+              </td>
               {months.map((month) => (
-                <td key={month}>{formatCount(footerTotals.monthValues[month])}</td>
+                <td key={month}>
+                  <CountSalesCell
+                    count={footerTotals.monthValues[month]}
+                    sales={footerTotals.monthSales[month]}
+                  />
+                </td>
               ))}
             </tr>
           </tfoot>
@@ -324,7 +390,7 @@ export default function ActiveCustomersPage() {
               <button type="button" className="moduleInlineButton" onClick={loadReport}>{t("refresh")}</button>
             </div>
             <p className="moduleHint">
-              {t("window")}: {report?.windowMonths || 4} {language === "ar" ? "أشهر" : "months"}
+              {t("window")}: {report?.windowDays || 120} {t("days")}
               {" · "}
               {t("asOf")}: {report?.asOfDate || "—"}
               {" · "}
@@ -343,19 +409,25 @@ export default function ActiveCustomersPage() {
                   <div className="moduleKpiCard">
                     <div className="moduleKpiLabel">{t("current")}</div>
                     <div className="moduleKpiValue">{formatCount(summary.currentActive)}</div>
+                    <div className="moduleKpiMeta">{formatMoneyAmount(summary.currentSales)} {t("sales")}</div>
                   </div>
                   <div className="moduleKpiCard">
                     <div className="moduleKpiLabel">{t("lastComplete")}</div>
                     <div className="moduleKpiValue">{formatCount(summary.latestCompleteActive)}</div>
+                    <div className="moduleKpiMeta">{formatMoneyAmount(summary.latestCompleteSales)} {t("sales")}</div>
                   </div>
                   <div className="moduleKpiCard">
                     <div className="moduleKpiLabel">{t("monthBefore")}</div>
                     <div className="moduleKpiValue">{formatCount(summary.priorCompleteActive)}</div>
+                    <div className="moduleKpiMeta">{formatMoneyAmount(summary.priorCompleteSales)} {t("sales")}</div>
                   </div>
                   <div className="moduleKpiCard">
                     <div className="moduleKpiLabel">{t("mom")}</div>
                     <div className={`moduleKpiValue ${change > 0 ? "moduleBiMonthCell--up" : change < 0 ? "moduleBiMonthCell--down" : ""}`}>
                       {formatSigned(change)} · {formatGrowthPercent(summary.momPercent)}
+                    </div>
+                    <div className={`moduleKpiMeta ${Number(summary.salesChange || 0) > 0 ? "moduleBiMonthCell--up" : Number(summary.salesChange || 0) < 0 ? "moduleBiMonthCell--down" : ""}`}>
+                      {formatSigned(summary.salesChange)} · {formatGrowthPercent(summary.salesMomPercent)} {t("sales")}
                     </div>
                   </div>
                 </div>

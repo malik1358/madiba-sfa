@@ -180,6 +180,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
 export async function runKpiUploadSummaryEmailCycle(admin, {
   trigger = "cron",
   force = false,
+  to: toOverride = "",
   env = process.env,
   send = sendEmail,
   now = new Date(),
@@ -204,12 +205,16 @@ export async function runKpiUploadSummaryEmailCycle(admin, {
     return { skipped: true, reason: "email_not_configured", sentCount: 0 };
   }
 
-  const to = resolveKpiUploadSummaryEmailRecipients(env);
+  const overrideTo = String(toOverride || "").trim();
+  const envWithTestTo = overrideTo
+    ? { ...env, KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO: overrideTo }
+    : env;
+  const to = resolveKpiUploadSummaryEmailRecipients(envWithTestTo);
   if (!to.length) {
     return { skipped: true, reason: "no_recipients", sentCount: 0 };
   }
-  const isTestSend = Boolean(String(env.KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO || "").trim());
-  const cc = isTestSend ? [] : resolveKpiUploadSummaryEmailCc(env, to);
+  const isTestSend = Boolean(String(envWithTestTo.KPI_UPLOAD_SUMMARY_EMAIL_TEST_TO || "").trim());
+  const cc = isTestSend ? [] : resolveKpiUploadSummaryEmailCc(envWithTestTo, to);
 
   const { summary } = await loadPayload(admin);
   if (!summary?.rows?.length || !summary.salesmanCount) {

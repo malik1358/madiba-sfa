@@ -24,6 +24,7 @@ jobs:
           KPI_UPLOAD_SUMMARY_EMAIL_URL: ${{ secrets.KPI_UPLOAD_SUMMARY_EMAIL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           INPUT_FORCE: ${{ github.event.inputs.force }}
+          INPUT_TO: ${{ github.event.inputs.to }}
         run: |
           DEFAULT_URL='https://madiba-sfa.vercel.app/api/cron/kpi-upload-summary-email'
           URL="$(printf '%s' "$KPI_UPLOAD_SUMMARY_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -31,10 +32,16 @@ jobs:
           if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
           FORCE="$(printf '%s' "$INPUT_FORCE" | tr '[:upper:]' '[:lower:]')"
           if [[ "$FORCE" == "true" || "$FORCE" == "1" ]]; then FORCE_JSON=true; else FORCE_JSON=false; fi
+          TO="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -n "$TO" ]]; then
+            PAYLOAD="$(printf '{"force":%s,"trigger":"manual-test","to":"%s"}' "$FORCE_JSON" "$TO")"
+          else
+            PAYLOAD="$(printf '{"force":%s,"trigger":"manual-test"}' "$FORCE_JSON")"
+          fi
           status_code="$(curl -sS -L --max-time 360 -o response.json -w "%{http_code}" -X POST "$URL" \
             -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" \
-            --data "{\"force\":$FORCE_JSON,\"trigger\":\"manual-test\"}")"
+            --data "$PAYLOAD")"
           cat response.json
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
             echo "KPI upload summary email returned HTTP $status_code"

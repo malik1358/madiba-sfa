@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   KPI_UPLOAD_SUMMARY_DEBOUNCE_MS,
+  buildActiveCustomersSalesSummaryRow,
   buildActiveCustomersSummaryRow,
+  buildActiveCustomersSummaryRows,
   buildAverageCollectionDaysSummaryRow,
   buildAverageCollectionDaysSummaryRows,
   buildKpiUploadSummaryEmail,
   buildKpiUploadSummaryTable,
+  compareActiveCustomersSalesToPriorMonth,
   compareActiveCustomersToPriorMonth,
   compareAverageCollectionDaysToPriorMonth,
   isKpiUploadSummaryDue,
@@ -242,6 +245,26 @@ test("active customers MoM is higher-is-better and appends to the KPI summary ta
   assert.equal(alone.vsLastMonth.direction, "up");
   assert.ok(alone.vsLastMonth.delta > 0);
 
+  const salesGrowing = compareActiveCustomersSalesToPriorMonth(500_000, 400_000);
+  assert.equal(salesGrowing.direction, "up");
+  assert.equal(salesGrowing.delta, 100_000);
+  assert.equal(salesGrowing.polarity, "higher-is-better");
+
+  const salesAlone = buildActiveCustomersSalesSummaryRow(activeCustomersReport);
+  assert.equal(salesAlone.key, "activeCustomersSales");
+  assert.equal(salesAlone.label, "Active customers sales (120d)");
+  assert.equal(salesAlone.kind, "activeCustomersSales");
+  // Open-month trailing 120d (as of early November) vs end of October.
+  assert.equal(salesAlone.month, "2026-11");
+  assert.equal(salesAlone.totalFiltered.actual, activeCustomersReport.company.currentSales);
+  assert.equal(salesAlone.vsLastMonth.priorActual, activeCustomersReport.company.latestCompleteSales);
+  assert.equal(salesAlone.paceEstimate.estimate, null);
+
+  const family = buildActiveCustomersSummaryRows(activeCustomersReport);
+  assert.equal(family.length, 2);
+  assert.equal(family[0].key, "activeCustomers");
+  assert.equal(family[1].key, "activeCustomersSales");
+
   const summary = buildKpiUploadSummaryTable({
     rows: [ahmed],
     reportDate: "2026-11-01",
@@ -254,9 +277,10 @@ test("active customers MoM is higher-is-better and appends to the KPI summary ta
     },
     activeCustomersReport,
   });
-  assert.equal(summary.rows.length, 4);
-  assert.equal(summary.rows.at(-1).key, "activeCustomers");
-  assert.equal(summary.rows.at(-1).vsLastMonth.direction, "up");
+  assert.equal(summary.rows.length, 5);
+  assert.equal(summary.rows.at(-2).key, "activeCustomers");
+  assert.equal(summary.rows.at(-1).key, "activeCustomersSales");
+  assert.equal(summary.rows.at(-2).vsLastMonth.direction, "up");
 });
 
 test("summary table reads nested snapshot targets like the KPI Targets page", () => {
@@ -381,6 +405,8 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.html, /getting worse vs last month/);
   assert.match(message.html, /Active customers/);
+  assert.match(message.html, /Active customers sales \(120d\)/);
+  assert.match(message.html, /Higher is better · 120-day sales/);
   assert.match(message.html, /growing vs last month/);
   assert.match(message.html, /Open Active Customers/);
   assert.match(message.html, /#0f4c5c/);
@@ -390,6 +416,7 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.text, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.text, /getting worse vs last month/);
   assert.match(message.text, /Active customers/);
+  assert.match(message.text, /Active customers sales \(120d\)/);
   assert.match(message.text, /growing vs last month/);
   assert.match(message.text, /\/management\/active-customers/);
 });
@@ -422,6 +449,39 @@ test("CC defaults to Fazlur and accepts extras without duplicating To", () => {
     resolveKpiUploadSummaryEmailCc({}, ["fazlur.rahiman@noorshukran.com"]),
     [],
   );
+});
+
+test("run cycle test to override skips CC and last-sent marker", async () => {
+  const summary = buildKpiUploadSummaryTable({
+    rows: [ahmed],
+    reportDate: "2026-10-01",
+    todayIso: "2026-10-20",
+  });
+  const sent = [];
+  let lastSent = { signature: "keep-me" };
+  const result = await runKpiUploadSummaryEmailCycle({}, {
+    force: true,
+    to: "test@example.com",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_PORT: "587",
+      SMTP_USER: "u",
+      SMTP_PASS: "p",
+      SMTP_FROM: "from@example.com",
+    },
+    loadPending: async () => ({}),
+    savePending: async () => {},
+    clearPending: async () => {},
+    loadLastSent: async () => lastSent,
+    saveLastSent: async (_admin, value) => { lastSent = value; },
+    loadPayload: async () => ({ summary }),
+    send: async (message) => { sent.push(message); },
+  });
+  assert.equal(result.skipped, false);
+  assert.deepEqual(result.to, ["test@example.com"]);
+  assert.deepEqual(result.cc, []);
+  assert.equal(sent.length, 1);
+  assert.equal(lastSent.signature, "keep-me");
 });
 
 test("run cycle waits for debounce then sends once", async () => {

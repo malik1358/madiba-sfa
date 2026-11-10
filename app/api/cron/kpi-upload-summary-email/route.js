@@ -20,10 +20,12 @@ async function readParams(request) {
   const url = new URL(request.url);
   const queryForce = url.searchParams.get("force");
   const queryTrigger = url.searchParams.get("trigger");
+  const queryTo = url.searchParams.get("to");
   if (String(request.method || "").toUpperCase() === "GET") {
     return {
       force: truthy(queryForce),
       trigger: queryTrigger || "manual-test",
+      to: queryTo || "",
     };
   }
   try {
@@ -31,11 +33,13 @@ async function readParams(request) {
     return {
       force: truthy(body?.force ?? queryForce),
       trigger: String(body?.trigger || queryTrigger || "manual-test").trim() || "manual-test",
+      to: String(body?.to ?? queryTo ?? "").trim(),
     };
   } catch {
     return {
       force: truthy(queryForce),
       trigger: queryTrigger || "manual-test",
+      to: queryTo || "",
     };
   }
 }
@@ -52,7 +56,8 @@ async function handleRequest(request) {
   try {
     const result = await runKpiUploadSummaryEmailCycle(createAdminClient(), {
       trigger: params.trigger,
-      force: params.force || params.trigger === "manual-test",
+      force: params.force || params.trigger === "manual-test" || Boolean(params.to),
+      to: params.to,
       env: process.env,
     });
     return NextResponse.json({

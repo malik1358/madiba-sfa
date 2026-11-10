@@ -36,6 +36,7 @@ export const MODULES = {
   monthlyAttendance: { href: "/management/monthly-attendance", label: "Monthly Attendance" },
   businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
   returnsAboveSales: { href: "/management/returns-above-sales", label: "Returns Above Sales" },
+  activeCustomers: { href: "/management/active-customers", label: "Active Customers" },
   mis: { href: "/management/mis", label: "Management MIS" },
   salesmanIncentive: { href: "/management/salesman-incentive", label: "Salesman Incentive" },
   promoterCoverage: { href: "/management/promoter-coverage", label: "Promoter Coverage" },
@@ -57,6 +58,7 @@ export const MODULES = {
   stockTake: { href: "/management/stock-take", label: "Stock Take" },
   eodStock: { href: "/management/eod-stock", label: "End-of-day Stock" },
   orderedNotInSales: { href: "/management/ordered-not-in-sales", label: "Ordered Not in Sales" },
+  interCityStockTransfer: { href: "/management/inter-city-stock-transfer", label: "Inter-city Stock Transfer" },
   roleAccess: { href: "/management/role-access", label: "Role Access" },
 };
 
@@ -97,6 +99,7 @@ export const NAV_GROUPS = [
     modules: [
       "businessDashboard",
       "returnsAboveSales",
+      "activeCustomers",
       "mis",
       "myPerformance",
       "salesmanIncentive",
@@ -117,7 +120,7 @@ export const NAV_GROUPS = [
   {
     key: "warehouse",
     label: "Warehouse",
-    modules: ["stockTake", "eodStock", "orderedNotInSales"],
+    modules: ["stockTake", "eodStock", "orderedNotInSales", "interCityStockTransfer"],
   },
   {
     key: "admin",
@@ -255,6 +258,7 @@ export function buildModuleAccess(context = {}) {
       monthlyAttendance: hasManagementReportAccess || isCollector || (isSalesman && !isCollector),
       businessDashboard: hasManagementReportAccess || (isSalesman && !isCollector),
       returnsAboveSales: hasManagementReportAccess,
+      activeCustomers: hasManagementReportAccess,
       mis: isAdmin || isManager,
       salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
       promoterCoverage: true,
@@ -280,6 +284,7 @@ export function buildModuleAccess(context = {}) {
       upload: isAdmin || isManager || isInvoiceMaker,
       eodStock: isAdmin || isManager || isInvoiceMaker,
       orderedNotInSales: hasManagementReportAccess,
+      interCityStockTransfer: hasManagementReportAccess,
       stockTake: stockTakeAccess,
       roleAccess: isAdmin,
     },
@@ -474,6 +479,7 @@ export const MODULE_LABELS = {
   monthlyAttendance: { en: "Monthly Attendance", ar: "الحضور الشهري" },
   businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   returnsAboveSales: { en: "Returns Above Sales", ar: "مرتجعات أعلى من المبيعات" },
+  activeCustomers: { en: "Active Customers", ar: "العملاء النشطون" },
   mis: { en: "Management MIS", ar: "تقرير الإدارة" },
   salesmanIncentive: { en: "Salesman Incentive", ar: "حوافز المندوبين" },
   promoterCoverage: { en: "Promoter Coverage", ar: "تغطية مروج المنتجات" },
@@ -494,6 +500,7 @@ export const MODULE_LABELS = {
   upload: { en: "Imports", ar: "الاستيراد" },
   eodStock: { en: "End-of-day Stock", ar: "مخزون نهاية اليوم" },
   orderedNotInSales: { en: "Ordered Not in Sales", ar: "مطلوب وغير مباع" },
+  interCityStockTransfer: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },
   roleAccess: { en: "Role Access", ar: "صلاحيات الأدوار" },
 };

@@ -236,7 +236,7 @@ function titleDate(matrix, headerIndexValue) {
   return found;
 }
 
-/** Tally Location Summary: Particulars in A, Quantity in B a few rows below, city in the title. */
+/** Tally Location Summary: Particulars in A, Closing Balance Quantity a few rows below, city in the title. */
 function findTallyLocationLayout(matrix, sheetName = "") {
   const limit = Math.min(matrix.length, 30);
   let particularsRow = -1;
@@ -254,31 +254,59 @@ function findTallyLocationLayout(matrix, sheetName = "") {
   }
   if (particularsRow < 0) return null;
 
-  let qtyRow = -1;
-  let qtyIndex = -1;
   const qtySearchEnd = Math.min(particularsRow + 8, matrix.length - 1);
+  let closingStart = -1;
+  let closingEnd = -1;
+  for (let index = particularsRow; index <= qtySearchEnd; index += 1) {
+    const row = matrix[index] || [];
+    for (let column = 0; column < row.length; column += 1) {
+      if (normalizeImportHeader(row[column]) !== "closing balance") continue;
+      closingStart = column;
+      closingEnd = row.length - 1;
+      for (let next = column + 1; next < row.length; next += 1) {
+        const label = normalizeImportHeader(row[next]);
+        if (!label) continue;
+        if (
+          label === "opening balance"
+          || label === "inwards"
+          || label === "outwards"
+          || label === "closing balance"
+          || label.endsWith(" balance")
+        ) {
+          closingEnd = next - 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const qtyCandidates = [];
   for (let index = particularsRow; index <= qtySearchEnd; index += 1) {
     const row = matrix[index] || [];
     for (let column = 0; column < row.length; column += 1) {
       const label = normalizeImportHeader(row[column]);
       if (label !== "quantity" && label !== "qty") continue;
-      if (qtyIndex < 0 || column === 1) {
-        qtyRow = index;
-        qtyIndex = column;
-      }
-      if (column === 1) break;
+      qtyCandidates.push({ row: index, column });
     }
-    if (qtyIndex === 1) break;
   }
-  if (qtyIndex < 0) return null;
+  if (!qtyCandidates.length) return null;
+
+  const underClosing = closingStart >= 0
+    ? qtyCandidates.filter((candidate) => (
+      candidate.column >= closingStart && candidate.column <= closingEnd
+    ))
+    : [];
+  // Prefer Closing Balance Quantity. Older one-city exports only have Quantity in column B.
+  const chosen = underClosing[0]
+    || (qtyCandidates.length > 1 ? qtyCandidates[qtyCandidates.length - 1] : qtyCandidates[0]);
 
   const city = normalizeEodCity(sheetName) || findTitleCity(matrix, particularsRow);
   if (!city) return null;
 
   return {
-    headerRow: qtyRow,
+    headerRow: chosen.row,
     nameIndex,
-    qtyIndex,
+    qtyIndex: chosen.column,
     city,
     particularsRow,
   };
@@ -310,6 +338,45 @@ export function parseEodQtyCell(value) {
 function isTotalLabel(value) {
   const text = normalizeImportHeader(value);
   return text === "total" || text === "grand total" || text === "particulars" || text === "item name";
+}
+
+/** Tally Location Summary section titles / godown lines — not stock items. */
+export function isEodStockSectionLabel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  const text = normalizeImportHeader(raw);
+  if (!text) return false;
+  if (isTotalLabel(raw)) return true;
+  if (
+    text === "non food division"
+    || text === "food division"
+    || text === "location summary"
+    || text === "closing balance"
+    || text === "fifo"
+    || text === "quantity"
+    || text === "alt units"
+    || text === "altunits"
+    || text === "building material"
+    || text === "building materials"
+    || text === "personal care"
+    || text === "office supplies"
+    || text === "stationery"
+    || text === "electronics"
+    || text === "sundry"
+  ) {
+    return true;
+  }
+  if (/^location\b/.test(text)) return true;
+  // Whole label is a city or godown title (RIYADH, RIYADH W/H 1). Product names that
+  // merely mention a city (e.g. "Only Riyadh") must stay as items.
+  if (!normalizeEodCity(raw)) return false;
+  const remainder = text
+    .replace(/\b(riyadh|riyad|ruh|dammam|damman|dmm|jeddah|jedda|jiddah|jed)\b/g, " ")
+    .replace(/\b(w\s*h|wh|warehouse|godown|region)\b/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return !remainder;
 }
 
 function addMeasure(target, measure, amount) {
@@ -360,7 +427,7 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
 
   function ensureItem(code, name, unit) {
     const key = String(code || "").trim().toUpperCase() || String(name || "").trim().toUpperCase().replace(/\s+/g, " ");
-    if (!key || isTotalLabel(key) || isTotalLabel(name)) return null;
+    if (!key || isEodStockSectionLabel(key) || isEodStockSectionLabel(name)) return null;
     if (!items.has(key)) {
       items.set(key, {
         itemCode: key,
@@ -546,14 +613,126 @@ function mergeStockRows(baseRows, incomingRows, citiesPresent) {
   return rows;
 }
 
+function uniqueCities(values) {
+  const seen = new Set();
+  const out = [];
+  (values || []).forEach((city) => {
+    const normalized = normalizeEodCity(city) || String(city || "").trim().toLowerCase();
+    if (!EOD_STOCK_CITIES.includes(normalized) || seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  return out;
+}
+
+function countPositiveCityItems(rows, city) {
+  return (rows || []).reduce((count, row) => (
+    roundEodQty(row?.cities?.[city]?.qty || 0) > 0 ? count + 1 : count
+  ), 0);
+}
+
+/** Infer Riyadh/Dammam/Jeddah from an uploaded Excel file name (dammam1, Riyadh.xlsx, …). */
+export function inferEodCityFromFileName(fileName) {
+  const base = String(fileName || "")
+    .trim()
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.(xlsx|xls)$/i, "");
+  const text = normalizeImportHeader(base);
+  if (!text) return "";
+  if (/(?:^|[^a-z])(?:riyadh|riyad|ruh)(?:[^a-z]|$)/.test(` ${text} `)) return "riyadh";
+  if (/(?:^|[^a-z])(?:dammam|damman|damma|damm|dmm)(?:[^a-z]|$)/.test(` ${text} `)) return "dammam";
+  if (/(?:^|[^a-z])(?:jeddah|jedda|jiddah|jed)(?:[^a-z]|$)/.test(` ${text} `)) return "jeddah";
+  return normalizeEodCity(base);
+}
+
+export function emptyEodCityUploads() {
+  return {
+    riyadh: null,
+    dammam: null,
+    jeddah: null,
+  };
+}
+
+export function readEodCityUploads(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const out = emptyEodCityUploads();
+  EOD_STOCK_CITIES.forEach((city) => {
+    const entry = source[city];
+    if (!entry || typeof entry !== "object") return;
+    const filePath = String(entry.filePath || "").trim();
+    const fileName = String(entry.fileName || "").trim();
+    if (!filePath && !fileName) return;
+    out[city] = {
+      fileName,
+      filePath,
+      uploadedAt: String(entry.uploadedAt || "").trim(),
+      stockDate: String(entry.stockDate || "").trim(),
+      itemCount: Math.max(0, Number(entry.itemCount) || 0),
+      canDownload: Boolean(filePath),
+    };
+  });
+  return out;
+}
+
+export function mergeEodCityUploads(previousUploads, citiesPresent, fileMeta = {}) {
+  const next = readEodCityUploads(previousUploads);
+  const cities = uniqueCities(citiesPresent);
+  if (!cities.length) return next;
+
+  const fileName = String(fileMeta.fileName || "").trim();
+  const filePath = String(fileMeta.filePath || "").trim();
+  const uploadedAt = String(fileMeta.uploadedAt || "").trim();
+  const stockDate = String(fileMeta.stockDate || "").trim();
+  const itemCounts = fileMeta.itemCounts && typeof fileMeta.itemCounts === "object"
+    ? fileMeta.itemCounts
+    : {};
+
+  cities.forEach((city) => {
+    next[city] = {
+      fileName,
+      filePath,
+      uploadedAt,
+      stockDate,
+      itemCount: Math.max(0, Number(itemCounts[city]) || Number(fileMeta.itemCount) || 0),
+      canDownload: Boolean(filePath),
+    };
+  });
+  return next;
+}
+
+export function summarizeEodCityUploads(dataset) {
+  const source = dataset && typeof dataset === "object" ? dataset : {};
+  const uploads = readEodCityUploads(source.cityUploads);
+  // Legacy datasets only kept the latest file pointer — still show it on matching cities.
+  if (!EOD_STOCK_CITIES.some((city) => uploads[city])) {
+    const legacyPath = String(source.filePath || "").trim();
+    const legacyName = String(source.fileName || "").trim();
+    const inferred = inferEodCityFromFileName(legacyName) || uniqueCities(source.citiesPresent)[0] || "";
+    if (legacyPath && inferred) {
+      uploads[inferred] = {
+        fileName: legacyName,
+        filePath: legacyPath,
+        uploadedAt: String(source.uploadedAt || "").trim(),
+        stockDate: String(source.stockDate || "").trim(),
+        itemCount: countPositiveCityItems(source.rows, inferred),
+        canDownload: true,
+      };
+    }
+  }
+  return uploads;
+}
+
 export function applyEodStockUpload(previousDataset, parsed) {
   const previous = previousDataset && typeof previousDataset === "object" ? previousDataset : {};
   const stockDate = parsed.stockDate;
   const fullFile = EOD_STOCK_CITIES.every((city) => parsed.citiesPresent.includes(city));
-  const canCarryCities = Boolean(previous.stockDate) && stockDate >= previous.stockDate && !fullFile;
+  // One-city / two-city files always keep the other cities from the current snapshot,
+  // even when the incoming stock date is older than the snapshot date.
+  const canCarryCities = !fullFile && Array.isArray(previous.rows) && previous.rows.length > 0;
   const baseRows = canCarryCities ? (previous.rows || []) : [];
   let previousStockDate = "";
   let previousRows = [];
+  let nextStockDate = stockDate;
 
   if (previous.stockDate && stockDate > previous.stockDate) {
     previousStockDate = previous.stockDate;
@@ -561,19 +740,33 @@ export function applyEodStockUpload(previousDataset, parsed) {
   } else if (previous.stockDate && stockDate === previous.stockDate) {
     previousStockDate = previous.previousStockDate || "";
     previousRows = previous.previousRows || [];
+  } else if (previous.stockDate && stockDate < previous.stockDate && canCarryCities) {
+    // Partial older file: keep the snapshot's stock date and day-over-day baseline.
+    nextStockDate = previous.stockDate;
+    previousStockDate = previous.previousStockDate || "";
+    previousRows = previous.previousRows || [];
   }
 
+  const rows = mergeStockRows(baseRows, parsed.rows, parsed.citiesPresent);
+  const citiesPresent = canCarryCities
+    ? uniqueCities([
+      ...(previous.citiesPresent || []),
+      ...EOD_STOCK_CITIES.filter((city) => countPositiveCityItems(rows, city) > 0),
+      ...(parsed.citiesPresent || []),
+    ])
+    : uniqueCities(parsed.citiesPresent);
+
   return {
-    stockDate,
+    stockDate: nextStockDate,
     previousStockDate,
-    rows: mergeStockRows(baseRows, parsed.rows, parsed.citiesPresent),
+    rows,
     previousRows: previousStockDate ? previousRows.map((row) => ({
       itemCode: row.itemCode,
       itemName: row.itemName,
       unit: row.unit || "",
       cities: copyCities(row.cities),
     })) : [],
-    citiesPresent: parsed.citiesPresent,
+    citiesPresent,
   };
 }
 
@@ -590,20 +783,36 @@ export function summarizeEodStock(dataset) {
     dammam: { qty: 0, value: 0 },
     jeddah: { qty: 0, value: 0 },
   };
+  const itemCounts = {
+    riyadh: 0,
+    dammam: 0,
+    jeddah: 0,
+  };
   (source.rows || []).forEach((row) => {
     EOD_STOCK_CITIES.forEach((city) => {
-      totals[city].qty = roundEodQty(totals[city].qty + (row.cities?.[city]?.qty || 0));
+      const qty = roundEodQty(row.cities?.[city]?.qty || 0);
+      totals[city].qty = roundEodQty(totals[city].qty + qty);
       totals[city].value = roundEodQty(totals[city].value + (row.cities?.[city]?.value || 0));
+      if (qty > 0) itemCounts[city] += 1;
     });
+  });
+  const cityUploads = summarizeEodCityUploads(source);
+  EOD_STOCK_CITIES.forEach((city) => {
+    if (cityUploads[city] && !cityUploads[city].itemCount) {
+      cityUploads[city] = { ...cityUploads[city], itemCount: itemCounts[city] };
+    }
   });
   return {
     stockDate: source.stockDate || "",
     previousStockDate: source.previousStockDate || "",
     uploadedAt: source.uploadedAt || "",
     fileName: source.fileName || "",
-    canDownload: Boolean(String(source.filePath || "").trim()),
+    canDownload: Boolean(String(source.filePath || "").trim())
+      || EOD_STOCK_CITIES.some((city) => cityUploads[city]?.canDownload),
     itemCount: Array.isArray(source.rows) ? source.rows.length : 0,
     cities: totals,
+    cityItemCounts: itemCounts,
+    cityUploads,
   };
 }
 
@@ -768,17 +977,33 @@ export function availableEodStockQty(availability, pricingRegion, itemCode) {
 }
 
 /**
- * Catalogue browse/export: keep the item when no EOD snapshot is loaded, or when
- * the latest city qty for the pricing region is strictly greater than zero.
+ * Countrywide (Riyadh + Dammam + Jeddah) available qty for an item.
+ * Returns null when no end-of-day stock snapshot is loaded.
  */
-export function hasPositiveEodStockQty(availability, pricingRegion, itemCode) {
-  const available = availableEodStockQty(availability, pricingRegion, itemCode);
+export function countryEodStockQty(availability, itemCode) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return null;
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return 0;
+  let total = 0;
+  for (const city of EOD_STOCK_CITIES) {
+    total += Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+  }
+  return roundEodQty(total);
+}
+
+/**
+ * Catalogue browse/export: keep the item when no EOD snapshot is loaded, or when
+ * countrywide qty (any city) is strictly greater than zero.
+ */
+export function hasPositiveCountryEodStockQty(availability, itemCode) {
+  const available = countryEodStockQty(availability, itemCode);
   if (available == null) return true;
   return available > 0;
 }
 
-export function filterItemsWithPositiveEodStock(items, availability, pricingRegion) {
-  return (items || []).filter((item) => hasPositiveEodStockQty(availability, pricingRegion, item?.item_code));
+export function filterItemsWithPositiveCountryEodStock(items, availability) {
+  return (items || []).filter((item) => hasPositiveCountryEodStockQty(availability, item?.item_code));
 }
 
 export function isEodStockQtyOverAvailable(orderedQty, available) {
@@ -787,25 +1012,59 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   return Number.isFinite(qty) && qty > available;
 }
 
+const EOD_CITY_SHORT = {
+  riyadh: "R",
+  dammam: "D",
+  jeddah: "J",
+};
+
+/**
+ * Compact city stock fragments, e.g. "R:30 D:6 J:0".
+ * Empty when no EOD snapshot is loaded or the item code is blank.
+ */
+export function formatEodStockCityBreakdown(availability, itemCode) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return "";
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return "";
+  return EOD_STOCK_CITIES.map((city) => {
+    const qty = Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+    return `${EOD_CITY_SHORT[city]}:${formatEodQty(qty)}`;
+  }).join(" ");
+}
+
 /**
  * Label beside order qty. Keeps the last uploaded stock qty until a newer import replaces it.
- * Shows the stock date when that snapshot is older than 24 hours. Warns when ordered qty exceeds available.
+ * Shows country total plus city breakdown (R:/D:/J:), stock date when older than 24 hours,
+ * and warns when ordered qty exceeds available.
  */
-export function formatEodStockAvailableLabel(available, language = "en", orderedQty = null, availability = null, nowMs = Date.now()) {
+export function formatEodStockAvailableLabel(
+  available,
+  language = "en",
+  orderedQty = null,
+  availability = null,
+  itemCode = "",
+  nowMs = Date.now(),
+) {
   if (available == null) return "";
   const qtyText = formatEodQty(available);
   const stock = normalizeEodStockAvailability(availability);
   const stale = isEodStockOlderThanHours(stock, 24, nowMs);
   const asOf = stale ? formatEodStockAsOfDate(stock.stockDate, language) : "";
+  const cities = formatEodStockCityBreakdown(availability, itemCode);
   const over = isEodStockQtyOverAvailable(orderedQty, available);
 
   if (language === "ar") {
-    let label = asOf ? `المتاح: ${qtyText} · ${asOf}` : `المتاح: ${qtyText}`;
+    let label = `المتاح: ${qtyText}`;
+    if (cities) label = `${label} · ${cities}`;
+    if (asOf) label = `${label} · ${asOf}`;
     if (over) label = `${label} — أكثر من المخزون`;
     return label;
   }
 
-  let label = asOf ? `Available: ${qtyText} · ${asOf}` : `Available: ${qtyText}`;
+  let label = `Available: ${qtyText}`;
+  if (cities) label = `${label} · ${cities}`;
+  if (asOf) label = `${label} · ${asOf}`;
   if (over) label = `${label} — over stock`;
   return label;
 }

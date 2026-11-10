@@ -27,8 +27,8 @@ import {
   VALUE_DISCOUNT_SLABS,
 } from "../lib/regionalPricing";
 import {
-  availableEodStockQty,
-  filterItemsWithPositiveEodStock,
+  countryEodStockQty,
+  filterItemsWithPositiveCountryEodStock,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../lib/eodStock.js";
@@ -255,7 +255,7 @@ export default function ProductCatalogue({
     };
   }, [hydratePhotoUrls, publishMeta, refresh, rememberPhotoUrl]);
 
-  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code, eodStock]);
+  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
 
   async function upload(itemCode, file) {
     if (!file || !canManagePhotos || writeInFlight.current) return;
@@ -441,11 +441,10 @@ export default function ProductCatalogue({
     if (notice) await showPopup(notice);
   }
 
-  const stockedItems = filterItemsWithPositiveEodStock(items, eodStock, pricingRegion);
-  const pricedRecommendation = (list) => filterItemsWithPositiveEodStock(
+  const stockedItems = filterItemsWithPositiveCountryEodStock(items, eodStock);
+  const pricedRecommendation = (list) => filterItemsWithPositiveCountryEodStock(
     (list || []).filter((item) => hasCataloguePrice(priceList[item.item_code])),
     eodStock,
-    pricingRegion,
   );
   const {
     recommended: recommendedItems,
@@ -459,7 +458,7 @@ export default function ProductCatalogue({
     pricedRecommendation(notBoughtRecently),
     pricedRecommendation(buyingLess),
   );
-  const filteredCodes = new Set(items.map((item) => normalizeCatalogueCode(item.item_code)));
+  const filteredCodes = new Set(stockedItems.map((item) => normalizeCatalogueCode(item.item_code)));
   const recommendationRows = [...recommendedItems, ...staleItems, ...decliningItems];
   const catalogueExportCandidates = [
     ...recommendationRows.filter((item) => filteredCodes.has(normalizeCatalogueCode(item.item_code))),
@@ -780,8 +779,8 @@ export default function ProductCatalogue({
           const showVolumeDiscountRows = volumeSlabRows.length > 0;
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
-          const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
+          const availableStock = countryEodStockQty(eodStock, item.item_code);
+          const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
           const overStock = isEodStockQtyOverAvailable(qty, availableStock);
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment

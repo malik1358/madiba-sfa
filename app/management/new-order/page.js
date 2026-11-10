@@ -57,7 +57,13 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
+import {
+  createOrderPdfDocument,
+  enrichOrderPdfLiveData,
+  formatHistoryChange,
+  preloadOrderPdfLibrary,
+  resolveLiveOrderPdfSnapshot,
+} from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { resolveOrderMakerFromScope } from "../../lib/orderSalesman";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
@@ -72,15 +78,15 @@ import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClien
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
 import {
-  availableEodStockQty,
+  countryEodStockQty,
   formatEodStockAvailableLabel,
-  hasPositiveEodStockQty,
   isEodStockQtyOverAvailable,
 } from "../../lib/eodStock.js";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 const OUTSTANDING_API = "/api/outstanding";
+const PENDING_TALLY_RECEIPTS_API = "/api/customer-pending-tally-receipts";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -670,6 +676,7 @@ export default function NewOrderPage() {
     needsInvoiceRowsReupload: false,
     rowsCount: 0,
   });
+  const [pendingTallyReceipts, setPendingTallyReceipts] = useState([]);
   const [customerDocumentCompliance, setCustomerDocumentCompliance] = useState(null);
   const [accessScope, setAccessScope] = useState(null);
   const [orderBlock, setOrderBlock] = useState(null);
@@ -877,7 +884,6 @@ export default function NewOrderPage() {
 
     return mergedItemsMaster.filter((item) => {
       if (catalogueMode && !isVisibleCatalogueItem(item, regionPriceList[item.item_code])) return false;
-      if (catalogueMode && !hasPositiveEodStockQty(eodStock, pricingRegion, item.item_code)) return false;
       if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       return !q || (
@@ -886,7 +892,7 @@ export default function NewOrderPage() {
         String(item.category || "").toLowerCase().includes(q)
       );
     });
-  }, [mergedItemsMaster, categoryFilter, itemSearch, catalogueMode, regionPriceList, eodStock, pricingRegion]);
+  }, [mergedItemsMaster, categoryFilter, itemSearch, catalogueMode, regionPriceList]);
 
   const groupedItems = useMemo(() => {
     const map = new Map();
@@ -1117,6 +1123,9 @@ export default function NewOrderPage() {
           customer: outstandingInfo?.customer || null,
           customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
         },
+        // Prefetched with the customer so fast WhatsApp PDFs still show
+        // Receipts not yet in Tally even if the live enrich call fails.
+        pendingTallyReceipts: Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : [],
         visitDistance: visitDistance || null,
         workingHours: workingHours || null,
       };
@@ -1128,6 +1137,7 @@ export default function NewOrderPage() {
       orderSummary.itemCount,
       orderSummary.totalQuantity,
       outstandingInfo,
+      pendingTallyReceipts,
       creditApproval.remark,
       pricedOrderLines,
       paymentType,
@@ -1145,17 +1155,35 @@ export default function NewOrderPage() {
       setDownloadingPdf(true);
       try {
         if (options.fast) {
-          const orderNumber = formatSalesOrderNumberForDisplay(snapshot) || "syncing";
-          // Keep the already-loaded customer analytics so the Monthly Performance
-          // (historic sales) table still appears without waiting on live lookups.
-          const doc = await createOrderPdfDocument(snapshot, { analytics: analytics || null });
+          // Fast share still loads Receipts not yet in Tally (one light API). Skip
+          // outstanding/history/pricing refreshes so WhatsApp after save stays quick.
+          const supabase = getSupabaseClient();
+          const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+          let fastSnapshot = snapshot;
+          if (accessToken) {
+            try {
+              const enriched = await enrichOrderPdfLiveData(snapshot, {
+                accessToken,
+                analyticsFallback: analytics,
+                skipOutstanding: true,
+                skipHistory: true,
+                skipPricing: true,
+                skipPendingTallyReceipts: false,
+              });
+              fastSnapshot = enriched.snapshot;
+            } catch {
+              // Keep the local snapshot if pending Tally receipts cannot be refreshed.
+            }
+          }
+          const orderNumber = formatSalesOrderNumberForDisplay(fastSnapshot) || "syncing";
+          const doc = await createOrderPdfDocument(fastSnapshot, { analytics: analytics || null });
           const fileName = buildOrderPdfFileName({
             orderId: orderNumber,
-            customerCode: snapshot.customerCode,
+            customerCode: fastSnapshot.customerCode || snapshot.customerCode,
             savedAtIso: new Date().toISOString(),
-            pendingSync: isQueuedPendingOrderId(snapshot.orderId),
+            pendingSync: isQueuedPendingOrderId(fastSnapshot.orderId || snapshot.orderId),
           });
-          const summaryText = buildOrderWhatsappSummary(snapshot, language, {
+          const summaryText = buildOrderWhatsappSummary(fastSnapshot, language, {
             analytics: analytics || null,
           });
           const blob = doc.output("blob");
@@ -1164,7 +1192,7 @@ export default function NewOrderPage() {
             file: new File([blob], fileName, { type: "application/pdf" }),
             fileName,
             summaryText,
-            snapshot,
+            snapshot: fastSnapshot,
           };
         }
 
@@ -1225,10 +1253,16 @@ export default function NewOrderPage() {
     if (!snapshot) return;
 
     setMessage("");
-    setLastSavedOrder(snapshot);
+    const shareSnapshot = {
+      ...snapshot,
+      pendingTallyReceipts: Array.isArray(snapshot.pendingTallyReceipts) && snapshot.pendingTallyReceipts.length
+        ? snapshot.pendingTallyReceipts
+        : (Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : []),
+    };
+    setLastSavedOrder(shareSnapshot);
 
     const [prepared, isNative] = await Promise.all([
-      downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true }),
+      downloadOrderPdf(shareSnapshot, { returnFileOnly: true, fast: true }),
       isNativeMobilePlatform(),
     ]);
     if (prepared?.snapshot) {
@@ -1251,7 +1285,7 @@ export default function NewOrderPage() {
       whatsappFile: prepared.file,
       autoShareWhatsapp: isNative || queued,
     });
-  }, [downloadOrderPdf, language, showPopup]);
+  }, [downloadOrderPdf, language, pendingTallyReceipts, showPopup]);
 
   const handleSaveDraft = useCallback(async () => {
     const saved = await saveDraft({ silent: true });
@@ -1280,6 +1314,7 @@ export default function NewOrderPage() {
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
+
 
   const handleSubmitOrder = useCallback(async () => {
     const saved = await submitOrder({
@@ -1392,6 +1427,42 @@ export default function NewOrderPage() {
       setOutstandingLoading(false);
     }
   }, [setError]);
+
+  const fetchPendingTallyReceiptsForCustomer = useCallback(async (customer) => {
+    if (!customer?.customer_code) {
+      setPendingTallyReceipts([]);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) {
+        setPendingTallyReceipts([]);
+        return;
+      }
+
+      const response = await fetch(
+        `${PENDING_TALLY_RECEIPTS_API}?customerCode=${encodeURIComponent(customer.customer_code || "")}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        setPendingTallyReceipts([]);
+        return;
+      }
+      setPendingTallyReceipts(
+        Array.isArray(payload.pendingTallyReceipts) ? payload.pendingTallyReceipts : [],
+      );
+    } catch {
+      setPendingTallyReceipts([]);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadOrderBlockStatus() {
@@ -1751,6 +1822,10 @@ export default function NewOrderPage() {
   useEffect(() => {
     fetchOutstandingForCustomer(selectedCustomer);
   }, [fetchOutstandingForCustomer, selectedCustomer]);
+
+  useEffect(() => {
+    fetchPendingTallyReceiptsForCustomer(selectedCustomer);
+  }, [fetchPendingTallyReceiptsForCustomer, selectedCustomer]);
 
   useEffect(() => {
     fetchCustomerDocuments(selectedCustomer);
@@ -2229,8 +2304,8 @@ export default function NewOrderPage() {
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
-                              const availableStock = availableEodStockQty(eodStock, pricingRegion, item.item_code);
-                              const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock);
+                              const availableStock = countryEodStockQty(eodStock, item.item_code);
+                              const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
                               const overStock = isEodStockQtyOverAvailable(qty, availableStock);
 
                               return (

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { EOD_STOCK_DATASET_KEY } from "../../lib/eodStock.js";
+import {
+  EOD_STOCK_CITIES,
+  EOD_STOCK_DATASET_KEY,
+  normalizeEodCity,
+  summarizeEodCityUploads,
+} from "../../lib/eodStock.js";
 import { OUTSTANDING_DATASET_KEY } from "../../lib/outstanding";
 import { RECEIPT_DATASET_KEY } from "../../lib/receiptRegister.js";
 import {
@@ -54,7 +59,7 @@ async function resolveProfile(admin, token) {
   };
 }
 
-async function resolveUploadMeta(admin, kind) {
+async function resolveUploadMeta(admin, kind, city = "") {
   if (kind === "sales") {
     return readSalesUploadFileMeta(admin);
   }
@@ -87,6 +92,16 @@ async function resolveUploadMeta(admin, kind) {
     if (error) throw error;
 
     const parsed = parseJson(data?.setting_value);
+    const normalizedCity = normalizeEodCity(city) || String(city || "").trim().toLowerCase();
+    if (normalizedCity && EOD_STOCK_CITIES.includes(normalizedCity)) {
+      const cityUpload = summarizeEodCityUploads(parsed || {})[normalizedCity];
+      return parseUploadFileMeta({
+        kind: "eod-stock",
+        fileName: cityUpload?.fileName || "",
+        filePath: cityUpload?.filePath || "",
+        uploadedAt: cityUpload?.uploadedAt || "",
+      });
+    }
     return parseUploadFileMeta({
       kind: "eod-stock",
       fileName: parsed?.fileName || "",
@@ -138,13 +153,17 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
+    const city = String(url.searchParams.get("city") || "").trim().toLowerCase();
     const metaOnly = url.searchParams.get("meta") === "1";
 
     if (!["sales", "outstanding", "receipt", "eod-stock"].includes(kind)) {
       return NextResponse.json({ success: false, error: "kind must be sales, outstanding, receipt, or eod-stock." }, { status: 400 });
     }
+    if (city && (kind !== "eod-stock" || !EOD_STOCK_CITIES.includes(normalizeEodCity(city) || city))) {
+      return NextResponse.json({ success: false, error: "city must be riyadh, dammam, or jeddah for eod-stock." }, { status: 400 });
+    }
 
-    const meta = await resolveUploadMeta(admin, kind);
+    const meta = await resolveUploadMeta(admin, kind, city);
 
     if (metaOnly) {
       return NextResponse.json({

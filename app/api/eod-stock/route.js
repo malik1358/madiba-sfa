@@ -6,10 +6,12 @@ import {
   applyEodStockUpload,
   buildEodStockReportRows,
   eodCityLabel,
+  mergeEodCityUploads,
   parseEodStockSheets,
   readEodStockDataset,
   summarizeEodStock,
 } from "../../lib/eodStock.js";
+import { repairEodStockDatasetFromCityFiles } from "../../lib/eodStockServer.js";
 import { canViewManagementReports, isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
@@ -76,6 +78,14 @@ async function loadDataset(admin) {
   }
 }
 
+async function saveDataset(admin, payload) {
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: EOD_STOCK_DATASET_KEY,
+    setting_value: JSON.stringify(payload),
+  }, { onConflict: "setting_key" });
+  if (error) throw error;
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -86,7 +96,25 @@ export async function GET(request) {
     const access = await requireImportAccess(admin, request);
     if (access.error) return access.error;
 
-    const dataset = await loadDataset(admin);
+    let dataset = await loadDataset(admin);
+    try {
+      const repaired = await repairEodStockDatasetFromCityFiles(admin, dataset);
+      if (repaired.changed) {
+        dataset = {
+          ...repaired.dataset,
+          uploadedAt: repaired.dataset.uploadedAt || dataset.uploadedAt || new Date().toISOString(),
+          fileName: repaired.dataset.fileName || dataset.fileName || "",
+          filePath: repaired.dataset.filePath || dataset.filePath || "",
+          uploadedBy: repaired.dataset.uploadedBy || dataset.uploadedBy || access.profile.id,
+        };
+        await saveDataset(admin, dataset);
+      } else {
+        dataset = repaired.dataset;
+      }
+    } catch (repairError) {
+      console.error("Could not repair end-of-day stock city files:", repairError);
+    }
+
     const summary = summarizeEodStock(dataset);
     const url = new URL(request.url);
     const summaryOnly = ["1", "true", "yes"].includes(String(url.searchParams.get("summary") || "").trim().toLowerCase());
@@ -162,6 +190,14 @@ export async function POST(request) {
 
     const previous = await loadDataset(admin);
     const applied = applyEodStockUpload(previous, parsed);
+    const summaryPreview = summarizeEodStock({ rows: applied.rows });
+    const cityUploads = mergeEodCityUploads(previous.cityUploads, parsed.citiesPresent, {
+      fileName,
+      filePath: storedFilePath,
+      uploadedAt: nowIso,
+      stockDate: applied.stockDate,
+      itemCounts: summaryPreview.cityItemCounts,
+    });
     const payload = {
       uploadedAt: nowIso,
       fileName,
@@ -172,16 +208,13 @@ export async function POST(request) {
       citiesPresent: applied.citiesPresent,
       rows: applied.rows,
       previousRows: applied.previousRows,
+      cityUploads,
       skippedZero: parsed.skippedZero || 0,
       skippedUnknownCity: parsed.skippedUnknownCity || 0,
       skippedOtherDates: parsed.skippedOtherDates || 0,
     };
 
-    const { error: upsertError } = await admin.from("system_settings").upsert({
-      setting_key: EOD_STOCK_DATASET_KEY,
-      setting_value: JSON.stringify(payload),
-    }, { onConflict: "setting_key" });
-    if (upsertError) throw upsertError;
+    await saveDataset(admin, payload);
 
     const summary = summarizeEodStock(payload);
     const cityNames = applied.citiesPresent.map(eodCityLabel).filter(Boolean).join(", ");

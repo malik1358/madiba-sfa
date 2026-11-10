@@ -890,6 +890,61 @@ test("enrichOrderPdfLiveData fills the shop name for a live PROSPECT id", async 
   }
 });
 
+test("enrichOrderPdfLiveData fast-share skips keep pending Tally receipts", async () => {
+  const originalFetch = global.fetch;
+  const fetched = [];
+  global.fetch = async (url) => {
+    const href = String(url);
+    fetched.push(href);
+    if (href.includes("/api/customer-pending-tally-receipts")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          pendingTallyReceipts: [
+            {
+              visitDate: "2026-11-08",
+              receiptMode: "CASH",
+              amountReceived: 685,
+            },
+          ],
+        }),
+      };
+    }
+    if (href.includes("/api/outstanding") || href.includes("/api/customer-history") || href.includes("/api/pricing/cache")) {
+      assert.fail(`unexpected live lookup during fast share: ${href}`);
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const { snapshot } = await enrichOrderPdfLiveData({
+      orderId: "ABA119",
+      customerCode: "1005",
+      customerName: "Abdullah bin mousa al kabbi",
+      lines: [{ item_code: "A1", quantity: 1, rate: 10, lineValue: 10 }],
+      outstanding: {
+        bucketLabels: [">120"],
+        customer: { total_outstanding: 685 },
+        customerInvoices: [],
+      },
+      pendingTallyReceipts: [],
+    }, {
+      accessToken: "token",
+      skipOutstanding: true,
+      skipHistory: true,
+      skipPricing: true,
+      skipPendingTallyReceipts: false,
+    });
+
+    assert.equal(snapshot.pendingTallyReceipts.length, 1);
+    assert.equal(snapshot.pendingTallyReceipts[0].amountReceived, 685);
+    assert.ok(fetched.some((url) => url.includes("/api/customer-pending-tally-receipts")));
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("enrichOrderPdfLiveData with skipPricing refreshes outstanding and keeps saved item qty price", async () => {
   const originalFetch = global.fetch;
   global.fetch = async (url) => {

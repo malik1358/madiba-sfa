@@ -519,6 +519,8 @@ test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches th
   // Atlalt Albina. Payment 117 is five days before Purchase 29. Leaving it
   // unadjusted lets later payments close the wrong purchases, and Machine Open
   // on NFD/1815 falls to about 11,302 instead of the ledger balance 21,398.08.
+  // June 2025 NSTC JVs coded under the party name must match the account but
+  // must not prepaid-FIFO onto Nov 2025+ sales (that cut open by 712.68).
   const transactions = [
     { transaction_date: "2025-11-26", voucher_number: "1929", voucher_type: "Sales", sales_amount: 1560, category: "Sundry", item_code: "A004192" },
     { transaction_date: "2025-11-26", voucher_number: "1929", voucher_type: "Sales", sales_amount: 780, category: "Sundry", item_code: "A004193" },
@@ -528,6 +530,9 @@ test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches th
     { transaction_date: "2026-09-21", voucher_number: "NFD/1815", voucher_type: "SALES-NON FOOD DIVISION", sales_amount: 21500, category: "Building Material", item_code: "A004403" },
   ];
   const receipts = [
+    { receipt_date: "2025-06-14", customer_code: "ATLALT ALBINA CO.", customer_name: "Atlalt Albina Co.", particulars: "1620 Atlalt Albina Co.", vch_type: "NSTC JV", vch_no: "00072", amount: 356.34 },
+    { receipt_date: "2025-06-19", customer_code: "ATLALT ALBINA CO.", customer_name: "Atlalt Albina Co.", particulars: "1620 Atlalt Albina Co.", vch_type: "NSTC JV", vch_no: "00068", amount: 356 },
+    { receipt_date: "2025-06-19", customer_code: "ATLALT ALBINA CO.", customer_name: "Atlalt Albina Co.", particulars: "1620 Atlalt Albina Co.", vch_type: "NSTC JV", vch_no: "00077", amount: 0.34 },
     { receipt_date: "2026-01-20", vch_type: "Payment", vch_no: "117", amount: -36855 },
     { receipt_date: "2026-01-25", vch_type: "Purchase", vch_no: "29", amount: 90644.15 },
     { receipt_date: "2026-02-11", vch_type: "Purchase", vch_no: "50", amount: 322 },
@@ -560,6 +565,11 @@ test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches th
   const open = matched.invoices.find((row) => row.voucher_number === "NFD/1815");
   assert.equal(Number(open.remaining.toFixed(2)), 21398.08);
   assert.ok(matched.invoices.filter((row) => row.voucher_number !== "NFD/1815").every((row) => row.remaining <= 0.009));
+  assert.equal(Number(matched.unmatchedReceiptAmount.toFixed(2)), 712.68);
+  assert.equal(
+    matched.allocations.filter((row) => ["00072", "00068", "00077"].includes(row.vch_no)).length,
+    0,
+  );
 
   const ledger = buildPaymentSettlementLedger({ transactions, receipts, todayIso: "2026-11-06" });
   const paymentDay = ledger.datewise.find((day) => day.date === "2026-01-20");
@@ -578,6 +588,38 @@ test("customer 1620 Payment 117 settles Purchase 29 and the open sale matches th
   const purchase29 = ledger.datewise.find((day) => day.date === "2026-01-25").purchases[0];
   assert.ok(purchase29.applications.every((row) => row.target_kind === "payment"));
   assert.ok(purchase29.applications.some((row) => row.voucher_number === "117"));
+
+  const nstcDay = ledger.datewise.find((day) => day.date === "2025-06-14");
+  const nstc = nstcDay.receipts.find((row) => row.vch_no === "00072");
+  assert.equal((nstc.applications || []).length, 0);
+});
+
+test("a receipt months before the first sales invoice stays unmatched and does not prepaid later sales", () => {
+  const { invoices, allocations, unmatchedReceiptAmount } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-03-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-06-01", voucher_number: "S2", sales_amount: 500, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2025-12-01", amount: 200, vch_no: "PRE", vch_type: "NSTC JV" },
+      { receipt_date: "2026-03-15", amount: 1150, vch_no: "R1", vch_type: "Receipt" },
+    ],
+  );
+  assert.equal(Number(unmatchedReceiptAmount.toFixed(2)), 200);
+  assert.equal(allocations.filter((row) => row.vch_no === "PRE").length, 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "S1").remaining.toFixed(2)), 0);
+  assert.equal(Number(invoices.find((row) => row.voucher_number === "S2").remaining.toFixed(2)), 575);
+});
+
+test("a short advance receipt onto the first sales invoice still settles", () => {
+  const { invoices, allocations, unmatchedReceiptAmount } = matchPaymentsFifo(
+    [{ transaction_date: "2026-03-20", voucher_number: "S1", sales_amount: 1000, category: "Paper" }],
+    [{ receipt_date: "2026-03-10", amount: 1150, vch_no: "ADV", vch_type: "Receipt" }],
+  );
+  assert.ok(unmatchedReceiptAmount <= 0.01);
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].vch_no, "ADV");
+  assert.ok(invoices[0].remaining <= 0.009);
 });
 
 test("a Payment does not settle a Purchase more than 31 days later", () => {

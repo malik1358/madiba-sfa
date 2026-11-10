@@ -148,8 +148,8 @@ function cacheKeyFor(customerCode, scope, { fullHistory = false } = {}) {
   }
 
   const historySuffix = fullHistory ? ":full" : "";
-  // s25: party-name-as-code receipts (1620 NSTC under ATLALT ALBINA CO.) match.
-  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}:s25${historySuffix}`;
+  // s26: pre-history receipts (before first sale) stay unmatched — 1620 NSTC JVs.
+  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}:s26${historySuffix}`;
 }
 
 function parseJson(value) {

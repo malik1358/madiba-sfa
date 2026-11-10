@@ -58,9 +58,11 @@ import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSug
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 import {
+  collectPreviouslySuppliedItemCodes,
   createOrderPdfDocument,
   enrichOrderPdfLiveData,
   formatHistoryChange,
+  markOrderPdfLinesPreviouslySupplied,
   preloadOrderPdfLibrary,
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
@@ -72,7 +74,7 @@ import { buildSettlementCustomerHistoryUrl } from "../../lib/customerHistoryApi"
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber, formatSalesOrderNumberForDisplay } from "../../lib/salesOrderNumber";
-import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { formatKsaDateTime, getKsaDateString } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, cashOrderAllowedDespiteBlockMessage, isSalesOrderSubmissionBlocked, resolveDisplayedOrderBlock, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 import ProductCatalogue from "../../components/ProductCatalogue";
@@ -1095,7 +1097,10 @@ export default function NewOrderPage() {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
-      const lines = pricedOrderLines;
+      const previouslySuppliedCodes = collectPreviouslySuppliedItemCodes(transactions, {
+        beforeDate: getKsaDateString(new Date(savedAtIso)),
+      });
+      const lines = markOrderPdfLinesPreviouslySupplied(pricedOrderLines, previouslySuppliedCodes);
       const totals = summarizePricedLines(lines);
       const orderMaker = resolveOrderMakerFromScope(accessScope);
 
@@ -1144,6 +1149,7 @@ export default function NewOrderPage() {
       pricingRegion,
       pricingType,
       selectedCustomer,
+      transactions,
       visibleOutstandingBuckets,
     ]
   );

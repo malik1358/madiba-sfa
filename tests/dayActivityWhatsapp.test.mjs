@@ -78,6 +78,25 @@ test("resolveDayActivityTillMessage counts visits orders and collections includi
   assert.equal(stats.collectionValue, 750);
 });
 
+test("resolveDayActivityTillMessage counts collection visits without payment", () => {
+  const stats = resolveDayActivityTillMessage({
+    entries: [],
+    untilAt: "2026-11-10T14:03:00.000Z",
+    currentEntry: {
+      transactionType: "COLLECTION_VISIT",
+      customerCode: "1130C",
+      amountReceived: 0,
+      visitOutcome: "RESPONSIBLE_NOT_AVAILABLE",
+      savedAt: "2026-11-10T14:03:00.000Z",
+    },
+  });
+
+  assert.equal(stats.collectionCount, 1);
+  assert.equal(stats.collectionValue, 0);
+  assert.equal(stats.visitWithoutOrderCount, 0);
+  assert.equal(stats.orderCount, 0);
+});
+
 test("resolveDayActivityTillMessage includes current submitted order value", () => {
   const stats = resolveDayActivityTillMessage({
     entries: [

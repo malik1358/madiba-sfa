@@ -3,19 +3,24 @@ import assert from "node:assert/strict";
 
 import {
   buildOrderPdfSnapshotFromSavedOrder,
+  collectPreviouslySuppliedItemCodes,
   enrichOrderPdfLiveData,
   formatHistoryChange,
   inferPricingFromHistory,
   mapSavedOrderLinesToPdfLines,
+  markOrderPdfLinesPreviouslySupplied,
   renderOrderPdfDocument,
   resolveLiveOrderPdfSnapshot,
 } from "../app/lib/orderPdfDocument.js";
 
 function createMockDoc() {
   const texts = [];
+  const styledTexts = [];
   let fontSize = 10;
+  let fontStyle = "normal";
   return {
     texts,
+    styledTexts,
     internal: {
       pageSize: {
         getWidth: () => 595.28,
@@ -25,7 +30,7 @@ function createMockDoc() {
     setFillColor() {},
     setDrawColor() {},
     setLineWidth() {},
-    setFont() {},
+    setFont(_name, style) { fontStyle = style || "normal"; },
     setFontSize(size) { fontSize = Number(size) || fontSize; },
     getFontSize() { return fontSize; },
     getTextWidth(text) { return String(text ?? "").length * fontSize * 0.5; },
@@ -51,7 +56,11 @@ function createMockDoc() {
       });
       return lines.length ? lines : [value];
     },
-    text(value) { texts.push(String(value)); },
+    text(value) {
+      const rendered = String(value);
+      texts.push(rendered);
+      styledTexts.push({ text: rendered, style: fontStyle });
+    },
   };
 }
 
@@ -1063,4 +1072,91 @@ test("enrichOrderPdfLiveData requests fullHistory for avg-days settlement ledger
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("collectPreviouslySuppliedItemCodes keeps only positive prior sales before the order date", () => {
+  const codes = collectPreviouslySuppliedItemCodes([
+    { item_code: "a003615", sales_amount: 97.75, transaction_date: "2026-10-01" },
+    { item_code: "A007084", sales_amount: -25.3, transaction_date: "2026-10-02" },
+    { item_code: "A004416", quantity: 2, sales_amount: 50, transaction_date: "2026-11-10" },
+    { item_code: "A003612", sales_amount: 109.25, transaction_date: "2026-11-09" },
+  ], { beforeDate: "2026-11-10" });
+
+  assert.equal(codes.has("A003615"), true);
+  assert.equal(codes.has("A003612"), true);
+  assert.equal(codes.has("A007084"), false);
+  assert.equal(codes.has("A004416"), false);
+});
+
+test("markOrderPdfLinesPreviouslySupplied flags related alias codes as repeats", () => {
+  const [repeatLine, newLine] = markOrderPdfLinesPreviouslySupplied(
+    [
+      { item_code: "A004555", item_name: "PAPER ALIAS" },
+      { item_code: "A009999", item_name: "NEW ITEM" },
+    ],
+    collectPreviouslySuppliedItemCodes([
+      { item_code: "A005425", sales_amount: 100, transaction_date: "2026-09-01" },
+    ])
+  );
+
+  assert.equal(repeatLine.previouslySupplied, true);
+  assert.equal(newLine.previouslySupplied, false);
+});
+
+test("renderOrderPdfDocument draws previously supplied item rows in bold", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 9001,
+    orderNumber: "9001",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-11-10T08:00:00.000Z",
+    customerCode: "1114C",
+    customerName: "Repeat Customer",
+    salesmanCode: "MOIN",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 2,
+    totalQuantity: 2,
+    grandTotal: 180,
+    totals: {
+      amountExclVat: 180,
+      vatAmount: 27,
+      amountInclVat: 207,
+    },
+    lines: [
+      {
+        item_code: "A003615",
+        item_name: "MADIBA TALC POWDER ( PRICKLY HEAT) - 150 GM 6PCS X 8PACK",
+        quantity: 1,
+        wholesaleRate: 85,
+        rate: 85,
+        lineValue: 85,
+        vatAmount: 12.75,
+        lineTotalInclVat: 97.75,
+        previouslySupplied: true,
+      },
+      {
+        item_code: "A009001",
+        item_name: "BRAND NEW ITEM NEVER SUPPLIED",
+        quantity: 1,
+        wholesaleRate: 95,
+        rate: 95,
+        lineValue: 95,
+        vatAmount: 14.25,
+        lineTotalInclVat: 109.25,
+        previouslySupplied: false,
+      },
+    ],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  const boldCodes = doc.styledTexts.filter((entry) => entry.style === "bold").map((entry) => entry.text);
+  const normalCodes = doc.styledTexts.filter((entry) => entry.style === "normal").map((entry) => entry.text);
+
+  assert.ok(boldCodes.includes("A003615"));
+  assert.ok(boldCodes.some((text) => text.includes("MADIBA TALC POWDER")));
+  assert.ok(normalCodes.includes("A009001"));
+  assert.equal(boldCodes.includes("A009001"), false);
+  assert.ok(doc.texts.includes("Bold item rows were supplied to this customer before."));
 });

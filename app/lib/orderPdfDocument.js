@@ -1,4 +1,4 @@
-import { lookupPositiveRate } from "./itemCodeAliases.js";
+import { getRelatedItemCodes, lookupPositiveRate, normalizeItemCode } from "./itemCodeAliases.js";
 import { addPdfBuildFooter } from "./buildInfo.js";
 import { appendCreditControlRemarkToPdf } from "./creditApproval.js";
 import { appendMonthlyPerformanceToPdf } from "./orderPdfMonthlyPerformance.js";
@@ -46,7 +46,7 @@ import {
   parseProspectIdFromCustomerCode,
 } from "./prospects.js";
 import { installArabicPdfText, registerArabicPdfFont } from "./pdfArabicText.js";
-import { formatKsaDateTime } from "./workdayActivity.js";
+import { formatKsaDateTime, getKsaDateString } from "./workdayActivity.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -89,6 +89,102 @@ export function resolveOrderPdfDiscountVisibility(lines = [], totals = {}) {
     cash: rows.some(lineHasCashDiscount) || toAmount(totals.cashDiscountTotal) > 0,
     value: rows.some(lineHasValueDiscount) || toAmount(totals.valueDiscountTotal) > 0,
     scheme: rows.some(lineHasSchemeDiscount) || toAmount(totals.schemeDiscountTotal) > 0,
+  };
+}
+
+export function isPositiveSalesPurchase(row) {
+  if (Number(row?.sales_amount || 0) > 0) return true;
+  if (Number(row?.line_value || 0) > 0) return true;
+  if (Number(row?.amount || 0) > 0) return true;
+  const quantity = Number(row?.quantity);
+  return Number.isFinite(quantity) && quantity > 0;
+}
+
+function orderPdfCutoffDate(value) {
+  if (!value) return null;
+  const asDate = value instanceof Date ? value : new Date(value);
+  if (Number.isFinite(asDate.getTime())) return getKsaDateString(asDate);
+  const text = String(value).trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : null;
+}
+
+export function collectPreviouslySuppliedItemCodes(transactions = [], { beforeDate = null } = {}) {
+  const codes = new Set();
+  const cutoff = orderPdfCutoffDate(beforeDate);
+  (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    if (!isPositiveSalesPurchase(row)) return;
+    if (cutoff) {
+      const txDate = String(row?.transaction_date || "").slice(0, 10);
+      if (txDate && txDate >= cutoff) return;
+    }
+    const code = normalizeItemCode(row?.item_code);
+    if (!code) return;
+    getRelatedItemCodes(code).forEach((related) => codes.add(related));
+  });
+  return codes;
+}
+
+export function collectPreviouslySuppliedItemCodesFromAnalytics(analytics) {
+  const codes = new Set();
+  const items = Array.isArray(analytics?.items) ? analytics.items : [];
+  items.forEach((item) => {
+    const code = normalizeItemCode(item?.item_code || item?.item_key);
+    if (!code) return;
+    getRelatedItemCodes(code).forEach((related) => codes.add(related));
+  });
+  Object.keys(analytics?.itemLookup || {}).forEach((key) => {
+    const code = normalizeItemCode(key);
+    if (!code) return;
+    getRelatedItemCodes(code).forEach((related) => codes.add(related));
+  });
+  return codes;
+}
+
+export function markOrderPdfLinesPreviouslySupplied(lines = [], previouslySuppliedCodes) {
+  const codeSet = previouslySuppliedCodes instanceof Set
+    ? previouslySuppliedCodes
+    : new Set(
+      [...(Array.isArray(previouslySuppliedCodes) ? previouslySuppliedCodes : [])]
+        .map((code) => normalizeItemCode(code))
+        .filter(Boolean)
+    );
+
+  return (Array.isArray(lines) ? lines : []).map((line) => {
+    const code = normalizeItemCode(line?.item_code);
+    const previouslySupplied = Boolean(
+      code && getRelatedItemCodes(code).some((related) => codeSet.has(related))
+    );
+    if (
+      line
+      && Object.prototype.hasOwnProperty.call(line, "previouslySupplied")
+      && Boolean(line.previouslySupplied) === previouslySupplied
+    ) {
+      return line;
+    }
+    return { ...line, previouslySupplied };
+  });
+}
+
+export function applyPreviouslySuppliedMarksToSnapshot(snapshot, {
+  transactions = null,
+  analytics = null,
+  beforeDate = null,
+} = {}) {
+  if (!snapshot) return snapshot;
+
+  let codes = null;
+  if (Array.isArray(transactions) && transactions.length) {
+    codes = collectPreviouslySuppliedItemCodes(transactions, {
+      beforeDate: beforeDate || snapshot.savedAtIso || null,
+    });
+  } else if (analytics) {
+    codes = collectPreviouslySuppliedItemCodesFromAnalytics(analytics);
+  }
+
+  if (!codes) return snapshot;
+  return {
+    ...snapshot,
+    lines: markOrderPdfLinesPreviouslySupplied(snapshot.lines || [], codes),
   };
 }
 
@@ -498,6 +594,12 @@ export async function enrichOrderPdfLiveData(snapshot, {
     }
   }
 
+  Object.assign(next, applyPreviouslySuppliedMarksToSnapshot(next, {
+    transactions: paymentHistory.transactions,
+    analytics,
+    beforeDate: next.savedAtIso || snapshot?.savedAtIso || null,
+  }));
+
   return { snapshot: next, analytics };
 }
 
@@ -586,8 +688,15 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const marginTop = 38;
   const contentWidth = pageWidth - marginX * 2;
   const tableStartX = marginX;
-  const pdfTotals = snapshot.totals || summarizePricedLines(snapshot.lines || []);
-  const subtotal = Number(pdfTotals.amountExclVat || snapshot.grandTotal || 0);
+  const hasExplicitPreviouslySuppliedMarks = (snapshot?.lines || []).some(
+    (line) => line && Object.prototype.hasOwnProperty.call(line, "previouslySupplied")
+  );
+  const markedSnapshot = hasExplicitPreviouslySuppliedMarks
+    ? snapshot
+    : applyPreviouslySuppliedMarksToSnapshot(snapshot, { analytics });
+  const orderLines = Array.isArray(markedSnapshot?.lines) ? markedSnapshot.lines : [];
+  const pdfTotals = markedSnapshot.totals || summarizePricedLines(orderLines);
+  const subtotal = Number(pdfTotals.amountExclVat || markedSnapshot.grandTotal || 0);
   const vatAmount = Number.isFinite(Number(pdfTotals.vatAmount))
     ? Number(pdfTotals.vatAmount)
     : subtotal * VAT_RATE;
@@ -595,8 +704,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ? Number(pdfTotals.amountInclVat)
     : subtotal + vatAmount;
   const vatLabel = formatOrderVatLabel(pdfTotals);
+  const hasPreviouslySuppliedLines = orderLines.some((line) => line?.previouslySupplied);
 
-  const discountVisibility = resolveOrderPdfDiscountVisibility(snapshot.lines || [], pdfTotals);
+  const discountVisibility = resolveOrderPdfDiscountVisibility(orderLines, pdfTotals);
   const columns = [
     { key: "item_code", label: "Code", width: 48, align: "left" },
     { key: "item_name", label: "Item", width: 0, align: "left" },
@@ -614,8 +724,8 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   itemColumn.width = Math.max(8, contentWidth - reservedWidth);
 
   const orderSummaryColumns = [
-    { label: "Items", value: String(snapshot.itemCount ?? (snapshot.lines || []).length), align: "left" },
-    { label: "Total Qty", value: formatQty(snapshot.totalQuantity), align: "left" },
+    { label: "Items", value: String(markedSnapshot.itemCount ?? orderLines.length), align: "left" },
+    { label: "Total Qty", value: formatQty(markedSnapshot.totalQuantity), align: "left" },
     { label: "Without VAT", value: formatMoneyAmount(subtotal), align: "left" },
     { label: vatLabel, value: formatMoneyAmount(vatAmount), align: "left" },
     { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
@@ -657,7 +767,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     return startY + 24;
   }
 
-  const orderNumberLabel = formatOrderPdfOrderNumberLabel(snapshot);
+  const orderNumberLabel = formatOrderPdfOrderNumberLabel(markedSnapshot);
 
   doc.setDrawColor(72, 110, 120);
   doc.setLineWidth(1);
@@ -675,22 +785,22 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
   doc.text(
-    `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)} | ${normalizePricingType(snapshot.pricingType).toUpperCase()}`,
+    `Status: ${markedSnapshot.statusLabel} | ${String(markedSnapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(markedSnapshot.pricingRegion)} | ${normalizePricingType(markedSnapshot.pricingType).toUpperCase()}`,
     marginX + 12,
     marginTop + 90
   );
 
   const rightColX = marginX + contentWidth - 210;
-  doc.text(`Date: ${formatKsaDateTime(snapshot.savedAtIso)}`, rightColX, marginTop + 24);
-  doc.text(`Salesman: ${formatOrderSalesmanLabel(snapshot)}`, rightColX, marginTop + 40);
+  doc.text(`Date: ${formatKsaDateTime(markedSnapshot.savedAtIso)}`, rightColX, marginTop + 24);
+  doc.text(`Salesman: ${formatOrderSalesmanLabel(markedSnapshot)}`, rightColX, marginTop + 40);
 
   doc.setLineWidth(0.8);
   doc.roundedRect(marginX, marginTop + 120, contentWidth, 56, 5, 5);
   doc.setFont(undefined, "bold");
   doc.text("Customer", marginX + 12, marginTop + 140);
   doc.setFont(undefined, "normal");
-  const customerCode = String(snapshot.customerCode || "").trim();
-  const customerName = String(snapshot.customerName || "").trim();
+  const customerCode = String(markedSnapshot.customerCode || "").trim();
+  const customerName = String(markedSnapshot.customerName || "").trim();
   const customerText = customerName ? `${customerCode} - ${customerName}` : customerCode;
   const customerLines = doc.splitTextToSize(customerText, contentWidth - 24);
   const customerLine1 = Array.isArray(customerLines) ? customerLines[0] : customerText;
@@ -718,7 +828,8 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   let y = drawTableHeader(marginTop + 242);
   doc.setFontSize(8);
 
-  (snapshot.lines || []).forEach((line) => {
+  orderLines.forEach((line) => {
+    const previouslySupplied = Boolean(line?.previouslySupplied);
     const rowValues = {
       item_code: String(line.item_code || "-"),
       item_name: String(line.item_name || "-"),
@@ -749,6 +860,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       doc.setFontSize(8);
     }
 
+    doc.setFont(undefined, previouslySupplied ? "bold" : "normal");
     let colX = tableStartX;
     columns.forEach((column) => {
       doc.rect(colX, y, column.width, rowHeight);
@@ -757,6 +869,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       });
       colX += column.width;
     });
+    doc.setFont(undefined, "normal");
 
     y += rowHeight;
   });
@@ -773,9 +886,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     }
   }
 
-  const outstandingCustomer = snapshot.outstanding?.customer || null;
-  const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
-  const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+  const outstandingCustomer = markedSnapshot.outstanding?.customer || null;
+  const outstandingBuckets = Array.isArray(markedSnapshot.outstanding?.bucketLabels) ? markedSnapshot.outstanding.bucketLabels : [];
+  const outstandingInvoices = Array.isArray(markedSnapshot.outstanding?.customerInvoices) ? markedSnapshot.outstanding.customerInvoices : [];
   const paymentBehavior = analytics?.paymentBehavior || null;
   const paymentBehaviorLines = [];
   const avgDaysLine = formatAvgDaysDualLine(paymentBehavior);
@@ -831,8 +944,8 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ? 14 + 10 + bucketRows.length * 18
     : 0;
   const hasOutstandingBuckets = bucketRows.length > 0;
-  const pendingTallyReceipts = Array.isArray(snapshot.pendingTallyReceipts)
-    ? snapshot.pendingTallyReceipts.slice(0, 8)
+  const pendingTallyReceipts = Array.isArray(markedSnapshot.pendingTallyReceipts)
+    ? markedSnapshot.pendingTallyReceipts.slice(0, 8)
     : [];
   const pendingTallyBlockHeight = pendingTallyReceipts.length > 0
     ? 12 + 14 + 10 + pendingTallyReceipts.length * 16 + 4
@@ -1022,14 +1135,14 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     cursorY = rowY + 16;
   }
 
-  if (Array.isArray(snapshot.history) && snapshot.history.length > 0) {
+  if (Array.isArray(markedSnapshot.history) && markedSnapshot.history.length > 0) {
     ensureSpace(24);
     doc.setFont(undefined, "bold");
     doc.text("Change History", marginX, cursorY);
     cursorY += 18;
     doc.setFont(undefined, "normal");
 
-    snapshot.history.slice(-6).forEach((entry) => {
+    markedSnapshot.history.slice(-6).forEach((entry) => {
       const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
       const label = `${when ? formatKsaDateTime(when) : "-"} • ${entry.action || "UPDATED"}`;
       const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
@@ -1051,7 +1164,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   }
 
   cursorY = appendCreditControlRemarkToPdf(doc, {
-    remark: snapshot.creditApprovalRemark,
+    remark: markedSnapshot.creditApprovalRemark,
     x: marginX,
     y: () => cursorY,
     maxWidth: contentWidth,
@@ -1076,16 +1189,21 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   doc.setFontSize(9);
-  ensureSpace(hasAnyDiscount ? 20 : 12);
-  doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
-  if (hasAnyDiscount) {
-    const discountNotes = [
-      discountVisibility.cash ? "Cash Disc is the sheet cash scheme." : "",
-      discountVisibility.value ? "Value Disc applies when the SKU value exceeds 5,000 ﷼." : "",
-      discountVisibility.scheme ? "Scheme is the mix carton offer on that line." : "",
-    ].filter(Boolean);
-    doc.text(discountNotes.join(" "), marginX, pageHeight - 24);
-  }
+  const footerNotes = [
+    "Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.",
+    hasPreviouslySuppliedLines ? "Bold item rows were supplied to this customer before." : "",
+    ...(hasAnyDiscount
+      ? [[
+        discountVisibility.cash ? "Cash Disc is the sheet cash scheme." : "",
+        discountVisibility.value ? "Value Disc applies when the SKU value exceeds 5,000 ﷼." : "",
+        discountVisibility.scheme ? "Scheme is the mix carton offer on that line." : "",
+      ].filter(Boolean).join(" ")]
+      : []),
+  ].filter(Boolean);
+  ensureSpace(12 + Math.max(0, footerNotes.length - 1) * 12);
+  footerNotes.forEach((note, index) => {
+    doc.text(note, marginX, pageHeight - 24 - ((footerNotes.length - 1 - index) * 12));
+  });
   addPdfBuildFooter(doc);
   return doc;
 }

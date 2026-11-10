@@ -59,6 +59,11 @@ import {
 } from "../../lib/avgDaysWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import {
+  buildCurrentDayActivityEntry,
+  loadDayActivityTillMessage,
+  DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+} from "../../lib/dayActivityWhatsapp";
+import {
   buildCurrentWorkingHoursEntry,
   loadWorkingHoursTillMessage,
   WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
@@ -1468,7 +1473,21 @@ export default function MyDayPage({ mode = "default" } = {}) {
       // Working hours still attempt a short timeline fetch so WhatsApp shows the
       // same near-stop total as Daily Visit Report, up to this visit.
       const customerCodeKey = String(customer.customer_code || "").trim().toUpperCase();
-      const [visitDistance, workingHours, avgDaysToPay] = await Promise.all([
+      const currentHoursEntry = buildCurrentWorkingHoursEntry({
+        transactionType: "VISIT_REPORT",
+        savedAt: capturedAt,
+        location,
+        customer,
+        customerCode: customer.customer_code,
+        customerGpsUpdateAccepted: gpsLocationUpdateAccepted,
+      });
+      const currentDayActivityEntry = buildCurrentDayActivityEntry({
+        transactionType: "VISIT_REPORT",
+        savedAt: capturedAt,
+        customer,
+        customerCode: customer.customer_code,
+      });
+      const [visitDistance, workingHours, dayActivity, avgDaysToPay] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -1483,14 +1502,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
           savedAt: capturedAt,
           skipTimeline: true,
           timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
-          currentEntry: buildCurrentWorkingHoursEntry({
-            transactionType: "VISIT_REPORT",
-            savedAt: capturedAt,
-            location,
-            customer,
-            customerCode: customer.customer_code,
-            customerGpsUpdateAccepted: gpsLocationUpdateAccepted,
-          }),
+          currentEntry: currentHoursEntry,
+        }),
+        loadDayActivityTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+          currentEntry: currentDayActivityEntry,
         }),
         resolveAvgDaysForWhatsapp({
           local: customer,
@@ -1525,6 +1545,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
         workingHours,
+        dayActivity,
         avgDaysToPay,
         // Previous near visit (before this save). Customer row is updated after.
         lastVisitAt: customer.last_visit_date || null,

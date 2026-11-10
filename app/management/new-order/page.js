@@ -1093,7 +1093,7 @@ export default function NewOrderPage() {
     : "";
 
   const buildOrderSnapshot = useCallback(
-    (orderId, statusLabel, orderNumber = "", visitDistance = null, workingHours = null) => {
+    (orderId, statusLabel, orderNumber = "", visitDistance = null, workingHours = null, dayActivity = null) => {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
@@ -1133,6 +1133,7 @@ export default function NewOrderPage() {
         pendingTallyReceipts: Array.isArray(pendingTallyReceipts) ? pendingTallyReceipts : [],
         visitDistance: visitDistance || null,
         workingHours: workingHours || null,
+        dayActivity: dayActivity || null,
       };
     },
     [
@@ -1303,6 +1304,7 @@ export default function NewOrderPage() {
       saved.orderNumber,
       saved.visitDistance,
       saved.workingHours,
+      saved.dayActivity,
     );
     if (!snapshot) return;
 
@@ -1335,6 +1337,7 @@ export default function NewOrderPage() {
       saved.orderNumber,
       saved.visitDistance,
       saved.workingHours,
+      saved.dayActivity,
     );
     if (!snapshot) return;
 

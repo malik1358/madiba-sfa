@@ -59,6 +59,11 @@ import {
   patchCollectionVisitSummaryVisitDistance,
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
+import {
+  buildCurrentDayActivityEntry,
+  loadDayActivityTillMessage,
+  patchWhatsappSummaryDayActivity,
+} from "../../lib/dayActivityWhatsapp.js";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
 import {
   buildCurrentWorkingHoursEntry,
@@ -1299,7 +1304,22 @@ export async function POST(request) {
           .maybeSingle();
         const location = { latitude, longitude };
         const customer = customerRow || {};
-        const [visitDistance, workingHours] = await Promise.all([
+        const currentHoursEntry = buildCurrentWorkingHoursEntry({
+          transactionType: "COLLECTION_VISIT",
+          savedAt: savedAtIso,
+          location,
+          customer,
+          customerCode,
+        });
+        const currentDayActivityEntry = buildCurrentDayActivityEntry({
+          transactionType: "COLLECTION_VISIT",
+          savedAt: savedAtIso,
+          customer,
+          customerCode,
+          amountReceived,
+          visitOutcome,
+        });
+        const [visitDistance, workingHours, dayActivity] = await Promise.all([
           loadVisitDistanceMetrics({
             supabase: admin,
             userId: user.id,
@@ -1311,33 +1331,51 @@ export async function POST(request) {
             supabase: admin,
             userId: user.id,
             savedAt: savedAtIso,
-            currentEntry: buildCurrentWorkingHoursEntry({
-              transactionType: "COLLECTION_VISIT",
-              savedAt: savedAtIso,
-              location,
-              customer,
-              customerCode,
-            }),
+            currentEntry: currentHoursEntry,
+          }),
+          loadDayActivityTillMessage({
+            supabase: admin,
+            userId: user.id,
+            savedAt: savedAtIso,
+            currentEntry: currentDayActivityEntry,
           }),
         ]);
         finalSummaryText = patchCollectionVisitSummaryVisitDistance(finalSummaryText, visitDistance);
         finalSummaryText = patchWhatsappSummaryWorkingHours(finalSummaryText, workingHours);
+        finalSummaryText = patchWhatsappSummaryDayActivity(finalSummaryText, dayActivity);
       } catch (distanceError) {
         console.warn("Unable to recompute visit distance for WhatsApp summary:", distanceError);
       }
     } else if (finalSummaryText) {
       try {
-        const workingHours = await loadWorkingHoursTillMessage({
-          supabase: admin,
-          userId: user.id,
+        const currentHoursEntry = buildCurrentWorkingHoursEntry({
+          transactionType: "COLLECTION_VISIT",
           savedAt: savedAtIso,
-          currentEntry: buildCurrentWorkingHoursEntry({
-            transactionType: "COLLECTION_VISIT",
-            savedAt: savedAtIso,
-            customerCode,
-          }),
+          customerCode,
         });
+        const currentDayActivityEntry = buildCurrentDayActivityEntry({
+          transactionType: "COLLECTION_VISIT",
+          savedAt: savedAtIso,
+          customerCode,
+          amountReceived,
+          visitOutcome,
+        });
+        const [workingHours, dayActivity] = await Promise.all([
+          loadWorkingHoursTillMessage({
+            supabase: admin,
+            userId: user.id,
+            savedAt: savedAtIso,
+            currentEntry: currentHoursEntry,
+          }),
+          loadDayActivityTillMessage({
+            supabase: admin,
+            userId: user.id,
+            savedAt: savedAtIso,
+            currentEntry: currentDayActivityEntry,
+          }),
+        ]);
         finalSummaryText = patchWhatsappSummaryWorkingHours(finalSummaryText, workingHours);
+        finalSummaryText = patchWhatsappSummaryDayActivity(finalSummaryText, dayActivity);
       } catch (hoursError) {
         console.warn("Unable to recompute working hours for WhatsApp summary:", hoursError);
       }

@@ -33,6 +33,11 @@ import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate"
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import {
+  buildCurrentDayActivityEntry,
+  loadDayActivityTillMessage,
+  DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+} from "../../lib/dayActivityWhatsapp";
+import {
   buildCurrentWorkingHoursEntry,
   loadWorkingHoursTillMessage,
   WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
@@ -760,7 +765,7 @@ export default function NewCustomerPage() {
         latitude: parsedGps?.lat ?? null,
         longitude: parsedGps?.lng ?? null,
       };
-      const [visitDistance, workingHours] = await Promise.all([
+      const [visitDistance, workingHours, dayActivity] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -779,6 +784,19 @@ export default function NewCustomerPage() {
             transactionType: "VISIT_REPORT",
             savedAt: capturedAt,
             location,
+            customer: prospectCustomer,
+            customerCode,
+          }),
+        }),
+        loadDayActivityTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+          currentEntry: buildCurrentDayActivityEntry({
+            transactionType: "PROSPECT_FOLLOW_UP",
+            savedAt: capturedAt,
             customer: prospectCustomer,
             customerCode,
           }),
@@ -849,6 +867,7 @@ export default function NewCustomerPage() {
         salesmanCode,
         visitDistance,
         workingHours,
+        dayActivity,
         visitAt: capturedAt,
       });
 

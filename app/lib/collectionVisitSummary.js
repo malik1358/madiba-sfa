@@ -1,4 +1,5 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
+import { formatDayActivityWhatsappLines } from "./dayActivityWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
@@ -201,6 +202,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   if (lastVisitLines.length > 0) {
     lines.push("", ...lastVisitLines);
   }
+  lines.push(...formatDayActivityWhatsappLines(options.dayActivity));
   return lines.join("\n");
 }
 

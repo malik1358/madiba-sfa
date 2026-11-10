@@ -24,11 +24,18 @@ test("Arabic visual reverse still mirrors letters for LTR PDF drawing", () => {
   );
 });
 
-test("Eastern digit runs are classified as Arabic (Unicode block) but stay readable after reverse", () => {
-  const runs = splitPdfTextRuns("RNFD/٤٢١");
-  assert.deepEqual(runs, [
-    { text: "RNFD/", arabic: false },
-    { text: "٤٢١", arabic: true },
+test("Eastern digit runs stay separate from Arabic letter runs", () => {
+  assert.deepEqual(splitPdfTextRuns("RNFD/٤٢١"), [
+    { text: "RNFD/٤٢١", arabic: false },
   ]);
-  assert.equal(reverseArabicPreservingDigits(runs[1].text), "٤٢١");
+  assert.deepEqual(splitPdfTextRuns("٥,٤٩١.٨٠ مدين"), [
+    { text: "٥,٤٩١.٨٠ ", arabic: false },
+    { text: "مدين", arabic: true },
+  ]);
+  assert.deepEqual(splitPdfTextRuns("١٣-سبتمبر-٢٠٢٦"), [
+    { text: "١٣-", arabic: false },
+    { text: "سبتمبر", arabic: true },
+    { text: "-٢٠٢٦", arabic: false },
+  ]);
+  assert.equal(reverseArabicPreservingDigits("٤٢١"), "٤٢١");
 });

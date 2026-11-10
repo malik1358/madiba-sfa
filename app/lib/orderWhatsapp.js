@@ -1,4 +1,8 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
+import {
+  DAY_ACTIVITY_WHATSAPP_LABELS_AR,
+  formatDayActivityWhatsappLines,
+} from "./dayActivityWhatsapp.js";
 import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatOrderVatLabel, normalizePricingType, VAT_RATE } from "./regionalPricing.js";
@@ -47,6 +51,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
     avgDaysToPay: isAr ? "متوسط أيام الدفع" : "Avg days to pay",
     avgDaysToPay6mLabel: isAr ? "متوسط 6 أشهر" : "6-month avg",
+    ...(isAr ? DAY_ACTIVITY_WHATSAPP_LABELS_AR : {}),
   };
 
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
@@ -88,5 +93,9 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     labels.pdfAttached,
     ...formatAvgDaysToPayWhatsappLines(avgDaysToPay, labels),
     ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
+    ...formatDayActivityWhatsappLines(
+      options.dayActivity ?? snapshot.dayActivity ?? null,
+      isAr ? DAY_ACTIVITY_WHATSAPP_LABELS_AR : undefined,
+    ),
   ].join("\n");
 }

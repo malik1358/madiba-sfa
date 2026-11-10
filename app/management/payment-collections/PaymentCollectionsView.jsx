@@ -78,6 +78,11 @@ import {
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { buildCollectionVisitSummary } from "../../lib/collectionVisitSummary";
 import {
+  buildCurrentDayActivityEntry,
+  loadDayActivityTillMessage,
+  DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+} from "../../lib/dayActivityWhatsapp";
+import {
   buildCurrentWorkingHoursEntry,
   loadTodayWorkingHoursEntries,
   loadWorkingHoursTillMessage,
@@ -2227,7 +2232,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customer: visitCustomer,
         customerCode: row.customer_code,
       });
-      const [visitDistance, workingHours, avgDaysToPay] = await Promise.all([
+      const currentDayActivityEntry = buildCurrentDayActivityEntry({
+        transactionType: "COLLECTION_VISIT",
+        savedAt: visitSavedAt,
+        customer: visitCustomer,
+        customerCode: row.customer_code,
+        amountReceived: Number(form.amountReceived || 0),
+        visitOutcome: selectedOutcome,
+      });
+      const [visitDistance, workingHours, dayActivity, avgDaysToPay] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -2244,6 +2257,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
           timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
           localEntries: workingHoursEntriesRef.current,
           currentEntry: currentHoursEntry,
+        }),
+        loadDayActivityTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: visitSavedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+          currentEntry: currentDayActivityEntry,
         }),
         resolveAvgDaysForWhatsapp({
           local: row,
@@ -2280,6 +2301,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           queuePriority: resolvedQueuePriority,
           visitDistance,
           workingHours,
+          dayActivity,
           visitAt: visitSavedAt,
           avgDaysToPay,
           lastVisit: row?.latest_collection || null,

@@ -1,4 +1,5 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
+import { formatDayActivityWhatsappLines } from "./dayActivityWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
@@ -51,6 +52,7 @@ export function buildFieldVisitWhatsappSummary({
   includeOutstanding = true,
   avgDaysToPay = null,
   workingHours = null,
+  dayActivity = null,
   lastVisitAt = null,
 } = {}) {
   const labels = {
@@ -126,6 +128,8 @@ export function buildFieldVisitWhatsappSummary({
     // Match collection WhatsApp: blank line, then last visit after GPS metrics.
     lines.push("", `${labels.lastVisitDate}: ${lastVisitDate}.`);
   }
+
+  lines.push(...formatDayActivityWhatsappLines(dayActivity));
 
   return lines.join("\n");
 }

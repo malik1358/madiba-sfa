@@ -14,6 +14,7 @@ export function buildProspectFollowUpWhatsappSummary({
   visitDistance = {},
   visitAt = "",
   workingHours = null,
+  dayActivity = null,
   outcome = "Order not received",
 } = {}) {
   const customerName = String(
@@ -46,6 +47,7 @@ export function buildProspectFollowUpWhatsappSummary({
     salesmanCode,
     visitDistance,
     workingHours,
+    dayActivity,
     includeOutstanding: false,
   });
 }

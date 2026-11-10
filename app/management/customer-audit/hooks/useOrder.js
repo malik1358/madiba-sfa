@@ -11,6 +11,12 @@ import { removeOfflineQueueItemById } from '../../../lib/offlineSyncQueue';
 import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '../../../lib/offlineOrderNumber';
 import { resolveOrderMakerFromScope } from '../../../lib/orderSalesman';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
+import { sumOrderLineValue } from '../../../lib/collectionDaySummary';
+import {
+  buildCurrentDayActivityEntry,
+  loadDayActivityTillMessage,
+  DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+} from '../../../lib/dayActivityWhatsapp';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import {
   buildCurrentWorkingHoursEntry,
@@ -396,7 +402,7 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
-      const [visitDistance, workingHours] = await Promise.all([
+      const [visitDistance, workingHours, dayActivity] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -411,6 +417,14 @@ export function useOrder({
           savedAt: capturedAt,
           skipTimeline: true,
           timelineTimeoutMs: WORKING_HOURS_WHATSAPP_TIMEOUT_MS,
+        }),
+        // Draft shares show today's running totals without counting this draft as an order.
+        loadDayActivityTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
         }),
       ]);
 
@@ -512,6 +526,7 @@ export function useOrder({
           orderNumber: allottedOrderNumber,
           visitDistance,
           workingHours,
+          dayActivity,
         };
       }
 
@@ -541,6 +556,7 @@ export function useOrder({
         orderNumber: confirmedNumber,
         visitDistance,
         workingHours,
+        dayActivity,
       };
     } catch (err) {
       setError(friendlyErrorMessage(err, 'Unable to save draft order.'));
@@ -605,7 +621,13 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
-      const [visitDistance, workingHours] = await Promise.all([
+      const currentOrderValue = sumOrderLineValue(
+        (orderItems || []).map((item) => ({
+          quantity: item.order_quantity,
+          rate: Number(getPrice(priceList, item.item_code) || 0),
+        })),
+      );
+      const [visitDistance, workingHours, dayActivity] = await Promise.all([
         loadVisitDistanceMetrics({
           supabase,
           userId: session.user.id,
@@ -626,6 +648,20 @@ export function useOrder({
             location,
             customer: selectedCustomer,
             customerCode: selectedCustomer?.customer_code,
+          }),
+        }),
+        loadDayActivityTillMessage({
+          supabase,
+          userId: session.user.id,
+          savedAt: capturedAt,
+          skipTimeline: true,
+          timelineTimeoutMs: DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS,
+          currentEntry: buildCurrentDayActivityEntry({
+            transactionType: 'ORDER_SUBMITTED',
+            savedAt: capturedAt,
+            customer: selectedCustomer,
+            customerCode: selectedCustomer?.customer_code,
+            orderValue: currentOrderValue,
           }),
         }),
       ]);
@@ -731,6 +767,7 @@ export function useOrder({
           orderNumber: allottedOrderNumber,
           visitDistance,
           workingHours,
+          dayActivity,
         };
       }
 
@@ -765,6 +802,7 @@ export function useOrder({
         orderNumber: confirmedNumber,
         visitDistance,
         workingHours,
+        dayActivity,
       };
     } catch (err) {
       setError(friendlyErrorMessage(err, 'Unable to submit order.'));

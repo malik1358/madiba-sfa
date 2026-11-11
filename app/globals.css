@@ -4591,16 +4591,24 @@ th:has(.moduleTableColumnFilterInput) {
   background: #fecaca;
 }
 
-.debtReportNoPaymentBadge {
+.debtReportNoPaymentBadge,
+.debtReportLegalBadge {
   display: inline-block;
   margin-inline-start: 6px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: #991b1b;
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;
   vertical-align: middle;
+}
+
+.debtReportNoPaymentBadge {
+  background: #991b1b;
+}
+
+.debtReportLegalBadge {
+  background: #0f4c5c;
 }
 
 .moduleTable thead tr.moduleTableColumnFilterRow th {

@@ -40,10 +40,9 @@ function loosePersonName(value) {
     .replace(/(.)\1+/g, "$1");
 }
 
-export const COLLECTION_QUEUE_EXCLUDED_SALESMEN = [
-  "Zia",
-  "Asrar Ahmed",
-];
+// Empty: Zia / Asrar Ahmed (building-material) books stay on the queue so
+// collectors can enter collections. Keep the helper/filter for future exclusions.
+export const COLLECTION_QUEUE_EXCLUDED_SALESMEN = [];
 
 export function isExcludedCollectionQueueSalesman(value, {
   excludedNames = COLLECTION_QUEUE_EXCLUDED_SALESMEN,

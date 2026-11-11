@@ -14,6 +14,7 @@ import {
   SKU_EXPANSION_KPI_KEYS,
 } from "../../lib/performanceKpis";
 import {
+  buildFilteredPerformanceKpi,
   compareKpiActualToPriorMonth,
   filterKpiTargetRows,
   NO_BOSS_KEY,
@@ -626,9 +627,11 @@ export default function KpiTargetsPage() {
                       <td className="moduleKpiBossCell"></td>
                       {columns.map((key) => {
                         const column = filteredTotals[key] || { actual: 0, target: 0, achievement: null };
-                        const liveKpi = buildPerformanceKpi(key, {
+                        const estimateColumn = paceEstimates[key] || {};
+                        const liveKpi = buildFilteredPerformanceKpi(key, {
                           actual: column.actual,
                           target: column.target,
+                          estimate: estimateColumn.estimate,
                           reportDate: `${month}-01`,
                           todayIso: getKsaDateString(),
                           salesAsOfDate,

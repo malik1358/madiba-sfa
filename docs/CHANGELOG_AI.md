@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-11** — Payment Collections no longer drops Zia / Asrar Ahmed (building-material) invoices from the queue (`COLLECTION_QUEUE_EXCLUDED_SALESMEN` is empty), so collectors can enter collections for those customers. Helper kept for future exclusions. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-11** — Stale overdue collections near-visit window uses **3 completed KSA working days** and does not count the incomplete report day toward that window (a near visit on the report day still clears). Example: on Wed 11 Nov, a near visit on Sun 8 Nov still excludes the customer. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-11** — KPI Targets Actual cells show each salesman's Method A **SFA est.** month-end figure under the booked actual (same `rowKpiMonthEndEstimate` as the footer sum). Team rows stay blank. No migration.
 - **2026-11-11** — Make Quotation no longer changes invoice status (validity-only on `order_invoice_meta`); quotation PDFs omit Change History and Outstanding Details / invoice rows. Manual dropdown to `Quotation submitted waiting for the payment` remains separate. No migration.
@@ -511,7 +512,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 - **Collector role was added in app code and a manual SQL script**, not in the baseline `profiles_role_check`.
 - **Profit is a single amount column** for BI, added by `sql/add_sales_profit_amount.sql`, not by a migration in `supabase/migrations/`.
 - **Visit plan email is intentionally off** (`SALESMAN_VISIT_PLAN_EMAIL_ENABLED` defaults false) while scoring is still being finalized. The midnight job still stores the snapshot.
-- **Hardcoded salesman groups and excluded collectors** are production behavior (`mutualSalesmanGroups.js`, `COLLECTION_QUEUE_EXCLUDED_SALESMEN`).
+- **Hardcoded salesman groups** are production behavior (`mutualSalesmanGroups.js`). `COLLECTION_QUEUE_EXCLUDED_SALESMEN` is currently empty (Zia/Asrar visible) but the filter remains.
 
 ## Recent behavior that later edits must keep
 
@@ -559,7 +560,7 @@ These are real mismatches. Do not “fix” them as drive-by cleanups.
 | `buildModuleAccess` and morning-attendance exemptions | Can lock every field user out, or loop collectors | `moduleAccess.js`, `morningAttendance.js`, `tests/moduleAccess.test.mjs` |
 | Sales scope, mutual groups, book shares, previous salesman | Users lose or gain customer books | `customerAccess.js`, `mutualSalesmanGroups.js`, `salesHierarchy.js` |
 | Outstanding column detection and bucket labels | Wrong aging and wrong balances | `outstanding.js`, `tests/outstanding.test.mjs` |
-| `COLLECTION_QUEUE_EXCLUDED_SALESMEN` | Those books reappear on the queue | `paymentCollections.js` |
+| `COLLECTION_QUEUE_EXCLUDED_SALESMEN` | Named books drop from or return to the queue (currently empty so Zia/Asrar stay visible) | `paymentCollections.js` |
 | KSA date helpers | Emails and attendance shift by a day | `workdayActivity.js` |
 | Collection visit save and background refresh | Data loss or a reload loop | `payment-collections/route.js`, `PaymentCollectionsView.jsx` |
 | Pending Orders outstanding loading | Page freeze | `pendingOrdersQuery.js`, `tests/pendingOrdersFilterPerf.test.mjs` |

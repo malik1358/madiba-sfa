@@ -847,31 +847,42 @@ test("isScheduledRevisitQueueCustomer moves visited partial visits with future r
   assert.equal(isScheduledRevisitQueueCustomer(paid, today), false);
 });
 
-test("isExcludedCollectionQueueSalesman matches Zia and Asrar Ahmed with loose spelling", () => {
-  assert.equal(isExcludedCollectionQueueSalesman("Zia"), true);
-  assert.equal(isExcludedCollectionQueueSalesman("ZIA "), true);
-  assert.equal(isExcludedCollectionQueueSalesman("Asrar Ahmed"), true);
-  assert.equal(isExcludedCollectionQueueSalesman("ASRAR  AHMED"), true);
+test("isExcludedCollectionQueueSalesman matches only names in the active exclusion list", () => {
+  assert.equal(isExcludedCollectionQueueSalesman("Zia"), false);
+  assert.equal(isExcludedCollectionQueueSalesman("Asrar Ahmed"), false);
   assert.equal(isExcludedCollectionQueueSalesman("PARVEZ"), false);
+  assert.equal(
+    isExcludedCollectionQueueSalesman("Zia", { excludedNames: ["Zia", "Asrar Ahmed"] }),
+    true,
+  );
+  assert.equal(
+    isExcludedCollectionQueueSalesman("ASRAR  AHMED", { excludedNames: ["Zia", "Asrar Ahmed"] }),
+    true,
+  );
 });
 
-test("filterCollectionQueueInvoices removes excluded salesman invoices only", () => {
+test("filterCollectionQueueInvoices keeps Zia and Asrar Ahmed invoices by default", () => {
   const filtered = filterCollectionQueueInvoices([
     { pending_amount: 100, salesman: "Zia" },
     { pending_amount: 200, salesman: "PARVEZ" },
     { pending_amount: 300, salesman: "Asrar Ahmed" },
   ]);
 
-  assert.equal(filtered.length, 1);
-  assert.equal(filtered[0].salesman, "PARVEZ");
+  assert.equal(filtered.length, 3);
+  assert.deepEqual(filtered.map((row) => row.salesman), ["Zia", "PARVEZ", "Asrar Ahmed"]);
 });
 
-test("buildCollectionQueues drops customers with only excluded salesman invoices", () => {
+test("buildCollectionQueues keeps building-material (Zia / Asrar) customers for collectors", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "C-ZIA",
       customer_name: "Zia Customer",
       invoices: [{ pending_amount: 200, due_date: "2026-08-01", salesman: "Zia" }],
+    },
+    {
+      customer_code: "C-ASRAR",
+      customer_name: "Asrar Customer",
+      invoices: [{ pending_amount: 150, due_date: "2026-08-01", salesman: "Asrar Ahmed" }],
     },
     {
       customer_code: "C-KEEP",
@@ -880,7 +891,10 @@ test("buildCollectionQueues drops customers with only excluded salesman invoices
     },
   ], "2026-08-14T10:00:00Z");
 
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C-KEEP"]);
+  assert.deepEqual(
+    queues.dueCustomers.map((row) => row.customer_code).sort(),
+    ["C-ASRAR", "C-KEEP", "C-ZIA"],
+  );
 });
 
 test("buildCollectionQueues includes Abdalla overdue invoices with Excel month-name dates", () => {

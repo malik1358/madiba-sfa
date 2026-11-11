@@ -233,6 +233,72 @@ export function buildFilteredPerformanceKpi(key, {
   });
 }
 
+/**
+ * One salesman's Method A month-end estimate for a KPI Targets cell/footer.
+ * Team rows return null (footer sums individuals only). Total cash collected is
+ * Collection estimate + Cash collection estimate.
+ */
+export function rowKpiMonthEndEstimate(
+  row,
+  key,
+  { reportDate, todayIso, salesAsOfDate, receiptAsOfDate } = {},
+) {
+  if (!row || row.isTeam) return null;
+  if (key === "totalCashCollected") {
+    const collection = rowKpiMonthEndEstimate(row, "collection", {
+      reportDate,
+      todayIso,
+      salesAsOfDate,
+      receiptAsOfDate,
+    });
+    const cash = rowKpiMonthEndEstimate(row, "cashCollection", {
+      reportDate,
+      todayIso,
+      salesAsOfDate,
+      receiptAsOfDate,
+    });
+    if (collection == null && cash == null) return null;
+    return (Number(collection) || 0) + (Number(cash) || 0);
+  }
+
+  const target = rowTargetValue(row, key);
+  const kpi = (row.kpis || []).find((item) => item.key === key);
+  const actual = Number(kpi?.actual || 0) || 0;
+  const rowSalesAsOf = row?.salesAsOfDate ?? salesAsOfDate;
+  const rowReceiptAsOf = row?.receiptAsOfDate ?? receiptAsOfDate;
+  const liveKpi = buildPerformanceKpi(key, {
+    actual,
+    target,
+    reportDate,
+    todayIso,
+    paceShares: row?.paceShares || null,
+    salesAsOfDate: rowSalesAsOf,
+    receiptAsOfDate: rowReceiptAsOf,
+  });
+  const expected = liveKpi.expected != null
+    ? liveKpi.expected
+    : resolveExpectedPacePercent(key, {
+      reportDate,
+      todayIso,
+      paceShares: row?.paceShares || null,
+      salesAsOfDate: rowSalesAsOf,
+      receiptAsOfDate: rowReceiptAsOf,
+    });
+  const asOfDate = resolveKpiPaceAsOfDate(key, {
+    reportDate,
+    todayIso,
+    salesAsOfDate: rowSalesAsOf,
+    receiptAsOfDate: rowReceiptAsOf,
+  });
+  return monthEndPaceEstimate({
+    actual,
+    target,
+    expected,
+    paceGap: liveKpi.paceGap,
+    asOfDate,
+  });
+}
+
 export function sumFilteredKpiPaceEstimates(
   rows = [],
   columns = PERFORMANCE_DISPLAY_KPI_KEYS,
@@ -245,49 +311,14 @@ export function sumFilteredKpiPaceEstimates(
     if (!keysToCompute.includes("collection")) keysToCompute.push("collection");
     if (!keysToCompute.includes("cashCollection")) keysToCompute.push("cashCollection");
   }
+  const options = { reportDate, todayIso, salesAsOfDate, receiptAsOfDate };
 
   keysToCompute.forEach((key) => {
     if (key === "totalCashCollected") return;
     let estimateSum = 0;
     let hasEstimate = false;
     (rows || []).forEach((row) => {
-      if (row?.isTeam) return;
-      const target = rowTargetValue(row, key);
-      const kpi = (row.kpis || []).find((item) => item.key === key);
-      const actual = Number(kpi?.actual || 0) || 0;
-      const rowSalesAsOf = row?.salesAsOfDate ?? salesAsOfDate;
-      const rowReceiptAsOf = row?.receiptAsOfDate ?? receiptAsOfDate;
-      const liveKpi = buildPerformanceKpi(key, {
-        actual,
-        target,
-        reportDate,
-        todayIso,
-        paceShares: row?.paceShares || null,
-        salesAsOfDate: rowSalesAsOf,
-        receiptAsOfDate: rowReceiptAsOf,
-      });
-      const expected = liveKpi.expected != null
-        ? liveKpi.expected
-        : resolveExpectedPacePercent(key, {
-          reportDate,
-          todayIso,
-          paceShares: row?.paceShares || null,
-          salesAsOfDate: rowSalesAsOf,
-          receiptAsOfDate: rowReceiptAsOf,
-        });
-      const asOfDate = resolveKpiPaceAsOfDate(key, {
-        reportDate,
-        todayIso,
-        salesAsOfDate: rowSalesAsOf,
-        receiptAsOfDate: rowReceiptAsOf,
-      });
-      const estimate = monthEndPaceEstimate({
-        actual,
-        target,
-        expected,
-        paceGap: liveKpi.paceGap,
-        asOfDate,
-      });
+      const estimate = rowKpiMonthEndEstimate(row, key, options);
       if (estimate == null) return;
       estimateSum += estimate;
       hasEstimate = true;

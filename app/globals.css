@@ -5667,6 +5667,15 @@ th:has(.moduleTableColumnFilterInput) {
   text-underline-offset: 2px;
 }
 
+.moduleKpiActualEstimate {
+  margin-top: 4px;
+  color: #0f4c5c;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
 .moduleKpiUpdatedStatus {
   margin: 0 0 14px;
   padding: 10px 12px;

@@ -19,6 +19,7 @@ import {
   filterKpiTargetRows,
   NO_BOSS_KEY,
   priorMonthKpiActualForRow,
+  rowKpiMonthEndEstimate,
   sumFilteredKpiColumns,
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
@@ -66,6 +67,7 @@ const TEXT = {
   teamHint: { en: "Team target", ar: "هدف الفريق" },
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   paceEstimate: { en: "Estimated month-end sales", ar: "تقدير مبيعات نهاية الشهر" },
+  sfaEstimate: { en: "SFA est.", ar: "تقدير النظام" },
   paceEstimateHint: {
     en: "Method A: each salesman's median 6-month cumulative sales curve, floored at KSA workday progress, through the latest sales date. Collection still uses workdays to the latest receipt date. Early-month estimates have higher uncertainty.",
     ar: "الطريقة A: الوسيط لمنحنى المبيعات التراكمي لآخر 6 أشهر لكل مندوب، مع حد أدنى لتقدم أيام العمل حتى آخر تاريخ مبيعات. التحصيل يعتمد على أيام العمل حتى آخر تحصيل. تقديرات بداية الشهر أقل يقيناً.",
@@ -587,12 +589,22 @@ export default function KpiTargetsPage() {
                               direction: "flat",
                             }
                             : compareKpiActualToPriorMonth(kpi?.actual || 0, priorSkuActual);
+                        const sfaEstimate = rowKpiMonthEndEstimate(row, key, {
+                          reportDate: row.reportDate || `${month}-01`,
+                          todayIso: row.todayIso || getKsaDateString(),
+                          salesAsOfDate: row.salesAsOfDate ?? salesAsOfDate,
+                          receiptAsOfDate: row.receiptAsOfDate ?? receiptAsOfDate,
+                        });
                         return (
                           <KpiTargetCells
                             key={key}
                             kpiKey={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
                             actualHref={actualDetailsHref(month, key, detailSalesmen)}
+                            sfaEstimate={sfaEstimate == null
+                              ? null
+                              : formatPerformanceKpiValue(key, sfaEstimate)}
+                            sfaEstimateLabel={t("sfaEstimate")}
                             achievement={formatAchievementPercent(liveKpi.achievement)}
                             ofTarget={t("ofTarget")}
                             status={isInformationOnly ? t("informationOnly") : (liveKpi.status?.label || "No target")}
@@ -875,6 +887,8 @@ function KpiTargetCells({
   kpiKey = "",
   actual,
   actualHref,
+  sfaEstimate = null,
+  sfaEstimateLabel = "SFA est.",
   achievement,
   ofTarget,
   status,
@@ -900,7 +914,14 @@ function KpiTargetCells({
 
   return (
     <>
-      <td>{actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}</td>
+      <td>
+        {actualHref ? <Link href={actualHref} className="moduleKpiActualLink">{actual}</Link> : actual}
+        {sfaEstimate ? (
+          <div className="moduleKpiMeta moduleKpiActualEstimate">
+            {sfaEstimateLabel}: {sfaEstimate}
+          </div>
+        ) : null}
+      </td>
       <td>
         {hideTarget ? null : (
           <input

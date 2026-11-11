@@ -200,17 +200,25 @@ test("buildCurrentWorkingHoursEntry marks far GPS stops", () => {
   assert.equal(accepted.isFarFromCustomer, false);
 });
 
-test("patchWhatsappSummaryWorkingHours inserts after visit date/time with blank lines", () => {
+test("patchWhatsappSummaryWorkingHours inserts above day totals at the end", () => {
   const patched = patchWhatsappSummaryWorkingHours(
     [
       "Customer: Test",
       "Visit date/time: 07/09/2026 10:34",
       "Outcome: Funds received",
+      "",
+      "Visits with order: 0 / 0 ﷼",
+      "Visits without order: 0",
+      "Collections: 1 / 0 ﷼",
     ].join("\n"),
     { known: true, value: "2h 10m", minutes: 130 },
   );
 
-  assert.match(patched, /Visit date\/time: 07\/09\/2026 10:34\n\nWorking hours: 2h 10m\n\nOutcome:/);
+  assert.match(
+    patched,
+    /Working hours: 2h 10m\n\nVisits with order: 0 \/ 0 ﷼\nVisits without order: 0\nCollections: 1 \/ 0 ﷼/,
+  );
+  assert.doesNotMatch(patched, /Visit date\/time:[\s\S]*Working hours:[\s\S]*Outcome:/);
 });
 
 test("patchWhatsappSummaryWorkingHours replaces an existing working hours dash", () => {

@@ -155,7 +155,10 @@ test("buildFieldVisitWhatsappSummary appends day activity totals at the end", ()
     },
   });
 
-  assert.match(summary, /Last visit date: 01\/11\/2026\.\n\nVisits with order: 2 \/ 8,000 ﷼\nVisits without order: 3\nCollections: 1 \/ 500 ﷼/);
+  assert.match(
+    summary,
+    /Last visit date: 01\/11\/2026\.\n\nWorking hours: -\n\nVisits with order: 2 \/ 8,000 ﷼\nVisits without order: 3\nCollections: 1 \/ 500 ﷼/,
+  );
 });
 
 test("buildCollectionVisitSummary appends day activity totals at the end", () => {
@@ -188,7 +191,7 @@ test("buildCollectionVisitSummary appends day activity totals at the end", () =>
     },
   );
 
-  assert.match(summary, /Visits with order: 0 \/ 0 ﷼\nVisits without order: 1\nCollections: 2 \/ 900 ﷼/);
+  assert.match(summary, /Working hours: -\n\nVisits with order: 0 \/ 0 ﷼\nVisits without order: 1\nCollections: 2 \/ 900 ﷼/);
 });
 
 test("buildOrderWhatsappSummary appends day activity totals at the end", () => {
@@ -215,7 +218,7 @@ test("buildOrderWhatsappSummary appends day activity totals at the end", () => {
     },
   });
 
-  assert.match(summary, /Visits with order: 1 \/ 100 ﷼\nVisits without order: 0\nCollections: 0 \/ 0 ﷼/);
+  assert.match(summary, /Working hours: -\n\nVisits with order: 1 \/ 100 ﷼\nVisits without order: 0\nCollections: 0 \/ 0 ﷼/);
 });
 
 test("patchWhatsappSummaryDayActivity replaces an existing totals block", () => {

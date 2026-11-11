@@ -264,6 +264,30 @@ export function formatDayActivityWhatsappLines(stats = null, labels = {}) {
   ];
 }
 
+/**
+ * Append Working hours then day totals at the end of a WhatsApp summary.
+ * Collapses the shared blank padding so there is one blank between the blocks.
+ */
+export function appendWorkingHoursAndDayActivityLines(
+  lines = [],
+  workingHoursLines = [],
+  dayActivityLines = [],
+) {
+  const hours = Array.isArray(workingHoursLines) ? [...workingHoursLines] : [];
+  const day = Array.isArray(dayActivityLines) ? [...dayActivityLines] : [];
+  if (!hours.length && !day.length) return lines;
+
+  lines.push(...hours);
+  if (!day.length) return lines;
+
+  if (lines.length && String(lines[lines.length - 1] || "").trim() === "" && String(day[0] || "").trim() === "") {
+    lines.push(...day.slice(1));
+  } else {
+    lines.push(...day);
+  }
+  return lines;
+}
+
 export function buildCurrentDayActivityEntry({
   transactionType = "VISIT_REPORT",
   savedAt = "",

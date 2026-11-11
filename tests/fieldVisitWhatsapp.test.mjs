@@ -49,10 +49,10 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /61-90: 500/);
   assert.match(summary, />90: 300/);
   assert.match(summary, /Total: 2,800/);
-  assert.match(summary, /Visit date\/time:.*\n\nWorking hours: -\n\n/);
+  assert.match(summary, /Visit date\/time:/);
   assert.match(summary, /GPS: -/);
   assert.match(summary, /Distance from customer: -/);
-  assert.match(summary, /Est. waiting: -/);
+  assert.match(summary, /Est. waiting: -\n\nWorking hours: -/);
 });
 
 test("buildFieldVisitWhatsappSummary includes working hours till the visit", () => {
@@ -69,7 +69,7 @@ test("buildFieldVisitWhatsappSummary includes working hours till the visit", () 
     workingHours: { known: true, value: "1h 26m", minutes: 86 },
   });
 
-  assert.match(summary, /\n\nWorking hours: 1h 26m\n\n/);
+  assert.match(summary, /Est\. waiting: -\n\nWorking hours: 1h 26m/);
 });
 
 test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the end", () => {
@@ -126,9 +126,9 @@ test("buildFieldVisitWhatsappSummary appends last visit date after GPS metrics",
     lastVisitAt: "2026-10-15",
   });
 
-  assert.match(summary, /Est\. waiting: -\n\nLast visit date: 15\/10\/2026\./);
+  assert.match(summary, /Est\. waiting: -\n\nLast visit date: 15\/10\/2026\.\n\nWorking hours: -/);
   assert.doesNotMatch(summary, /Last visit date:[\s\S]*GPS:/);
-  assert.ok(summary.trimEnd().endsWith("Last visit date: 15/10/2026."));
+  assert.ok(summary.trimEnd().endsWith("Working hours: -"));
 });
 
 test("buildFieldVisitWhatsappSummary reads last visit date from the customer row", () => {

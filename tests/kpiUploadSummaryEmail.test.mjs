@@ -19,6 +19,8 @@ import {
   resolveKpiUploadSummaryEmailCc,
   resolveKpiUploadSummaryEmailRecipients,
 } from "../app/lib/kpiUploadSummaryEmail.js";
+import { buildFilteredPerformanceKpi } from "../app/lib/kpiTargetsTable.js";
+import { resolveExpectedPacePercent } from "../app/lib/performanceKpis.js";
 import { buildActiveCustomersReport } from "../app/lib/activeCustomers.js";
 import { buildReceivableDaysReport } from "../app/lib/receivableDays.js";
 import { runKpiUploadSummaryEmailCycle } from "../app/lib/kpiUploadSummaryEmailServer.js";
@@ -171,6 +173,72 @@ test("upload summary Total sales status matches ~100% estimate instead of workda
   assert.ok(Number(totalSales.paceEstimate.achievement) < 101);
   assert.match(totalSales.totalFiltered.statusLabel, /On pace|ahead of pace|Achieved/);
   assert.doesNotMatch(totalSales.totalFiltered.statusLabel, /behind pace/);
+});
+
+test("upload summary Total sales keeps workday-floored estimate realistic early month", () => {
+  const actual = 422_819;
+  const target = 4_580_000;
+  const asOf = "2026-11-10";
+  const workdayShare = resolveExpectedPacePercent("collection", {
+    reportDate: "2026-11-01",
+    todayIso: asOf,
+    receiptAsOfDate: asOf,
+  }) / 100;
+  const personalPaceShares = {
+    shares: Object.fromEntries(
+      Array.from({ length: 31 }, (_, index) => {
+        const day = index + 1;
+        if (day <= 9) return [day, (day / 9) * workdayShare];
+        return [day, Math.min(1, workdayShare + ((day - 9) / 22) * (1 - workdayShare))];
+      }),
+    ),
+  };
+  const salesman = {
+    ...ahmed,
+    officeSupplies: "2290000",
+    localItemSales: "1145000",
+    otherSales: "1145000",
+    totalSales: "4580000",
+    collection: "3268000",
+    paceShares: personalPaceShares,
+    salesAsOfDate: asOf,
+    receiptAsOfDate: asOf,
+    kpis: [
+      { key: "officeSupplies", actual: Math.round(actual * 0.5) },
+      { key: "localItemSales", actual: Math.round(actual * 0.25) },
+      { key: "otherSales", actual: actual - Math.round(actual * 0.5) - Math.round(actual * 0.25) },
+      { key: "totalSales", actual },
+      { key: "collection", actual: 828_959 },
+      { key: "cashCollection", actual: 0 },
+      { key: "totalCashCollected", actual: 828_959 },
+      { key: "newCustomers", actual: 0 },
+      { key: "repeatCustomers", actual: 0 },
+    ],
+  };
+  const summary = buildKpiUploadSummaryTable({
+    rows: [salesman],
+    reportDate: "2026-11-01",
+    todayIso: asOf,
+    salesAsOfDate: asOf,
+    receiptAsOfDate: asOf,
+  });
+  const totalSales = summary.rows.find((row) => row.key === "totalSales");
+  assert.ok(totalSales);
+  // ~10% booked after ~1/3 of workdays → estimate near ~30% of target, not ~100%.
+  assert.ok(Number(totalSales.paceEstimate.achievement) > 20);
+  assert.ok(Number(totalSales.paceEstimate.achievement) < 40);
+  assert.equal(
+    totalSales.totalFiltered.statusLabel,
+    buildFilteredPerformanceKpi("totalSales", {
+      actual,
+      target,
+      estimate: totalSales.paceEstimate.estimate,
+      reportDate: "2026-11-01",
+      todayIso: asOf,
+      salesAsOfDate: asOf,
+      receiptAsOfDate: asOf,
+    }).status.label,
+  );
 });
 
 test("average collection days treats lower days as improving", () => {

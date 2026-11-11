@@ -8,8 +8,10 @@ import {
   buyingCustomerCodesFromSales,
   buildPerformanceKpi,
   buildPerformanceSnapshot,
+  estimateAtCurrentPace,
   expectedPacePercent,
   expectedPacePercentFromEstimate,
+  guardEstimateExpectedPercent,
   ksaWorkdayProgressRatio,
   isMissingSchemaColumn,
   classifyBuyingCustomers,
@@ -136,6 +138,29 @@ test("counts new SKUs sold only to repeat customers", () => {
   });
   assert.equal(details.actual, 2);
   assert.equal(details.rows.length, 2);
+});
+
+test("estimate expected % floors at workday so tiny personal shares cannot invent a full-target finish", () => {
+  // Thamer-style curve: historically ~0.74% of month by day 10.
+  const asOf = "2026-11-10";
+  const workday = ksaWorkdayProgressRatio(asOf) * 100;
+  assert.ok(workday > 20);
+  assert.equal(guardEstimateExpectedPercent(0.74, asOf), workday);
+  assert.equal(guardEstimateExpectedPercent(27.4, asOf), Math.max(27.4, workday));
+
+  const actual = 23_644.72;
+  const tinyShareEstimate = monthEndPaceEstimate({
+    actual,
+    expected: 0.74,
+    asOfDate: asOf,
+  });
+  const linearEstimate = actual * (100 / workday);
+  assert.ok(tinyShareEstimate < 200_000);
+  assert.ok(Math.abs(tinyShareEstimate - linearEstimate) < 1);
+
+  // Without the floor, the same share invents multi-million month-end sales.
+  const unguarded = estimateAtCurrentPace(actual, 0.74);
+  assert.ok(unguarded > 3_000_000);
 });
 
 test("expected pace from estimate is the inverse of estimate at current pace", () => {

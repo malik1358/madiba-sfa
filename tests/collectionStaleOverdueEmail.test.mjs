@@ -9,6 +9,7 @@ import {
   filterCollectionStaleOverdueRowsForProfile,
   groupCollectionStaleOverdueBySalesman,
   isCollectionStaleOverdueRow,
+  isCollectionVisitWithinWorkingDays,
   isSoftAgingSalesman,
   selectCollectionRowsForStaleOverdueEmail,
   resolveCollectionStaleOverdueDigestCc,
@@ -72,9 +73,15 @@ test("isCollectionStaleOverdueRow requires overdue, zero 8d receipts, and stale 
     collection_history: [{ saved_at: "2026-09-25T10:00:00Z" }],
   }, { todayKey }), true);
 
+  // Incomplete today is excluded, so Sep 22 still falls inside 3 completed workdays from Sep 26.
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
     latest_collection: { saved_at: "2026-09-22T10:00:00Z" },
+  }, { todayKey }), false);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    latest_collection: { saved_at: "2026-09-21T10:00:00Z" },
   }, { todayKey }), true);
 
   assert.equal(isCollectionStaleOverdueRow({
@@ -275,7 +282,28 @@ test("recent Sep 27 collection under a C-suffixed account code excludes the nume
 
   assert.equal(enriched.last_near_collection_visit_at, "2026-09-27T08:00:00.000Z");
   assert.equal(isCollectionStaleOverdueRow(enriched, { todayKey: "2026-09-29" }), false);
-  assert.equal(queryCalls.find(([method]) => method === "gte")[2], "2026-09-26T21:00:00.000Z");
+  // Window = 3 completed workdays before 2026-09-29 → starts 2026-09-26.
+  assert.equal(queryCalls.find(([method]) => method === "gte")[2], "2026-09-25T21:00:00.000Z");
+});
+
+test("near visit on 8 Nov still clears stale filter on incomplete 11 Nov", () => {
+  const row = {
+    outstanding_30_60: 13439.13,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+    salesman_name: "Parvez",
+    salesman_code: "PARVEZ",
+    recent_collection_visits_checked: true,
+    last_near_collection_visit_at: "2026-11-08T10:00:00+03:00",
+    last_visit_without_order_at: "",
+    last_near_visit_without_order_at: "",
+  };
+  assert.equal(
+    isCollectionVisitWithinWorkingDays(row, { todayKey: "2026-11-11" }),
+    true,
+  );
+  assert.equal(isCollectionStaleOverdueRow(row, { todayKey: "2026-11-11" }), false);
 });
 
 test("recent FAR Sep 27 collection remains in the digest and is labelled FAR", async () => {
@@ -431,7 +459,7 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
 
   assert.match(message.subject, /2 customers/);
   assert.match(message.html, /Stale overdue collections/);
-  assert.match(message.html, /no near collection visit in the last 3 working days/);
+  assert.match(message.html, /no near collection visit in the last 3 completed working days \(today excluded\)/);
   assert.match(message.html, /Parvez \(S01\)/);
   assert.match(message.html, /Sara \(S02\)/);
   assert.match(message.html, /Recv 8d/);

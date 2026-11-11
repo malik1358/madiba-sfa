@@ -52,11 +52,13 @@ function chunk(values, size = 80) {
 }
 
 function recentCollectionVisitWindowStart(todayKey, workingDays = 3) {
-  let dateKey = todayKey;
+  // Scan covers today plus the prior completed working days (today is incomplete).
+  let dateKey = addKsaCalendarDays(todayKey, -1);
   let countedDays = 0;
-  while (countedDays < workingDays) {
+  const limit = Math.max(1, Number(workingDays) || 3);
+  while (countedDays < limit) {
     if (isKsaOrderDay(dateKey)) countedDays += 1;
-    if (countedDays < workingDays) dateKey = addKsaCalendarDays(dateKey, -1);
+    if (countedDays < limit) dateKey = addKsaCalendarDays(dateKey, -1);
   }
   return dateKey;
 }

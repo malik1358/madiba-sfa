@@ -4820,6 +4820,7 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleKpiTargetsTable .moduleKpiPaceEstimateRow .moduleKpiSalesmanCell,
 .moduleKpiTargetsTable .moduleKpiPaceEstimateRow .moduleKpiBossCell {
   background: #dff0f3;
+  overflow: visible;
 }
 
 .moduleKpiTargetsTable .moduleKpiVsLastMonthRow td {
@@ -4830,11 +4831,98 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleKpiTargetsTable .moduleKpiVsLastMonthRow .moduleKpiSalesmanCell,
 .moduleKpiTargetsTable .moduleKpiVsLastMonthRow .moduleKpiBossCell {
   background: #f4f8f9;
+  overflow: visible;
 }
 
 .moduleKpiTargetsTable .moduleKpiVsLastMonthRow td.moduleBiMonthCell--up,
 .moduleKpiTargetsTable .moduleKpiVsLastMonthRow td.moduleBiMonthCell--down {
   font-weight: 700;
+}
+
+.moduleKpiRowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.moduleKpiInfoTip {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+
+.moduleKpiInfoTipBtn {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1px solid #0f4c5c;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f4c5c;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+}
+
+.moduleKpiInfoTipBtn:hover,
+.moduleKpiInfoTipBtn:focus-visible {
+  background: #0f4c5c;
+  color: #fff;
+  outline: none;
+}
+
+.moduleKpiInfoTipPanel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  display: none;
+  width: min(22rem, 70vw);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: start;
+  white-space: normal;
+}
+
+.moduleKpiInfoTipPanel::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 100%;
+  border: 6px solid transparent;
+  border-top-color: #0f172a;
+}
+
+[dir="rtl"] .moduleKpiInfoTipPanel {
+  left: auto;
+  right: 0;
+}
+
+[dir="rtl"] .moduleKpiInfoTipPanel::after {
+  left: auto;
+  right: 10px;
+}
+
+.moduleKpiInfoTipLine {
+  display: block;
+}
+
+.moduleKpiInfoTipLine + .moduleKpiInfoTipLine {
+  margin-top: 8px;
+}
+
+.moduleKpiInfoTip:hover .moduleKpiInfoTipPanel,
+.moduleKpiInfoTip:focus-within .moduleKpiInfoTipPanel {
+  display: block;
 }
 
 .moduleKpiTargetsTable tfoot td {
@@ -4848,11 +4936,11 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiPaceEstimateRow td {
-  bottom: 5.5rem;
+  bottom: 2.75rem;
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiTotalsRow td {
-  bottom: 11rem;
+  bottom: 5.5rem;
 }
 
 .moduleKpiTargetsTable tfoot .moduleKpiSalesmanCell {

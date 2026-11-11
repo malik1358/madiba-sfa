@@ -209,7 +209,7 @@ Schemes and quantity limits are settings, not tables:
 | `customer_order_block_override:<code>` | Admin same-day override to allow credit draft/submit when Avg Days to Pay auto-block is triggered. JSON includes `is_unblocked`, `unblocked_on_ksa_date` (KSA `YYYY-MM-DD`), `updated_at`, `updated_by`, optional `note`. Active only while `unblocked_on_ksa_date` equals today in Asia/Riyadh; next KSA day it is ignored. |
 | `customer_inactive_meta:<code>` | Inactive-with-outstanding flags |
 | `visit_report_latest:<code>` / `visit_report_history:<code>:` | Field visit reports |
-| `order_invoice_meta:<id>` | Invoice status and PDF metadata. Quotation fields: `quotationValidUntil` (KSA `YYYY-MM-DD`), `quotationWorkingDays` (2 or 3), `quotationIssueDate`, `quotationCreatedAt`, `quotationCreatedBy` when status is `Quotation submitted waiting for the payment` |
+| `order_invoice_meta:<id>` | Invoice status and PDF metadata. Quotation fields (`quotationValidUntil` KSA `YYYY-MM-DD`, `quotationWorkingDays` 2 or 3, `quotationIssueDate`, `quotationCreatedAt`, `quotationCreatedBy`) are set by Make Quotation without requiring status `Quotation submitted waiting for the payment` |
 | `order_history_latest:<id>` / `order_history:<id>:` | Order edit history |
 | `order_pricing_meta:<id>` | Pricing snapshot on the order (`paymentType`, `pricingRegion`, `pricingType`; refresh adds `refreshedAt` / `refreshedBy`) |
 | `missing_invoice_email_last_sent_at` | Email dedupe JSON: `lastSentAt`, `lastMidnightKsaDate`, `lastDailySummaryIndiaDate` (India calendar date for Soyeb/Fazlur end-of-day summary) |

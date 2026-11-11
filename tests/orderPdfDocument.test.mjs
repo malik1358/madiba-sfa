@@ -313,6 +313,54 @@ test("renderOrderPdfDocument draws the new order layout", () => {
   assert.equal(doc.texts.includes("Receipts not yet in Tally"), false);
 });
 
+test("quotation PDF omits Change History and Outstanding Details", () => {
+  const doc = createMockDoc();
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: {
+      id: 296,
+      order_number: "MOI01",
+      status: "SUBMITTED",
+      customer_code: "PROSPECT-261",
+      customer_name: "INFOGATE",
+      salesman_code: "MOIN",
+      updated_at: "2026-09-06T16:02:56.000Z",
+    },
+    lines: [{ item_code: "A004075", item_name: "THERMAL ROLL", quantity: 20, rate: 72, line_value: 1440 }],
+    history: [{
+      changedAt: "2026-09-06T16:02:56.000Z",
+      action: "UPDATED",
+      changes: [{ type: "ADDED", item_code: "A004075", item_name: "THERMAL ROLL", after_quantity: 20, after_rate: 72 }],
+    }],
+    outstanding: {
+      bucketLabels: ["0-30 days"],
+      customer: { buckets: { "0-30 days": 100 }, open_invoices: 1, total_outstanding: 100 },
+      customerInvoices: [{
+        invoice_date: "2026-08-01",
+        ref_no: "INV-1",
+        pending_amount: 100,
+        due_date: "2026-08-31",
+        overdue_days: 10,
+        invoice_day: 40,
+        salesman: "MOIN",
+      }],
+    },
+  });
+
+  renderOrderPdfDocument(doc, {
+    ...snapshot,
+    documentKind: "quotation",
+    quotationValidUntil: "2026-09-09",
+    quotationWorkingDays: 3,
+  });
+
+  assert.ok(doc.texts.includes("QUOTATION"));
+  assert.ok(doc.texts.includes("Quotation No. MOI01"));
+  assert.ok(doc.texts.some((text) => String(text).includes("Valid until 2026-09-09")));
+  assert.equal(doc.texts.includes("Outstanding Details"), false);
+  assert.equal(doc.texts.includes("Outstanding Invoice Rows"), false);
+  assert.equal(doc.texts.includes("Change History"), false);
+});
+
 test("renderOrderPdfDocument shows recent receipts not yet in Tally below outstanding", () => {
   const doc = createMockDoc();
   const snapshot = buildOrderPdfSnapshotFromSavedOrder({

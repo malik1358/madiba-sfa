@@ -119,6 +119,56 @@ test("summary table transposes footer rows into columns for sales, collection, a
   assert.equal(summary.rows[2].vsLastMonth.priorActual, 250_000);
 });
 
+test("upload summary Total sales status matches ~100% estimate instead of workday behind-pace", () => {
+  const actual = 422_819;
+  const target = 4_580_000;
+  const day3Share = actual / target;
+  const personalPaceShares = {
+    shares: Object.fromEntries(
+      Array.from({ length: 31 }, (_, index) => {
+        const day = index + 1;
+        if (day <= 3) return [day, (day / 3) * day3Share];
+        return [day, Math.min(1, day3Share + ((day - 3) / 28) * (1 - day3Share))];
+      }),
+    ),
+  };
+  const salesman = {
+    ...ahmed,
+    officeSupplies: "2290000",
+    localItemSales: "1145000",
+    otherSales: "1145000",
+    totalSales: "4580000",
+    collection: "3268000",
+    paceShares: personalPaceShares,
+    salesAsOfDate: "2026-11-03",
+    receiptAsOfDate: "2026-11-08",
+    kpis: [
+      { key: "officeSupplies", actual: 211_410 },
+      { key: "localItemSales", actual: 105_705 },
+      { key: "otherSales", actual: 105_704 },
+      { key: "totalSales", actual },
+      { key: "collection", actual: 828_959 },
+      { key: "cashCollection", actual: 0 },
+      { key: "totalCashCollected", actual: 828_959 },
+      { key: "newCustomers", actual: 0 },
+      { key: "repeatCustomers", actual: 0 },
+    ],
+  };
+  const summary = buildKpiUploadSummaryTable({
+    rows: [salesman],
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-10",
+    salesAsOfDate: "2026-11-03",
+    receiptAsOfDate: "2026-11-08",
+  });
+  const totalSales = summary.rows.find((row) => row.key === "totalSales");
+  assert.ok(totalSales);
+  assert.ok(Number(totalSales.paceEstimate.achievement) > 99);
+  assert.ok(Number(totalSales.paceEstimate.achievement) < 101);
+  assert.match(totalSales.totalFiltered.statusLabel, /On pace|ahead of pace|Achieved/);
+  assert.doesNotMatch(totalSales.totalFiltered.statusLabel, /behind pace/);
+});
+
 test("average collection days treats lower days as improving", () => {
   const improving = compareAverageCollectionDaysToPriorMonth(40, 50);
   assert.equal(improving.direction, "up");

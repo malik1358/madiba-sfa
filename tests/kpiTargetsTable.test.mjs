@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   bossCodeFromTeamTarget,
+  buildFilteredPerformanceKpi,
   filterKpiTargetRows,
   hasExplicitTargets,
   isKpiTargetProfile,
@@ -225,6 +226,32 @@ test("total cash collected pace estimate is collection plus cash collection", ()
     estimates.totalCashCollected.estimate,
     (Number(estimates.collection.estimate) || 0) + (Number(estimates.cashCollection.estimate) || 0),
   );
+});
+
+test("filtered totals status uses estimate-aligned expected, not bare workday pace", () => {
+  // Personal curve projects ~100% of target while workday expected is much higher.
+  const actual = 422_819;
+  const target = 4_580_000;
+  const estimate = 4_583_917;
+  const aligned = buildFilteredPerformanceKpi("totalSales", {
+    actual,
+    target,
+    estimate,
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-10",
+    salesAsOfDate: "2026-11-03",
+  });
+  assert.equal(aligned.status.key, "on_pace");
+  assert.ok(Math.abs(Number(aligned.paceGap) || 0) < 1);
+
+  const bare = buildPerformanceKpi("totalSales", {
+    actual,
+    target,
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-10",
+    salesAsOfDate: "2026-11-03",
+  });
+  assert.equal(bare.status.key, "behind");
 });
 
 test("pace estimate vs last month shows value and percent direction", () => {

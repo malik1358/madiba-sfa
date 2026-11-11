@@ -4,6 +4,7 @@ import {
   achievementPercent,
   averageSkusPerRepeatCustomer,
   buildPerformanceKpi,
+  expectedPacePercentFromEstimate,
   monthEndPaceEstimate,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
@@ -199,6 +200,36 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
     totals[key].achievement = achievementPercent(totals[key].actual, totals[key].target);
   });
   return totals;
+}
+
+/**
+ * Filtered Totals / upload-summary status for one KPI.
+ * When Estimate at current pace is available, expected % is the blend implied by
+ * that estimate (`actual × 100 / estimate`) so ahead/behind cannot disagree with
+ * a ~100% month-end projection. Falls back to normal KPI pace when estimate is
+ * missing.
+ */
+export function buildFilteredPerformanceKpi(key, {
+  actual = 0,
+  target = 0,
+  estimate = null,
+  reportDate,
+  todayIso,
+  salesAsOfDate,
+  receiptAsOfDate,
+  paceShares = null,
+} = {}) {
+  const expected = expectedPacePercentFromEstimate(actual, estimate);
+  return buildPerformanceKpi(key, {
+    actual,
+    target,
+    reportDate,
+    todayIso,
+    paceShares,
+    salesAsOfDate,
+    receiptAsOfDate,
+    expected: expected == null ? undefined : expected,
+  });
 }
 
 export function sumFilteredKpiPaceEstimates(

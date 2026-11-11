@@ -385,6 +385,19 @@ export function estimateAtCurrentPace(actual, expectedPercent) {
 }
 
 /**
+ * Inverse of estimateAtCurrentPace: expected % implied by booked actual and a
+ * month-end pace estimate (`actual × 100 / estimate`). Used so filtered Totals
+ * ahead/behind status matches the Estimate at current pace footer (salesmen can
+ * have different personal curves; a single workday % would disagree).
+ */
+export function expectedPacePercentFromEstimate(actual, estimate) {
+  const value = Number(actual || 0);
+  const projected = Number(estimate);
+  if (!(value > 0) || !Number.isFinite(projected) || !(projected > 0)) return null;
+  return (value * 100) / projected;
+}
+
+/**
  * Project month-end value if today's ahead/behind pace gap (percentage points vs expected)
  * holds through month-end: target × (100 + gap) / 100.
  * Example: target 4,550,000 and 21% behind pace → 4,550,000 × 0.79 = 3,594,500.
@@ -448,6 +461,7 @@ export function kpiStatus({
   paceShares = null,
   salesAsOfDate,
   dataAsOfDate,
+  expected: expectedOverride,
 } = {}) {
   const achievement = achievementPercent(actual, target);
   if (achievement == null) {
@@ -467,7 +481,10 @@ export function kpiStatus({
   const paceDate = paceShares == null && asOf === undefined
     ? resolveKpiPaceDate(reportDate, today || reportDate)
     : resolveSalesPaceAsOfDate(reportDate, today || reportDate, asOf);
-  const expected = monthIsComplete ? 100 : expectedPacePercent(paceDate, paceShares);
+  const override = expectedOverride == null ? null : Number(expectedOverride);
+  const expected = Number.isFinite(override)
+    ? override
+    : (monthIsComplete ? 100 : expectedPacePercent(paceDate, paceShares));
   const gap = achievement - expected;
 
   if (achievement >= 100) {
@@ -854,6 +871,7 @@ export function buildPerformanceKpi(key, {
   paceShares = null,
   salesAsOfDate,
   receiptAsOfDate,
+  expected: expectedOverride,
 } = {}) {
   const achievement = achievementPercent(actual, target);
   const salesPace = SALES_PACE_KPI_KEYS.has(key);
@@ -867,6 +885,7 @@ export function buildPerformanceKpi(key, {
     dataAsOfDate: salesPace
       ? salesAsOfDate
       : (collectionPace ? receiptAsOfDate : undefined),
+    expected: expectedOverride,
   });
   return {
     key,

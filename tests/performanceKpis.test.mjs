@@ -9,6 +9,7 @@ import {
   buildPerformanceKpi,
   buildPerformanceSnapshot,
   expectedPacePercent,
+  expectedPacePercentFromEstimate,
   ksaWorkdayProgressRatio,
   isMissingSchemaColumn,
   classifyBuyingCustomers,
@@ -135,6 +136,45 @@ test("counts new SKUs sold only to repeat customers", () => {
   });
   assert.equal(details.actual, 2);
   assert.equal(details.rows.length, 2);
+});
+
+test("expected pace from estimate is the inverse of estimate at current pace", () => {
+  assert.equal(
+    Number(expectedPacePercentFromEstimate(422_819, 4_583_917).toFixed(4)),
+    Number(((422_819 * 100) / 4_583_917).toFixed(4)),
+  );
+  assert.equal(expectedPacePercentFromEstimate(0, 100), null);
+  assert.equal(expectedPacePercentFromEstimate(100, 0), null);
+  assert.equal(expectedPacePercentFromEstimate(100, null), null);
+});
+
+test("filtered sales status with estimate-aligned expected stays on pace near 100% projection", () => {
+  // Screenshot bug: workday expected (~34%) made Total sales look 25% behind while
+  // Estimate at current pace (personal curve) projected ~100% of target.
+  const actual = 422_819;
+  const target = 4_580_000;
+  const estimate = 4_583_917;
+  const expected = expectedPacePercentFromEstimate(actual, estimate);
+  const status = kpiStatus({
+    actual,
+    target,
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-10",
+    expected,
+  });
+  assert.ok(Math.abs(status.gap) < 1);
+  assert.equal(status.key, "on_pace");
+  assert.match(status.label, /On pace/);
+
+  const wrongWorkdayStatus = kpiStatus({
+    actual,
+    target,
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-10",
+    salesAsOfDate: "2026-11-03",
+  });
+  assert.equal(wrongWorkdayStatus.key, "behind");
+  assert.match(wrongWorkdayStatus.label, /behind pace/);
 });
 
 test("KPI status compares actual/target with expected pace by today", () => {

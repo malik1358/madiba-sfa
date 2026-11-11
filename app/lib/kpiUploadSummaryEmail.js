@@ -1,10 +1,10 @@
 import {
   PERFORMANCE_KPI_LABELS,
-  buildPerformanceKpi,
   formatAchievementPercent,
   formatPerformanceKpiValue,
 } from "./performanceKpis.js";
 import {
+  buildFilteredPerformanceKpi,
   compareKpiActualToPriorMonth,
   compareKpiEstimateToPriorMonth,
   sumFilteredKpiColumns,
@@ -475,15 +475,16 @@ export function buildKpiUploadSummaryTable({
 
   const tableRows = (columns || []).map((key) => {
     const total = totals[key] || { actual: 0, target: 0, achievement: null };
-    const liveKpi = buildPerformanceKpi(key, {
+    const estimate = estimates[key] || { estimate: null, target: 0, achievement: null };
+    const liveKpi = buildFilteredPerformanceKpi(key, {
       actual: total.actual,
       target: total.target,
+      estimate: estimate.estimate,
       reportDate,
       todayIso,
       salesAsOfDate,
       receiptAsOfDate,
     });
-    const estimate = estimates[key] || { estimate: null, target: 0, achievement: null };
     const comparison = vsPrior[key] || compareKpiEstimateToPriorMonth(null, 0);
     return {
       key,
@@ -546,6 +547,13 @@ function toneColor(tone) {
   if (tone === "red") return "#b91c1c";
   if (tone === "orange") return "#c2410c";
   return "#475569";
+}
+
+function toneBackground(tone) {
+  if (tone === "green") return "#dcfce7";
+  if (tone === "red") return "#fee2e2";
+  if (tone === "orange") return "#ffedd5";
+  return "#e2e8f0";
 }
 
 function isCollectionDaysRow(row) {
@@ -674,7 +682,7 @@ function totalFilteredHtml(row) {
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(actual)}</div>
     ${hasTarget ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">Target ${escapeHtml(target)}</div>
     <div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : `<div style="color:#64748b;font-size:12px;margin-top:2px;">${infoLine}</div>`}
-    <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#fee2e2;color:${toneColor(cell.statusTone)};font-size:11px;font-weight:600;">
+    <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:${toneBackground(cell.statusTone)};color:${toneColor(cell.statusTone)};font-size:11px;font-weight:600;">
       ${escapeHtml(status)}
     </div>
   `;

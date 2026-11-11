@@ -422,7 +422,7 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
   const rows = [
     {
       ...ahmed,
-      paceShares: { 10: 1 },
+      paceShares: { 8: 1 },
       kpis: ahmed.kpis.map((kpi) => (
         kpi.key === "officeSupplies" ? { ...kpi, actual: 1_262_294 } : kpi
       )),
@@ -439,7 +439,7 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
       collection: "0",
       newCustomers: "0",
       repeatCustomers: "0",
-      paceShares: { 10: 1 },
+      paceShares: { 8: 1 },
       kpis: [
         { key: "officeSupplies", actual: 14_882 },
         { key: "localItemSales", actual: 0 },
@@ -464,7 +464,7 @@ test("pace estimate footer stays at or above the filtered actual total", () => {
     target: 100,
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
-    paceShares: { 10: 1 },
+    paceShares: { 8: 1 },
   });
   assert.equal(estimateFromPaceGap(100, ahmedLive.paceGap), 1_262_294);
   assert.equal(
@@ -585,8 +585,8 @@ test("pace estimate equals actual when sales and receipts reach month-end", () =
 
 test("pace estimate footer sums each salesman's own scaled pace estimate", () => {
   const rows = [
-    { ...ahmed, paceShares: { 10: 0.5 } },
-    { ...ali, paceShares: { 10: 0.8 } },
+    { ...ahmed, paceShares: { 8: 0.5 } },
+    { ...ali, paceShares: { 8: 0.8 } },
     teamAhmed,
   ];
   const estimates = sumFilteredKpiPaceEstimates(rows, ["officeSupplies", "totalSales"], {
@@ -598,14 +598,14 @@ test("pace estimate footer sums each salesman's own scaled pace estimate", () =>
     target: 100,
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
-    paceShares: { 10: 0.5 },
+    paceShares: { 8: 0.5 },
   });
   const aliOffice = buildPerformanceKpi("officeSupplies", {
     actual: 30,
     target: 80,
     reportDate: "2026-10-01",
     todayIso: "2026-10-10",
-    paceShares: { 10: 0.8 },
+    paceShares: { 8: 0.8 },
   });
   const officeEstimate = monthEndPaceEstimate({
     actual: 40,
@@ -642,14 +642,14 @@ test("pace estimate footer sums each salesman's own scaled pace estimate", () =>
         target: 190,
         reportDate: "2026-10-01",
         todayIso: "2026-10-10",
-        paceShares: { 10: 0.5 },
+        paceShares: { 8: 0.5 },
       }).expected,
       paceGap: buildPerformanceKpi("totalSales", {
         actual: 50,
         target: 190,
         reportDate: "2026-10-01",
         todayIso: "2026-10-10",
-        paceShares: { 10: 0.5 },
+        paceShares: { 8: 0.5 },
       }).paceGap,
     })
     + monthEndPaceEstimate({
@@ -660,14 +660,14 @@ test("pace estimate footer sums each salesman's own scaled pace estimate", () =>
         target: 120,
         reportDate: "2026-10-01",
         todayIso: "2026-10-10",
-        paceShares: { 10: 0.8 },
+        paceShares: { 8: 0.8 },
       }).expected,
       paceGap: buildPerformanceKpi("totalSales", {
         actual: 50,
         target: 120,
         reportDate: "2026-10-01",
         todayIso: "2026-10-10",
-        paceShares: { 10: 0.8 },
+        paceShares: { 8: 0.8 },
       }).paceGap,
     })
   ));

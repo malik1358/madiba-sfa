@@ -26,7 +26,7 @@ export function rowChartLabel(row = {}) {
 
 /**
  * KPI-style month-end projection for an open MTD chart point.
- * Uses workday expected pace (same shape as Estimate at current pace without personal shares).
+ * Uses workday expected pace (same shape as Method A sales forecast without personal shares).
  */
 export function chartOpenMonthEstimate(actual, {
   openMonth = "",

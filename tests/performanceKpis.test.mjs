@@ -175,7 +175,7 @@ test("expected pace from estimate is the inverse of estimate at current pace", (
 
 test("filtered sales status with estimate-aligned expected stays on pace near 100% projection", () => {
   // Screenshot bug: workday expected (~34%) made Total sales look 25% behind while
-  // Estimate at current pace (personal curve) projected ~100% of target.
+  // Estimated month-end sales (personal curve) projected ~100% of target.
   const actual = 422_819;
   const target = 4_580_000;
   const estimate = 4_583_917;
@@ -262,8 +262,9 @@ test("collection pace stops at the latest receipt date", () => {
 });
 
 test("pace through the last calendar day of the month is always 100%", () => {
-  // Day-31 historical shares often walk back to a day-30 average below 100%.
-  const incompleteMonthEndShares = { 29: 0.95, 30: 0.99846 };
+  // Workday-indexed curves can leave the last workday share below 100%.
+  // 2026-10-30 is Friday (off): elapsed workdays = 25 of 26.
+  const incompleteMonthEndShares = { 24: 0.95, 25: 0.99846 };
   assert.equal(expectedPacePercent("2026-10-31", incompleteMonthEndShares), 100);
   assert.equal(expectedPacePercent("2026-10-30", incompleteMonthEndShares), 99.846);
   assert.equal(
@@ -339,7 +340,8 @@ test("Thursday last sales/receipt date advances pace through Friday holiday", ()
   // Even on Thursday itself, Friday is already known to have zero sales.
   assert.equal(resolveSalesPaceAsOfDate("2026-11-01", "2026-11-05", "2026-11-05"), "2026-11-06");
 
-  const shares = { 5: 0.2, 6: 0.21, 7: 0.3 };
+  // Thursday 5 Nov advances through Friday 6 Nov → workday index still 5 (Fri off).
+  const shares = { 5: 0.21, 6: 0.3 };
   assert.equal(
     resolveExpectedPacePercent("totalSales", {
       reportDate: "2026-11-01",
@@ -369,7 +371,8 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
   assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", ""), "2026-10-01");
   assert.equal(resolveSalesPaceAsOfDate("2026-10-01", "2026-10-20", undefined), "2026-10-20");
 
-  const shares = { 19: 0.4, 20: 0.7 };
+  // Workday indices: 2026-10-19 = WD16, 2026-10-20 = WD17.
+  const shares = { 16: 0.4, 17: 0.7 };
   const uploaded = kpiStatus({
     actual: 40,
     target: 100,
@@ -378,7 +381,8 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
     paceShares: shares,
     salesAsOfDate: "2026-10-19",
   });
-  assert.equal(uploaded.expected, 40);
+  // Method A floors the 40% WD16 historical share at workday progress through 19 Oct.
+  assert.equal(uploaded.expected, ksaWorkdayProgressRatio("2026-10-19") * 100);
 
   const calendar = kpiStatus({
     actual: 40,
@@ -387,6 +391,7 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
     todayIso: "2026-10-20",
     paceShares: shares,
   });
+  // WD17 historical 70% is above workday progress through 20 Oct.
   assert.equal(calendar.expected, 70);
 
   const collection = buildPerformanceKpi("collection", {
@@ -423,8 +428,8 @@ test("open-month sales pace stops at the latest uploaded sales date", () => {
 });
 
 test("averaged pace shares stay non-decreasing after a late-month dip", () => {
-  // Month A books early; month B books almost everything on day 31. Plain averages
-  // can put day 26 below day 12; cumulative share must not fall.
+  // Month A books early; month B books almost everything late. Plain averages
+  // can dip later workday keys; cumulative share must not fall.
   const curve = averageCumulativeDayShares([
     { transaction_date: "2026-07-12", sales_amount: 65 },
     { transaction_date: "2026-07-26", sales_amount: 35 },
@@ -432,8 +437,10 @@ test("averaged pace shares stay non-decreasing after a late-month dip", () => {
     { transaction_date: "2026-08-31", sales_amount: 90 },
   ]);
   assert.equal(curve.monthCount, 2);
-  assert.ok(curve.shares[26] >= curve.shares[12]);
-  assert.ok(curve.shares[31] >= curve.shares[26]);
+  assert.equal(curve.indexBy, "workday");
+  // Jul 12→WD10, Jul 12→WD11; Jul 26→WD22; Aug 31→WD27.
+  assert.ok(curve.shares[22] >= curve.shares[10]);
+  assert.ok(curve.shares[27] >= curve.shares[22]);
   assert.ok(expectedPacePercent("2026-09-26", curve.shares) >= expectedPacePercent("2026-09-12", curve.shares));
 });
 
@@ -460,12 +467,13 @@ test("expected pace uses historical share of month sales by that date", () => {
 
 test("historical sales pace applies only to sales KPIs", () => {
   const reportDate = "2026-10-01";
-  const todayIso = "2026-10-09";
+  // 2026-10-10 is workday index 8 (Oct 2 and 9 Fridays off).
+  const todayIso = "2026-10-10";
   const workdayPace = ksaWorkdayProgressRatio(todayIso) * 100;
   const snapshot = buildPerformanceSnapshot({
     reportDate,
     todayIso,
-    paceShares: { 9: 0.7 },
+    paceShares: { 8: 0.7 },
     actuals: {
       officeSupplies: 50,
       localItemSales: 50,
@@ -518,8 +526,19 @@ test("pace shares use that salesman only, not the company average", () => {
   };
   assert.deepEqual(pickSalesmanPaceShares(pace, "abdul"), abdul);
   assert.equal(pickSalesmanPaceShares(pace, "ABADALLA"), null);
-  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "ABDUL")), 12);
-  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "NEWGUY")), ksaWorkdayProgressRatio("2026-09-09") * 100);
+  // Method A floors a 12% historical day-9 share at KSA workday progress.
+  const workday = ksaWorkdayProgressRatio("2026-09-09") * 100;
+  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "ABDUL")), workday);
+  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "NEWGUY")), workday);
+});
+
+test("Method A expected pace floors historical share at workday progress", () => {
+  const workday = ksaWorkdayProgressRatio("2026-11-10") * 100;
+  // 2026-11-10 is KSA workday index 9.
+  assert.ok(workday > 5);
+  assert.equal(expectedPacePercent("2026-11-10", { 9: 0.007 }), workday);
+  assert.ok(Math.abs(expectedPacePercent("2026-11-10", { 9: 0.55 }) - 55) < 1e-9);
+  assert.equal(expectedPacePercent("2026-11-30", { 30: 0.55 }), 100);
 });
 
 test("nets signed sales and positive or negative credit notes by category", () => {
@@ -599,14 +618,17 @@ test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
     { transaction_date: "2026-08-15", salesman_code: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 100 },
   ];
   const pace = await loadSalesPaceShares(activeSalesAdmin(paceRows), { reportDate: "2026-09-01" });
+  // Workday-indexed: Aug 1 = WD1, Aug 8 = WD7, Aug 15 = WD13.
   assert.equal(pace.bySalesman.get("SM002")[1], 1 / 3);
-  assert.equal(pace.bySalesman.get("SM002")[8], 2 / 3);
-  assert.equal(pace.bySalesman.get("SM002")[15], 1);
+  assert.equal(pace.bySalesman.get("SM002")[7], 2 / 3);
+  assert.equal(pace.bySalesman.get("SM002")[13], 1);
   assert.equal(pace.bySalesman.has("THAMER"), false);
 });
 
-test("sales pace uses each salesman's own last three complete months", async () => {
+test("sales pace uses each salesman's own last six complete months (median)", async () => {
   const pace = await loadSalesPaceShares(activeSalesAdmin([
+    { transaction_date: "2026-03-01", salesman_code: "SM01", sales_amount: 1000 },
+    { transaction_date: "2026-04-01", salesman_code: "SM01", sales_amount: 1000 },
     { transaction_date: "2026-05-01", salesman_code: "SM01", sales_amount: 1000 },
     { transaction_date: "2026-06-01", salesman_code: "SM01", sales_amount: 25 },
     { transaction_date: "2026-06-20", salesman_code: "SM01", sales_amount: 75 },
@@ -618,9 +640,29 @@ test("sales pace uses each salesman's own last three complete months", async () 
     { transaction_date: "2026-08-20", salesman_code: "SM02", sales_amount: 50 },
   ]), { reportDate: "2026-09-01" });
 
-  assert.equal(pace.bySalesman.get("SM01")[1], 0.25);
+  // Last six for SM01: Mar–Aug. Day-1 shares [1,1,1,0.25,0.25,0.25] → median 0.625.
+  // Without the 6-month window Mar would still be included; Mar is first of six.
+  assert.equal(pace.bySalesman.get("SM01")[1], 0.625);
   assert.equal(pace.bySalesman.get("SM02")[1], 0.5);
   assert.equal(pace.bySalesman.has("SM03"), false);
+
+  // Seventh older month must not pull the median when only six are kept.
+  const paced = await loadSalesPaceShares(activeSalesAdmin([
+    { transaction_date: "2026-02-01", salesman_code: "SM01", sales_amount: 1 },
+    { transaction_date: "2026-03-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-03-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-04-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-04-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-05-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-05-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-06-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-06-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-07-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-07-20", salesman_code: "SM01", sales_amount: 75 },
+    { transaction_date: "2026-08-01", salesman_code: "SM01", sales_amount: 25 },
+    { transaction_date: "2026-08-20", salesman_code: "SM01", sales_amount: 75 },
+  ]), { reportDate: "2026-09-01" });
+  assert.equal(paced.bySalesman.get("SM01")[1], 0.25);
 });
 
 test("current month pace date is the latest uploaded sales date", async () => {
@@ -851,7 +893,7 @@ test("KPI detail contributions reconcile net sales, buyers, and per-customer FIF
 test("performance snapshots reuse source actuals cached for the active batch", async () => {
   const queriedTables = [];
   const cache = {
-    version: 8,
+    version: 10,
     receiptStamp: "stamp-1",
     salesAsOfDate: "2026-09-08",
     receiptAsOfDate: "2026-09-07",
@@ -877,6 +919,10 @@ test("performance snapshots reuse source actuals cached for the active batch", a
         select: () => query,
         eq: (key, value) => { filters[key] = value; return query; },
         in: () => query,
+        gte: () => query,
+        lte: () => query,
+        lt: () => query,
+        range: () => query,
         maybeSingle: async () => ({
           data: {
             setting_value: filters.setting_key === "active_sales_batch_id"
@@ -907,10 +953,10 @@ test("performance snapshots reuse source actuals cached for the active batch", a
   assert.equal(queriedTables.includes("collection_visits"), false);
 });
 
-test("allowRebuild false serves stored KPI cache even when receipt stamp differs", async () => {
+test("allowRebuild false serves current Method A cache even when receipt stamp differs", async () => {
   const queriedTables = [];
   const cache = {
-    version: 8,
+    version: 10,
     receiptStamp: "old-stamp",
     salesAsOfDate: "2026-10-08",
     receiptAsOfDate: "2026-10-07",
@@ -965,7 +1011,7 @@ test("allowRebuild false serves stored KPI cache even when receipt stamp differs
   assert.equal(queriedTables.includes("customers"), false);
 });
 
-test("allowRebuild false does not rebuild when KPI cache is missing", async () => {
+test("allowRebuild false rebuilds when Method A cache is missing or outdated", async () => {
   const queriedTables = [];
   let upsertCalled = false;
   const admin = {
@@ -975,6 +1021,10 @@ test("allowRebuild false does not rebuild when KPI cache is missing", async () =
         select: () => query,
         eq: () => query,
         in: () => query,
+        gte: () => query,
+        lte: () => query,
+        lt: () => query,
+        range: () => query,
         upsert: async () => {
           upsertCalled = true;
           return { error: null };
@@ -985,20 +1035,82 @@ test("allowRebuild false does not rebuild when KPI cache is missing", async () =
       return query;
     },
   };
-  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+  await loadPerformanceSnapshotsForSalesmen(admin, {
     salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
     reportDate: "2026-10-01",
     allowRebuild: false,
   });
 
-  assert.equal(snapshot.actuals.totalSales, 0);
-  assert.equal(upsertCalled, false);
-  assert.equal(queriedTables.includes("active_sales"), false);
+  assert.equal(upsertCalled, true);
+  assert.equal(queriedTables.includes("active_sales"), true);
+});
+
+test("outdated v8–v9 KPI caches are rejected and rebuilt for Method A", async () => {
+  let stored = {
+    version: 9,
+    receiptStamp: "stamp",
+    salesAsOfDate: "2026-10-08",
+    receiptAsOfDate: "2026-10-07",
+    batchId: "10",
+    actualsBySalesman: {
+      SM001: {
+        officeSupplies: 100,
+        localItemSales: 0,
+        otherSales: 50,
+        collection: 40,
+        cashCollection: 10,
+        newCustomers: 1,
+        repeatCustomers: 0,
+      },
+    },
+    paceBySalesman: { SM001: { 10: 0.12 } },
+  };
+  let rebuilt = false;
+  const admin = {
+    from(table) {
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq: (key, value) => { filters[key] = value; return query; },
+        in: () => query,
+        gte: () => query,
+        lte: () => query,
+        lt: () => query,
+        range: () => query,
+        upsert: async ({ setting_value }) => {
+          rebuilt = true;
+          stored = JSON.parse(setting_value);
+          return { error: null };
+        },
+        maybeSingle: async () => ({
+          data: filters.setting_key?.startsWith("performance_kpi_actuals_v2:")
+            ? { setting_value: JSON.stringify(stored) }
+            : filters.setting_key === "active_sales_batch_id"
+              ? { setting_value: "10" }
+              : filters.setting_key === "receipt_register_uploaded_at"
+                ? { setting_value: "stamp" }
+                : null,
+          error: null,
+        }),
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return query;
+    },
+  };
+  const [snapshot] = await loadPerformanceSnapshotsForSalesmen(admin, {
+    salesmen: [{ salesmanCode: "SM001", salesmanName: "Ahmed" }],
+    reportDate: "2026-10-01",
+    allowRebuild: false,
+  });
+  assert.equal(rebuilt, true);
+  assert.equal(Number(stored.version), 10);
+  // Soft-read must not keep serving the rejected v9 pace curve as Method A.
+  assert.notEqual(snapshot.paceShares?.[10], 0.12);
 });
 
 test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", async () => {
   const cache = {
-    version: 8,
+    version: 10,
     receiptStamp: "any",
     salesAsOfDate: "2026-09-30",
     receiptAsOfDate: "2026-09-29",
@@ -1056,7 +1168,7 @@ test("loadStoredKpiActualsByCode reads prior-month cache without stamp checks", 
 
   const withSku = {
     ...cache,
-    version: 9,
+    version: 10,
     actualsBySalesman: {
       SM001: {
         ...cache.actualsBySalesman.SM001,

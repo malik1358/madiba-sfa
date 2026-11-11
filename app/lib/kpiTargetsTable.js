@@ -205,10 +205,10 @@ export function sumFilteredKpiColumns(rows = [], columns = PERFORMANCE_DISPLAY_K
 
 /**
  * Filtered Totals / upload-summary status for one KPI.
- * When Estimate at current pace is available, expected % is the blend implied by
+ * When Estimated month-end sales is available, expected % is the blend implied by
  * that estimate (`actual × 100 / estimate`) so ahead/behind cannot disagree with
  * a ~100% month-end projection. Falls back to normal KPI pace when estimate is
- * missing.
+ * missing. Targets never enter the forecast formula.
  */
 export function buildFilteredPerformanceKpi(key, {
   actual = 0,

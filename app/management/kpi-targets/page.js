@@ -65,15 +65,20 @@ const TEXT = {
   team: { en: "team", ar: "فريق" },
   teamHint: { en: "Team target", ar: "هدف الفريق" },
   totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
-  paceEstimate: { en: "Estimate at current pace", ar: "التقدير بالمسار الحالي" },
+  paceEstimate: { en: "Estimated month-end sales", ar: "تقدير مبيعات نهاية الشهر" },
   paceEstimateHint: {
-    en: "Sales: each salesman's last-3-month pace to the latest sales date. Collection: KSA workdays (Sat on, Fri off) to the latest receipt date",
-    ar: "المبيعات: مسار آخر 3 أشهر حتى آخر تاريخ مبيعات. التحصيل: أيام العمل (السبت عمل، الجمعة عطلة) حتى آخر تاريخ تحصيل",
+    en: "Method A: each salesman's median 6-month cumulative sales curve, floored at KSA workday progress, through the latest sales date. Collection still uses workdays to the latest receipt date. Early-month estimates have higher uncertainty.",
+    ar: "الطريقة A: الوسيط لمنحنى المبيعات التراكمي لآخر 6 أشهر لكل مندوب، مع حد أدنى لتقدم أيام العمل حتى آخر تاريخ مبيعات. التحصيل يعتمد على أيام العمل حتى آخر تحصيل. تقديرات بداية الشهر أقل يقيناً.",
+  },
+  forecastAsOf: { en: "Forecast as-of", ar: "التقدير حتى" },
+  forecastUncertainty: {
+    en: "Early-month 80% historical range is roughly −30% to +33% of the central forecast at ~workday 10; late-month ranges are much tighter.",
+    ar: "نطاق الثقة التاريخي 80% في بداية الشهر تقريباً −30% إلى +33% من التقدير عند نحو يوم العمل 10؛ ويتضيق كثيراً لاحقاً.",
   },
   vsLastMonth: { en: "vs last month", ar: "مقابل الشهر الماضي" },
   vsLastMonthHint: {
-    en: "Pace estimate minus last month's actual for the same filtered salesmen",
-    ar: "تقدير المسار ناقص فعلي الشهر الماضي لنفس المندوبين المصفّين",
+    en: "Estimated month-end sales minus last month's actual for the same filtered salesmen",
+    ar: "تقدير نهاية الشهر ناقص فعلي الشهر الماضي لنفس المندوبين المصفّين",
   },
   higherThanLastMonth: { en: "higher than last month", ar: "أعلى من الشهر الماضي" },
   lowerThanLastMonth: { en: "lower than last month", ar: "أقل من الشهر الماضي" },
@@ -692,6 +697,12 @@ export default function KpiTargetsPage() {
                       <td className="moduleKpiSalesmanCell">
                         <strong>{t("paceEstimate")}</strong>
                         <div className="moduleKpiMeta">{t("paceEstimateHint")}</div>
+                        {lastTransactionDate ? (
+                          <div className="moduleKpiMeta">
+                            {t("forecastAsOf")}: {formatKsaDateOnly(lastTransactionDate)}
+                          </div>
+                        ) : null}
+                        <div className="moduleKpiMeta">{t("forecastUncertainty")}</div>
                       </td>
                       <td className="moduleKpiBossCell"></td>
                       {columns.map((key) => {

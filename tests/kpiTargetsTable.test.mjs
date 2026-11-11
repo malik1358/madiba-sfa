@@ -14,6 +14,7 @@ import {
   compareKpiEstimateToPriorMonth,
   priorMonthKpiActualForRow,
   priorMonthKpiActualFromRow,
+  rowKpiMonthEndEstimate,
   sumFilteredKpiColumns,
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
@@ -205,10 +206,11 @@ test("total cash collected pace estimate is collection plus cash collection", ()
       ],
     },
   ];
+  const options = { reportDate: "2026-10-01", todayIso: "2026-10-10" };
   const estimates = sumFilteredKpiPaceEstimates(
     rows,
     ["collection", "cashCollection", "totalCashCollected"],
-    { reportDate: "2026-10-01", todayIso: "2026-10-10" },
+    options,
   );
   const expected = resolveExpectedPacePercent("collection", {
     reportDate: "2026-10-01",
@@ -226,6 +228,15 @@ test("total cash collected pace estimate is collection plus cash collection", ()
     estimates.totalCashCollected.estimate,
     (Number(estimates.collection.estimate) || 0) + (Number(estimates.cashCollection.estimate) || 0),
   );
+  assert.equal(
+    rowKpiMonthEndEstimate(rows[0], "collection", options),
+    estimates.collection.estimate,
+  );
+  assert.equal(
+    rowKpiMonthEndEstimate(rows[0], "totalCashCollected", options),
+    estimates.totalCashCollected.estimate,
+  );
+  assert.equal(rowKpiMonthEndEstimate({ ...rows[0], isTeam: true }, "collection", options), null);
 });
 
 test("filtered sales estimate floors tiny personal early-month shares at workday pace", () => {

@@ -47,18 +47,18 @@ test("resolveQuotationValidUntil uses KSA issue date and working days", () => {
   assert.equal(resolved.validUntil, "2026-09-06");
 });
 
-test("buildQuotationInvoiceMeta sets quotation status and validity fields", () => {
+test("buildQuotationInvoiceMeta sets validity fields without changing invoice status", () => {
   const now = new Date("2026-09-02T08:00:00+03:00");
   const meta = buildQuotationInvoiceMeta(
     { orderId: "441", status: ORDER_STATUS_PENDING_INVOICE_CREATION },
     { userId: "user-1", now, workingDays: 3 },
   );
-  assert.equal(meta.status, ORDER_STATUS_QUOTATION_WAITING_PAYMENT);
+  assert.equal(meta.status, ORDER_STATUS_PENDING_INVOICE_CREATION);
   assert.equal(meta.quotationWorkingDays, 3);
   assert.equal(meta.quotationIssueDate, "2026-09-02");
   assert.equal(meta.quotationValidUntil, "2026-09-06");
   assert.equal(meta.quotationCreatedBy, "user-1");
-  assert.equal(meta.statusUpdatedBy, "user-1");
+  assert.equal(meta.statusUpdatedBy, undefined);
   assert.ok(String(meta.quotationCreatedAt || "").length > 0);
 });
 

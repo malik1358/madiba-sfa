@@ -956,14 +956,16 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   }
 
-  const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
-    label: row.label,
-    value: formatOutstandingValue(row.amount, 0, row.kind !== "count"),
-  }));
+  const bucketRows = isQuotation
+    ? []
+    : buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
+      label: row.label,
+      value: formatOutstandingValue(row.amount, 0, row.kind !== "count"),
+    }));
   const outstandingBlockHeight = bucketRows.length > 0
     ? 14 + 10 + bucketRows.length * 18
     : 0;
-  const hasOutstandingBuckets = bucketRows.length > 0;
+  const hasOutstandingBuckets = !isQuotation && bucketRows.length > 0;
   const pendingTallyReceipts = Array.isArray(markedSnapshot.pendingTallyReceipts)
     ? markedSnapshot.pendingTallyReceipts.slice(0, 8)
     : [];
@@ -1089,7 +1091,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
   cursorY = Math.max(cursorY, summaryY + summaryBoxHeight) + 24;
 
-  if (outstandingCustomer && outstandingInvoices.length > 0) {
+  if (!isQuotation && outstandingCustomer && outstandingInvoices.length > 0) {
     ensureSpace(30);
     doc.setFont(undefined, "bold");
     doc.text("Outstanding Invoice Rows", marginX, cursorY);
@@ -1155,7 +1157,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     cursorY = rowY + 16;
   }
 
-  if (Array.isArray(markedSnapshot.history) && markedSnapshot.history.length > 0) {
+  if (!isQuotation && Array.isArray(markedSnapshot.history) && markedSnapshot.history.length > 0) {
     ensureSpace(24);
     doc.setFont(undefined, "bold");
     doc.text("Change History", marginX, cursorY);

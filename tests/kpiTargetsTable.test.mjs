@@ -228,34 +228,49 @@ test("total cash collected pace estimate is collection plus cash collection", ()
   );
 });
 
-test("filtered sales estimate floors tiny personal early-month shares at workday pace", () => {
+test("filtered sales estimate clamps tiny personal shares but keeps normal back-loading", () => {
   const asOf = "2026-11-10";
   const workday = resolveExpectedPacePercent("collection", {
     reportDate: "2026-11-01",
     todayIso: asOf,
     receiptAsOfDate: asOf,
   });
-  const rows = [{
-    salesmanCode: "SM002",
-    isTeam: false,
-    paceShares: { 10: 0.0074 },
-    salesAsOfDate: asOf,
-    receiptAsOfDate: asOf,
-    officeSupplies: "1000000",
-    localItemSales: "0",
-    otherSales: "0",
-    totalSales: "1000000",
-    kpis: [{ key: "totalSales", actual: 23_644.72 }],
-  }];
+  const rows = [
+    {
+      salesmanCode: "SM002",
+      isTeam: false,
+      paceShares: { 10: 0.0074 },
+      salesAsOfDate: asOf,
+      officeSupplies: "1000000",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "1000000",
+      kpis: [{ key: "totalSales", actual: 23_644.72 }],
+    },
+    {
+      salesmanCode: "ASRAR",
+      isTeam: false,
+      paceShares: { 10: 0.274 },
+      salesAsOfDate: asOf,
+      officeSupplies: "2000000",
+      localItemSales: "0",
+      otherSales: "0",
+      totalSales: "2000000",
+      kpis: [{ key: "totalSales", actual: 190_592.26 }],
+    },
+  ];
   const estimates = sumFilteredKpiPaceEstimates(rows, ["totalSales"], {
     reportDate: "2026-11-01",
     todayIso: asOf,
     salesAsOfDate: asOf,
   });
   const estimate = estimates.totalSales.estimate;
+  const thamer = 23_644.72 * (100 / (workday * 0.5));
+  const asrar = 190_592.26 * (100 / 27.4);
   assert.ok(estimate != null);
-  assert.ok(estimate < 200_000, `expected workday-floored estimate, got ${estimate}`);
-  assert.ok(Math.abs(estimate - (23_644.72 * (100 / workday))) < 1);
+  assert.ok(Math.abs(estimate - (thamer + asrar)) < 2);
+  // Full workday floor on both would sit materially lower.
+  assert.ok(estimate > (23_644.72 + 190_592.26) * (100 / workday));
 });
 
 test("filtered totals status uses estimate-aligned expected, not bare workday pace", () => {

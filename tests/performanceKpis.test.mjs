@@ -140,13 +140,14 @@ test("counts new SKUs sold only to repeat customers", () => {
   assert.equal(details.rows.length, 2);
 });
 
-test("estimate expected % floors at workday so tiny personal shares cannot invent a full-target finish", () => {
+test("estimate expected % clamps only pathological near-zero shares, keeps normal back-loading", () => {
   // Thamer-style curve: historically ~0.74% of month by day 10.
   const asOf = "2026-11-10";
   const workday = ksaWorkdayProgressRatio(asOf) * 100;
   assert.ok(workday > 20);
-  assert.equal(guardEstimateExpectedPercent(0.74, asOf), workday);
-  assert.equal(guardEstimateExpectedPercent(27.4, asOf), Math.max(27.4, workday));
+  assert.equal(guardEstimateExpectedPercent(0.74, asOf), workday * 0.5);
+  // Asrar-style ~27% by day 10 stays — full workday floor used to cut this.
+  assert.equal(guardEstimateExpectedPercent(27.4, asOf), 27.4);
 
   const actual = 23_644.72;
   const tinyShareEstimate = monthEndPaceEstimate({
@@ -154,13 +155,22 @@ test("estimate expected % floors at workday so tiny personal shares cannot inven
     expected: 0.74,
     asOfDate: asOf,
   });
-  const linearEstimate = actual * (100 / workday);
-  assert.ok(tinyShareEstimate < 200_000);
-  assert.ok(Math.abs(tinyShareEstimate - linearEstimate) < 1);
+  const softFloorEstimate = actual * (100 / (workday * 0.5));
+  assert.ok(tinyShareEstimate < 250_000);
+  assert.ok(Math.abs(tinyShareEstimate - softFloorEstimate) < 1);
 
-  // Without the floor, the same share invents multi-million month-end sales.
+  // Without the guard, the same share invents multi-million month-end sales.
   const unguarded = estimateAtCurrentPace(actual, 0.74);
   assert.ok(unguarded > 3_000_000);
+
+  // Normal back-loaded curve keeps its higher month-end projection.
+  const backLoaded = monthEndPaceEstimate({
+    actual: 190_592.26,
+    expected: 27.4,
+    asOfDate: asOf,
+  });
+  assert.ok(Math.abs(backLoaded - (190_592.26 * (100 / 27.4))) < 1);
+  assert.ok(backLoaded > 190_592.26 * (100 / workday));
 });
 
 test("expected pace from estimate is the inverse of estimate at current pace", () => {

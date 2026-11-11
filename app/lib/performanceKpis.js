@@ -406,11 +406,14 @@ export function estimateAtCurrentPace(actual, expectedPercent) {
 }
 
 /**
- * Floor the expected % used for month-end estimates at KSA workday progress.
- * Personal curves that are near zero early in the month (e.g. 0.7% by day 10)
- * otherwise turn a small booked actual into a multi-million fantasy finish
- * (`actual × 100 / 0.7`). Status can still use the raw historical share; estimates
- * must not assume a slower start than workdays elapsed.
+ * Guard the expected % used for month-end estimates.
+ * Only clamps pathological near-zero personal curves (below 5pp absolute or below
+ * 25% of workday progress). Those otherwise turn a small booked actual into a
+ * multi-million fantasy finish (`actual × 100 / 0.7`). Normal back-loaded curves
+ * (e.g. ~27% by day 10 vs ~35% workdays) keep their history so the company
+ * estimate is not forced down to a pure workday line. When clamping, floor at
+ * half of workday progress — still conservative vs the raw tiny share, but not
+ * as harsh as a full workday floor.
  */
 export function guardEstimateExpectedPercent(expectedPercent, asOfDate) {
   const expected = Number(expectedPercent);
@@ -421,7 +424,9 @@ export function guardEstimateExpectedPercent(expectedPercent, asOfDate) {
   if (date >= monthEnd) return expected;
   const workday = ksaWorkdayProgressRatio(date) * 100;
   if (!(workday > 0)) return expected;
-  return Math.max(expected, workday);
+  const pathologyFloor = Math.max(5, workday * 0.25);
+  if (expected >= pathologyFloor) return expected;
+  return Math.max(expected, workday * 0.5);
 }
 
 /**
@@ -457,8 +462,9 @@ export function estimateFromPaceGap(target, paceGap) {
  * Never returns below the current actual; keeps untarged actuals in the sum,
  * including credit-note / return negatives (dropping those made the footer sit
  * above Total actual after a full-month upload).
- * When `asOfDate` is set, expected % is floored at workday progress so a tiny
- * personal early-month share cannot invent a full-target finish.
+ * When `asOfDate` is set, a pathological near-zero personal share is floored
+ * (see `guardEstimateExpectedPercent`) so it cannot invent a full-target finish,
+ * while normal back-loaded history is kept.
  * `target` / `paceGap` are accepted for call-site compatibility but unused.
  */
 export function monthEndPaceEstimate({

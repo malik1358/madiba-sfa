@@ -19,12 +19,14 @@ import {
   ORDER_STATUS_INVOICE_MADE,
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
+  ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
   ORDER_STATUS_REJECTED,
   ORDER_REJECTION_REASON_LEGACY_UNINVOICED,
   MAX_ORDER_INVOICE_UPLOAD_BYTES,
   canApprovePendingOrders,
   isPendingForApprovalStatus,
   isPendingForInvoiceCreationStatus,
+  isQuotationWaitingPaymentStatus,
   isSubmittedWithoutUploadedInvoice,
   isSupportedInvoiceStatus,
   isValidRejectionReason,
@@ -35,6 +37,11 @@ import {
   shouldAutoRejectLegacyUninvoicedOrder,
   statusForRejectionReason,
 } from "../../lib/orderApproval.js";
+import {
+  buildQuotationInvoiceMeta,
+  canMakeOrderQuotation,
+  normalizeQuotationWorkingDays,
+} from "../../lib/orderQuotation.js";
 import { sendInvoiceUploadNotification } from "../../lib/invoiceUploadEmailServer.js";
 import { enqueueDeferredTeamEmail } from "../../lib/deferredTeamEmail.js";
 import { isWithinTeamEmailWindow } from "../../lib/workdayActivity.js";
@@ -585,7 +592,15 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
-    if (!["set-status", "approve-order", "reject-order", "mark-pending-approvals", "mark-pending-invoice-creation", "mark-legacy-uninvoiced-rejected"].includes(mode)) {
+    if (![
+      "set-status",
+      "make-quotation",
+      "approve-order",
+      "reject-order",
+      "mark-pending-approvals",
+      "mark-pending-invoice-creation",
+      "mark-legacy-uninvoiced-rejected",
+    ].includes(mode)) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
     }
 
@@ -853,6 +868,27 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated });
     }
 
+    if (mode === "make-quotation") {
+      const liveOrder = await loadLiveOrder();
+      if (!canMakeOrderQuotation(liveOrder, existing)) {
+        return NextResponse.json({
+          success: false,
+          error: "Only submitted orders without an uploaded invoice can become a quotation.",
+        }, { status: 400 });
+      }
+
+      const workingDays = normalizeQuotationWorkingDays(body?.workingDays);
+      const quotationMeta = buildQuotationInvoiceMeta(existing, {
+        userId: scope.userId,
+        now: new Date(nowIso),
+        workingDays,
+      });
+
+      await upsertMeta(admin, quotationMeta);
+      const hydrated = toClientInvoiceMeta(quotationMeta);
+      return NextResponse.json({ success: true, item: hydrated });
+    }
+
     if (!canManageOrderInvoice(scope.role)) {
       return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can set invoice status." }, { status: 403 });
     }
@@ -866,7 +902,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Upload invoice PDF before setting status to Invoice made." }, { status: 400 });
     }
 
-    const updated = {
+    let updated = {
       ...existing,
       orderId,
       status: status === ORDER_STATUS_PENDING_APPROVAL || isPendingForApprovalStatus(status)
@@ -883,6 +919,14 @@ export async function POST(request) {
       updated.rejectedBy = "";
       updated.approvedAt = "";
       updated.approvedBy = "";
+    }
+
+    if (isQuotationWaitingPaymentStatus(status) || status === ORDER_STATUS_QUOTATION_WAITING_PAYMENT) {
+      updated = buildQuotationInvoiceMeta(updated, {
+        userId: scope.userId,
+        now: new Date(nowIso),
+        workingDays: normalizeQuotationWorkingDays(body?.workingDays),
+      });
     }
 
     if (status === ORDER_STATUS_PENDING_INVOICE_CREATION || isPendingForInvoiceCreationStatus(status)) {

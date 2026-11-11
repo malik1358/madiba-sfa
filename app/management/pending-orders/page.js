@@ -77,6 +77,14 @@ import {
   shouldAutoRejectLegacyUninvoicedOrder,
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
+import {
+  QUOTATION_VALIDITY_WORKING_DAYS,
+  canMakeOrderQuotation,
+  formatQuotationValidUntilLabel,
+  isOrderQuotationMeta,
+  quotationPdfSnapshotFields,
+} from "../../lib/orderQuotation";
+import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { canRefreshOrderPricing } from "../../lib/orderPricingRefresh";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
 import { uniqueExcelFilterOptions } from "../../lib/biExcelFilters";
@@ -100,6 +108,13 @@ const TEXT = {
   cacheOffline: { en: "Offline — showing last saved pending orders.", ar: "غير متصل — عرض آخر الطلبات المحفوظة." },
   onDevice: { en: "On this device", ar: "على هذا الجهاز" },
   syncFailed: { en: "Sync failed", ar: "فشل المزامنة" },
+  makeQuotation: { en: "Make Quotation", ar: "إنشاء عرض سعر" },
+  refreshQuotation: { en: "Refresh Quotation", ar: "تحديث عرض السعر" },
+  makingQuotation: { en: "Making quotation...", ar: "جاري إنشاء عرض السعر..." },
+  quotationReady: {
+    en: "Quotation saved. Share the PDF with the customer.",
+    ar: "تم حفظ عرض السعر. شارك ملف PDF مع العميل.",
+  },
 };
 
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
@@ -372,6 +387,7 @@ export default function PendingOrdersPage() {
   const [loadingLines, setLoadingLines] = useState(false);
   const [downloadingPdfOrderId, setDownloadingPdfOrderId] = useState("");
   const [downloadingTallyExcelOrderId, setDownloadingTallyExcelOrderId] = useState("");
+  const [makingQuotationOrderId, setMakingQuotationOrderId] = useState("");
   const [refreshingPricingOrderId, setRefreshingPricingOrderId] = useState("");
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
@@ -1316,7 +1332,11 @@ export default function PendingOrdersPage() {
     return { order, lines: data || [], history };
   }
 
-  async function generateOrderPdf(orderId) {
+  async function generateOrderPdf(orderId, {
+    metaOverride = null,
+    asQuotation = false,
+    forceDownload = true,
+  } = {}) {
     if (!orderId || downloadingPdfOrderId) return;
 
     setDownloadingPdfOrderId(String(orderId));
@@ -1394,23 +1414,37 @@ export default function PendingOrdersPage() {
         });
       }
 
-      const doc = await createOrderPdfDocument({
+      const quotationMeta = metaOverride || invoiceMetaByOrder?.[order.id] || null;
+      const quotationFields = asQuotation || isOrderQuotationMeta(quotationMeta)
+        ? quotationPdfSnapshotFields(quotationMeta || {
+          status: INVOICE_STATUS_QUOTATION_WAITING_PAYMENT,
+        })
+        : {};
+
+      const pdfSnapshot = {
         ...liveSnapshot,
+        ...quotationFields,
         creditApprovalRemark: creditEvaluation?.remark || liveSnapshot.creditApprovalRemark,
-      }, { analytics });
+      };
+
+      const doc = await createOrderPdfDocument(pdfSnapshot, { analytics });
 
       const orderNumber = formatSalesOrderNumber(liveSnapshot) || "order";
+      const isQuotationPdf = String(pdfSnapshot.documentKind || "").trim().toLowerCase() === "quotation";
       const fileName = buildOrderPdfFileName({
-        orderId: orderNumber,
+        orderId: `${isQuotationPdf ? "quotation-" : ""}${orderNumber}`,
         customerCode: liveSnapshot.customerCode || order.customer_code,
         savedAtIso: new Date().toISOString(),
         pendingSync: isQueuedPendingOrderId(liveSnapshot.orderId),
       });
+      const shareText = isQuotationPdf
+        ? buildOrderWhatsappSummary(pdfSnapshot, language)
+        : `Sales order for ${order.customer_name || order.customer_code || "customer"}`;
       await saveOrShareOrderPdf(doc, fileName, {
-        title: `Order #${orderNumber}`,
-        text: `Sales order for ${order.customer_name || order.customer_code || "customer"}`,
-        dialogTitle: "Save order PDF",
-        forceDownload: true,
+        title: isQuotationPdf ? `Quotation #${orderNumber}` : `Order #${orderNumber}`,
+        text: shareText,
+        dialogTitle: isQuotationPdf ? "Share quotation PDF" : "Save order PDF",
+        forceDownload,
       });
     } catch (error) {
       if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
@@ -1419,6 +1453,65 @@ export default function PendingOrdersPage() {
       setError(error?.message || "Unable to prepare PDF for this order.");
     } finally {
       setDownloadingPdfOrderId("");
+    }
+  }
+
+  async function makeOrderQuotation(orderId) {
+    if (!orderId || makingQuotationOrderId || isQueuedPendingOrderId(orderId)) return;
+
+    const order = orders.find((entry) => String(entry.id) === String(orderId));
+    const meta = invoiceMetaByOrder?.[orderId] || null;
+    if (!canMakeOrderQuotation(order, meta)) {
+      setError("Only submitted orders without an uploaded invoice can become a quotation.");
+      return;
+    }
+
+    setMakingQuotationOrderId(String(orderId));
+    setError("");
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/order-invoice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mode: "make-quotation",
+          orderId,
+          workingDays: QUOTATION_VALIDITY_WORKING_DAYS,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to make quotation.");
+      }
+
+      const item = payload.item || { orderId, status: INVOICE_STATUS_QUOTATION_WAITING_PAYMENT };
+      setInvoiceMetaByOrder((current) => ({
+        ...current,
+        [orderId]: item,
+      }));
+      setStatusDraftByOrder((current) => ({
+        ...current,
+        [orderId]: String(item.status || INVOICE_STATUS_QUOTATION_WAITING_PAYMENT),
+      }));
+
+      setMakingQuotationOrderId("");
+      await generateOrderPdf(orderId, {
+        metaOverride: item,
+        asQuotation: true,
+        forceDownload: false,
+      });
+      await showPopup({
+        variant: "success",
+        message: t("quotationReady"),
+      });
+    } catch (err) {
+      setError(err?.message || "Unable to make quotation.");
+    } finally {
+      setMakingQuotationOrderId("");
     }
   }
 
@@ -1972,7 +2065,7 @@ export default function PendingOrdersPage() {
                                 type="button"
                                 className="moduleInlineButton"
                                 onClick={() => generateOrderPdf(order.id)}
-                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId)}
+                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || Boolean(makingQuotationOrderId)}
                                 title="Download PDF with live receipt and outstanding; keeps saved item, qty, and price"
                               >
                                 {String(downloadingPdfOrderId) === String(order.id)
@@ -1983,13 +2076,31 @@ export default function PendingOrdersPage() {
                                 type="button"
                                 className="moduleInlineButton"
                                 onClick={() => generateOrderTallyExcel(order.id)}
-                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId)}
+                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || Boolean(makingQuotationOrderId)}
                                 title="Download Tally import Excel for this order"
                               >
                                 {String(downloadingTallyExcelOrderId) === String(order.id)
                                   ? "Preparing Excel..."
                                   : "Generate Excel"}
                               </button>
+                              {!isInvoiceMaker && canMakeOrderQuotation(order, meta) ? (
+                                <button
+                                  type="button"
+                                  className="modulePrimaryButton"
+                                  onClick={() => makeOrderQuotation(order.id)}
+                                  disabled={
+                                    Boolean(makingQuotationOrderId)
+                                    || Boolean(downloadingPdfOrderId)
+                                    || Boolean(downloadingTallyExcelOrderId)
+                                    || busyApproval
+                                  }
+                                  title={`Create customer quotation valid for ${QUOTATION_VALIDITY_WORKING_DAYS} working days`}
+                                >
+                                  {String(makingQuotationOrderId) === String(order.id)
+                                    ? t("makingQuotation")
+                                    : (isOrderQuotationMeta(meta) ? t("refreshQuotation") : t("makeQuotation"))}
+                                </button>
+                              ) : null}
                               {canManageInvoice && canRefreshOrderPricing(order, meta) && !hasUploadedInvoice(meta) ? (
                                 <button
                                   type="button"
@@ -2137,6 +2248,9 @@ export default function PendingOrdersPage() {
                                 <div className="moduleHint" style={{ marginTop: "10px" }}>
                                   <strong>Order created:</strong> {formatDateTime(order.created_at)}
                                   <span> | <strong>Invoice status:</strong> {invoiceStatusText(meta, order, approvalRequired)}</span>
+                                  {formatQuotationValidUntilLabel(meta, language) ? (
+                                    <span> | <strong>Quotation:</strong> {formatQuotationValidUntilLabel(meta, language)}</span>
+                                  ) : null}
                                   {meta?.rejectionReason ? (
                                     <span> | <strong>Rejection reason:</strong> {meta.rejectionReason}</span>
                                   ) : null}
@@ -2269,17 +2383,36 @@ export default function PendingOrdersPage() {
                                     type="button"
                                     className="modulePrimaryButton"
                                     onClick={() => generateOrderPdf(order.id)}
-                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || loadingLines || orderLines.length === 0}
+                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || Boolean(makingQuotationOrderId) || loadingLines || orderLines.length === 0}
                                   >
                                     {String(downloadingPdfOrderId) === String(order.id)
                                       ? "Preparing PDF..."
                                       : "Generate / Download PDF"}
                                   </button>
+                                  {!isInvoiceMaker && canMakeOrderQuotation(order, meta) ? (
+                                    <button
+                                      type="button"
+                                      className="modulePrimaryButton"
+                                      onClick={() => makeOrderQuotation(order.id)}
+                                      disabled={
+                                        Boolean(makingQuotationOrderId)
+                                        || Boolean(downloadingPdfOrderId)
+                                        || Boolean(downloadingTallyExcelOrderId)
+                                        || loadingLines
+                                        || orderLines.length === 0
+                                      }
+                                      title={`Create customer quotation valid for ${QUOTATION_VALIDITY_WORKING_DAYS} working days`}
+                                    >
+                                      {String(makingQuotationOrderId) === String(order.id)
+                                        ? t("makingQuotation")
+                                        : (isOrderQuotationMeta(meta) ? t("refreshQuotation") : t("makeQuotation"))}
+                                    </button>
+                                  ) : null}
                                   <button
                                     type="button"
                                     className="moduleInlineButton"
                                     onClick={() => generateOrderTallyExcel(order.id)}
-                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || loadingLines || orderLines.length === 0}
+                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || Boolean(makingQuotationOrderId) || loadingLines || orderLines.length === 0}
                                     title="Download Tally import Excel for this order"
                                   >
                                     {String(downloadingTallyExcelOrderId) === String(order.id)

@@ -17,6 +17,8 @@ function formatMoney(value) {
 
 export function buildOrderWhatsappSummary(snapshot, language = "en", options = {}) {
   const isAr = language === "ar";
+  const isQuotation = String(snapshot?.documentKind || "").trim().toLowerCase() === "quotation"
+    || Boolean(String(snapshot?.quotationValidUntil || "").trim());
   const totals = snapshot.totals || {};
   const subtotal = Number(totals.amountExclVat || snapshot.grandTotal || 0);
   const vatAmount = Number.isFinite(Number(totals.vatAmount))
@@ -30,12 +32,17 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     { language }
   );
   const labels = {
-    title: isAr ? "طلب مبيعات" : "Sales order",
-    orderId: isAr ? "رقم الطلب" : "Order #",
+    title: isQuotation
+      ? (isAr ? "عرض سعر" : "Quotation")
+      : (isAr ? "طلب مبيعات" : "Sales order"),
+    orderId: isQuotation
+      ? (isAr ? "رقم العرض" : "Quotation #")
+      : (isAr ? "رقم الطلب" : "Order #"),
     customer: isAr ? "العميل" : "Customer",
     code: isAr ? "الرمز" : "Code",
     salesman: isAr ? "رجل البيع" : "Salesman",
     visitDateTime: isAr ? "تاريخ ووقت الزيارة" : "Visit date/time",
+    validUntil: isAr ? "صالح حتى" : "Valid until",
     workingHours: isAr ? "ساعات العمل" : "Working hours",
     status: isAr ? "الحالة" : "Status",
     payment: isAr ? "الدفع" : "Payment",
@@ -68,6 +75,18 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     }
     : (snapshot.avgDaysToPay ?? null);
 
+  const quotationValidUntil = String(snapshot?.quotationValidUntil || "").trim();
+  const quotationWorkingDays = Number(snapshot?.quotationWorkingDays);
+  const validityLine = isQuotation && quotationValidUntil
+    ? `${labels.validUntil}: ${quotationValidUntil}${
+      Number.isFinite(quotationWorkingDays) && quotationWorkingDays > 0
+        ? (isAr
+          ? ` (${quotationWorkingDays} أيام عمل)`
+          : ` (${quotationWorkingDays} working day${quotationWorkingDays === 1 ? "" : "s"})`)
+        : ""
+    }`
+    : "";
+
   const lines = [
     labels.title,
     `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
@@ -75,6 +94,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${formatOrderSalesmanLabel(snapshot)}`,
     `${labels.visitDateTime}: ${formatKsaDateTime(snapshot.savedAtIso || new Date().toISOString())}`,
+    ...(validityLine ? [validityLine] : []),
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,

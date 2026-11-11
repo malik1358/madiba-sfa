@@ -1,5 +1,6 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import {
+  appendWorkingHoursAndDayActivityLines,
   DAY_ACTIVITY_WHATSAPP_LABELS_AR,
   formatDayActivityWhatsappLines,
 } from "./dayActivityWhatsapp.js";
@@ -67,17 +68,13 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     }
     : (snapshot.avgDaysToPay ?? null);
 
-  return [
+  const lines = [
     labels.title,
-        `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
+    `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${formatOrderSalesmanLabel(snapshot)}`,
     `${labels.visitDateTime}: ${formatKsaDateTime(snapshot.savedAtIso || new Date().toISOString())}`,
-    ...formatWorkingHoursWhatsappLines(
-      options.workingHours ?? snapshot.workingHours ?? null,
-      { workingHours: labels.workingHours },
-    ),
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,
@@ -93,9 +90,20 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     labels.pdfAttached,
     ...formatAvgDaysToPayWhatsappLines(avgDaysToPay, labels),
     ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
-    ...formatDayActivityWhatsappLines(
+  ];
+
+  // Working hours sits above the day totals block at the end of the share.
+  appendWorkingHoursAndDayActivityLines(
+    lines,
+    formatWorkingHoursWhatsappLines(
+      options.workingHours ?? snapshot.workingHours ?? null,
+      { workingHours: labels.workingHours },
+    ),
+    formatDayActivityWhatsappLines(
       options.dayActivity ?? snapshot.dayActivity ?? null,
       isAr ? DAY_ACTIVITY_WHATSAPP_LABELS_AR : undefined,
     ),
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }

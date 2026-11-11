@@ -73,10 +73,10 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
 
   assert.match(summary, /Queue priority: 3/);
   assert.match(summary, /Customer: Acme Trading/);
-  assert.match(summary, /\n\nWorking hours: -\n\n/);
   assert.match(summary, /0-30: 1,000/);
   assert.match(summary, /Visit number today: 2/);
   assert.match(summary, />120: 0\n\nGPS: -/);
+  assert.match(summary, /Est\. waiting: -\n\nWorking hours: -/);
   assert.match(summary, /Distance from customer: -/);
   assert.match(summary, /Est. waiting: -/);
 });
@@ -105,7 +105,7 @@ test("buildCollectionVisitSummary includes working hours till the visit", () => 
     },
   );
 
-  assert.match(summary, /\n\nWorking hours: 3h 26m\n\n/);
+  assert.match(summary, /Est\. waiting: -\n\nWorking hours: 3h 26m/);
 });
 
 test("buildCollectionVisitSummary includes last visit date, outcome, remarks, and amount when present", () => {
@@ -201,6 +201,7 @@ test("buildCollectionVisitSummary places last visit after GPS as a separate trai
   assert.ok(gpsIndex > outstandingIndex);
   assert.ok(lastVisitIndex > gpsIndex);
   assert.match(summary, /Est\. waiting: 1 min\n\nLast visit date: 13\/09\/2026, 13:00\./);
+  assert.match(summary, /Last visit amount received: 3,190\.\n\nWorking hours: -/);
 });
 
 test("buildCollectionVisitSummary omits last visit amount when zero and skips empty last visit", () => {

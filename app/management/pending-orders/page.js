@@ -1416,9 +1416,7 @@ export default function PendingOrdersPage() {
 
       const quotationMeta = metaOverride || invoiceMetaByOrder?.[order.id] || null;
       const quotationFields = asQuotation || isOrderQuotationMeta(quotationMeta)
-        ? quotationPdfSnapshotFields(quotationMeta || {
-          status: INVOICE_STATUS_QUOTATION_WAITING_PAYMENT,
-        })
+        ? quotationPdfSnapshotFields(quotationMeta || {}, { force: asQuotation })
         : {};
 
       const pdfSnapshot = {
@@ -1488,14 +1486,10 @@ export default function PendingOrdersPage() {
         throw new Error(payload.error || "Unable to make quotation.");
       }
 
-      const item = payload.item || { orderId, status: INVOICE_STATUS_QUOTATION_WAITING_PAYMENT };
+      const item = payload.item || { ...(meta || {}), orderId };
       setInvoiceMetaByOrder((current) => ({
         ...current,
         [orderId]: item,
-      }));
-      setStatusDraftByOrder((current) => ({
-        ...current,
-        [orderId]: String(item.status || INVOICE_STATUS_QUOTATION_WAITING_PAYMENT),
       }));
 
       setMakingQuotationOrderId("");

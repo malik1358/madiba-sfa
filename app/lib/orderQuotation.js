@@ -1,11 +1,9 @@
 import {
-  ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
   hasUploadedInvoice,
   isInvoiceMadeStatus,
   isQuotationWaitingPaymentStatus,
   isRejectedByManagementStatus,
   isSubmittedOrder,
-  normalizeInvoiceStatus,
 } from "./orderApproval.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 import {
@@ -55,6 +53,10 @@ export function resolveQuotationValidUntil({
   };
 }
 
+/**
+ * Persist quotation validity on invoice meta without changing invoice status.
+ * Make Quotation must not flip the queue to "Quotation submitted waiting for the payment".
+ */
 export function buildQuotationInvoiceMeta(existing = {}, {
   userId = "",
   now = new Date(),
@@ -68,15 +70,12 @@ export function buildQuotationInvoiceMeta(existing = {}, {
   return {
     ...(existing || {}),
     ...(orderId ? { orderId } : {}),
-    status: ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
     quotationCreatedAt: nowIso,
     quotationCreatedBy: userId || existing?.quotationCreatedBy || "",
     quotationWorkingDays: resolved.workingDays,
     quotationValidUntil: resolved.validUntil,
     quotationIssueDate: resolved.issueDate,
     updatedAt: nowIso,
-    statusUpdatedAt: nowIso,
-    statusUpdatedBy: userId || existing?.statusUpdatedBy || "",
   };
 }
 
@@ -90,8 +89,8 @@ export function canMakeOrderQuotation(order, meta = null) {
 }
 
 export function isOrderQuotationMeta(meta = null) {
-  if (isQuotationWaitingPaymentStatus(meta?.status)) return true;
-  return Boolean(String(meta?.quotationValidUntil || "").trim());
+  return Boolean(String(meta?.quotationValidUntil || "").trim())
+    || isQuotationWaitingPaymentStatus(meta?.status);
 }
 
 export function formatQuotationValidUntilLabel(meta = null, language = "en") {
@@ -104,8 +103,9 @@ export function formatQuotationValidUntilLabel(meta = null, language = "en") {
   return `Valid until ${validUntil} (${days} working day${days === 1 ? "" : "s"})`;
 }
 
-export function quotationPdfSnapshotFields(meta = null) {
-  if (!isOrderQuotationMeta(meta)) {
+export function quotationPdfSnapshotFields(meta = null, { force = false } = {}) {
+  const hasQuotation = force || isOrderQuotationMeta(meta);
+  if (!hasQuotation) {
     return {
       documentKind: "order",
       quotationValidUntil: "",
@@ -115,7 +115,6 @@ export function quotationPdfSnapshotFields(meta = null) {
   }
   return {
     documentKind: "quotation",
-    statusLabel: normalizeInvoiceStatus(meta?.status) || ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
     quotationValidUntil: String(meta?.quotationValidUntil || "").trim(),
     quotationWorkingDays: normalizeQuotationWorkingDays(meta?.quotationWorkingDays),
     quotationIssueDate: String(meta?.quotationIssueDate || "").trim(),

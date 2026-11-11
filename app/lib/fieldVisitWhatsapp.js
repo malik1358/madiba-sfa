@@ -1,5 +1,8 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
-import { formatDayActivityWhatsappLines } from "./dayActivityWhatsapp.js";
+import {
+  appendWorkingHoursAndDayActivityLines,
+  formatDayActivityWhatsappLines,
+} from "./dayActivityWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
@@ -89,7 +92,6 @@ export function buildFieldVisitWhatsappSummary({
     `${labels.code}: ${customer.customer_code || "-"}`,
     `${labels.salesman}: ${salesman}`,
     `${labels.visitDateTime}: ${visitDateTime}`,
-    ...formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }),
     `${labels.outcome}: ${outcome || labels.notSpecified}`,
     `${labels.nextVisit}: ${nextVisit || labels.notSpecified}`,
   ];
@@ -129,7 +131,12 @@ export function buildFieldVisitWhatsappSummary({
     lines.push("", `${labels.lastVisitDate}: ${lastVisitDate}.`);
   }
 
-  lines.push(...formatDayActivityWhatsappLines(dayActivity));
+  // Working hours sits above the day totals block at the end of the share.
+  appendWorkingHoursAndDayActivityLines(
+    lines,
+    formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }),
+    formatDayActivityWhatsappLines(dayActivity),
+  );
 
   return lines.join("\n");
 }

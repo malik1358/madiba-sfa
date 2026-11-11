@@ -395,19 +395,15 @@ export function patchWhatsappSummaryWorkingHours(
     }
   }
 
-  const visitDatePatterns = [
-    /^(Visit date\/time:\s*.+)$/m,
-    /^(تاريخ ووقت الزيارة:\s*.+)$/m,
+  // Prefer placing Working hours just above the day-totals block at the end.
+  const dayTotalsPatterns = [
+    /^(Visits with order:\s*.+)$/m,
+    /^(زيارات مع طلب:\s*.+)$/m,
   ];
-  for (const pattern of visitDatePatterns) {
+  for (const pattern of dayTotalsPatterns) {
     if (pattern.test(text)) {
-      return text.replace(pattern, `$1${spacedBlock}`).replace(/\n{3,}/g, "\n\n");
+      return text.replace(pattern, `${line}\n\n$1`).replace(/\n{3,}/g, "\n\n");
     }
-  }
-
-  const gpsPattern = /\nGPS:/;
-  if (gpsPattern.test(text)) {
-    return text.replace(gpsPattern, `${spacedBlock}GPS:`).replace(/\n{3,}/g, "\n\n");
   }
 
   return `${text.trimEnd()}${spacedBlock}`.replace(/\n{3,}/g, "\n\n").trimEnd();

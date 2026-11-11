@@ -132,6 +132,7 @@ function createDeleteHarness({
     isSalesOrderSubmissionBlocked: () => false,
     assertLocalOrderQuantityControls: async () => ({ ok: true }),
     recordConfirmedOrderQuantityUsage: () => {},
+    releaseConfirmedOrderQuantityUsage: () => {},
     claimUnsavedEntry: () => () => {},
     WORKING_HOURS_WHATSAPP_TIMEOUT_MS: 8000,
   });

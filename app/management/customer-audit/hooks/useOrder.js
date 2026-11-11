@@ -34,6 +34,7 @@ import { blockedByAvgDaysMessage, isSalesOrderSubmissionBlocked } from '../../..
 import {
   assertLocalOrderQuantityControls,
   recordConfirmedOrderQuantityUsage,
+  releaseConfirmedOrderQuantityUsage,
 } from '../../../lib/orderQuantityControlsClient';
 
 function isPendingOrderId(orderId) {
@@ -791,6 +792,7 @@ export function useOrder({
       recordConfirmedOrderQuantityUsage({
         customerCode: selectedCustomer?.customer_code || '',
         lines: orderItems,
+        orderId: payload.orderId,
       });
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
@@ -853,6 +855,10 @@ export function useOrder({
 
       if (isPendingOrderId(currentDraftOrderId)) {
         await cancelQueuedSalesOrderDraft(currentDraftOrderId);
+        releaseConfirmedOrderQuantityUsage({
+          customerCode: selectedCustomer?.customer_code || '',
+          orderId: currentDraftOrderId,
+        });
         if (accessScope) {
           void removeLocalPendingOrder(session.user.id, accessScope, currentDraftOrderId);
         }
@@ -906,6 +912,10 @@ export function useOrder({
       }
 
       const deletedId = payload.orderId;
+      releaseConfirmedOrderQuantityUsage({
+        customerCode: selectedCustomer?.customer_code || '',
+        orderId: deletedId,
+      });
       if (accessScope) {
         void removeLocalPendingOrder(session.user.id, accessScope, deletedId);
       }

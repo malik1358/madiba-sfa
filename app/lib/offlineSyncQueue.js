@@ -296,12 +296,22 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
       options.onSynced?.(item, payload);
       if (typeof window !== "undefined" && (item.metadata?.type === "sales_order" || String(item.url || "").includes("/api/sales-orders"))) {
         try {
-          const { recordConfirmedOrderQuantityUsage } = await import("./orderQuantityControlsClient.js");
           const body = item.jsonBody && typeof item.jsonBody === "object" ? item.jsonBody : {};
-          recordConfirmedOrderQuantityUsage({
-            customerCode: body.customerCode || item.metadata?.customerCode || "",
-            lines: Array.isArray(body.lines) ? body.lines : [],
-          });
+          const action = String(body.action || item.metadata?.action || "").trim().toLowerCase();
+          if (action === "submit" || action === "save_draft") {
+            const { recordConfirmedOrderQuantityUsage } = await import("./orderQuantityControlsClient.js");
+            recordConfirmedOrderQuantityUsage({
+              customerCode: body.customerCode || item.metadata?.customerCode || "",
+              lines: Array.isArray(body.lines) ? body.lines : [],
+              orderId: payload.orderId || body.orderId || item.metadata?.orderId || null,
+            });
+          } else if (action === "delete_draft") {
+            const { releaseConfirmedOrderQuantityUsage } = await import("./orderQuantityControlsClient.js");
+            releaseConfirmedOrderQuantityUsage({
+              customerCode: body.customerCode || item.metadata?.customerCode || "",
+              orderId: payload.orderId || body.orderId || item.metadata?.orderId || null,
+            });
+          }
         } catch {
           // Ignore local usage ledger failures after a successful sync.
         }

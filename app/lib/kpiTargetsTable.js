@@ -9,6 +9,7 @@ import {
   normalizePerformanceTargets,
   normalizeSalesmanCode,
   resolveExpectedPacePercent,
+  resolveKpiPaceAsOfDate,
 } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
@@ -274,11 +275,18 @@ export function sumFilteredKpiPaceEstimates(
           salesAsOfDate: rowSalesAsOf,
           receiptAsOfDate: rowReceiptAsOf,
         });
+      const asOfDate = resolveKpiPaceAsOfDate(key, {
+        reportDate,
+        todayIso,
+        salesAsOfDate: rowSalesAsOf,
+        receiptAsOfDate: rowReceiptAsOf,
+      });
       const estimate = monthEndPaceEstimate({
         actual,
         target,
         expected,
         paceGap: liveKpi.paceGap,
+        asOfDate,
       });
       if (estimate == null) return;
       estimateSum += estimate;

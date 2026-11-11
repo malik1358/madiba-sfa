@@ -289,7 +289,7 @@ export function averageCumulativeDayShares(salesRows = []) {
     const shares = {};
     for (let day = 1; day <= lastDay; day += 1) {
       cumulative += bucket.days.get(day) || 0;
-      shares[day] = cumulative / bucket.total;
+      shares[day] = Math.min(1, cumulative / bucket.total);
     }
     curves.push(shares);
   });
@@ -298,7 +298,10 @@ export function averageCumulativeDayShares(salesRows = []) {
   for (let day = 1; day <= 31; day += 1) {
     const values = curves.map((curve) => curve[day]).filter((value) => value != null);
     if (values.length) {
-      result[day] = values.reduce((sum, value) => sum + value, 0) / values.length;
+      result[day] = Math.min(
+        1,
+        values.reduce((sum, value) => sum + value, 0) / values.length,
+      );
     }
   }
   // Averaging months can dip later days below earlier ones; cumulative share must not fall.
@@ -306,7 +309,7 @@ export function averageCumulativeDayShares(salesRows = []) {
   for (let day = 1; day <= 31; day += 1) {
     const value = result[day];
     if (value == null || !Number.isFinite(Number(value))) continue;
-    runningMax = Math.max(runningMax, Number(value));
+    runningMax = Math.max(runningMax, Math.min(1, Number(value)));
     result[day] = runningMax;
   }
   return { shares: result, monthCount: curves.length };
@@ -352,6 +355,24 @@ export function expectedPacePercent(asOfDate, paceShares = null) {
   return workday;
 }
 
+export function resolveKpiPaceAsOfDate(key, {
+  reportDate,
+  todayIso,
+  salesAsOfDate,
+  receiptAsOfDate,
+} = {}) {
+  const today = String(todayIso || reportDate || "").slice(0, 10);
+  const salesPace = SALES_PACE_KPI_KEYS.has(key);
+  const collectionPace = COLLECTION_PACE_KPI_KEYS.has(key);
+  if (salesPace) {
+    return resolveSalesPaceAsOfDate(reportDate, today || reportDate, salesAsOfDate);
+  }
+  if (collectionPace) {
+    return resolveReceiptPaceAsOfDate(reportDate, today || reportDate, receiptAsOfDate);
+  }
+  return resolveKpiPaceDate(reportDate, today || reportDate);
+}
+
 export function resolveExpectedPacePercent(key, {
   reportDate,
   todayIso,
@@ -364,12 +385,12 @@ export function resolveExpectedPacePercent(key, {
   const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
   if (monthIsComplete) return 100;
   const salesPace = SALES_PACE_KPI_KEYS.has(key);
-  const collectionPace = COLLECTION_PACE_KPI_KEYS.has(key);
-  const paceDate = salesPace
-    ? resolveSalesPaceAsOfDate(reportDate, today || reportDate, salesAsOfDate)
-    : collectionPace
-      ? resolveReceiptPaceAsOfDate(reportDate, today || reportDate, receiptAsOfDate)
-      : resolveKpiPaceDate(reportDate, today || reportDate);
+  const paceDate = resolveKpiPaceAsOfDate(key, {
+    reportDate,
+    todayIso: today,
+    salesAsOfDate,
+    receiptAsOfDate,
+  });
   return expectedPacePercent(
     paceDate,
     salesPace ? paceShares : null,
@@ -382,6 +403,25 @@ export function estimateAtCurrentPace(actual, expectedPercent) {
   const expected = Number(expectedPercent);
   if (!Number.isFinite(value) || !Number.isFinite(expected) || !(expected > 0)) return null;
   return value * (100 / expected);
+}
+
+/**
+ * Floor the expected % used for month-end estimates at KSA workday progress.
+ * Personal curves that are near zero early in the month (e.g. 0.7% by day 10)
+ * otherwise turn a small booked actual into a multi-million fantasy finish
+ * (`actual × 100 / 0.7`). Status can still use the raw historical share; estimates
+ * must not assume a slower start than workdays elapsed.
+ */
+export function guardEstimateExpectedPercent(expectedPercent, asOfDate) {
+  const expected = Number(expectedPercent);
+  if (!Number.isFinite(expected) || !(expected > 0)) return expectedPercent;
+  const date = String(asOfDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return expected;
+  const monthEnd = currentMonthDateRange(date).to;
+  if (date >= monthEnd) return expected;
+  const workday = ksaWorkdayProgressRatio(date) * 100;
+  if (!(workday > 0)) return expected;
+  return Math.max(expected, workday);
 }
 
 /**
@@ -417,6 +457,8 @@ export function estimateFromPaceGap(target, paceGap) {
  * Never returns below the current actual; keeps untarged actuals in the sum,
  * including credit-note / return negatives (dropping those made the footer sit
  * above Total actual after a full-month upload).
+ * When `asOfDate` is set, expected % is floored at workday progress so a tiny
+ * personal early-month share cannot invent a full-target finish.
  * `target` / `paceGap` are accepted for call-site compatibility but unused.
  */
 export function monthEndPaceEstimate({
@@ -424,13 +466,17 @@ export function monthEndPaceEstimate({
   target = 0,
   expected = null,
   paceGap = null,
+  asOfDate = "",
 } = {}) {
   const value = Number(actual || 0) || 0;
   const goal = Number(target || 0) || 0;
   if (value === 0 && !(goal > 0)) return null;
   // Booked negatives (returns / credit notes) stay as-is — do not drop or scale.
   if (!(value > 0)) return value;
-  const estimate = estimateAtCurrentPace(value, expected);
+  const estimate = estimateAtCurrentPace(
+    value,
+    guardEstimateExpectedPercent(expected, asOfDate),
+  );
   if (estimate == null) {
     return value;
   }

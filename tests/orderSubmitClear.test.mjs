@@ -66,6 +66,7 @@ function createHarness(result, { draftId = 586 } = {}) {
     isSalesOrderSubmissionBlocked: () => false,
     assertLocalOrderQuantityControls: async () => ({ ok: true }),
     recordConfirmedOrderQuantityUsage: () => {},
+    releaseConfirmedOrderQuantityUsage: () => {},
     claimUnsavedEntry: () => () => {},
     WORKING_HOURS_WHATSAPP_TIMEOUT_MS: 8000,
   });

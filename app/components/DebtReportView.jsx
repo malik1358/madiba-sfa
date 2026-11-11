@@ -58,11 +58,10 @@ const TEXT = {
   visitPerson: { en: "Visit person", ar: "اسم الزائر" },
   remarks: { en: "Remarks", ar: "الملاحظات" },
   legal: { en: "Transferred to legal", ar: "محول للقانوني" },
+  legalBadge: { en: "Legal", ar: "قانوني" },
   transferredOn: { en: "Transferred on", ar: "تاريخ التحويل" },
   transferredBy: { en: "Transferred by", ar: "حوّله" },
   note: { en: "Legal note", ar: "ملاحظة القانوني" },
-  yes: { en: "Yes", ar: "نعم" },
-  no: { en: "No", ar: "لا" },
   total: { en: "Total", ar: "الإجمالي" },
   customers: { en: "Customers", ar: "العملاء" },
   shown: { en: "shown", ar: "ظاهر" },
@@ -113,15 +112,17 @@ function filterKeysFor(view) {
     "lastVisit",
     "visitPerson",
     "remarks",
-    "legal",
   ];
   if (view === "legal") keys.push("transferredOn", "transferredBy", "note");
   else keys.push("transferredOn", "note");
   return keys;
 }
 
-function rowFilterValue(row, key, yesLabel, noLabel) {
-  if (key === "code") return excelFilterCellText(row.customerCode);
+function rowFilterValue(row, key, legalBadgeLabel) {
+  if (key === "code") {
+    const code = excelFilterCellText(row.customerCode);
+    return row.transferredToLegal ? `${code} ${legalBadgeLabel}` : code;
+  }
   if (key === "customer") return excelFilterCellText(row.customerName);
   if (key === "salesman") return excelFilterCellText(row.salesman || "-");
   if (key === "cityArea") return excelFilterCellText(row.cityArea || "-");
@@ -136,7 +137,6 @@ function rowFilterValue(row, key, yesLabel, noLabel) {
   if (key === "lastVisit") return formatDate(row.lastVisitDate);
   if (key === "visitPerson") return excelFilterCellText(row.lastVisitPerson || "-");
   if (key === "remarks") return excelFilterCellText(row.lastVisitRemark || "-");
-  if (key === "legal") return row.transferredToLegal ? yesLabel : noLabel;
   if (key === "transferredOn") return formatDate(row.transferredAt);
   if (key === "transferredBy") return excelFilterCellText(row.transferredBy || "-");
   if (key === "note") return excelFilterCellText(row.legalNote || "-");
@@ -158,7 +158,7 @@ export default function DebtReportView({ view = "bad-debts" }) {
 
   const filterKeys = useMemo(() => filterKeysFor(view), [view]);
   const valueOf = useCallback(
-    (row, key) => rowFilterValue(row, key, t("yes"), t("no")),
+    (row, key) => rowFilterValue(row, key, t("legalBadge")),
     [t],
   );
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, filterKeys, valueOf);
@@ -287,7 +287,6 @@ export default function DebtReportView({ view = "bad-debts" }) {
                         <BiExcelHead label={t("lastVisit")} filterKey="lastVisit" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("visitPerson")} filterKey="visitPerson" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("remarks")} filterKey="remarks" options={options} filters={filters} onChange={setFilter} />
-                        <BiExcelHead label={t("legal")} filterKey="legal" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("transferredOn")} filterKey="transferredOn" options={options} filters={filters} onChange={setFilter} />
                         {view === "legal" ? (
                           <BiExcelHead label={t("transferredBy")} filterKey="transferredBy" options={options} filters={filters} onChange={setFilter} />
@@ -301,7 +300,12 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           key={`${row.customerCode}-${row.transferredAt}`}
                           className={hasNoLastPayment(row) ? "debtReportRow-no-payment" : undefined}
                         >
-                          <td>{row.customerCode}</td>
+                          <td>
+                            {row.customerCode}
+                            {row.transferredToLegal ? (
+                              <span className="debtReportLegalBadge">{t("legalBadge")}</span>
+                            ) : null}
+                          </td>
                           <td>
                             {row.customerName}
                             {hasNoLastPayment(row) ? (
@@ -323,9 +327,6 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td>{formatDate(row.lastVisitDate)}</td>
                           <td>{row.lastVisitPerson || "-"}</td>
                           <td>{row.lastVisitRemark || "-"}</td>
-                          <td className={row.transferredToLegal ? "moduleBiMonthCell--down" : ""}>
-                            {row.transferredToLegal ? t("yes") : t("no")}
-                          </td>
                           <td>{formatDate(row.transferredAt)}</td>
                           {view === "legal" ? <td>{row.transferredBy || "-"}</td> : null}
                           <td>{row.legalNote || "-"}</td>
@@ -333,14 +334,19 @@ export default function DebtReportView({ view = "bad-debts" }) {
                       ))}
                       {visibleRows.length === 0 ? (
                         <tr>
-                          <td colSpan={view === "legal" ? 17 : 16}>{t("noRows")}</td>
+                          <td colSpan={view === "legal" ? 16 : 15}>{t("noRows")}</td>
                         </tr>
                       ) : null}
                     </tbody>
                     {visibleRows.length > 0 ? (
                       <tfoot>
                         <tr>
-                          <td><strong>{t("total")}</strong></td>
+                          <td>
+                            <strong>{t("total")}</strong>
+                            {visibleSummary.legal > 0 ? (
+                              <span className="debtReportLegalBadge">{visibleSummary.legal} {t("legalBadge")}</span>
+                            ) : null}
+                          </td>
                           <td><strong>{visibleRows.length}</strong></td>
                           <td />
                           <td />
@@ -353,7 +359,6 @@ export default function DebtReportView({ view = "bad-debts" }) {
                           <td />
                           <td />
                           <td />
-                          <td><strong>{visibleSummary.legal}</strong></td>
                           <td colSpan={view === "legal" ? 3 : 2} />
                         </tr>
                       </tfoot>

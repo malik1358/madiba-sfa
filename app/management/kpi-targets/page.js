@@ -75,11 +75,13 @@ const TEXT = {
     en: "Early-month 80% historical range is roughly −30% to +33% of the central forecast at ~workday 10; late-month ranges are much tighter.",
     ar: "نطاق الثقة التاريخي 80% في بداية الشهر تقريباً −30% إلى +33% من التقدير عند نحو يوم العمل 10؛ ويتضيق كثيراً لاحقاً.",
   },
+  paceEstimateInfo: { en: "About estimated month-end sales", ar: "حول تقدير مبيعات نهاية الشهر" },
   vsLastMonth: { en: "vs last month", ar: "مقابل الشهر الماضي" },
   vsLastMonthHint: {
     en: "Estimated month-end sales minus last month's actual for the same filtered salesmen",
     ar: "تقدير نهاية الشهر ناقص فعلي الشهر الماضي لنفس المندوبين المصفّين",
   },
+  vsLastMonthInfo: { en: "About vs last month", ar: "حول مقابل الشهر الماضي" },
   higherThanLastMonth: { en: "higher than last month", ar: "أعلى من الشهر الماضي" },
   lowerThanLastMonth: { en: "lower than last month", ar: "أقل من الشهر الماضي" },
   sameAsLastMonth: { en: "same as last month", ar: "مثل الشهر الماضي" },
@@ -695,14 +697,19 @@ export default function KpiTargetsPage() {
                     </tr>
                     <tr className="moduleKpiPaceEstimateRow">
                       <td className="moduleKpiSalesmanCell">
-                        <strong>{t("paceEstimate")}</strong>
-                        <div className="moduleKpiMeta">{t("paceEstimateHint")}</div>
-                        {lastTransactionDate ? (
-                          <div className="moduleKpiMeta">
-                            {t("forecastAsOf")}: {formatKsaDateOnly(lastTransactionDate)}
-                          </div>
-                        ) : null}
-                        <div className="moduleKpiMeta">{t("forecastUncertainty")}</div>
+                        <div className="moduleKpiRowLabel">
+                          <strong>{t("paceEstimate")}</strong>
+                          <KpiRowInfoTip
+                            label={t("paceEstimateInfo")}
+                            lines={[
+                              t("paceEstimateHint"),
+                              lastTransactionDate
+                                ? `${t("forecastAsOf")}: ${formatKsaDateOnly(lastTransactionDate)}`
+                                : "",
+                              t("forecastUncertainty"),
+                            ].filter(Boolean)}
+                          />
+                        </div>
                       </td>
                       <td className="moduleKpiBossCell"></td>
                       {columns.map((key) => {
@@ -731,10 +738,14 @@ export default function KpiTargetsPage() {
                     </tr>
                     <tr className="moduleKpiVsLastMonthRow">
                       <td className="moduleKpiSalesmanCell">
-                        <strong>{t("vsLastMonth")}</strong>
-                        <div className="moduleKpiMeta">
-                          {t("vsLastMonthHint")}
-                          {priorMonth ? ` (${priorMonth})` : ""}
+                        <div className="moduleKpiRowLabel">
+                          <strong>{t("vsLastMonth")}</strong>
+                          <KpiRowInfoTip
+                            label={t("vsLastMonthInfo")}
+                            lines={[
+                              `${t("vsLastMonthHint")}${priorMonth ? ` (${priorMonth})` : ""}`,
+                            ]}
+                          />
                         </div>
                       </td>
                       <td className="moduleKpiBossCell"></td>
@@ -828,6 +839,26 @@ function FragmentHeader({ group, actual, achievement }) {
       <th data-column-filter-label={`${group} Target`}>Target</th>
       <th data-column-filter-label={`${group} ${achievement}`}>{achievement}</th>
     </>
+  );
+}
+
+function KpiRowInfoTip({ label, lines = [] }) {
+  const body = (Array.isArray(lines) ? lines : [lines])
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  if (!body.length) return null;
+
+  return (
+    <span className="moduleKpiInfoTip">
+      <button type="button" className="moduleKpiInfoTipBtn" aria-label={label} title={label}>
+        i
+      </button>
+      <span className="moduleKpiInfoTipPanel" role="tooltip">
+        {body.map((line) => (
+          <span key={line} className="moduleKpiInfoTipLine">{line}</span>
+        ))}
+      </span>
+    </span>
   );
 }
 

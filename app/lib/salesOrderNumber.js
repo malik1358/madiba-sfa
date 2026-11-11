@@ -71,14 +71,17 @@ export function requireSalesOrderNumber(source = {}) {
   return orderNumber;
 }
 
-/** Mandatory PDF header line, e.g. "Order No. 296" or "Order No. PARVEZ-0042". */
+/** Mandatory PDF header line, e.g. "Order No. 296" or "Quotation No. PARVEZ-0042". */
 export function formatOrderPdfOrderNumberLabel(source = {}) {
   const orderNumber = formatSalesOrderNumberForDisplay(source);
   if (!orderNumber) {
     throw new Error("Order number is required to generate the order PDF.");
   }
   const pendingSync = isQueuedPendingOrderId(source.id ?? source.orderId ?? "");
-  return `Order No. ${orderNumber}${pendingSync && orderNumber !== PENDING_SYNC_ORDER_NUMBER_LABEL ? " (Pending sync)" : ""}`;
+  const kind = String(source?.documentKind || "").trim().toLowerCase() === "quotation"
+    ? "Quotation No."
+    : "Order No.";
+  return `${kind} ${orderNumber}${pendingSync && orderNumber !== PENDING_SYNC_ORDER_NUMBER_LABEL ? " (Pending sync)" : ""}`;
 }
 
 export function salesOrderNumberNeedsLiveLookup(source = {}) {

@@ -767,7 +767,22 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     return startY + 24;
   }
 
-  const orderNumberLabel = formatOrderPdfOrderNumberLabel(markedSnapshot);
+  const isQuotation = String(markedSnapshot?.documentKind || "").trim().toLowerCase() === "quotation"
+    || Boolean(String(markedSnapshot?.quotationValidUntil || "").trim());
+  const orderNumberLabel = formatOrderPdfOrderNumberLabel({
+    ...markedSnapshot,
+    documentKind: isQuotation ? "quotation" : markedSnapshot?.documentKind,
+  });
+  const documentTitle = isQuotation ? "QUOTATION" : "SALES ORDER";
+  const quotationValidUntil = String(markedSnapshot?.quotationValidUntil || "").trim();
+  const quotationWorkingDays = Number(markedSnapshot?.quotationWorkingDays);
+  const quotationValidityLabel = quotationValidUntil
+    ? `Valid until ${quotationValidUntil}${
+      Number.isFinite(quotationWorkingDays) && quotationWorkingDays > 0
+        ? ` (${quotationWorkingDays} working day${quotationWorkingDays === 1 ? "" : "s"})`
+        : ""
+    }`
+    : "";
 
   doc.setDrawColor(72, 110, 120);
   doc.setLineWidth(1);
@@ -777,7 +792,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFont(undefined, "bold");
   doc.text("MADIBA SFA", marginX + 12, marginTop + 24);
   doc.setFontSize(12);
-  doc.text("SALES ORDER", marginX + 12, marginTop + 44);
+  doc.text(documentTitle, marginX + 12, marginTop + 44);
 
   doc.setFontSize(16);
   doc.text(orderNumberLabel, marginX + 12, marginTop + 70);
@@ -793,6 +808,11 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const rightColX = marginX + contentWidth - 210;
   doc.text(`Date: ${formatKsaDateTime(markedSnapshot.savedAtIso)}`, rightColX, marginTop + 24);
   doc.text(`Salesman: ${formatOrderSalesmanLabel(markedSnapshot)}`, rightColX, marginTop + 40);
+  if (quotationValidityLabel) {
+    doc.setFont(undefined, "bold");
+    doc.text(quotationValidityLabel, rightColX, marginTop + 56);
+    doc.setFont(undefined, "normal");
+  }
 
   doc.setLineWidth(0.8);
   doc.roundedRect(marginX, marginTop + 120, contentWidth, 56, 5, 5);

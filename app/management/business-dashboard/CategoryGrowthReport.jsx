@@ -123,7 +123,7 @@ const TEXT = {
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
   },
   monthChartHint: {
-    en: "Hover a period for amounts. Click a name to hide or show that line. The open month on this chart uses the KPI Estimate at current pace (actual ÷ workday pace), not raw MTD. Tables still show MTD.",
+    en: "Hover a period for amounts. Click a name to hide or show that line. The open month on this chart uses the KPI open-month estimate (actual ÷ workday pace), not raw MTD. Tables still show MTD.",
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الشهر المفتوح في هذا الرسم يستخدم تقدير مؤشر الأداء حسب الوتيرة (الفعلي ÷ وتيرة أيام العمل)، وليس حتى اليوم الخام. الجداول تبقى حتى اليوم.",
   },
   shareChart: { en: "Share of lifetime sales", ar: "حصة مبيعات العمر" },

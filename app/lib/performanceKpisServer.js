@@ -39,9 +39,11 @@ const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
 ];
 
-const PERFORMANCE_KPI_CACHE_VERSION = 9;
-const MIN_USABLE_PERFORMANCE_KPI_CACHE_VERSION = 8;
-const SALES_PACE_HISTORY_MONTHS = 3;
+export const PERFORMANCE_KPI_CACHE_VERSION = 10;
+/** Reject v8–v9 three-month / calendar-day pace curves; Method A requires v10+. */
+export const MIN_USABLE_PERFORMANCE_KPI_CACHE_VERSION = 10;
+/** Method A: median cumulative curve over the last six complete months. */
+export const SALES_PACE_HISTORY_MONTHS = 6;
 const PERFORMANCE_KPI_CACHE_KEY_PREFIX = "performance_kpi_actuals_v2:";
 
 function isMissingColumnError(error) {
@@ -214,14 +216,32 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
     rows = await fetchPagedRows(
       admin,
       "active_sales",
-      "salesman_code,transaction_date,sales_amount",
+      "salesman_code,transaction_date,sales_amount,voucher_type",
       (query) => query
         .gte("transaction_date", historyStart)
         .lte("transaction_date", historyLastDay),
     );
   } catch (error) {
-    if (!isMissingColumnError(error) && !isMissingTableError(error)) throw error;
-    return { company: null, bySalesman: new Map() };
+    // Older schemas without voucher_type still support net amounts when signed.
+    if (isMissingColumnError(error)) {
+      try {
+        rows = await fetchPagedRows(
+          admin,
+          "active_sales",
+          "salesman_code,transaction_date,sales_amount",
+          (query) => query
+            .gte("transaction_date", historyStart)
+            .lte("transaction_date", historyLastDay),
+        );
+      } catch (inner) {
+        if (!isMissingColumnError(inner) && !isMissingTableError(inner)) throw inner;
+        return { company: null, bySalesman: new Map() };
+      }
+    } else if (!isMissingTableError(error)) {
+      throw error;
+    } else {
+      return { company: null, bySalesman: new Map() };
+    }
   }
 
   const bySalesman = new Map();
@@ -234,7 +254,10 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
     grouped.set(code, list);
   });
   grouped.forEach((list, code) => {
-    const curve = averageCumulativeDayShares(list);
+    const curve = averageCumulativeDayShares(list, {
+      aggregator: "median",
+      maxMonths: SALES_PACE_HISTORY_MONTHS,
+    });
     if (curve.monthCount >= 1) bySalesman.set(code, curve.shares);
   });
 
@@ -541,7 +564,7 @@ function isUsablePerformanceKpiCacheShape(cache) {
 
 /**
  * Read a saved monthly KPI actuals cache without batch/stamp checks or rebuild.
- * Used by KPI Targets / My Performance screen loads and prior-month comparisons.
+ * Returns null for missing or incompatible versions (v8–v9 Method A incompatible).
  */
 export async function readStoredPerformanceKpiCache(admin, reportDate) {
   const { data, error } = await admin
@@ -600,7 +623,7 @@ function stripUnsetSkuExpansionFields(derived, sourceActuals = {}) {
 }
 
 export async function loadStoredKpiActualsByCode(admin, reportDate) {
-  const cache = await readStoredPerformanceKpiCache(admin, reportDate);
+  const cache = await ensureCurrentPerformanceKpiCache(admin, reportDate);
   const source = cache?.actualsBySalesman;
   if (!source || typeof source !== "object") return {};
   const byCode = {};
@@ -713,6 +736,16 @@ export async function rebuildPerformanceKpiCache(admin, {
 }
 
 /**
+ * Soft-read Method A cache, rebuilding automatically when missing or older than v10.
+ * Does not wait for a sales/receipt upload — screen and email loads migrate in place.
+ */
+export async function ensureCurrentPerformanceKpiCache(admin, reportDate) {
+  const existing = await readStoredPerformanceKpiCache(admin, reportDate);
+  if (existing) return existing;
+  return rebuildPerformanceKpiCache(admin, { reportDate });
+}
+
+/**
  * Rebuild current-month KPI actuals after a sales or receipt upload.
  * Also builds the prior month when that frozen cache is missing or older than
  * the current cache version (so new KPI fields appear in vs-last-month).
@@ -816,9 +849,9 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
       await writePerformanceKpiCache(admin, reportDate, sourceCache);
     }
   } else {
-    // Screen / email reads: never scan active_sales or the receipt register here.
-    // Sales and receipt uploads rebuild the cache in post-response work.
-    sourceCache = await readStoredPerformanceKpiCache(admin, reportDate);
+    // Screen / email reads: use stored Method A cache, or rebuild when missing /
+    // incompatible (v8–v9). Do not serve outdated three-month pace curves.
+    sourceCache = await ensureCurrentPerformanceKpiCache(admin, reportDate);
   }
 
   if (!sourceCache) {

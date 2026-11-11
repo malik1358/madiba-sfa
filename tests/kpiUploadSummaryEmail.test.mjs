@@ -22,6 +22,7 @@ import {
 import { buildActiveCustomersReport } from "../app/lib/activeCustomers.js";
 import { buildReceivableDaysReport } from "../app/lib/receivableDays.js";
 import { runKpiUploadSummaryEmailCycle } from "../app/lib/kpiUploadSummaryEmailServer.js";
+import { ksaWorkdayProgressRatio } from "../app/lib/performanceKpis.js";
 
 const ahmed = {
   salesmanCode: "AHMED",
@@ -120,15 +121,18 @@ test("summary table transposes footer rows into columns for sales, collection, a
 });
 
 test("upload summary Total sales status matches ~100% estimate instead of workday behind-pace", () => {
-  const actual = 422_819;
   const target = 4_580_000;
-  const day3Share = actual / target;
+  const salesAsOfDate = "2026-11-03";
+  // Method A floors historical share at workday progress — set booked actual so
+  // actual / workday_pace ≈ target (estimate ~100% of target).
+  const workdayFrac = ksaWorkdayProgressRatio(salesAsOfDate);
+  const actual = Math.round(target * workdayFrac);
   const personalPaceShares = {
     shares: Object.fromEntries(
       Array.from({ length: 31 }, (_, index) => {
         const day = index + 1;
-        if (day <= 3) return [day, (day / 3) * day3Share];
-        return [day, Math.min(1, day3Share + ((day - 3) / 28) * (1 - day3Share))];
+        // Keep historical at-or-above workday so the floor is not the only driver.
+        return [day, Math.min(1, Math.max(workdayFrac, day / 31))];
       }),
     ),
   };
@@ -140,12 +144,12 @@ test("upload summary Total sales status matches ~100% estimate instead of workda
     totalSales: "4580000",
     collection: "3268000",
     paceShares: personalPaceShares,
-    salesAsOfDate: "2026-11-03",
+    salesAsOfDate,
     receiptAsOfDate: "2026-11-08",
     kpis: [
-      { key: "officeSupplies", actual: 211_410 },
-      { key: "localItemSales", actual: 105_705 },
-      { key: "otherSales", actual: 105_704 },
+      { key: "officeSupplies", actual: Math.round(actual * 0.5) },
+      { key: "localItemSales", actual: Math.round(actual * 0.25) },
+      { key: "otherSales", actual: actual - Math.round(actual * 0.5) - Math.round(actual * 0.25) },
       { key: "totalSales", actual },
       { key: "collection", actual: 828_959 },
       { key: "cashCollection", actual: 0 },
@@ -445,7 +449,7 @@ test("email HTML uses transposed header labels", () => {
   });
   assert.match(message.subject, /KPI Targets summary/);
   assert.match(message.html, /Total \(filtered\)/);
-  assert.match(message.html, /Estimate at current pace/);
+  assert.match(message.html, /Estimated month-end sales/);
   assert.match(message.html, /vs last month/);
   assert.match(message.html, /Total sales/);
   assert.match(message.html, /Collection/);

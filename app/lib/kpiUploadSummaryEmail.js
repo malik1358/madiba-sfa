@@ -25,7 +25,7 @@ export const KPI_UPLOAD_SUMMARY_ROW_KEYS = [
 
 export const KPI_UPLOAD_SUMMARY_ROW_LABELS = {
   totalFiltered: "Total (filtered)",
-  paceEstimate: "Estimate at current pace",
+  paceEstimate: "Estimated month-end sales",
   vsLastMonth: "vs last month",
 };
 
@@ -708,7 +708,7 @@ function paceEstimateHtml(row) {
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(estimate)}</div>
     ${hasTarget ? `<div style="margin-top:4px;">${escapeHtml(achievement)} of target</div>` : ""}
     <div style="margin-top:6px;display:inline-block;padding:2px 8px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:11px;font-weight:600;">
-      Estimate at current pace
+      Estimated month-end sales
     </div>
   `;
 }
@@ -760,7 +760,7 @@ function paceEstimateText(row) {
   return [
     formatKpiCellValue(row.key, cell.estimate),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
-    "Estimate at current pace",
+    "Estimated month-end sales",
   ].filter(Boolean).join("; ");
 }
 
@@ -841,7 +841,7 @@ export function buildKpiUploadSummaryEmail({
   const textRows = (summary?.rows || []).map((row) => [
     row.label,
     `  Total (filtered): ${totalFilteredText(row)}`,
-    `  Estimate at current pace: ${paceEstimateText(row)}`,
+    `  Estimated month-end sales: ${paceEstimateText(row)}`,
     `  vs last month: ${vsLastMonthText(row, summary?.priorMonth)}`,
   ].join("\n"));
 

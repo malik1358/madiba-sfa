@@ -248,6 +248,20 @@ export function monthProgressRatio(reportDate) {
   return Math.min(1, Math.max(0, day / lastDay));
 }
 
+/** KSA workdays elapsed in the month through asOfDate (Friday off). */
+export function ksaWorkdaysElapsedInMonth(asOfDate) {
+  const date = String(asOfDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+  const { from, to } = currentMonthDateRange(date);
+  let elapsed = 0;
+  for (let cursor = from; cursor <= to; cursor = nextIsoDate(cursor)) {
+    if (!isKsaWorkday(cursor)) continue;
+    if (cursor > date) break;
+    elapsed += 1;
+  }
+  return elapsed;
+}
+
 export function ksaWorkdayProgressRatio(asOfDate) {
   const date = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
@@ -263,7 +277,25 @@ export function ksaWorkdayProgressRatio(asOfDate) {
   return Math.min(1, Math.max(0, elapsed / workdays));
 }
 
-export function averageCumulativeDayShares(salesRows = []) {
+function medianNumber(values = []) {
+  const arr = (values || []).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!arr.length) return null;
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+/**
+ * Build each salesman's historical cumulative sales curve.
+ * Default Method A: median of up to the last `maxMonths` complete months, indexed by
+ * KSA workday progress within each month (Friday off) so months of different lengths
+ * align. Pass indexBy "calendar" only for legacy comparisons.
+ * Caller must exclude the current incomplete month from `salesRows`.
+ */
+export function averageCumulativeDayShares(salesRows = [], {
+  aggregator = "median",
+  maxMonths = null,
+  indexBy = "workday",
+} = {}) {
   const months = new Map();
   (salesRows || []).forEach((row) => {
     const date = String(row?.transaction_date || "").slice(0, 10);
@@ -271,45 +303,76 @@ export function averageCumulativeDayShares(salesRows = []) {
     const amount = netKpiSalesAmount(row);
     if (amount === 0) return;
     const month = date.slice(0, 7);
-    const day = Number(date.slice(8, 10));
     let bucket = months.get(month);
     if (!bucket) {
-      bucket = { total: 0, days: new Map() };
+      bucket = { total: 0, byDate: new Map() };
       months.set(month, bucket);
     }
     bucket.total += amount;
-    bucket.days.set(day, (bucket.days.get(day) || 0) + amount);
+    bucket.byDate.set(date, (bucket.byDate.get(date) || 0) + amount);
   });
 
+  const monthKeys = [...months.keys()].sort();
+  const limitedKeys = Number.isFinite(Number(maxMonths)) && Number(maxMonths) > 0
+    ? monthKeys.slice(-Number(maxMonths))
+    : monthKeys;
+
   const curves = [];
-  months.forEach((bucket) => {
-    if (!(bucket.total > 0) || !bucket.days.size) return;
-    const lastDay = Math.max(...bucket.days.keys());
-    let cumulative = 0;
+  limitedKeys.forEach((month) => {
+    const bucket = months.get(month);
+    if (!bucket || !(bucket.total > 0) || !bucket.byDate.size) return;
+    const { from, to } = currentMonthDateRange(`${month}-01`);
     const shares = {};
-    for (let day = 1; day <= lastDay; day += 1) {
-      cumulative += bucket.days.get(day) || 0;
-      shares[day] = cumulative / bucket.total;
+    let cumulative = 0;
+    if (indexBy === "calendar") {
+      for (let cursor = from; cursor <= to; cursor = nextIsoDate(cursor)) {
+        cumulative += bucket.byDate.get(cursor) || 0;
+        const day = Number(cursor.slice(8, 10));
+        shares[day] = cumulative / bucket.total;
+      }
+    } else {
+      // Align months by KSA workday progress: include intervening non-workdays
+      // in the cumulative when a workday boundary is reached (same as backtest).
+      const workdayDates = [];
+      for (let cursor = from; cursor <= to; cursor = nextIsoDate(cursor)) {
+        if (isKsaWorkday(cursor)) workdayDates.push(cursor);
+      }
+      let prev = (() => {
+        const year = Number(from.slice(0, 4));
+        const monthNo = Number(from.slice(5, 7));
+        return new Date(Date.UTC(year, monthNo - 1, 0)).toISOString().slice(0, 10);
+      })();
+      workdayDates.forEach((asOfHist, index) => {
+        for (let d = nextIsoDate(prev); d <= asOfHist; d = nextIsoDate(d)) {
+          cumulative += bucket.byDate.get(d) || 0;
+        }
+        prev = asOfHist;
+        shares[index + 1] = cumulative / bucket.total;
+      });
     }
     curves.push(shares);
   });
 
+  const maxKey = 31;
   const result = {};
-  for (let day = 1; day <= 31; day += 1) {
-    const values = curves.map((curve) => curve[day]).filter((value) => value != null);
-    if (values.length) {
-      result[day] = values.reduce((sum, value) => sum + value, 0) / values.length;
+  for (let key = 1; key <= maxKey; key += 1) {
+    const values = curves.map((curve) => curve[key]).filter((value) => value != null && Number.isFinite(value));
+    if (!values.length) continue;
+    if (aggregator === "mean") {
+      result[key] = values.reduce((sum, value) => sum + value, 0) / values.length;
+    } else {
+      result[key] = medianNumber(values);
     }
   }
-  // Averaging months can dip later days below earlier ones; cumulative share must not fall.
+  // Combining months can dip later keys below earlier ones; cumulative share must not fall.
   let runningMax = 0;
-  for (let day = 1; day <= 31; day += 1) {
-    const value = result[day];
+  for (let key = 1; key <= maxKey; key += 1) {
+    const value = result[key];
     if (value == null || !Number.isFinite(Number(value))) continue;
     runningMax = Math.max(runningMax, Number(value));
-    result[day] = runningMax;
+    result[key] = runningMax;
   }
-  return { shares: result, monthCount: curves.length };
+  return { shares: result, monthCount: curves.length, indexBy };
 }
 
 export function shareForDay(shares, day) {
@@ -339,15 +402,17 @@ export function expectedPacePercent(asOfDate, paceShares = null) {
   const date = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
   // Last calendar day of the month = 100% of the month's pace. Historical
-  // curves can walk day 31 back to a day-30 average below 100% and then inflate
-  // Estimate at current pace above booked actuals even when sales/receipts are
-  // uploaded through month-end.
+  // curves can walk the last key back below 100% and then inflate the
+  // month-end sales forecast above booked actuals even when sales/receipts
+  // are uploaded through month-end.
   const monthEnd = currentMonthDateRange(date).to;
   if (date >= monthEnd) return 100;
   const workday = ksaWorkdayProgressRatio(date) * 100;
-  const historical = shareForDay(paceShares, Number(date.slice(8, 10)));
+  // Method A curves are keyed by KSA workday index (not calendar day).
+  const historical = shareForDay(paceShares, ksaWorkdaysElapsedInMonth(date));
   if (historical != null && historical > 0) {
-    return Math.min(100, Math.max(0, historical * 100));
+    // Method A full workday floor: effective_pace = max(historical, workday).
+    return Math.min(100, Math.max(workday, historical * 100));
   }
   return workday;
 }
@@ -387,7 +452,7 @@ export function estimateAtCurrentPace(actual, expectedPercent) {
 /**
  * Inverse of estimateAtCurrentPace: expected % implied by booked actual and a
  * month-end pace estimate (`actual × 100 / estimate`). Used so filtered Totals
- * ahead/behind status matches the Estimate at current pace footer (salesmen can
+ * ahead/behind status matches the Estimated month-end sales footer (salesmen can
  * have different personal curves; a single workday % would disagree).
  */
 export function expectedPacePercentFromEstimate(actual, estimate) {
@@ -411,12 +476,12 @@ export function estimateFromPaceGap(target, paceGap) {
 }
 
 /**
- * One salesman's month-end figure for the Estimate at current pace footer.
- * Scales actual by expected pace share (`actual × 100 / expected%`) so leftover
- * matches historical (or workday) share still ahead, not target × ahead/behind gap.
- * Never returns below the current actual; keeps untarged actuals in the sum,
- * including credit-note / return negatives (dropping those made the footer sit
- * above Total actual after a full-month upload).
+ * One salesman's month-end sales forecast (Method A) for the KPI Targets footer.
+ * Scales positive actual by effective pace (`actual × 100 / expected%`) where
+ * expected% already applies the workday floor. Never uses target or pace gap.
+ * Never returns below booked positive actual; keeps credit-note / return
+ * negatives as-is (not dropped, not amplified). Zero MTD stays null/zero — no
+ * Method B remaining-sales fallback.
  * `target` / `paceGap` are accepted for call-site compatibility but unused.
  */
 export function monthEndPaceEstimate({
@@ -434,6 +499,7 @@ export function monthEndPaceEstimate({
   if (estimate == null) {
     return value;
   }
+  // Forecast never falls below already booked positive net sales.
   return Math.max(value, Number(estimate) || 0);
 }
 

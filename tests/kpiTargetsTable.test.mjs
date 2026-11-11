@@ -228,18 +228,49 @@ test("total cash collected pace estimate is collection plus cash collection", ()
   );
 });
 
+test("filtered sales estimate floors tiny personal early-month shares at workday pace", () => {
+  const asOf = "2026-11-10";
+  const workday = resolveExpectedPacePercent("collection", {
+    reportDate: "2026-11-01",
+    todayIso: asOf,
+    receiptAsOfDate: asOf,
+  });
+  const rows = [{
+    salesmanCode: "SM002",
+    isTeam: false,
+    paceShares: { 10: 0.0074 },
+    salesAsOfDate: asOf,
+    receiptAsOfDate: asOf,
+    officeSupplies: "1000000",
+    localItemSales: "0",
+    otherSales: "0",
+    totalSales: "1000000",
+    kpis: [{ key: "totalSales", actual: 23_644.72 }],
+  }];
+  const estimates = sumFilteredKpiPaceEstimates(rows, ["totalSales"], {
+    reportDate: "2026-11-01",
+    todayIso: asOf,
+    salesAsOfDate: asOf,
+  });
+  const estimate = estimates.totalSales.estimate;
+  assert.ok(estimate != null);
+  assert.ok(estimate < 200_000, `expected workday-floored estimate, got ${estimate}`);
+  assert.ok(Math.abs(estimate - (23_644.72 * (100 / workday))) < 1);
+});
+
 test("filtered totals status uses estimate-aligned expected, not bare workday pace", () => {
-  // Personal curve projects ~100% of target while workday expected is much higher.
-  const actual = 422_819;
+  // When estimate and actual imply the same expected %, Totals status stays on pace
+  // even if a bare workday expected (no personal curve) would say behind.
+  const actual = 1_200_000;
   const target = 4_580_000;
-  const estimate = 4_583_917;
+  const estimate = 4_580_000;
   const aligned = buildFilteredPerformanceKpi("totalSales", {
     actual,
     target,
     estimate,
     reportDate: "2026-11-01",
     todayIso: "2026-11-10",
-    salesAsOfDate: "2026-11-03",
+    salesAsOfDate: "2026-11-10",
   });
   assert.equal(aligned.status.key, "on_pace");
   assert.ok(Math.abs(Number(aligned.paceGap) || 0) < 1);
@@ -249,7 +280,7 @@ test("filtered totals status uses estimate-aligned expected, not bare workday pa
     target,
     reportDate: "2026-11-01",
     todayIso: "2026-11-10",
-    salesAsOfDate: "2026-11-03",
+    salesAsOfDate: "2026-11-10",
   });
   assert.equal(bare.status.key, "behind");
 });

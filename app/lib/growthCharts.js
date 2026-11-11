@@ -50,6 +50,7 @@ export function chartOpenMonthEstimate(actual, {
   const estimate = monthEndPaceEstimate({
     actual,
     expected,
+    asOfDate: paceDate,
   });
   if (estimate == null) {
     const fallback = estimateAtCurrentPace(actual, expected);

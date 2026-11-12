@@ -73,7 +73,9 @@ For Vercel Hobby plans, use GitHub Actions for 8-hour scheduling:
 
 ### 4) Manual sync (optional)
 
-You can trigger a manual sync with:
+In the app: **Management → Item Price History → Sync prices now** (admin / report-user). That runs the same endpoint the GitHub Action calls.
+
+Or with curl / cron secret:
 
 curl -X POST https://YOUR_DOMAIN/api/admin/price-sync \
 	-H "Authorization: Bearer YOUR_CRON_SECRET"

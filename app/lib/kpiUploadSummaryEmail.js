@@ -17,8 +17,10 @@ import {
   buildKpiUploadSummaryCategoryRows,
   insertKpiUploadSummaryCategoryRows,
   monthsThroughYtd,
+  reconstructPriorOutstandingCategoryBuckets,
   sumCreditSalesCategoryBucketsFromFacts,
   trailingMonthsEndingAt,
+  withKpiUploadSummaryNonBuilding,
 } from "./kpiUploadSummaryCategories.js";
 import {
   receivableTrailingDays,
@@ -551,6 +553,7 @@ export function buildKpiUploadSummaryTable({
 
   if (categoryBreakdown?.outstandingBuckets) {
     const monthKey = String(reportDate || "").slice(0, 7);
+    const priorMonthKeyValue = String(priorMonth || previousMonthKey(monthKey) || "").slice(0, 7);
     const asOf = String(todayIso || salesAsOfDate || reportDate || "").slice(0, 10);
     const facts = Array.isArray(categoryBreakdown.cubeFacts) ? categoryBreakdown.cubeFacts : [];
     const salesmanCodes = categoryBreakdown.salesmanCodes || null;
@@ -569,6 +572,61 @@ export function buildKpiUploadSummaryTable({
       months: trailingMonthsEndingAt(monthKey, 12),
       salesmanCodes,
     });
+    const creditThisMonth = sumCreditSalesCategoryBucketsFromFacts(facts, {
+      months: [monthKey],
+      salesmanCodes,
+    });
+    const collectionMtd = withKpiUploadSummaryNonBuilding(
+      categoryBreakdown.collectionBuckets || {},
+    );
+    const priorOutstanding = reconstructPriorOutstandingCategoryBuckets({
+      currentOutstanding: categoryBreakdown.outstandingBuckets,
+      creditSalesThisMonth: creditThisMonth,
+      collectionMtd,
+    });
+    // Prior DSO uses reconstructed prior-month-end AR and full prior-month calendar windows.
+    const priorCreditYtd = priorMonthKeyValue
+      ? sumCreditSalesCategoryBucketsFromFacts(facts, {
+        months: monthsThroughYtd(priorMonthKeyValue),
+        salesmanCodes,
+      })
+      : null;
+    const priorCredit3m = priorMonthKeyValue
+      ? sumCreditSalesCategoryBucketsFromFacts(facts, {
+        months: trailingMonthsEndingAt(priorMonthKeyValue, 3),
+        salesmanCodes,
+      })
+      : null;
+    const priorCredit12m = priorMonthKeyValue
+      ? sumCreditSalesCategoryBucketsFromFacts(facts, {
+        months: trailingMonthsEndingAt(priorMonthKeyValue, 12),
+        salesmanCodes,
+      })
+      : null;
+    const priorYtdDays = priorMonthKeyValue ? receivableYtdDays(priorMonthKeyValue) : 0;
+    const prior3mDays = priorMonthKeyValue ? receivableTrailingDays(priorMonthKeyValue, 3) : 0;
+    const prior12mDays = priorMonthKeyValue ? receivableTrailingDays(priorMonthKeyValue, 12) : 0;
+    const priorDaysByCategoryYtd = priorCreditYtd
+      ? buildCategoryReceivableDays({
+        outstandingBuckets: priorOutstanding,
+        creditSalesBuckets: priorCreditYtd,
+        days: priorYtdDays,
+      })
+      : null;
+    const priorDaysByCategory3m = priorCredit3m
+      ? buildCategoryReceivableDays({
+        outstandingBuckets: priorOutstanding,
+        creditSalesBuckets: priorCredit3m,
+        days: prior3mDays,
+      })
+      : null;
+    const priorDaysByCategory12m = priorCredit12m
+      ? buildCategoryReceivableDays({
+        outstandingBuckets: priorOutstanding,
+        creditSalesBuckets: priorCredit12m,
+        days: prior12mDays,
+      })
+      : null;
     const collectionDaysByParent = {
       averageCollectionDays: buildCategoryCollectionDaysRows({
         parentKey: "averageCollectionDays",
@@ -578,6 +636,9 @@ export function buildKpiUploadSummaryTable({
           creditSalesBuckets: creditYtd,
           days: daysYtd,
         }),
+        priorDaysByCategory: priorDaysByCategoryYtd,
+        compareFn: compareAverageCollectionDaysToPriorMonth,
+        month: monthKey,
         statusLabel: "Lower is better · YTD category DSO",
       }),
       averageCollectionDays3m: buildCategoryCollectionDaysRows({
@@ -588,6 +649,9 @@ export function buildKpiUploadSummaryTable({
           creditSalesBuckets: credit3m,
           days: days3m,
         }),
+        priorDaysByCategory: priorDaysByCategory3m,
+        compareFn: compareAverageCollectionDaysToPriorMonth,
+        month: monthKey,
         statusLabel: "Lower is better · Rolling 3m category DSO",
       }),
       averageCollectionDays12m: buildCategoryCollectionDaysRows({
@@ -598,6 +662,9 @@ export function buildKpiUploadSummaryTable({
           creditSalesBuckets: credit12m,
           days: days12m,
         }),
+        priorDaysByCategory: priorDaysByCategory12m,
+        compareFn: compareAverageCollectionDaysToPriorMonth,
+        month: monthKey,
         statusLabel: "Lower is better · Rolling 12m category DSO",
       }),
     };

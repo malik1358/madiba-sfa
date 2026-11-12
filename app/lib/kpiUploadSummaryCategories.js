@@ -429,6 +429,35 @@ export function buildCategoryReceivableDays({
   return result;
 }
 
+/**
+ * Reconstruct prior-month-end outstanding by category:
+ * AR_prior ≈ AR_now − credit_sales_this_month + collections_MTD.
+ * Floors at zero per leaf; Non-building = electronics + rest.
+ */
+export function reconstructPriorOutstandingCategoryBuckets({
+  currentOutstanding = {},
+  creditSalesThisMonth = {},
+  collectionMtd = {},
+} = {}) {
+  const current = withKpiUploadSummaryNonBuilding(currentOutstanding);
+  const sales = withKpiUploadSummaryNonBuilding(creditSalesThisMonth);
+  const collected = withKpiUploadSummaryNonBuilding(collectionMtd);
+  return withKpiUploadSummaryNonBuilding({
+    buildingMaterial: Math.max(
+      0,
+      roundMoney(current.buildingMaterial - sales.buildingMaterial + collected.buildingMaterial),
+    ),
+    electronics: Math.max(
+      0,
+      roundMoney(current.electronics - sales.electronics + collected.electronics),
+    ),
+    rest: Math.max(
+      0,
+      roundMoney(current.rest - sales.rest + collected.rest),
+    ),
+  });
+}
+
 function categoryRowKey(metric, categoryKey) {
   return `${metric}_${categoryKey}`;
 }
@@ -443,6 +472,7 @@ function buildOneCategorySummaryRow({
   parentTarget = 0,
   expectedRemaining = null,
   estimateOverride = null,
+  vsLastMonthOverride = undefined,
   statusLabel = "Category split · no target",
   formatKey = null,
   kind = "categorySplit",
@@ -482,9 +512,11 @@ function buildOneCategorySummaryRow({
       target: Number(parentTarget) > 0 && metric !== "collectionDays" ? Number(parentTarget) : 0,
       achievement: Number(parentTarget) > 0 && metric !== "collectionDays" ? achievement : null,
     },
-    vsLastMonth: metric === "collectionDays"
-      ? null
-      : compareKpiEstimateToPriorMonth(estimate, priorActual),
+    vsLastMonth: vsLastMonthOverride !== undefined
+      ? vsLastMonthOverride
+      : (metric === "collectionDays"
+        ? null
+        : compareKpiEstimateToPriorMonth(estimate, priorActual)),
   };
 }
 
@@ -568,31 +600,42 @@ export function buildKpiUploadSummaryCategoryRows({
 
 /**
  * Category DSO children for one Avg collection days parent row.
+ * Optional priorDaysByCategory + compareFn fills vs last month (lower-is-better).
  */
 export function buildCategoryCollectionDaysRows({
   parentKey = "averageCollectionDays",
   parentLabel = "Avg collection days",
   daysByCategory = {},
+  priorDaysByCategory = null,
+  compareFn = null,
+  month = "",
   statusLabel = "Lower is better · category DSO",
 } = {}) {
   return KPI_UPLOAD_SUMMARY_CATEGORY_KEYS
     .filter((categoryKey) => daysByCategory?.[categoryKey] != null)
     .map((categoryKey) => {
+      const currentDays = daysByCategory[categoryKey];
+      const priorDays = priorDaysByCategory?.[categoryKey];
+      const vsLastMonth = typeof compareFn === "function"
+        ? compareFn(currentDays, priorDays)
+        : null;
       const row = buildOneCategorySummaryRow({
         metric: "collectionDays",
         categoryKey,
-        actual: daysByCategory[categoryKey],
-        priorActual: null,
+        actual: currentDays,
+        priorActual: priorDays,
         statusLabel,
         formatKey: parentKey,
         kind: "categoryCollectionDays",
         estimateOverride: null,
+        vsLastMonthOverride: vsLastMonth,
       });
       return {
         ...row,
         key: `${parentKey}_${categoryKey}`,
         label: `${parentLabel} — ${KPI_UPLOAD_SUMMARY_CATEGORY_LABELS[categoryKey] || categoryKey}`,
         parentKey,
+        month: String(month || "").slice(0, 7),
       };
     });
 }

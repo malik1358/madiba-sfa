@@ -7,6 +7,11 @@ import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
 
+function isProspectVisitCustomer(customer = {}) {
+  if (customer?.is_prospect || customer?.isProspect) return true;
+  return /^PROSPECT-/i.test(String(customer?.customer_code || "").trim());
+}
+
 function formatDateOnly(value) {
   return formatKsaDateOnly(value, "");
 }
@@ -100,7 +105,9 @@ export function buildFieldVisitWhatsappSummary({
     lines.push(`${labels.notes}: ${note}`);
   }
 
-  if (includeOutstanding !== false) {
+  // Prospects are not on the outstanding book — never show aging zeros.
+  const showOutstanding = includeOutstanding !== false && !isProspectVisitCustomer(customer);
+  if (showOutstanding) {
     const bucket0To30 = Number(customer.outstanding_0_30 || 0);
     const bucket31To60 = Number(customer.outstanding_30_60 || 0);
     const bucket61To90 = Number(customer.outstanding_61_90 || 0);

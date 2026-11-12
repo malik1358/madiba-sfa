@@ -75,7 +75,7 @@ test("buildFieldVisitWhatsappSummary includes working hours till the visit", () 
 test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the end", () => {
   const summary = buildFieldVisitWhatsappSummary({
     customer: {
-      customer_code: "PROSPECT-300",
+      customer_code: "1542",
       customer_name: "Jawahir Alqamih Trading Company",
     },
     visitForm: {
@@ -97,6 +97,62 @@ test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the
   assert.match(summary, /Distance from previous: 3.40 km/);
   assert.match(summary, /Est. waiting: 25 min/);
   assert.doesNotMatch(summary, /Last visit date/);
+});
+
+test("buildFieldVisitWhatsappSummary omits outstanding for prospect customer codes", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "PROSPECT-968",
+      customer_name: "Olaya Kayfak Trading Company",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_above_90: 0,
+    },
+    visitForm: {
+      outcome: "COME_BACK_LATER",
+      nextVisitAt: "2026-11-15",
+      note: "هذا فرع اخر من الفروع",
+      visitAt: "2026-11-12T11:31:00.000Z",
+    },
+    salesmanName: "Fatima (SM004)",
+    visitDistance: {
+      latitude: 24.56706,
+      longitude: 46.686261,
+      distanceFromCustomerKm: 2.67,
+      distanceFromPreviousKm: 0,
+      waitingMinutes: null,
+    },
+  });
+
+  assert.match(summary, /^Field visit report/);
+  assert.match(summary, /Code: PROSPECT-968/);
+  assert.match(summary, /Notes: هذا فرع اخر من الفروع/);
+  assert.doesNotMatch(summary, /Outstanding:/);
+  assert.doesNotMatch(summary, /0-30:/);
+  assert.doesNotMatch(summary, /31-60:/);
+  assert.doesNotMatch(summary, /Total:/);
+  assert.match(summary, /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.56706%2C46\.686261/);
+});
+
+test("buildFieldVisitWhatsappSummary omits outstanding when is_prospect is set", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "TEMP-1",
+      customer_name: "Pending Prospect",
+      is_prospect: true,
+      outstanding_above_90: 900,
+    },
+    visitForm: {
+      outcome: "COME_BACK_LATER",
+      nextVisitAt: "2026-11-20",
+    },
+    salesmanName: "Fatima (SM004)",
+  });
+
+  assert.doesNotMatch(summary, /Outstanding:/);
+  assert.doesNotMatch(summary, /0-30:/);
+  assert.doesNotMatch(summary, /900/);
 });
 
 test("buildFieldVisitWhatsappSummary appends last visit date after GPS metrics", () => {

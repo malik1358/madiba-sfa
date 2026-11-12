@@ -11,6 +11,7 @@ import {
   insertKpiUploadSummaryCategoryRows,
   isOpenInvoiceExpectedThisMonth,
   KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS,
+  buildKpiUploadSummaryExcludedCustomerSet,
   pickCustomerAvgDaysToPay,
   reconstructPriorOutstandingCategoryBuckets,
   resolveExpectedPayDate,
@@ -279,6 +280,34 @@ test("estimate avg days prefers lifetime and uses 120 when never paid", () => {
     last_receipt_date: "2026-09-01",
   }), 120);
   assert.equal(pickCustomerAvgDaysToPay({}), 120);
+});
+
+test("expected remaining excludes legal-queue customer codes", () => {
+  const mix = new Map([
+    ["1258C", withKpiUploadSummaryNonBuilding({ buildingMaterial: 0, electronics: 0, rest: 100 })],
+    ["1224", withKpiUploadSummaryNonBuilding({ buildingMaterial: 0, electronics: 0, rest: 100 })],
+  ]);
+  const excluded = buildKpiUploadSummaryExcludedCustomerSet(["1258C"]);
+  const expected = sumExpectedCollectionCategoryBuckets([
+    {
+      customer_code: "1258C",
+      customer_name: "Sheem Al Majd Trading Company",
+      invoice_date: "2026-02-12",
+      pending_amount: 345844.7,
+    },
+    {
+      customer_code: "1224",
+      invoice_date: "2026-09-01",
+      pending_amount: 10000,
+    },
+  ], {
+    avgDaysByCustomer: new Map([["1258C", 260], ["1224", 30]]),
+    customerMix: mix,
+    monthEnd: "2026-11-30",
+    excludedCustomerCodes: excluded,
+  });
+  assert.equal(expected.rest, 10000);
+  assert.equal(expected.buildingMaterial, 0);
 });
 
 test("insertKpiUploadSummaryCategoryRows keeps unknown rows untouched when empty", () => {

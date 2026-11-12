@@ -2,7 +2,7 @@ import { isBuildingMaterialSale } from "./buildingMaterialCustomerFilter.js";
 import { achievementPercent, normalizeSalesmanCode } from "./performanceKpis.js";
 import { isElectronicsSale } from "./salesmanIncentive.js";
 import { compareKpiEstimateToPriorMonth } from "./kpiTargetsTable.js";
-import { normalizeCode } from "./outstanding.js";
+import { normalizeCode, resolveCustomerAccountCode } from "./outstanding.js";
 import { receivableDays } from "./receivableDays.js";
 import { addDaysToDateKey } from "./scheduleDateWindow.js";
 import { previousMonthKey } from "./categoryGrowth.js";
@@ -336,18 +336,46 @@ export function sumOutstandingCategoryBuckets(invoices = [], customerMix = new M
 }
 
 /**
+ * Expand a customer code into match keys (raw, account, with/without C).
+ */
+export function expandKpiUploadSummaryCustomerKeys(customerCode = "") {
+  const raw = normalizeCode(customerCode);
+  if (!raw) return [];
+  const account = normalizeCode(resolveCustomerAccountCode(raw) || raw);
+  const bare = raw.replace(/C$/, "");
+  return [...new Set([raw, account, bare, bare ? `${bare}C` : ""].filter(Boolean))];
+}
+
+export function buildKpiUploadSummaryExcludedCustomerSet(codes = []) {
+  const excluded = new Set();
+  (codes || []).forEach((code) => {
+    expandKpiUploadSummaryCustomerKeys(code).forEach((key) => excluded.add(key));
+  });
+  return excluded;
+}
+
+export function isKpiUploadSummaryCustomerExcluded(customerCode, excludedCustomerCodes = null) {
+  if (!(excludedCustomerCodes instanceof Set) || excludedCustomerCodes.size === 0) return false;
+  return expandKpiUploadSummaryCustomerKeys(customerCode)
+    .some((key) => excludedCustomerCodes.has(key));
+}
+
+/**
  * Still-open invoices expected to pay this month (incl. overdue) by category mix.
+ * Optional excludedCustomerCodes skips legal-queue (and similar) accounts.
  */
 export function sumExpectedCollectionCategoryBuckets(invoices = [], {
   avgDaysByCustomer = new Map(),
   customerMix = new Map(),
   monthEnd = "",
+  excludedCustomerCodes = null,
 } = {}) {
   let buckets = emptyKpiUploadSummaryCategoryBuckets();
   (invoices || []).forEach((invoice) => {
     const amount = Number(invoice?.pending_amount ?? invoice?.amount ?? 0);
     if (!(amount > 0)) return;
     const customer = normalizeCode(invoice?.customer_code);
+    if (isKpiUploadSummaryCustomerExcluded(customer, excludedCustomerCodes)) return;
     const avgDays = avgDaysByCustomer instanceof Map
       ? avgDaysByCustomer.get(customer)
       : avgDaysByCustomer?.[customer];

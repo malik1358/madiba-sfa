@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MADIBA_STORE_LATITUDE,
+  MADIBA_STORE_LONGITUDE,
+  madibaStoreLabel,
+} from "../app/lib/madibaStoreLocation.js";
+import {
   findPreviousVisitDistanceAnchors,
   formatVisitDistanceWhatsappLines,
+  formatVisitGpsWhatsappValue,
   resolveVisitDistanceMetrics,
   timelineRowFromActivityLog,
 } from "../app/lib/visitDistanceWhatsapp.js";
@@ -17,6 +23,37 @@ test("formatVisitDistanceWhatsappLines always includes GPS and the three distanc
     "Distance from previous: -",
     "Est. waiting: -",
   ]);
+});
+
+test("formatVisitGpsWhatsappValue labels MADIBA store entries instead of a Google Maps link", () => {
+  assert.equal(
+    formatVisitGpsWhatsappValue({
+      latitude: MADIBA_STORE_LATITUDE,
+      longitude: MADIBA_STORE_LONGITUDE,
+    }),
+    madibaStoreLabel("en"),
+  );
+  assert.equal(
+    formatVisitGpsWhatsappValue({
+      latitude: 24.568242,
+      longitude: 46.74084,
+    }),
+    madibaStoreLabel("en"),
+  );
+  assert.match(
+    formatVisitGpsWhatsappValue({ latitude: 24.72, longitude: 46.72 }),
+    /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.72%2C46\.72$/,
+  );
+
+  const lines = formatVisitDistanceWhatsappLines({
+    latitude: MADIBA_STORE_LATITUDE,
+    longitude: MADIBA_STORE_LONGITUDE,
+    distanceFromCustomerKm: 0,
+    distanceFromPreviousKm: 0,
+    waitingMinutes: null,
+  });
+  assert.equal(lines[1], `GPS: ${madibaStoreLabel("en")}`);
+  assert.doesNotMatch(lines.join("\n"), /google\.com\/maps/);
 });
 
 test("resolveVisitDistanceMetrics uses customer GPS, previous GPS, and waiting time", () => {

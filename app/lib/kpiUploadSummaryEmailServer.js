@@ -4,11 +4,13 @@ import { isKpiTargetProfile, mergeKpiTargetProfiles } from "./kpiTargetsTable.js
 import {
   allocateReceiptsToCategoryBuckets,
   buildCustomerCategoryMixFromFacts,
+  buildKpiUploadSummaryExcludedCustomerSet,
   pickCustomerAvgDaysToPay,
   sumExpectedCollectionCategoryBuckets,
   sumOutstandingCategoryBuckets,
   sumSalesCategoryBucketsFromFacts,
 } from "./kpiUploadSummaryCategories.js";
+import { loadLegalTransferRows } from "./badDebtReportServer.js";
 import {
   KPI_UPLOAD_SUMMARY_DEBOUNCE_MS,
   KPI_UPLOAD_SUMMARY_LAST_SENT_KEY,
@@ -254,12 +256,16 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
     const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
     const monthEnd = lastDayOfMonth(monthKey) || currentRange.to;
 
-    const [currentReceipts, priorReceipts, outstandingInvoices] = await Promise.all([
+    const [currentReceipts, priorReceipts, outstandingInvoices, legalTransfers] = await Promise.all([
       loadReceiptRowsForMonth(admin, { fromDate: currentRange.from, toDate: currentRange.to }),
       priorRange
         ? loadReceiptRowsForMonth(admin, { fromDate: priorRange.from, toDate: priorRange.to })
         : Promise.resolve([]),
       loadOutstandingInvoicesForKpiSummary(admin),
+      loadLegalTransferRows(admin).catch((error) => {
+        console.error("KPI upload summary: legal transfers unavailable:", error);
+        return [];
+      }),
     ]);
 
     // Lifetime/all-months mix for open AR attribution; month mix for MTD receipts.
@@ -284,6 +290,11 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
     const avgDaysByCustomer = new Map(
       enrichedCustomers.map((row) => [normalizeCode(row.customer_code), pickCustomerAvgDaysToPay(row)]),
     );
+    const excludedLegalCustomers = buildKpiUploadSummaryExcludedCustomerSet(
+      (legalTransfers || [])
+        .filter((row) => Boolean(row?.is_transferred))
+        .map((row) => row?.customer_code),
+    );
 
     return {
       salesBuckets,
@@ -296,6 +307,7 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
         avgDaysByCustomer,
         customerMix: outstandingMix,
         monthEnd,
+        excludedCustomerCodes: excludedLegalCustomers,
       }),
       outstandingBuckets: sumOutstandingCategoryBuckets(outstandingInvoices, outstandingMix),
       cubeFacts: facts,

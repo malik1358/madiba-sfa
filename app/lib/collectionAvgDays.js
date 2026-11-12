@@ -1,4 +1,5 @@
-import { buildPaymentBehavior } from "./paymentBehavior.js";
+import { buildPaymentBehavior, matchPaymentsFifo } from "./paymentBehavior.js";
+import { resolveLastPaidInvoiceDays } from "./kpiUploadSummaryCategories.js";
 import {
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
@@ -202,7 +203,7 @@ function synthesizeInvoicesFromOutstandingBuckets(record, todayIso = new Date().
     .filter(Boolean);
 }
 
-/** Attach avg_days_to_pay and last_receipt_date using preloaded sales + receipt maps. */
+/** Attach avg_days_to_pay, last_paid_invoice_days, and last_receipt_date. */
 export function attachAvgDaysToPayToRecords(records, {
   salesByCustomer = new Map(),
   receiptsByCustomer = new Map(),
@@ -222,17 +223,21 @@ export function attachAvgDaysToPayToRecords(records, {
       0,
     );
     const receipts = lookupByCustomerCode(receiptsByCustomer, code);
+    const salesRows = lookupByCustomerCode(salesByCustomer, code);
     const behavior = resolveCollectionAvgDaysBehavior({
-      transactions: lookupByCustomerCode(salesByCustomer, code),
+      transactions: salesRows,
       receipts,
       invoices: effectiveInvoices,
       totalOutstanding,
       todayIso,
     });
+    const { allocations } = matchPaymentsFifo(salesRows, receipts);
     return {
       ...record,
       avg_days_to_pay: behavior?.avgDaysToPay ?? null,
       avg_days_to_pay_6m: behavior?.avgDaysToPay6m ?? null,
+      avg_days_paid_only: behavior?.avgDaysPaidOnly ?? null,
+      last_paid_invoice_days: resolveLastPaidInvoiceDays(allocations),
       last_receipt_date: resolveLastReceiptDate(receipts),
     };
   });

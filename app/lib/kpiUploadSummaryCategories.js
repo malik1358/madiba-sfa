@@ -250,15 +250,55 @@ function customerHasPaidReceipt(row = {}) {
 }
 
 /**
+ * Days on the most recently paid invoice (latest receipt_date among paid
+ * allocations). Combined with lifetime avg via max(...) for the estimate.
+ */
+export function resolveLastPaidInvoiceDays(allocations = []) {
+  const byInvoice = new Map();
+  (Array.isArray(allocations) ? allocations : []).forEach((row) => {
+    if (row?.exclude_from_avg_days) return;
+    const amount = Number(row?.amount);
+    if (!(Number.isFinite(amount) && amount > 0.009)) return;
+    const days = Number(row?.days);
+    if (!Number.isFinite(days) || days < 0) return;
+    const receiptDate = String(row?.receipt_date || "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(receiptDate)) return;
+    const invoiceDate = String(row?.invoice_date || "").trim().slice(0, 10);
+    const voucher = String(row?.voucher_number || "").trim();
+    const key = `${invoiceDate}|${voucher}`;
+    const current = byInvoice.get(key);
+    if (!current || receiptDate >= current.receiptDate) {
+      byInvoice.set(key, { receiptDate, days: Math.round(days) });
+    }
+  });
+  let best = null;
+  byInvoice.forEach((entry) => {
+    if (
+      !best
+      || entry.receiptDate > best.receiptDate
+      || (entry.receiptDate === best.receiptDate && entry.days > best.days)
+    ) {
+      best = entry;
+    }
+  });
+  return best ? best.days : null;
+}
+
+/**
  * Avg days for Collection month-end expected remaining:
- * always lifetime; never-paid (or missing lifetime) → 120. Ignores 6m.
+ * max(lifetime blended avg, days on last paid invoice). Ignores 6m.
+ * Never-paid (or no usable days) → 120.
  */
 export function pickCustomerAvgDaysToPay(row = {}) {
   if (!customerHasPaidReceipt(row)) {
     return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
   }
   const lifetime = Number(row?.avg_days_to_pay ?? row?.avgDaysToPay);
-  if (Number.isFinite(lifetime) && lifetime >= 0) return lifetime;
+  const lastPaid = Number(row?.last_paid_invoice_days ?? row?.lastPaidInvoiceDays);
+  const candidates = [];
+  if (Number.isFinite(lifetime) && lifetime >= 0) candidates.push(lifetime);
+  if (Number.isFinite(lastPaid) && lastPaid >= 0) candidates.push(lastPaid);
+  if (candidates.length) return Math.max(...candidates);
   return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
 }
 

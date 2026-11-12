@@ -280,7 +280,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 
 KPI target edits notify affected salespeople after the save and CC their complete reporting chain. To manually send a month to all active KPI-eligible salespeople, run **Actions → KPI Targets Email → Run workflow**, selecting `2026-10` for the October 2026 targets. The workflow uses the existing `CRON_SECRET` and production Vercel host; it adds no secrets or schedule.
 
-Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
+Cron requests send header `x-cron-secret`. Price sync accepts that header (or Bearer cron secret) for the GitHub workflow, and also accepts an admin / report-user session JWT from **Item Price History → Sync prices now**.
 
 The Missing Invoice Email backup retries the observed pre-delivery HTTP 500 (`success: false`, `error: "Internal server error."`, no `failedCount`) up to twice, waiting 10 seconds between attempts and retaining the 180-second per-attempt limit. It does not retry ambiguous gateway/transport failures or reported delivery failures: the latter include `failedCount` and may mean mail was sent but saving its marker failed. URL fallback also stops on reported delivery failures. Existing recent-send/midnight markers remain unchanged; persistent failures still fail the job and print the final response. If failures persist, inspect the production function/database logs—the generic HTTP 500 response alone does not identify the failing dependency. No migration or secret changes are required.
 

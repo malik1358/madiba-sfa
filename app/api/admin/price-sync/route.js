@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminRole } from "../../../lib/moduleAccess.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../../lib/offlineDataBroadcast.js";
 import { recordItemPriceHistory } from "../../../lib/itemPriceHistory.js";
 import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
@@ -196,7 +197,7 @@ function buildEnrichedSheetItems(parsed, metadataByCode) {
   return Array.from(byCode.values());
 }
 
-function isAuthorized(request) {
+function isCronAuthorized(request) {
   const expectedSecret = normalizeSecret(cronSecret);
   if (!expectedSecret) return false;
 
@@ -207,6 +208,60 @@ function isAuthorized(request) {
   const headerSecret = normalizeSecret(request.headers.get("x-cron-secret"));
 
   return bearer === expectedSecret || headerSecret === expectedSecret;
+}
+
+async function authorizePriceSync(request) {
+  if (isCronAuthorized(request)) {
+    return { ok: true, via: "cron" };
+  }
+
+  if (!supabaseUrl || !serviceKey) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { success: false, error: "Server configuration is incomplete." },
+        { status: 500 },
+      ),
+    };
+  }
+
+  const authHeader = request.headers.get("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return {
+      ok: false,
+      response: NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const token = authHeader.slice(7);
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: { user }, error: userError } = await admin.auth.getUser(token);
+  if (userError || !user) {
+    return {
+      ok: false,
+      response: NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("id,role")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError || !profile || !isAdminRole(profile.role)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { success: false, error: "Only admin can run price sync." },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, via: "admin", user, profile };
 }
 
 function extractSourcePayload(body) {
@@ -447,8 +502,9 @@ async function runSync(sourcePayload = null) {
 
 export async function POST(request) {
   try {
-    if (!isAuthorized(request)) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    const access = await authorizePriceSync(request);
+    if (!access.ok) {
+      return access.response;
     }
 
     const body = await readRequestBody(request);

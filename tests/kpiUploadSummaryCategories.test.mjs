@@ -13,6 +13,7 @@ import {
   KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS,
   buildKpiUploadSummaryExcludedCustomerSet,
   pickCustomerAvgDaysToPay,
+  resolveLastPaidInvoiceDays,
   reconstructPriorOutstandingCategoryBuckets,
   resolveExpectedPayDate,
   scaleKpiUploadSummaryCategoryBuckets,
@@ -258,11 +259,47 @@ test("overdue still-open invoices count toward this month expected remaining", (
   assert.equal(outstanding.buildingMaterial, 150000);
 });
 
-test("estimate avg days prefers lifetime and uses 120 when never paid", () => {
+test("resolveLastPaidInvoiceDays takes days from the latest paid invoice", () => {
+  assert.equal(resolveLastPaidInvoiceDays([
+    {
+      invoice_date: "2026-01-10",
+      voucher_number: "A",
+      receipt_date: "2026-02-01",
+      amount: 100,
+      days: 22,
+    },
+    {
+      invoice_date: "2026-03-01",
+      voucher_number: "B",
+      receipt_date: "2026-04-15",
+      amount: 200,
+      days: 45,
+    },
+    {
+      invoice_date: "2026-03-01",
+      voucher_number: "B",
+      receipt_date: "2026-03-20",
+      amount: 50,
+      days: 19,
+    },
+  ]), 45);
+  assert.equal(resolveLastPaidInvoiceDays([
+    { receipt_date: "2026-04-01", amount: 10, days: 5, exclude_from_avg_days: true },
+  ]), null);
+});
+
+test("estimate avg days uses max(lifetime, last paid invoice) and 120 when never paid", () => {
   assert.equal(KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS, 120);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 19,
+    avg_days_to_pay_6m: 10,
+    last_paid_invoice_days: 45,
+    last_receipt_date: "2026-10-13",
+  }), 45);
   assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: 79,
     avg_days_to_pay_6m: 10,
+    last_paid_invoice_days: 40,
     last_receipt_date: "2026-10-13",
   }), 79);
   assert.equal(pickCustomerAvgDaysToPay({

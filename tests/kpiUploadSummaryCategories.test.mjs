@@ -1,0 +1,154 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  allocateReceiptsToCategoryBuckets,
+  buildCustomerCategoryMixFromFacts,
+  buildKpiUploadSummaryCategoryRows,
+  classifyKpiUploadSummaryCategory,
+  insertKpiUploadSummaryCategoryRows,
+  scaleKpiUploadSummaryCategoryBuckets,
+  sumSalesCategoryBucketsFromFacts,
+  withKpiUploadSummaryNonBuilding,
+} from "../app/lib/kpiUploadSummaryCategories.js";
+import { buildKpiUploadSummaryTable } from "../app/lib/kpiUploadSummaryEmail.js";
+
+test("classify prefers building material over electronics", () => {
+  assert.equal(classifyKpiUploadSummaryCategory({
+    category: "Building Material",
+    item_name: "MDF 18MM",
+  }), "buildingMaterial");
+  assert.equal(classifyKpiUploadSummaryCategory({
+    category: "Electronics",
+    item_name: "Calculator",
+  }), "electronics");
+  assert.equal(classifyKpiUploadSummaryCategory({
+    category: "Office supplies",
+    item_name: "Stapler",
+  }), "rest");
+});
+
+test("non-building is electronics plus rest and scales to parent total", () => {
+  const scaled = scaleKpiUploadSummaryCategoryBuckets({
+    buildingMaterial: 100,
+    electronics: 50,
+    rest: 50,
+  }, 400);
+  assert.equal(scaled.buildingMaterial, 200);
+  assert.equal(scaled.electronics, 100);
+  assert.equal(scaled.rest, 100);
+  assert.equal(scaled.nonBuilding, 200);
+  assert.equal(scaled.buildingMaterial + scaled.nonBuilding, 400);
+  assert.equal(scaled.electronics + scaled.rest, scaled.nonBuilding);
+});
+
+test("cube facts sum into category buckets for the KPI salesman roster", () => {
+  const facts = [
+    { month: "2026-11", salesman_code: "S01", category: "Building Material", item_name: "Plywood", sales_amount: 1000 },
+    { month: "2026-11", salesman_code: "S01", category: "Electronics", item_name: "Fan", sales_amount: 400 },
+    { month: "2026-11", salesman_code: "S01", category: "Stationery", item_name: "Pen", sales_amount: 600 },
+    { month: "2026-11", salesman_code: "OTHER", category: "Electronics", item_name: "TV", sales_amount: 9999 },
+    { month: "2026-10", salesman_code: "S01", category: "Building Material", item_name: "Plywood", sales_amount: 500 },
+  ];
+  const buckets = sumSalesCategoryBucketsFromFacts(facts, {
+    month: "2026-11",
+    salesmanCodes: ["S01"],
+  });
+  assert.deepEqual(buckets, withKpiUploadSummaryNonBuilding({
+    buildingMaterial: 1000,
+    electronics: 400,
+    rest: 600,
+  }));
+});
+
+test("receipts allocate by customer sales mix and fall back to rest", () => {
+  const mix = buildCustomerCategoryMixFromFacts([
+    { month: "2026-11", salesman_code: "S01", customer_code: "1001", category: "Electronics", sales_amount: 75 },
+    { month: "2026-11", salesman_code: "S01", customer_code: "1001", category: "Stationery", sales_amount: 25 },
+    { month: "2026-11", salesman_code: "S01", customer_code: "1002", category: "Building Material", item_name: "MDF", sales_amount: 100 },
+  ], { month: "2026-11", salesmanCodes: ["S01"] });
+
+  const buckets = allocateReceiptsToCategoryBuckets([
+    { customer_code: "1001", amount: 100 },
+    { customer_code: "1002", amount: 50 },
+    { customer_code: "9999", amount: 20 },
+  ], mix);
+
+  assert.equal(buckets.electronics, 75);
+  assert.equal(buckets.rest, 45);
+  assert.equal(buckets.buildingMaterial, 50);
+  assert.equal(buckets.nonBuilding, 120);
+});
+
+test("category rows insert under Total sales and Collection in the upload summary", () => {
+  const ahmed = {
+    salesmanCode: "AHMED",
+    salesmanName: "Ahmed",
+    isTeam: false,
+    totalSales: "400",
+    collection: "200",
+    officeSupplies: "0",
+    localItemSales: "0",
+    otherSales: "0",
+    kpis: [
+      { key: "totalSales", actual: 400 },
+      { key: "collection", actual: 200 },
+      { key: "totalCashCollected", actual: 200 },
+      { key: "officeSupplies", actual: 0 },
+      { key: "localItemSales", actual: 0 },
+      { key: "otherSales", actual: 0 },
+      { key: "cashCollection", actual: 0 },
+      { key: "newCustomers", actual: 0 },
+      { key: "repeatCustomers", actual: 0 },
+    ],
+  };
+  const summary = buildKpiUploadSummaryTable({
+    rows: [ahmed],
+    reportDate: "2026-11-01",
+    todayIso: "2026-11-12",
+    salesAsOfDate: "2026-11-11",
+    receiptAsOfDate: "2026-11-11",
+    priorMonth: "2026-10",
+    priorMonthActualsByCode: {
+      AHMED: { totalSales: 800, collection: 100 },
+    },
+    categoryBreakdown: {
+      salesBuckets: { buildingMaterial: 100, electronics: 100, rest: 200 },
+      priorSalesBuckets: { buildingMaterial: 400, electronics: 200, rest: 200 },
+      collectionBuckets: { buildingMaterial: 50, electronics: 50, rest: 100 },
+      priorCollectionBuckets: { buildingMaterial: 20, electronics: 30, rest: 50 },
+    },
+  });
+
+  const labels = summary.rows.map((row) => row.label);
+  assert.ok(labels.indexOf("Total sales") < labels.indexOf("Sales — Building material"));
+  assert.ok(labels.indexOf("Sales — Building material") < labels.indexOf("Sales — Non-building"));
+  assert.ok(labels.indexOf("Sales — Electronics") < labels.indexOf("Sales — Rest"));
+  assert.ok(labels.indexOf("Collection") < labels.indexOf("Collection — Building material"));
+  assert.equal(
+    summary.rows.find((row) => row.key === "sales_buildingMaterial").totalFiltered.actual
+      + summary.rows.find((row) => row.key === "sales_nonBuilding").totalFiltered.actual,
+    400,
+  );
+  assert.equal(
+    summary.rows.find((row) => row.key === "collection_electronics").totalFiltered.actual
+      + summary.rows.find((row) => row.key === "collection_rest").totalFiltered.actual,
+    summary.rows.find((row) => row.key === "collection_nonBuilding").totalFiltered.actual,
+  );
+  assert.match(
+    summary.rows.find((row) => row.key === "sales_buildingMaterial").totalFiltered.statusLabel,
+    /Category split/,
+  );
+});
+
+test("insertKpiUploadSummaryCategoryRows keeps unknown rows untouched when empty", () => {
+  const rows = [{ key: "totalSales", label: "Total sales" }, { key: "collection", label: "Collection" }];
+  assert.deepEqual(insertKpiUploadSummaryCategoryRows(rows, {}), rows);
+  const built = buildKpiUploadSummaryCategoryRows({
+    salesBuckets: { buildingMaterial: 1, electronics: 0, rest: 0 },
+    totalSalesActual: 1,
+    collectionActual: 0,
+  });
+  const next = insertKpiUploadSummaryCategoryRows(rows, built);
+  assert.equal(next.length, 2 + 4 + 4);
+});

@@ -11,6 +11,10 @@ import {
   sumFilteredKpiEstimateVsPriorMonth,
   sumFilteredKpiPaceEstimates,
 } from "./kpiTargetsTable.js";
+import {
+  buildKpiUploadSummaryCategoryRows,
+  insertKpiUploadSummaryCategoryRows,
+} from "./kpiUploadSummaryCategories.js";
 import { previousMonthKey } from "./categoryGrowth.js";
 import { receivableDaysChangeTone } from "./receivableDays.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
@@ -457,6 +461,7 @@ export function buildKpiUploadSummaryTable({
   priorMonthActualsByCode = {},
   receivableDaysReport = null,
   activeCustomersReport = null,
+  categoryBreakdown = null,
 } = {}) {
   const people = (rows || []).filter((row) => !row?.isTeam).map(withFlatKpiTargets);
   const totals = sumFilteredKpiColumns(people, columns);
@@ -504,6 +509,28 @@ export function buildKpiUploadSummaryTable({
       vsLastMonth: comparison,
     };
   });
+
+  if (categoryBreakdown) {
+    const totalSalesRow = tableRows.find((row) => row.key === "totalSales");
+    const collectionRow = tableRows.find((row) => row.key === "collection");
+    const categoryRows = buildKpiUploadSummaryCategoryRows({
+      salesBuckets: categoryBreakdown.salesBuckets,
+      priorSalesBuckets: categoryBreakdown.priorSalesBuckets,
+      collectionBuckets: categoryBreakdown.collectionBuckets,
+      priorCollectionBuckets: categoryBreakdown.priorCollectionBuckets,
+      totalSalesActual: totalSalesRow?.totalFiltered?.actual || 0,
+      priorTotalSalesActual: totalSalesRow?.vsLastMonth?.priorActual,
+      totalSalesEstimate: totalSalesRow?.paceEstimate?.estimate,
+      totalSalesTarget: totalSalesRow?.totalFiltered?.target || 0,
+      collectionActual: collectionRow?.totalFiltered?.actual || 0,
+      priorCollectionActual: collectionRow?.vsLastMonth?.priorActual,
+      collectionEstimate: collectionRow?.paceEstimate?.estimate,
+      collectionTarget: collectionRow?.totalFiltered?.target || 0,
+    });
+    const withCategories = insertKpiUploadSummaryCategoryRows(tableRows, categoryRows);
+    tableRows.length = 0;
+    tableRows.push(...withCategories);
+  }
 
   tableRows.push(...buildAverageCollectionDaysSummaryRows(receivableDaysReport));
   tableRows.push(...buildActiveCustomersSummaryRows(activeCustomersReport));
@@ -572,6 +599,17 @@ function isActiveCustomersFamilyRow(row) {
   return isActiveCustomersRow(row) || isActiveCustomersSalesRow(row);
 }
 
+function isCategorySplitRow(row) {
+  return row?.kind === "categorySplit" || String(row?.key || "").includes("_buildingMaterial")
+    || String(row?.key || "").includes("_nonBuilding")
+    || String(row?.key || "").includes("_electronics")
+    || /_(rest)$/.test(String(row?.key || ""));
+}
+
+function summaryFormatKey(row) {
+  return row?.formatKey || row?.key;
+}
+
 function isInfoOnlySummaryRow(row) {
   return isCollectionDaysRow(row) || isActiveCustomersFamilyRow(row);
 }
@@ -616,7 +654,13 @@ function formatSignedMoney(key, value) {
     if (number < 0) return `−${abs}`;
     return abs;
   }
-  const abs = formatPerformanceKpiValue(key, Math.abs(number));
+  const moneyKey = key === "collection" ? "collection" : "totalSales";
+  const abs = formatPerformanceKpiValue(
+    ["collection", "totalSales", "totalCashCollected", "officeSupplies", "localItemSales", "otherSales"].includes(key)
+      ? key
+      : moneyKey,
+    Math.abs(number),
+  );
   if (number > 0) return `+${abs}`;
   if (number < 0) return `−${abs}`;
   return abs;
@@ -626,7 +670,10 @@ function formatKpiCellValue(key, value) {
   if (COLLECTION_DAYS_KEYS.has(key)) return formatCollectionDaysValue(value);
   if (key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_KEY) return formatActiveCustomersValue(value);
   if (key === KPI_UPLOAD_SUMMARY_ACTIVE_CUSTOMERS_SALES_KEY) return formatActiveCustomersSalesValue(value);
-  return formatPerformanceKpiValue(key, value);
+  if (["collection", "totalSales", "totalCashCollected", "officeSupplies", "localItemSales", "otherSales"].includes(key)) {
+    return formatPerformanceKpiValue(key, value);
+  }
+  return formatPerformanceKpiValue("totalSales", value);
 }
 
 function formatSignedPercent(value) {
@@ -665,15 +712,21 @@ function infoOnlyAsOfLabel(row) {
   if (isActiveCustomersSalesRow(row)) {
     return row.month ? `As of ${row.month}` : "Trailing 120-day sales";
   }
+  if (isCategorySplitRow(row)) {
+    return row.metric === "collection"
+      ? "Share of collection by item mix"
+      : "Share of sales by item category";
+  }
   return "Information only";
 }
 
 function totalFilteredHtml(row) {
   const cell = row.totalFiltered || {};
-  const actual = formatKpiCellValue(row.key, cell.actual);
+  const formatKey = summaryFormatKey(row);
+  const actual = formatKpiCellValue(formatKey, cell.actual);
   const hasTarget = Number(cell.target) > 0;
   const target = hasTarget
-    ? formatKpiCellValue(row.key, cell.target)
+    ? formatKpiCellValue(formatKey, cell.target)
     : "—";
   const achievement = formatAchievementPercent(cell.achievement);
   const status = String(cell.statusLabel || "No target");
@@ -701,8 +754,9 @@ function paceEstimateHtml(row) {
   if (cell.estimate == null) {
     return `<div style="color:#94a3b8;">—</div>`;
   }
-  const estimate = formatKpiCellValue(row.key, cell.estimate);
-  const hasTarget = Number(cell.target) > 0;
+  const formatKey = summaryFormatKey(row);
+  const estimate = formatKpiCellValue(formatKey, cell.estimate);
+  const hasTarget = Number(cell.target) > 0 && !isCategorySplitRow(row);
   const achievement = formatAchievementPercent(cell.achievement);
   return `
     <div style="font-weight:700;font-size:15px;color:#0f4c5c;">${escapeHtml(estimate)}</div>
@@ -726,11 +780,12 @@ function vsLastMonthHtml(row, priorMonth) {
     ? previousMonthKey(row.month)
     : priorMonth;
   const priorLabel = comparisonMonth ? ` (${escapeHtml(comparisonMonth)})` : "";
+  const formatKey = summaryFormatKey(row);
   const priorValue = cell.priorActual == null
     ? "—"
-    : formatKpiCellValue(row.key, cell.priorActual);
+    : formatKpiCellValue(formatKey, cell.priorActual);
   return `
-    <div style="font-weight:700;font-size:15px;color:${color};">${escapeHtml(formatSignedMoney(row.key, cell.delta))}</div>
+    <div style="font-weight:700;font-size:15px;color:${color};">${escapeHtml(formatSignedMoney(formatKey, cell.delta))}</div>
     <div style="color:#64748b;font-size:12px;margin-top:2px;">
       last month${priorLabel}: ${escapeHtml(priorValue)}
     </div>
@@ -741,11 +796,12 @@ function vsLastMonthHtml(row, priorMonth) {
 
 function totalFilteredText(row) {
   const cell = row.totalFiltered || {};
+  const formatKey = summaryFormatKey(row);
   const hasTarget = Number(cell.target) > 0;
   return [
-    formatKpiCellValue(row.key, cell.actual),
+    formatKpiCellValue(formatKey, cell.actual),
     hasTarget
-      ? `target ${formatKpiCellValue(row.key, cell.target)}`
+      ? `target ${formatKpiCellValue(formatKey, cell.target)}`
       : infoOnlyAsOfLabel(row).toLowerCase(),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     cell.statusLabel || "No target",
@@ -756,9 +812,10 @@ function paceEstimateText(row) {
   if (isInfoOnlySummaryRow(row)) return "—; No pace estimate";
   const cell = row.paceEstimate || {};
   if (cell.estimate == null) return "—";
-  const hasTarget = Number(cell.target) > 0;
+  const formatKey = summaryFormatKey(row);
+  const hasTarget = Number(cell.target) > 0 && !isCategorySplitRow(row);
   return [
-    formatKpiCellValue(row.key, cell.estimate),
+    formatKpiCellValue(formatKey, cell.estimate),
     hasTarget ? `${formatAchievementPercent(cell.achievement)} of target` : null,
     "Estimated month-end sales",
   ].filter(Boolean).join("; ");
@@ -771,11 +828,12 @@ function vsLastMonthText(row, priorMonth) {
   const comparisonMonth = isInfoOnlySummaryRow(row) && row.month
     ? previousMonthKey(row.month)
     : priorMonth;
+  const formatKey = summaryFormatKey(row);
   const priorValue = cell.priorActual == null
     ? "—"
-    : formatKpiCellValue(row.key, cell.priorActual);
+    : formatKpiCellValue(formatKey, cell.priorActual);
   return [
-    formatSignedMoney(row.key, cell.delta),
+    formatSignedMoney(formatKey, cell.delta),
     `last month${comparisonMonth ? ` (${comparisonMonth})` : ""}: ${priorValue}`,
     formatSignedPercent(cell.percent),
     directionLabel,
@@ -806,8 +864,11 @@ export function buildKpiUploadSummaryEmail({
 
   const bodyRows = (summary?.rows || []).map((row, index) => {
     const bg = index % 2 === 0 ? "#ffffff" : "#f0f7f8";
+    const labelStyle = isCategorySplitRow(row)
+      ? "padding:10px 8px 10px 20px;border:1px solid #d7e3ea;vertical-align:top;font-weight:600;color:#345c6e;"
+      : "padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;font-weight:700;color:#0f4c5c;";
     return `<tr style="background:${bg};">
-      <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;font-weight:700;color:#0f4c5c;">${escapeHtml(row.label)}</td>
+      <td style="${labelStyle}">${escapeHtml(row.label)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${totalFilteredHtml(row)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${paceEstimateHtml(row)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${vsLastMonthHtml(row, summary?.priorMonth)}</td>
@@ -825,7 +886,7 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets (plus company Avg collection days: YTD, Rolling 3m, Rolling 12m, Active customers, and Active customers sales (120d)), transposed so Total / Estimate / vs last month are columns. Lower collection days is better; higher active customers and 120-day sales are better.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets with Building material / Non-building / Electronics / Rest splits under Total sales and Collection (plus company Avg collection days: YTD, Rolling 3m, Rolling 12m, Active customers, and Active customers sales (120d)). Building material + Non-building = parent total; Electronics + Rest = Non-building. Collection categories use each customer's sales item mix. Lower collection days is better; higher active customers and 120-day sales are better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>

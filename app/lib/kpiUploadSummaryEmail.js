@@ -12,9 +12,18 @@ import {
   sumFilteredKpiPaceEstimates,
 } from "./kpiTargetsTable.js";
 import {
+  buildCategoryCollectionDaysRows,
+  buildCategoryReceivableDays,
   buildKpiUploadSummaryCategoryRows,
   insertKpiUploadSummaryCategoryRows,
+  monthsThroughYtd,
+  sumCreditSalesCategoryBucketsFromFacts,
+  trailingMonthsEndingAt,
 } from "./kpiUploadSummaryCategories.js";
+import {
+  receivableTrailingDays,
+  receivableYtdDays,
+} from "./receivableDays.js";
 import { previousMonthKey } from "./categoryGrowth.js";
 import { receivableDaysChangeTone } from "./receivableDays.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
@@ -510,29 +519,93 @@ export function buildKpiUploadSummaryTable({
     };
   });
 
-  if (categoryBreakdown) {
-    const totalSalesRow = tableRows.find((row) => row.key === "totalSales");
-    const collectionRow = tableRows.find((row) => row.key === "collection");
-    const categoryRows = buildKpiUploadSummaryCategoryRows({
-      salesBuckets: categoryBreakdown.salesBuckets,
-      priorSalesBuckets: categoryBreakdown.priorSalesBuckets,
-      collectionBuckets: categoryBreakdown.collectionBuckets,
-      priorCollectionBuckets: categoryBreakdown.priorCollectionBuckets,
-      totalSalesActual: totalSalesRow?.totalFiltered?.actual || 0,
-      priorTotalSalesActual: totalSalesRow?.vsLastMonth?.priorActual,
-      totalSalesEstimate: totalSalesRow?.paceEstimate?.estimate,
-      totalSalesTarget: totalSalesRow?.totalFiltered?.target || 0,
-      collectionActual: collectionRow?.totalFiltered?.actual || 0,
-      priorCollectionActual: collectionRow?.vsLastMonth?.priorActual,
-      collectionEstimate: collectionRow?.paceEstimate?.estimate,
-      collectionTarget: collectionRow?.totalFiltered?.target || 0,
-    });
-    const withCategories = insertKpiUploadSummaryCategoryRows(tableRows, categoryRows);
+  const categoryPack = categoryBreakdown
+    ? (() => {
+      const totalSalesRow = tableRows.find((row) => row.key === "totalSales");
+      const collectionRow = tableRows.find((row) => row.key === "collection");
+      return buildKpiUploadSummaryCategoryRows({
+        salesBuckets: categoryBreakdown.salesBuckets,
+        priorSalesBuckets: categoryBreakdown.priorSalesBuckets,
+        collectionBuckets: categoryBreakdown.collectionBuckets,
+        priorCollectionBuckets: categoryBreakdown.priorCollectionBuckets,
+        expectedCollectionBuckets: categoryBreakdown.expectedCollectionBuckets,
+        totalSalesActual: totalSalesRow?.totalFiltered?.actual || 0,
+        priorTotalSalesActual: totalSalesRow?.vsLastMonth?.priorActual,
+        totalSalesEstimate: totalSalesRow?.paceEstimate?.estimate,
+        totalSalesTarget: totalSalesRow?.totalFiltered?.target || 0,
+        collectionActual: collectionRow?.totalFiltered?.actual || 0,
+        priorCollectionActual: collectionRow?.vsLastMonth?.priorActual,
+        collectionEstimate: collectionRow?.paceEstimate?.estimate,
+        collectionTarget: collectionRow?.totalFiltered?.target || 0,
+      });
+    })()
+    : null;
+
+  if (categoryPack) {
+    const withCategories = insertKpiUploadSummaryCategoryRows(tableRows, categoryPack);
     tableRows.length = 0;
     tableRows.push(...withCategories);
   }
 
   tableRows.push(...buildAverageCollectionDaysSummaryRows(receivableDaysReport));
+
+  if (categoryBreakdown?.outstandingBuckets) {
+    const monthKey = String(reportDate || "").slice(0, 7);
+    const asOf = String(todayIso || salesAsOfDate || reportDate || "").slice(0, 10);
+    const facts = Array.isArray(categoryBreakdown.cubeFacts) ? categoryBreakdown.cubeFacts : [];
+    const salesmanCodes = categoryBreakdown.salesmanCodes || null;
+    const daysYtd = receivableYtdDays(monthKey, asOf);
+    const days3m = receivableTrailingDays(monthKey, 3, asOf);
+    const days12m = receivableTrailingDays(monthKey, 12, asOf);
+    const creditYtd = sumCreditSalesCategoryBucketsFromFacts(facts, {
+      months: monthsThroughYtd(monthKey),
+      salesmanCodes,
+    });
+    const credit3m = sumCreditSalesCategoryBucketsFromFacts(facts, {
+      months: trailingMonthsEndingAt(monthKey, 3),
+      salesmanCodes,
+    });
+    const credit12m = sumCreditSalesCategoryBucketsFromFacts(facts, {
+      months: trailingMonthsEndingAt(monthKey, 12),
+      salesmanCodes,
+    });
+    const collectionDaysByParent = {
+      averageCollectionDays: buildCategoryCollectionDaysRows({
+        parentKey: "averageCollectionDays",
+        parentLabel: "Avg collection days (YTD)",
+        daysByCategory: buildCategoryReceivableDays({
+          outstandingBuckets: categoryBreakdown.outstandingBuckets,
+          creditSalesBuckets: creditYtd,
+          days: daysYtd,
+        }),
+        statusLabel: "Lower is better · YTD category DSO",
+      }),
+      averageCollectionDays3m: buildCategoryCollectionDaysRows({
+        parentKey: "averageCollectionDays3m",
+        parentLabel: "Avg collection days (Rolling 3m)",
+        daysByCategory: buildCategoryReceivableDays({
+          outstandingBuckets: categoryBreakdown.outstandingBuckets,
+          creditSalesBuckets: credit3m,
+          days: days3m,
+        }),
+        statusLabel: "Lower is better · Rolling 3m category DSO",
+      }),
+      averageCollectionDays12m: buildCategoryCollectionDaysRows({
+        parentKey: "averageCollectionDays12m",
+        parentLabel: "Avg collection days (Rolling 12m)",
+        daysByCategory: buildCategoryReceivableDays({
+          outstandingBuckets: categoryBreakdown.outstandingBuckets,
+          creditSalesBuckets: credit12m,
+          days: days12m,
+        }),
+        statusLabel: "Lower is better · Rolling 12m category DSO",
+      }),
+    };
+    const withDaysCategories = insertKpiUploadSummaryCategoryRows(tableRows, { collectionDaysByParent });
+    tableRows.length = 0;
+    tableRows.push(...withDaysCategories);
+  }
+
   tableRows.push(...buildActiveCustomersSummaryRows(activeCustomersReport));
 
   return {
@@ -600,10 +673,17 @@ function isActiveCustomersFamilyRow(row) {
 }
 
 function isCategorySplitRow(row) {
-  return row?.kind === "categorySplit" || String(row?.key || "").includes("_buildingMaterial")
+  return row?.kind === "categorySplit"
+    || row?.kind === "categoryCollectionDays"
+    || String(row?.key || "").includes("_buildingMaterial")
     || String(row?.key || "").includes("_nonBuilding")
     || String(row?.key || "").includes("_electronics")
     || /_(rest)$/.test(String(row?.key || ""));
+}
+
+function isCategoryCollectionDaysRow(row) {
+  return row?.kind === "categoryCollectionDays"
+    || String(row?.key || "").startsWith("averageCollectionDays");
 }
 
 function summaryFormatKey(row) {
@@ -611,7 +691,9 @@ function summaryFormatKey(row) {
 }
 
 function isInfoOnlySummaryRow(row) {
-  return isCollectionDaysRow(row) || isActiveCustomersFamilyRow(row);
+  return isCollectionDaysRow(row)
+    || isCategoryCollectionDaysRow(row)
+    || isActiveCustomersFamilyRow(row);
 }
 
 function formatCollectionDaysValue(value) {
@@ -712,9 +794,12 @@ function infoOnlyAsOfLabel(row) {
   if (isActiveCustomersSalesRow(row)) {
     return row.month ? `As of ${row.month}` : "Trailing 120-day sales";
   }
+  if (isCategoryCollectionDaysRow(row)) {
+    return "Lower is better · category DSO";
+  }
   if (isCategorySplitRow(row)) {
     return row.metric === "collection"
-      ? "Share of collection by item mix"
+      ? "MTD + open expected this month"
       : "Share of sales by item category";
   }
   return "Information only";
@@ -886,7 +971,7 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets with Building material / Non-building / Electronics / Rest splits under Total sales and Collection (plus company Avg collection days: YTD, Rolling 3m, Rolling 12m, Active customers, and Active customers sales (120d)). Building material + Non-building = parent total; Electronics + Rest = Non-building. Collection categories use each customer's sales item mix. Lower collection days is better; higher active customers and 120-day sales are better.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets with Building material / Non-building / Electronics / Rest under Total sales, Collection, and each Avg collection days line. Collection month-end = MTD collected + still-open invoices whose historical pay day falls on/before month-end (overdue open still counts). Category DSO = (category outstanding ÷ category credit sales) × window days. Building material + Non-building = parent; Electronics + Rest = Non-building. Lower collection days is better; higher active customers and 120-day sales are better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>

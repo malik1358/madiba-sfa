@@ -2,6 +2,11 @@ import { createClient } from "@supabase/supabase-js";
 import { previousMonthKey } from "./categoryGrowth.js";
 import { isKpiTargetProfile, mergeKpiTargetProfiles } from "./kpiTargetsTable.js";
 import {
+  allocateReceiptsToCategoryBuckets,
+  buildCustomerCategoryMixFromFacts,
+  sumSalesCategoryBucketsFromFacts,
+} from "./kpiUploadSummaryCategories.js";
+import {
   KPI_UPLOAD_SUMMARY_DEBOUNCE_MS,
   KPI_UPLOAD_SUMMARY_LAST_SENT_KEY,
   KPI_UPLOAD_SUMMARY_PENDING_KEY,
@@ -14,7 +19,11 @@ import {
   resolveKpiUploadSummaryEmailRecipients,
 } from "./kpiUploadSummaryEmail.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
-import { monthStartDate } from "./performanceKpis.js";
+import {
+  isKpiCollectionReceipt,
+  monthStartDate,
+  normalizeSalesmanCode,
+} from "./performanceKpis.js";
 import {
   loadPerformanceSnapshotsForSalesmen,
   loadStoredKpiActualsByCode,
@@ -22,6 +31,14 @@ import {
 import { loadActiveCustomersCompanyReport } from "./activeCustomersServer.js";
 import { buildReceivableDaysReport } from "./receivableDays.js";
 import { readReceivableDaysDataset } from "./receivableDaysServer.js";
+import { loadSalesBiCube } from "./salesBiCubeServer.js";
+import { salesBiFactsFromCube } from "./salesBiCube.js";
+import {
+  RECEIPT_DATASET_KEY,
+  buildReceiptRow,
+  normalizeReceiptDataset,
+} from "./receiptRegister.js";
+import { currentMonthDateRange } from "./salesInvoices.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function createServiceAdmin(env = process.env) {
@@ -124,6 +141,106 @@ export async function loadReceivableDaysReportForKpiSummary(admin, {
   }
 }
 
+function cubeFactsList(cube) {
+  if (!cube) return [];
+  if (Array.isArray(cube.facts)) return cube.facts;
+  if (cube.facts && typeof cube.facts.values === "function") return salesBiFactsFromCube(cube);
+  return [];
+}
+
+async function loadReceiptRowsForMonth(admin, { fromDate = "", toDate = "" } = {}) {
+  try {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", RECEIPT_DATASET_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    const dataset = normalizeReceiptDataset(
+      (() => {
+        try {
+          return JSON.parse(String(data?.setting_value || "null"));
+        } catch {
+          return null;
+        }
+      })(),
+    );
+    return (dataset.rows || [])
+      .map((raw) => buildReceiptRow(raw))
+      .filter((row) => {
+        if (!isKpiCollectionReceipt(row)) return false;
+        const day = String(row?.receipt_date || "").slice(0, 10);
+        if (fromDate && day < fromDate) return false;
+        if (toDate && day > toDate) return false;
+        return Number(row?.amount || 0) > 0;
+      });
+  } catch (error) {
+    console.error("KPI upload summary: receipt register unavailable for category split:", error);
+    return [];
+  }
+}
+
+/**
+ * Sales category buckets from the BI cube; collection buckets from receipts
+ * allocated by each customer's sales item mix (same cube).
+ */
+export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
+  month = "",
+  priorMonth = "",
+  salesmanCodes = [],
+} = {}) {
+  const monthKey = String(month || "").slice(0, 7);
+  const priorKey = String(priorMonth || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
+
+  try {
+    const cube = await loadSalesBiCube(admin, { allowStale: true });
+    const facts = cubeFactsList(cube);
+    const codeSet = new Set((salesmanCodes || []).map(normalizeSalesmanCode).filter(Boolean));
+    const salesBuckets = sumSalesCategoryBucketsFromFacts(facts, {
+      month: monthKey,
+      salesmanCodes: codeSet,
+    });
+    const priorSalesBuckets = priorKey
+      ? sumSalesCategoryBucketsFromFacts(facts, {
+        month: priorKey,
+        salesmanCodes: codeSet,
+      })
+      : null;
+
+    const currentRange = currentMonthDateRange(`${monthKey}-01`);
+    const priorRange = priorKey ? currentMonthDateRange(`${priorKey}-01`) : null;
+    const [currentReceipts, priorReceipts] = await Promise.all([
+      loadReceiptRowsForMonth(admin, { fromDate: currentRange.from, toDate: currentRange.to }),
+      priorRange
+        ? loadReceiptRowsForMonth(admin, { fromDate: priorRange.from, toDate: priorRange.to })
+        : Promise.resolve([]),
+    ]);
+    const currentMix = buildCustomerCategoryMixFromFacts(facts, {
+      month: monthKey,
+      salesmanCodes: codeSet,
+    });
+    const priorMix = priorKey
+      ? buildCustomerCategoryMixFromFacts(facts, {
+        month: priorKey,
+        salesmanCodes: codeSet,
+      })
+      : new Map();
+
+    return {
+      salesBuckets,
+      priorSalesBuckets,
+      collectionBuckets: allocateReceiptsToCategoryBuckets(currentReceipts, currentMix),
+      priorCollectionBuckets: priorKey
+        ? allocateReceiptsToCategoryBuckets(priorReceipts, priorMix)
+        : null,
+    };
+  } catch (error) {
+    console.error("KPI upload summary: category breakdown unavailable:", error);
+    return null;
+  }
+}
+
 export async function loadKpiUploadSummaryPayload(admin, {
   reportDate = "",
 } = {}) {
@@ -136,9 +253,16 @@ export async function loadKpiUploadSummaryPayload(admin, {
     salesmanCode: row.salesman_code,
     salesmanName: row.salesman_name,
   }));
-  const priorMonth = previousMonthKey(String(monthStartDate(monthDate) || monthDate).slice(0, 7));
+  const monthKey = String(monthStartDate(monthDate) || monthDate).slice(0, 7);
+  const priorMonth = previousMonthKey(monthKey);
   const priorReportDate = priorMonth ? `${priorMonth}-01` : "";
-  const [snapshots, priorMonthActualsByCode, receivableDaysReport, activeCustomersReport] = await Promise.all([
+  const [
+    snapshots,
+    priorMonthActualsByCode,
+    receivableDaysReport,
+    activeCustomersReport,
+    categoryBreakdown,
+  ] = await Promise.all([
     loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmanPayload,
       reportDate: monthDate,
@@ -149,6 +273,11 @@ export async function loadKpiUploadSummaryPayload(admin, {
       : Promise.resolve({}),
     loadReceivableDaysReportForKpiSummary(admin, { asOfDate: todayIso }),
     loadActiveCustomersCompanyReport(admin, { asOfDate: todayIso }),
+    loadKpiUploadSummaryCategoryBreakdown(admin, {
+      month: monthKey,
+      priorMonth,
+      salesmanCodes: salesmanPayload.map((row) => row.salesmanCode),
+    }),
   ]);
 
   const salesAsOfDate = String(
@@ -168,6 +297,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
     priorMonthActualsByCode,
     receivableDaysReport,
     activeCustomersReport,
+    categoryBreakdown,
   });
 
   return { summary, monthDate, todayIso };

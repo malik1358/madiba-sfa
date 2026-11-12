@@ -4,10 +4,13 @@ import assert from "node:assert/strict";
 import {
   allocateReceiptsToCategoryBuckets,
   buildCustomerCategoryMixFromFacts,
+  buildCategoryCollectionDaysRows,
+  buildCategoryReceivableDays,
   buildKpiUploadSummaryCategoryRows,
   classifyKpiUploadSummaryCategory,
   insertKpiUploadSummaryCategoryRows,
   isOpenInvoiceExpectedThisMonth,
+  reconstructPriorOutstandingCategoryBuckets,
   resolveExpectedPayDate,
   scaleKpiUploadSummaryCategoryBuckets,
   sumExpectedCollectionCategoryBuckets,
@@ -15,7 +18,10 @@ import {
   sumSalesCategoryBucketsFromFacts,
   withKpiUploadSummaryNonBuilding,
 } from "../app/lib/kpiUploadSummaryCategories.js";
-import { buildKpiUploadSummaryTable } from "../app/lib/kpiUploadSummaryEmail.js";
+import {
+  buildKpiUploadSummaryTable,
+  compareAverageCollectionDaysToPriorMonth,
+} from "../app/lib/kpiUploadSummaryEmail.js";
 import { buildReceivableDaysReport } from "../app/lib/receivableDays.js";
 
 test("classify prefers building material over electronics", () => {
@@ -165,6 +171,56 @@ test("category rows insert under Total sales and Collection in the upload summar
   );
   assert.ok(labels.indexOf("Avg collection days (YTD)") < labels.indexOf("Avg collection days (YTD) — Building material"));
   assert.ok(summary.rows.some((row) => row.key === "averageCollectionDays_buildingMaterial"));
+  for (const key of [
+    "averageCollectionDays_buildingMaterial",
+    "averageCollectionDays_nonBuilding",
+    "averageCollectionDays_electronics",
+    "averageCollectionDays_rest",
+  ]) {
+    const row = summary.rows.find((entry) => entry.key === key);
+    assert.ok(row?.vsLastMonth, `${key} should have vs last month`);
+    assert.equal(row.vsLastMonth.polarity, "lower-is-better");
+    assert.ok(Number.isFinite(row.vsLastMonth.estimate), `${key} estimate`);
+  }
+  const bmDays = summary.rows.find((row) => row.key === "averageCollectionDays_buildingMaterial");
+  assert.ok(Number.isFinite(bmDays.vsLastMonth.priorActual));
+  assert.ok(Number.isFinite(bmDays.vsLastMonth.delta));
+});
+
+test("reconstructPriorOutstandingCategoryBuckets floors at zero", () => {
+  const prior = reconstructPriorOutstandingCategoryBuckets({
+    currentOutstanding: { buildingMaterial: 100, electronics: 40, rest: 60 },
+    creditSalesThisMonth: { buildingMaterial: 30, electronics: 50, rest: 10 },
+    collectionMtd: { buildingMaterial: 20, electronics: 5, rest: 15 },
+  });
+  assert.equal(prior.buildingMaterial, 90);
+  assert.equal(prior.electronics, 0);
+  assert.equal(prior.rest, 65);
+  assert.equal(prior.nonBuilding, 65);
+});
+
+test("buildCategoryCollectionDaysRows attaches lower-is-better MoM", () => {
+  const rows = buildCategoryCollectionDaysRows({
+    parentKey: "averageCollectionDays",
+    parentLabel: "Avg collection days (YTD)",
+    daysByCategory: buildCategoryReceivableDays({
+      outstandingBuckets: { buildingMaterial: 80, electronics: 40, rest: 60 },
+      creditSalesBuckets: { buildingMaterial: 100, electronics: 50, rest: 50 },
+      days: 100,
+    }),
+    priorDaysByCategory: buildCategoryReceivableDays({
+      outstandingBuckets: { buildingMaterial: 100, electronics: 30, rest: 70 },
+      creditSalesBuckets: { buildingMaterial: 100, electronics: 50, rest: 50 },
+      days: 100,
+    }),
+    compareFn: compareAverageCollectionDaysToPriorMonth,
+    month: "2026-11",
+  });
+  const bm = rows.find((row) => row.categoryKey === "buildingMaterial");
+  assert.equal(bm.month, "2026-11");
+  assert.equal(bm.vsLastMonth.polarity, "lower-is-better");
+  assert.equal(bm.vsLastMonth.direction, "up");
+  assert.ok(bm.vsLastMonth.delta < 0);
 });
 
 test("overdue still-open invoices count toward this month expected remaining", () => {

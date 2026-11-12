@@ -10,6 +10,8 @@ import {
   classifyKpiUploadSummaryCategory,
   insertKpiUploadSummaryCategoryRows,
   isOpenInvoiceExpectedThisMonth,
+  KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS,
+  pickCustomerAvgDaysToPay,
   reconstructPriorOutstandingCategoryBuckets,
   resolveExpectedPayDate,
   scaleKpiUploadSummaryCategoryBuckets,
@@ -253,6 +255,30 @@ test("overdue still-open invoices count toward this month expected remaining", (
     { customer_code: "1002", pending_amount: 150000 },
   ], mix);
   assert.equal(outstanding.buildingMaterial, 150000);
+});
+
+test("estimate avg days prefers lifetime and uses 120 when never paid", () => {
+  assert.equal(KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS, 120);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 79,
+    avg_days_to_pay_6m: 10,
+    last_receipt_date: "2026-10-13",
+  }), 79);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 40,
+    avg_days_to_pay_6m: 12,
+    avg_days_paid_only: 40,
+  }), 40);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 55,
+    avg_days_to_pay_6m: 8,
+  }), 120);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: null,
+    avg_days_to_pay_6m: 15,
+    last_receipt_date: "2026-09-01",
+  }), 120);
+  assert.equal(pickCustomerAvgDaysToPay({}), 120);
 });
 
 test("insertKpiUploadSummaryCategoryRows keeps unknown rows untouched when empty", () => {

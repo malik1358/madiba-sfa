@@ -239,15 +239,27 @@ function estimateFromParentShare(categoryActual, parentActual, parentEstimate) {
   return roundMoney(Number(parentEstimate) * (shareBase / parent));
 }
 
+/** Fallback when the customer has never paid (no receipt) or lifetime avg is missing. */
+export const KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS = 120;
+
+function customerHasPaidReceipt(row = {}) {
+  const lastReceipt = String(row?.last_receipt_date || row?.lastReceiptDate || "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lastReceipt)) return true;
+  const paidOnly = Number(row?.avg_days_paid_only ?? row?.avgDaysPaidOnly);
+  return Number.isFinite(paidOnly) && paidOnly >= 0;
+}
+
 /**
- * Prefer 6-month avg days to pay, else lifetime.
+ * Avg days for Collection month-end expected remaining:
+ * always lifetime; never-paid (or missing lifetime) → 120. Ignores 6m.
  */
 export function pickCustomerAvgDaysToPay(row = {}) {
-  const six = Number(row?.avg_days_to_pay_6m ?? row?.avgDaysToPay6m);
-  if (Number.isFinite(six) && six >= 0) return six;
+  if (!customerHasPaidReceipt(row)) {
+    return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
+  }
   const lifetime = Number(row?.avg_days_to_pay ?? row?.avgDaysToPay);
   if (Number.isFinite(lifetime) && lifetime >= 0) return lifetime;
-  return null;
+  return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
 }
 
 export function resolveExpectedPayDate(invoiceDate, avgDays) {

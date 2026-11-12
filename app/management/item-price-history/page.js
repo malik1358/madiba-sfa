@@ -6,8 +6,10 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
+import { useAppPopup } from "../../components/AppPopupProvider";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
+import { isAdminRole } from "../../lib/moduleAccess";
 import { PRICING_REGIONS, pricingRegionLabel } from "../../lib/regionalPricing";
 import { getSupabaseClient } from "../../lib/supabase";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
@@ -23,6 +25,16 @@ const TEXT = {
   search: { en: "Item code or name", ar: "كود أو اسم الصنف" },
   region: { en: "Region", ar: "المنطقة" },
   lookup: { en: "Show history", ar: "عرض السجل" },
+  syncPrices: { en: "Sync prices now", ar: "مزامنة الأسعار الآن" },
+  syncingPrices: { en: "Syncing prices...", ar: "جاري مزامنة الأسعار..." },
+  syncHint: {
+    en: "Runs the same catalog refresh as the GitHub Price Sync action (every 8 hours).",
+    ar: "يشغّل نفس تحديث الكتالوج الذي تنفذه مهمة GitHub Price Sync (كل 8 ساعات).",
+  },
+  syncSuccess: {
+    en: "Price catalog synced.",
+    ar: "تمت مزامنة كتالوج الأسعار.",
+  },
   loading: { en: "Loading price history...", ar: "جاري تحميل سجل الأسعار..." },
   searching: { en: "Searching...", ar: "جاري البحث..." },
   date: { en: "Date", ar: "التاريخ" },
@@ -76,10 +88,13 @@ function sourceLabel(source, t) {
 export default function ItemPriceHistoryPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
+  const { showPopup } = useAppPopup();
   const [query, setQuery] = useState("");
   const [region, setRegion] = useState("riyadh");
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [canSyncPrices, setCanSyncPrices] = useState(false);
   const [error, setError] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
   const [matches, setMatches] = useState([]);
@@ -93,6 +108,33 @@ export default function ItemPriceHistoryPage() {
   });
 
   usePopupMessages({ error });
+
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await resolveAuthSession(supabase);
+        if (!session?.user || cancelled) return;
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        if (!cancelled) {
+          setCanSyncPrices(isAdminRole(profile?.role));
+        }
+      } catch {
+        if (!cancelled) setCanSyncPrices(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadHistory = useCallback(async (itemCode, nextRegion = region) => {
     const supabase = getSupabaseClient();
@@ -203,6 +245,60 @@ export default function ItemPriceHistoryPage() {
     await loadHistory(needle, region);
   }
 
+  async function syncPricesNow() {
+    const supabase = getSupabaseClient();
+    if (!supabase || !canSyncPrices || syncing) return;
+
+    setSyncing(true);
+    setError("");
+    try {
+      const session = await resolveAuthSession(supabase);
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/admin/price-sync",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        },
+        130000,
+      );
+
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || "Price sync failed.");
+      }
+
+      const priceCount = Number(payload.priceCount || 0);
+      const historyInserted = Number(payload.historyInserted || 0);
+      const syncedAtLabel = payload.syncedAt ? formatKsaDateTime(payload.syncedAt) : "";
+      showPopup({
+        message: [
+          t("syncSuccess"),
+          priceCount ? `${priceCount} prices.` : "",
+          historyInserted ? `${historyInserted} history rows.` : "",
+          syncedAtLabel ? `${t("syncedAt")}: ${syncedAtLabel}` : "",
+        ].filter(Boolean).join(" "),
+        variant: "success",
+      });
+
+      if (selected?.itemCode) {
+        await loadHistory(selected.itemCode, region);
+      } else if (payload.syncedAt) {
+        setMeta((current) => ({ ...current, syncedAt: payload.syncedAt }));
+      }
+    } catch (syncError) {
+      setError(syncError.message || "Price sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const summaryLine = useMemo(() => {
     if (!selected) return "";
     const parts = [
@@ -237,6 +333,20 @@ export default function ItemPriceHistoryPage() {
           <p className="moduleError">{t("accessDenied")}</p>
         ) : (
           <>
+            {canSyncPrices ? (
+              <section className="moduleCard moduleFilterRow" style={{ alignItems: "center" }}>
+                <p className="moduleHint" style={{ flex: 1, margin: 0 }}>{t("syncHint")}</p>
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={syncPricesNow}
+                  disabled={syncing || loading}
+                >
+                  {syncing ? t("syncingPrices") : t("syncPrices")}
+                </button>
+              </section>
+            ) : null}
+
             <form className="moduleCard moduleFilterRow" onSubmit={onSubmit}>
               <label style={{ flex: 2 }}>
                 {t("search")}
@@ -271,7 +381,7 @@ export default function ItemPriceHistoryPage() {
                   ))}
                 </select>
               </label>
-              <button type="submit" className="modulePrimaryButton" disabled={loading}>
+              <button type="submit" className="modulePrimaryButton" disabled={loading || syncing}>
                 {loading ? t("loading") : t("lookup")}
               </button>
             </form>

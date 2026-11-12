@@ -3,6 +3,9 @@ import { achievementPercent, normalizeSalesmanCode } from "./performanceKpis.js"
 import { isElectronicsSale } from "./salesmanIncentive.js";
 import { compareKpiEstimateToPriorMonth } from "./kpiTargetsTable.js";
 import { normalizeCode } from "./outstanding.js";
+import { receivableDays } from "./receivableDays.js";
+import { addDaysToDateKey } from "./scheduleDateWindow.js";
+import { previousMonthKey } from "./categoryGrowth.js";
 
 /** Exclusive leaf buckets; Non-building = electronics + rest. */
 export const KPI_UPLOAD_SUMMARY_CATEGORY_KEYS = [
@@ -236,6 +239,196 @@ function estimateFromParentShare(categoryActual, parentActual, parentEstimate) {
   return roundMoney(Number(parentEstimate) * (shareBase / parent));
 }
 
+/**
+ * Prefer 6-month avg days to pay, else lifetime.
+ */
+export function pickCustomerAvgDaysToPay(row = {}) {
+  const six = Number(row?.avg_days_to_pay_6m ?? row?.avgDaysToPay6m);
+  if (Number.isFinite(six) && six >= 0) return six;
+  const lifetime = Number(row?.avg_days_to_pay ?? row?.avgDaysToPay);
+  if (Number.isFinite(lifetime) && lifetime >= 0) return lifetime;
+  return null;
+}
+
+export function resolveExpectedPayDate(invoiceDate, avgDays) {
+  const date = String(invoiceDate || "").slice(0, 10);
+  const days = Number(avgDays);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(days) || days < 0) return "";
+  return addDaysToDateKey(date, Math.round(days));
+}
+
+/**
+ * Open invoice counts toward this month's expected remaining when its historical
+ * pay day is on/before month-end — including overdue (expected pay already passed).
+ */
+export function isOpenInvoiceExpectedThisMonth({
+  invoiceDate = "",
+  avgDays = null,
+  monthEnd = "",
+} = {}) {
+  const expectedPayDate = resolveExpectedPayDate(invoiceDate, avgDays);
+  const end = String(monthEnd || "").slice(0, 10);
+  if (!expectedPayDate || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return false;
+  return expectedPayDate <= end;
+}
+
+export function splitAmountByCategoryMix(amount, mix = null) {
+  const value = Number(amount || 0);
+  if (!(value > 0)) return emptyKpiUploadSummaryCategoryBuckets();
+  const leafTotal = mix
+    ? Number(mix.buildingMaterial || 0) + Number(mix.electronics || 0) + Number(mix.rest || 0)
+    : 0;
+  if (!mix || !(leafTotal > 0)) {
+    return addToKpiUploadSummaryCategoryBucket(emptyKpiUploadSummaryCategoryBuckets(), "rest", value);
+  }
+  let buckets = emptyKpiUploadSummaryCategoryBuckets();
+  buckets = addToKpiUploadSummaryCategoryBucket(
+    buckets,
+    "buildingMaterial",
+    value * (Number(mix.buildingMaterial || 0) / leafTotal),
+  );
+  buckets = addToKpiUploadSummaryCategoryBucket(
+    buckets,
+    "electronics",
+    value * (Number(mix.electronics || 0) / leafTotal),
+  );
+  buckets = addToKpiUploadSummaryCategoryBucket(
+    buckets,
+    "rest",
+    value * (Number(mix.rest || 0) / leafTotal),
+  );
+  return buckets;
+}
+
+function mergeCategoryBuckets(left = {}, right = {}) {
+  return withKpiUploadSummaryNonBuilding({
+    buildingMaterial: Number(left.buildingMaterial || 0) + Number(right.buildingMaterial || 0),
+    electronics: Number(left.electronics || 0) + Number(right.electronics || 0),
+    rest: Number(left.rest || 0) + Number(right.rest || 0),
+  });
+}
+
+/**
+ * Outstanding open amounts split by each customer's sales item mix.
+ */
+export function sumOutstandingCategoryBuckets(invoices = [], customerMix = new Map()) {
+  let buckets = emptyKpiUploadSummaryCategoryBuckets();
+  (invoices || []).forEach((invoice) => {
+    const amount = Number(invoice?.pending_amount ?? invoice?.amount ?? 0);
+    if (!(amount > 0)) return;
+    const customer = normalizeCode(invoice?.customer_code);
+    const mix = customerMix.get(customer);
+    buckets = mergeCategoryBuckets(buckets, splitAmountByCategoryMix(amount, mix));
+  });
+  return withKpiUploadSummaryNonBuilding(buckets);
+}
+
+/**
+ * Still-open invoices expected to pay this month (incl. overdue) by category mix.
+ */
+export function sumExpectedCollectionCategoryBuckets(invoices = [], {
+  avgDaysByCustomer = new Map(),
+  customerMix = new Map(),
+  monthEnd = "",
+} = {}) {
+  let buckets = emptyKpiUploadSummaryCategoryBuckets();
+  (invoices || []).forEach((invoice) => {
+    const amount = Number(invoice?.pending_amount ?? invoice?.amount ?? 0);
+    if (!(amount > 0)) return;
+    const customer = normalizeCode(invoice?.customer_code);
+    const avgDays = avgDaysByCustomer instanceof Map
+      ? avgDaysByCustomer.get(customer)
+      : avgDaysByCustomer?.[customer];
+    if (!isOpenInvoiceExpectedThisMonth({
+      invoiceDate: invoice?.invoice_date,
+      avgDays,
+      monthEnd,
+    })) return;
+    const mix = customerMix.get(customer);
+    buckets = mergeCategoryBuckets(buckets, splitAmountByCategoryMix(amount, mix));
+  });
+  return withKpiUploadSummaryNonBuilding(buckets);
+}
+
+/**
+ * Credit sales by category for a set of YYYY-MM months (uses cube credit_sales_amount).
+ */
+export function sumCreditSalesCategoryBucketsFromFacts(facts = [], {
+  months = null,
+  salesmanCodes = null,
+} = {}) {
+  const monthSet = months instanceof Set
+    ? months
+    : (Array.isArray(months) ? new Set(months.map((month) => String(month || "").slice(0, 7))) : null);
+  const codeSet = salesmanCodes instanceof Set
+    ? salesmanCodes
+    : (Array.isArray(salesmanCodes)
+      ? new Set([...salesmanCodes].map(normalizeSalesmanCode).filter(Boolean))
+      : null);
+  let buckets = emptyKpiUploadSummaryCategoryBuckets();
+  (facts || []).forEach((fact) => {
+    const factMonth = String(fact?.month || fact?.m || "").slice(0, 7);
+    if (monthSet && monthSet.size && !monthSet.has(factMonth)) return;
+    const code = normalizeSalesmanCode(fact?.salesman_code || fact?.sc);
+    if (codeSet && codeSet.size && !codeSet.has(code)) return;
+    const amount = Number(
+      fact?.credit_sales_amount ?? fact?.cra ?? fact?.sales_amount ?? fact?.a ?? fact?.s ?? 0,
+    );
+    if (!Number.isFinite(amount) || amount === 0) return;
+    const row = {
+      category: fact?.category || fact?.c,
+      item_code: fact?.item_code || fact?.ic,
+      item_name: fact?.item_name || fact?.iname,
+    };
+    buckets = addToKpiUploadSummaryCategoryBucket(
+      buckets,
+      classifyKpiUploadSummaryCategory(row),
+      amount,
+    );
+  });
+  return withKpiUploadSummaryNonBuilding(buckets);
+}
+
+export function monthsThroughYtd(monthKey = "") {
+  const month = String(monthKey || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return [];
+  const year = month.slice(0, 4);
+  const endMonth = Number(month.slice(5, 7));
+  const out = [];
+  for (let index = 1; index <= endMonth; index += 1) {
+    out.push(`${year}-${String(index).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+export function trailingMonthsEndingAt(monthKey = "", monthCount = 3) {
+  const end = String(monthKey || "").slice(0, 7);
+  const count = Math.max(1, Math.floor(Number(monthCount) || 0));
+  if (!/^\d{4}-\d{2}$/.test(end)) return [];
+  const months = [end];
+  let cursor = end;
+  for (let index = 1; index < count; index += 1) {
+    cursor = previousMonthKey(cursor);
+    if (!cursor) break;
+    months.unshift(cursor);
+  }
+  return months;
+}
+
+export function buildCategoryReceivableDays({
+  outstandingBuckets = {},
+  creditSalesBuckets = {},
+  days = 0,
+} = {}) {
+  const outstanding = withKpiUploadSummaryNonBuilding(outstandingBuckets);
+  const credit = withKpiUploadSummaryNonBuilding(creditSalesBuckets);
+  const result = {};
+  KPI_UPLOAD_SUMMARY_CATEGORY_KEYS.forEach((key) => {
+    result[key] = receivableDays(outstanding[key], credit[key], days);
+  });
+  return result;
+}
+
 function categoryRowKey(metric, categoryKey) {
   return `${metric}_${categoryKey}`;
 }
@@ -248,42 +441,65 @@ function buildOneCategorySummaryRow({
   parentActual,
   parentEstimate,
   parentTarget = 0,
+  expectedRemaining = null,
+  estimateOverride = null,
+  statusLabel = "Category split · no target",
+  formatKey = null,
+  kind = "categorySplit",
 }) {
-  const labelPrefix = metric === "collection" ? "Collection" : "Sales";
-  const estimate = estimateFromParentShare(actual, parentActual, parentEstimate);
-  const achievement = achievementPercent(estimate, parentTarget);
+  const labelPrefix = metric === "collection"
+    ? "Collection"
+    : (metric === "collectionDays" ? "Avg collection days" : "Sales");
+  let estimate = estimateOverride;
+  if (estimate == null && metric === "collection" && expectedRemaining != null) {
+    estimate = roundMoney(Number(actual || 0) + Number(expectedRemaining || 0));
+  }
+  if (estimate == null && metric !== "collectionDays") {
+    estimate = estimateFromParentShare(actual, parentActual, parentEstimate);
+  }
+  const achievement = metric === "collectionDays"
+    ? null
+    : achievementPercent(estimate, parentTarget);
   return {
     key: categoryRowKey(metric, categoryKey),
     label: `${labelPrefix} — ${KPI_UPLOAD_SUMMARY_CATEGORY_LABELS[categoryKey] || categoryKey}`,
-    kind: "categorySplit",
+    kind,
     metric,
     categoryKey,
-    formatKey: metric === "collection" ? "collection" : "totalSales",
+    formatKey: formatKey
+      || (metric === "collection"
+        ? "collection"
+        : (metric === "collectionDays" ? "averageCollectionDays" : "totalSales")),
     totalFiltered: {
-      actual: roundMoney(actual),
+      actual: metric === "collectionDays" ? actual : roundMoney(actual),
       target: 0,
       achievement: null,
-      statusLabel: "Category split · no target",
+      statusLabel,
       statusTone: "neutral",
     },
     paceEstimate: {
-      estimate,
-      target: Number(parentTarget) > 0 ? Number(parentTarget) : 0,
-      achievement: Number(parentTarget) > 0 ? achievement : null,
+      estimate: metric === "collectionDays" ? null : estimate,
+      target: Number(parentTarget) > 0 && metric !== "collectionDays" ? Number(parentTarget) : 0,
+      achievement: Number(parentTarget) > 0 && metric !== "collectionDays" ? achievement : null,
     },
-    vsLastMonth: compareKpiEstimateToPriorMonth(estimate, priorActual),
+    vsLastMonth: metric === "collectionDays"
+      ? null
+      : compareKpiEstimateToPriorMonth(estimate, priorActual),
   };
 }
 
 /**
  * Build Sales/Collection category detail rows from pre-aggregated buckets.
  * Building material + Non-building = parent; Electronics + Rest = Non-building.
+ * Collection month-end estimate = MTD collected + open invoices expected this month
+ * (including overdue still open).
  */
 export function buildKpiUploadSummaryCategoryRows({
   salesBuckets = null,
   priorSalesBuckets = null,
   collectionBuckets = null,
   priorCollectionBuckets = null,
+  expectedCollectionBuckets = null,
   totalSalesActual = 0,
   priorTotalSalesActual = null,
   totalSalesEstimate = null,
@@ -313,6 +529,9 @@ export function buildKpiUploadSummaryCategoryRows({
       priorCollectionBuckets || emptyKpiUploadSummaryCategoryBuckets(),
       priorCollectionActual,
     );
+  const expectedRemaining = withKpiUploadSummaryNonBuilding(
+    expectedCollectionBuckets || emptyKpiUploadSummaryCategoryBuckets(),
+  );
 
   const salesRows = KPI_UPLOAD_SUMMARY_CATEGORY_KEYS.map((categoryKey) => (
     buildOneCategorySummaryRow({
@@ -334,24 +553,69 @@ export function buildKpiUploadSummaryCategoryRows({
       parentActual: collectionActual,
       parentEstimate: collectionEstimate,
       parentTarget: collectionTarget,
+      expectedRemaining: expectedRemaining[categoryKey],
+      statusLabel: "MTD + open expected this month",
     })
   ));
-  return { salesRows, collectionRows, sales, collection };
+  return {
+    salesRows,
+    collectionRows,
+    sales,
+    collection,
+    expectedRemaining,
+  };
 }
 
 /**
- * Insert category detail rows after Total sales and Collection in the email table.
+ * Category DSO children for one Avg collection days parent row.
+ */
+export function buildCategoryCollectionDaysRows({
+  parentKey = "averageCollectionDays",
+  parentLabel = "Avg collection days",
+  daysByCategory = {},
+  statusLabel = "Lower is better · category DSO",
+} = {}) {
+  return KPI_UPLOAD_SUMMARY_CATEGORY_KEYS
+    .filter((categoryKey) => daysByCategory?.[categoryKey] != null)
+    .map((categoryKey) => {
+      const row = buildOneCategorySummaryRow({
+        metric: "collectionDays",
+        categoryKey,
+        actual: daysByCategory[categoryKey],
+        priorActual: null,
+        statusLabel,
+        formatKey: parentKey,
+        kind: "categoryCollectionDays",
+        estimateOverride: null,
+      });
+      return {
+        ...row,
+        key: `${parentKey}_${categoryKey}`,
+        label: `${parentLabel} — ${KPI_UPLOAD_SUMMARY_CATEGORY_LABELS[categoryKey] || categoryKey}`,
+        parentKey,
+      };
+    });
+}
+
+/**
+ * Insert category detail rows after Total sales, Collection, and each DSO parent.
  */
 export function insertKpiUploadSummaryCategoryRows(rows = [], categoryRows = {}) {
   const salesRows = Array.isArray(categoryRows?.salesRows) ? categoryRows.salesRows : [];
   const collectionRows = Array.isArray(categoryRows?.collectionRows) ? categoryRows.collectionRows : [];
-  if (!salesRows.length && !collectionRows.length) return [...(rows || [])];
+  const collectionDaysByParent = categoryRows?.collectionDaysByParent && typeof categoryRows.collectionDaysByParent === "object"
+    ? categoryRows.collectionDaysByParent
+    : {};
+  const hasDaysChildren = Object.values(collectionDaysByParent).some((list) => Array.isArray(list) && list.length);
+  if (!salesRows.length && !collectionRows.length && !hasDaysChildren) return [...(rows || [])];
 
   const next = [];
   (rows || []).forEach((row) => {
     next.push(row);
     if (row?.key === "totalSales" && salesRows.length) next.push(...salesRows);
     if (row?.key === "collection" && collectionRows.length) next.push(...collectionRows);
+    const daysChildren = collectionDaysByParent[row?.key];
+    if (Array.isArray(daysChildren) && daysChildren.length) next.push(...daysChildren);
   });
   return next;
 }

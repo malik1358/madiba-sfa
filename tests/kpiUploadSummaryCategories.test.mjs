@@ -7,11 +7,16 @@ import {
   buildKpiUploadSummaryCategoryRows,
   classifyKpiUploadSummaryCategory,
   insertKpiUploadSummaryCategoryRows,
+  isOpenInvoiceExpectedThisMonth,
+  resolveExpectedPayDate,
   scaleKpiUploadSummaryCategoryBuckets,
+  sumExpectedCollectionCategoryBuckets,
+  sumOutstandingCategoryBuckets,
   sumSalesCategoryBucketsFromFacts,
   withKpiUploadSummaryNonBuilding,
 } from "../app/lib/kpiUploadSummaryCategories.js";
 import { buildKpiUploadSummaryTable } from "../app/lib/kpiUploadSummaryEmail.js";
+import { buildReceivableDaysReport } from "../app/lib/receivableDays.js";
 
 test("classify prefers building material over electronics", () => {
   assert.equal(classifyKpiUploadSummaryCategory({
@@ -117,7 +122,22 @@ test("category rows insert under Total sales and Collection in the upload summar
       priorSalesBuckets: { buildingMaterial: 400, electronics: 200, rest: 200 },
       collectionBuckets: { buildingMaterial: 50, electronics: 50, rest: 100 },
       priorCollectionBuckets: { buildingMaterial: 20, electronics: 30, rest: 50 },
+      expectedCollectionBuckets: { buildingMaterial: 25, electronics: 10, rest: 15 },
+      outstandingBuckets: { buildingMaterial: 200000, electronics: 50000, rest: 150000 },
+      cubeFacts: [
+        { month: "2026-11", salesman_code: "AHMED", category: "Building Material", item_name: "MDF", credit_sales_amount: 100000 },
+        { month: "2026-11", salesman_code: "AHMED", category: "Electronics", credit_sales_amount: 80000 },
+        { month: "2026-11", salesman_code: "AHMED", category: "Stationery", credit_sales_amount: 120000 },
+        { month: "2026-10", salesman_code: "AHMED", category: "Building Material", item_name: "MDF", credit_sales_amount: 90000 },
+        { month: "2026-09", salesman_code: "AHMED", category: "Electronics", credit_sales_amount: 70000 },
+      ],
+      salesmanCodes: ["AHMED"],
     },
+    receivableDaysReport: buildReceivableDaysReport({
+      monthlyCreditSales: { "2026-10": 100000, "2026-11": 120000 },
+      monthlyReceivables: { "2026-10": 50000, "2026-11": 40000 },
+      asOfDate: "2026-11-12",
+    }),
   });
 
   const labels = summary.rows.map((row) => row.label);
@@ -135,10 +155,48 @@ test("category rows insert under Total sales and Collection in the upload summar
       + summary.rows.find((row) => row.key === "collection_rest").totalFiltered.actual,
     summary.rows.find((row) => row.key === "collection_nonBuilding").totalFiltered.actual,
   );
-  assert.match(
-    summary.rows.find((row) => row.key === "sales_buildingMaterial").totalFiltered.statusLabel,
-    /Category split/,
+  assert.equal(
+    summary.rows.find((row) => row.key === "collection_buildingMaterial").paceEstimate.estimate,
+    75,
   );
+  assert.match(
+    summary.rows.find((row) => row.key === "collection_buildingMaterial").totalFiltered.statusLabel,
+    /expected this month/,
+  );
+  assert.ok(labels.indexOf("Avg collection days (YTD)") < labels.indexOf("Avg collection days (YTD) — Building material"));
+  assert.ok(summary.rows.some((row) => row.key === "averageCollectionDays_buildingMaterial"));
+});
+
+test("overdue still-open invoices count toward this month expected remaining", () => {
+  assert.equal(resolveExpectedPayDate("2026-09-20", 45), "2026-11-04");
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-09-01",
+    avgDays: 30,
+    monthEnd: "2026-11-30",
+  }), true);
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-11-01",
+    avgDays: 45,
+    monthEnd: "2026-11-30",
+  }), false);
+
+  const mix = new Map([
+    ["1002", withKpiUploadSummaryNonBuilding({ buildingMaterial: 100, electronics: 0, rest: 0 })],
+  ]);
+  const expected = sumExpectedCollectionCategoryBuckets([
+    { customer_code: "1002", invoice_date: "2026-09-01", pending_amount: 100000 },
+    { customer_code: "1002", invoice_date: "2026-11-01", pending_amount: 50000 },
+  ], {
+    avgDaysByCustomer: new Map([["1002", 30]]),
+    customerMix: mix,
+    monthEnd: "2026-11-30",
+  });
+  assert.equal(expected.buildingMaterial, 100000);
+
+  const outstanding = sumOutstandingCategoryBuckets([
+    { customer_code: "1002", pending_amount: 150000 },
+  ], mix);
+  assert.equal(outstanding.buildingMaterial, 150000);
 });
 
 test("insertKpiUploadSummaryCategoryRows keeps unknown rows untouched when empty", () => {

@@ -4,6 +4,9 @@ import { isKpiTargetProfile, mergeKpiTargetProfiles } from "./kpiTargetsTable.js
 import {
   allocateReceiptsToCategoryBuckets,
   buildCustomerCategoryMixFromFacts,
+  pickCustomerAvgDaysToPay,
+  sumExpectedCollectionCategoryBuckets,
+  sumOutstandingCategoryBuckets,
   sumSalesCategoryBucketsFromFacts,
 } from "./kpiUploadSummaryCategories.js";
 import {
@@ -38,8 +41,14 @@ import {
   buildReceiptRow,
   normalizeReceiptDataset,
 } from "./receiptRegister.js";
+import {
+  OUTSTANDING_DATASET_KEY,
+  normalizeCode,
+} from "./outstanding.js";
+import { enrichCollectionRecordsWithAvgDays } from "./collectionAvgDays.js";
 import { currentMonthDateRange } from "./salesInvoices.js";
 import { getKsaDateString } from "./workdayActivity.js";
+import { lastDayOfMonth } from "./biReportPeriod.js";
 
 function createServiceAdmin(env = process.env) {
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
@@ -180,14 +189,46 @@ async function loadReceiptRowsForMonth(admin, { fromDate = "", toDate = "" } = {
   }
 }
 
+async function loadOutstandingInvoicesForKpiSummary(admin) {
+  try {
+    const payload = await readJsonSetting(admin, OUTSTANDING_DATASET_KEY);
+    const invoices = Array.isArray(payload?.invoices) ? payload.invoices : [];
+    return invoices.filter((invoice) => Number(invoice?.pending_amount || 0) > 0);
+  } catch (error) {
+    console.error("KPI upload summary: outstanding invoices unavailable:", error);
+    return [];
+  }
+}
+
+function groupOutstandingInvoicesByCustomer(invoices = []) {
+  const byCustomer = new Map();
+  (invoices || []).forEach((invoice) => {
+    const code = normalizeCode(invoice?.customer_code);
+    if (!code) return;
+    const current = byCustomer.get(code) || {
+      customer_code: code,
+      customer_name: String(invoice?.customer_name || "").trim(),
+      invoices: [],
+    };
+    current.invoices.push(invoice);
+    if (!current.customer_name && invoice?.customer_name) {
+      current.customer_name = String(invoice.customer_name).trim();
+    }
+    byCustomer.set(code, current);
+  });
+  return [...byCustomer.values()];
+}
+
 /**
  * Sales category buckets from the BI cube; collection buckets from receipts
- * allocated by each customer's sales item mix (same cube).
+ * allocated by each customer's sales item mix (same cube). Expected remaining
+ * uses open invoices × customer avg pay days (overdue open still counts).
  */
 export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
   month = "",
   priorMonth = "",
   salesmanCodes = [],
+  todayIso = "",
 } = {}) {
   const monthKey = String(month || "").slice(0, 7);
   const priorKey = String(priorMonth || "").slice(0, 7);
@@ -210,14 +251,23 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
 
     const currentRange = currentMonthDateRange(`${monthKey}-01`);
     const priorRange = priorKey ? currentMonthDateRange(`${priorKey}-01`) : null;
-    const [currentReceipts, priorReceipts] = await Promise.all([
+    const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
+    const monthEnd = lastDayOfMonth(monthKey) || currentRange.to;
+
+    const [currentReceipts, priorReceipts, outstandingInvoices] = await Promise.all([
       loadReceiptRowsForMonth(admin, { fromDate: currentRange.from, toDate: currentRange.to }),
       priorRange
         ? loadReceiptRowsForMonth(admin, { fromDate: priorRange.from, toDate: priorRange.to })
         : Promise.resolve([]),
+      loadOutstandingInvoicesForKpiSummary(admin),
     ]);
+
+    // Lifetime/all-months mix for open AR attribution; month mix for MTD receipts.
     const currentMix = buildCustomerCategoryMixFromFacts(facts, {
       month: monthKey,
+      salesmanCodes: codeSet,
+    });
+    const outstandingMix = buildCustomerCategoryMixFromFacts(facts, {
       salesmanCodes: codeSet,
     });
     const priorMix = priorKey
@@ -227,6 +277,14 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
       })
       : new Map();
 
+    const customerRecords = groupOutstandingInvoicesByCustomer(outstandingInvoices);
+    const enrichedCustomers = customerRecords.length
+      ? await enrichCollectionRecordsWithAvgDays(admin, customerRecords, { todayIso: asOf })
+      : [];
+    const avgDaysByCustomer = new Map(
+      enrichedCustomers.map((row) => [normalizeCode(row.customer_code), pickCustomerAvgDaysToPay(row)]),
+    );
+
     return {
       salesBuckets,
       priorSalesBuckets,
@@ -234,6 +292,14 @@ export async function loadKpiUploadSummaryCategoryBreakdown(admin, {
       priorCollectionBuckets: priorKey
         ? allocateReceiptsToCategoryBuckets(priorReceipts, priorMix)
         : null,
+      expectedCollectionBuckets: sumExpectedCollectionCategoryBuckets(outstandingInvoices, {
+        avgDaysByCustomer,
+        customerMix: outstandingMix,
+        monthEnd,
+      }),
+      outstandingBuckets: sumOutstandingCategoryBuckets(outstandingInvoices, outstandingMix),
+      cubeFacts: facts,
+      salesmanCodes: [...codeSet],
     };
   } catch (error) {
     console.error("KPI upload summary: category breakdown unavailable:", error);
@@ -277,6 +343,7 @@ export async function loadKpiUploadSummaryPayload(admin, {
       month: monthKey,
       priorMonth,
       salesmanCodes: salesmanPayload.map((row) => row.salesmanCode),
+      todayIso,
     }),
   ]);
 

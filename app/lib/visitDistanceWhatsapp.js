@@ -8,6 +8,7 @@ import {
   isIdleGpsPingTimelineRow,
   parseGpsFromActivityNote,
 } from "./geo.js";
+import { isAtMadibaStore, madibaStoreLabel } from "./madibaStoreLocation.js";
 import { todayAttendanceBounds } from "./morningAttendance.js";
 
 export const VISIT_DISTANCE_ACTIVITY_ENTRY_TYPES = [
@@ -50,7 +51,13 @@ export function formatVisitDistanceKm(value) {
 
 export function formatVisitGpsWhatsappValue(metrics = {}) {
   if (!hasGpsCoordinates(metrics)) return "-";
-  return buildGoogleMapsPointUrl(Number(metrics.latitude), Number(metrics.longitude));
+  const latitude = Number(metrics.latitude);
+  const longitude = Number(metrics.longitude);
+  // Store-side entries keep GPS on the report only; never share a Google Maps pin.
+  if (isAtMadibaStore({ latitude, longitude })) {
+    return madibaStoreLabel("en");
+  }
+  return buildGoogleMapsPointUrl(latitude, longitude);
 }
 
 export function formatVisitDistanceWhatsappLines(metrics = {}, labels = {}) {

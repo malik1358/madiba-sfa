@@ -2,9 +2,12 @@ import { createClient } from "@supabase/supabase-js";
 import { isManagementRole } from "../../../lib/moduleAccess.js";
 import {
   defaultMisAsOfDate,
+  buildLiveFilteredMisReport,
+  loadMisFilterCatalogs,
   loadPreparedMisReport,
   rebuildPreparedMisReport,
 } from "../../../lib/misReportServer.js";
+import { hasActiveGrowthFilters, normalizeGrowthFilters } from "../../../lib/categoryGrowth.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
@@ -70,9 +73,11 @@ export async function GET(request) {
     const url = new URL(request.url);
     const asOfDate = parseAsOfDate(url.searchParams.get("asOf") || url.searchParams.get("date"));
     const rebuild = wantsRebuild(url);
+    const wantCatalogs = ["1", "true", "yes"].includes(String(url.searchParams.get("catalogs") || "").trim().toLowerCase());
 
     if (rebuild) {
       const prepared = await rebuildPreparedMisReport(admin, { asOfDate });
+      const catalogs = wantCatalogs ? await loadMisFilterCatalogs(admin) : undefined;
       return Response.json({
         success: true,
         prepared: true,
@@ -80,6 +85,31 @@ export async function GET(request) {
         asOfDate: prepared.asOfDate,
         builtAt: prepared.builtAt,
         report: prepared.report,
+        catalogs,
+      });
+    }
+
+    if (wantCatalogs && !rebuild) {
+      const catalogs = await loadMisFilterCatalogs(admin);
+      const loaded = await loadPreparedMisReport(admin, { asOfDate });
+      if (!loaded.report) {
+        return Response.json({
+          success: true,
+          prepared: false,
+          catalogs,
+          asOfDate,
+        });
+      }
+      return Response.json({
+        success: true,
+        prepared: true,
+        rebuilt: false,
+        asOfDate: loaded.asOfDate,
+        builtAt: loaded.builtAt,
+        staleRequest: Boolean(loaded.staleRequest),
+        message: loaded.message || null,
+        report: loaded.report,
+        catalogs,
       });
     }
 
@@ -108,6 +138,47 @@ export async function GET(request) {
     console.error("MIS report error", error);
     return Response.json(
       { success: false, error: error?.message || "Unable to load MIS report" },
+      { status: 400 },
+    );
+  }
+
+export async function POST(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return Response.json({ success: false, error: "Supabase is not configured" }, { status: 500 });
+    }
+
+    const user = await getAuthUser(request);
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const profile = await getProfile(admin, user.id);
+    if (!isManagementRole(profile.role)) {
+      return Response.json({ success: false, error: "MIS is available to admin and manager only." }, { status: 403 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const asOfDate = parseAsOfDate(body?.asOf || body?.date);
+    const filters = normalizeGrowthFilters(body?.filters || {});
+    const live = await buildLiveFilteredMisReport(admin, {
+      asOfDate,
+      filters: hasActiveGrowthFilters(filters) ? filters : null,
+    });
+
+    return Response.json({
+      success: true,
+      prepared: false,
+      live: true,
+      filtered: hasActiveGrowthFilters(filters),
+      asOfDate: live.asOfDate,
+      builtAt: live.builtAt,
+      report: live.report,
+      catalogs: live.catalogs,
+    });
+  } catch (error) {
+    console.error("MIS live filter error", error);
+    return Response.json(
+      { success: false, error: error?.message || "Unable to build filtered MIS" },
       { status: 400 },
     );
   }

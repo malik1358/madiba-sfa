@@ -8860,14 +8860,14 @@ tr.paymentSettleStatementLead td {
 }
 .misSlide h2 { margin: 0; color: #0b2545; font-size: 1.35rem; }
 .misSlide h3 { margin: 0 0 10px; color: #0f4c5c; font-size: 0.95rem; }
-.misKpiPanel {
+.misFilterPanel {
   margin-bottom: 12px;
   border: 1px solid #c5d6df;
   border-radius: 12px;
   background: #eef5f8;
   overflow: hidden;
 }
-.misKpiPanelToggle {
+.misFilterPanelToggle {
   width: 100%;
   display: flex;
   align-items: center;
@@ -8880,20 +8880,20 @@ tr.paymentSettleStatementLead td {
   text-align: left;
   font: inherit;
 }
-.misKpiPanelToggle:hover { background: rgba(15, 76, 92, 0.06); }
-.misKpiPanelChevron {
+.misFilterPanelToggle:hover { background: rgba(15, 76, 92, 0.06); }
+.misFilterPanelChevron {
   width: 1rem;
   flex: 0 0 auto;
   font-size: 12px;
   line-height: 1;
 }
-.misKpiPanelTitle {
+.misFilterPanelTitle {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.misKpiPanelCount {
+.misFilterPanelCount {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8906,7 +8906,7 @@ tr.paymentSettleStatementLead td {
   font-size: 11px;
   font-weight: 800;
 }
-.misKpiPanelAction {
+.misFilterPanelAction {
   margin-inline-start: auto;
   font-size: 12px;
   font-weight: 700;
@@ -8945,7 +8945,9 @@ tr.paymentSettleStatementLead td {
   font-weight: 800;
   line-height: 1.2;
 }
-.misKpiPanel--open .misKpiGrid { margin-bottom: 0; padding: 0 10px 10px; }
+.misFilterPanelBody { padding: 0 10px 12px; }
+.misFilterPanelBody .moduleSection { margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
+.misFilterPanelBody .moduleSectionHeader { display: none; }
 .misKpiGrid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px;
 }

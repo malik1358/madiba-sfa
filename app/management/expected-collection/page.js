@@ -279,11 +279,11 @@ export default function ExpectedCollectionPage() {
               {" · "}
               {t("salesman")}: {salesmanGroups.length}
               {" · "}
-              BM: {formatAmount(report?.bmTotal || 0)}
+              BM: {formatAmount(totals.bmValue)}
               {" · "}
-              Rest: {formatAmount(report?.restTotal || 0)}
+              Rest: {formatAmount(totals.restValue)}
               {" · "}
-              {t("total")}: {formatAmount(report?.total || 0)}
+              {t("totalExpected")}: {formatAmount(totals.amount)}
             </p>
             <p className="moduleHint">{t("hint")}</p>
             {error ? <p className="moduleHint">{error}</p> : null}
@@ -316,7 +316,16 @@ export default function ExpectedCollectionPage() {
                       <BiExcelHead label={t("approxPay")} filterKey="approxPayDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("bm")} filterKey="bmValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("rest")} filterKey="restValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("totalExpected")} filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+                      <BiExcelHead
+                        label={t("totalExpected")}
+                        filterKey="amount"
+                        options={options}
+                        filters={filters}
+                        onChange={setFilter}
+                        allLabel={t("all")}
+                        className="moduleBiTotalCol"
+                        summary={formatAmount(totals.amount)}
+                      />
                     </tr>
                   </thead>
                   <tbody>

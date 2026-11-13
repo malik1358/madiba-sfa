@@ -4507,6 +4507,25 @@ th:has(.moduleTableColumnFilterInput) {
   line-height: 1.2;
 }
 
+.moduleTableHeadingFilter .moduleTableHeadingSummary {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #ecfeff;
+  background: #0b3c49;
+  border-radius: 4px;
+  padding: 4px 6px;
+  text-align: end;
+}
+
+.moduleBiTable th.moduleBiTotalCol .moduleTableHeadingSummary {
+  background: #0f4c5c;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #9ec4cc;
+}
+
 .moduleTableHeadingFilter select.moduleInput {
   width: 100%;
   min-width: 0;
@@ -7882,7 +7901,7 @@ button.moduleBiDashKpi:focus-visible {
   position: sticky;
   bottom: 0;
   font-weight: 800;
-  z-index: 2;
+  z-index: 4;
   background: #ecfeff;
   color: #0f4c5c;
 }
@@ -7891,6 +7910,7 @@ button.moduleBiDashKpi:focus-visible {
 .moduleBiTable tfoot td.moduleBiTotalCol {
   background: #0f4c5c;
   color: #ffffff;
+  z-index: 5;
 }
 
 .moduleBiTable tfoot td.moduleBiMonthCell--up {

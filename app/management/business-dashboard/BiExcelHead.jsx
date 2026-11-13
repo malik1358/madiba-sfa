@@ -35,11 +35,15 @@ export default function BiExcelHead({
   onChange,
   allLabel = "All",
   className = "",
+  summary = null,
 }) {
   return (
     <th className={className} data-column-filter-label={label}>
       <div className="moduleTableHeadingFilter">
         <span>{label}</span>
+        {summary != null && summary !== "" ? (
+          <span className="moduleTableHeadingSummary">{summary}</span>
+        ) : null}
         <ExcelColumnFilter
           label={label}
           options={options[filterKey] || []}

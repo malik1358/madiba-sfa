@@ -4507,6 +4507,25 @@ th:has(.moduleTableColumnFilterInput) {
   line-height: 1.2;
 }
 
+.moduleTableHeadingFilter .moduleTableHeadingSummary {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #ecfeff;
+  background: #0b3c49;
+  border-radius: 4px;
+  padding: 4px 6px;
+  text-align: end;
+}
+
+.moduleBiTable th.moduleBiTotalCol .moduleTableHeadingSummary {
+  background: #0f4c5c;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #9ec4cc;
+}
+
 .moduleTableHeadingFilter select.moduleInput {
   width: 100%;
   min-width: 0;
@@ -7882,7 +7901,7 @@ button.moduleBiDashKpi:focus-visible {
   position: sticky;
   bottom: 0;
   font-weight: 800;
-  z-index: 2;
+  z-index: 4;
   background: #ecfeff;
   color: #0f4c5c;
 }
@@ -7891,6 +7910,7 @@ button.moduleBiDashKpi:focus-visible {
 .moduleBiTable tfoot td.moduleBiTotalCol {
   background: #0f4c5c;
   color: #ffffff;
+  z-index: 5;
 }
 
 .moduleBiTable tfoot td.moduleBiMonthCell--up {
@@ -9047,6 +9067,59 @@ tr.paymentSettleStatementLead td {
 .misInitiativeCard h3 { background: #0b2545; }
 .misInitiativeCard p { margin: 0; color: #243b4a; line-height: 1.45; }
 .misMeta { margin-top: 12px; color: #6b7c86; font-size: 12px; }
+
+.misSalesLossLink {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.misSalesLossLink:hover { text-decoration-thickness: 2px; }
+.misSalesLossLink:focus-visible {
+  outline: 2px solid #0f4c5c;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.misDrillPanel {
+  margin-top: 16px;
+  padding: 12px 14px 4px;
+  border: 1px solid rgba(15, 76, 92, 0.18);
+  border-radius: 8px;
+  background: #f6fafb;
+}
+.misDrillPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.misDrillPanelHead h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #0b2545;
+}
+.misDrillPanelClose {
+  appearance: none;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(15, 76, 92, 0.35);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f4c5c;
+  cursor: pointer;
+}
+.misDrillPanelClose:hover { background: rgba(15, 76, 92, 0.06); }
 
 /* MIS inventory cover: keep Category / Item code pinned; do not right-stick every band column. */
 .misInventoryCoverTable th.moduleBiTotalCol,

@@ -83,6 +83,20 @@ function pctChangeSafe(current, previous) {
   return Math.round(((cur / prev) - 1) * 1000) / 10;
 }
 
+function momTrendClass(value) {
+  const n = Number(value) || 0;
+  if (n > 0) return "moduleBiMonthCell--up";
+  if (n < 0) return "moduleBiMonthCell--down";
+  return "";
+}
+
+function lossClass(value) {
+  const n = Number(value) || 0;
+  if (n > 0) return "moduleBiMonthCell--down";
+  if (n < 0) return "moduleBiMonthCell--up";
+  return "";
+}
+
 function cumulativeSeries(months, valuesByMonth) {
   let running = 0;
   return months.map((ym) => {
@@ -312,6 +326,142 @@ function SalesmanTable({ rows, language }) {
               <td className="moduleBiTotalCol">{amountInt(salesTotal)}</td>
             </tr>
           </tfoot>
+        </table>
+      </div>
+    </ExportableTable>
+  );
+}
+
+function PortfolioCategoryMomTable({ rows, language }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const keys = [
+    "category", "previousSales", "sales", "salesLoss", "salesMomPct",
+    "previousGp", "gp", "previousGpPct", "gpPct",
+  ];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct" || key === "gpPct" || key === "previousGpPct") {
+      return row[key] != null ? `${row[key]}%` : "—";
+    }
+    if (["previousSales", "sales", "salesLoss", "previousGp", "gp"].includes(key)) {
+      return amountInt(row[key]);
+    }
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const sum = (key) => visibleRows.reduce((acc, row) => acc + Number(row[key] || 0), 0);
+  const priorSalesTotal = sum("previousSales");
+  const salesTotal = sum("sales");
+  const lossTotal = sum("salesLoss");
+  const priorGpTotal = sum("previousGp");
+  const gpTotal = sum("gp");
+
+  return (
+    <ExportableTable filename="mis-portfolio-category-mom" sheetName="Portfolio MoM" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Prior sales" filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Current sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="Sales Δ" filterKey="salesLoss" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Prior GP" filterKey="previousGp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Current GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="Prior GP%" filterKey="previousGpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Current GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol moduleBiMonthCell--current" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.category}</td>
+                <td>{amountInt(row.previousSales)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                <td className={lossClass(row.salesLoss)}>{amountInt(row.salesLoss)}</td>
+                <td className={momTrendClass(row.salesMomPct)}>{pct(row.salesMomPct)}</td>
+                <td>{amountInt(row.previousGp)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.gp)}</td>
+                <td>{row.previousGpPct != null ? `${row.previousGpPct}%` : "—"}</td>
+                <td className="moduleBiTotalCol moduleBiMonthCell--current">{row.gpPct != null ? `${row.gpPct}%` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td><strong>Total</strong></td>
+              <td><strong>{amountInt(priorSalesTotal)}</strong></td>
+              <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
+              <td className={lossClass(lossTotal)}><strong>{amountInt(lossTotal)}</strong></td>
+              <td className={momTrendClass(pctChangeSafe(salesTotal, priorSalesTotal))}>
+                <strong>{pct(pctChangeSafe(salesTotal, priorSalesTotal))}</strong>
+              </td>
+              <td><strong>{amountInt(priorGpTotal)}</strong></td>
+              <td className="moduleBiMonthCell--current"><strong>{amountInt(gpTotal)}</strong></td>
+              <td><strong>{priorSalesTotal ? `${((priorGpTotal / priorSalesTotal) * 100).toFixed(1)}%` : "—"}</strong></td>
+              <td className="moduleBiTotalCol moduleBiMonthCell--current">
+                <strong>{salesTotal ? `${((gpTotal / salesTotal) * 100).toFixed(1)}%` : "—"}</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </ExportableTable>
+  );
+}
+
+function PortfolioTopLossItemsTable({ rows, language }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const keys = [
+    "itemName", "itemCode", "category", "previousSales", "sales", "salesLoss", "salesMomPct",
+    "previousGp", "gp", "gpPct",
+  ];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct" || key === "gpPct") {
+      return row[key] != null ? `${row[key]}%` : "—";
+    }
+    if (["previousSales", "sales", "salesLoss", "previousGp", "gp"].includes(key)) {
+      return amountInt(row[key]);
+    }
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const rowKey = (row) => `${row.itemCode || ""}||${row.itemName}`;
+
+  return (
+    <ExportableTable filename="mis-portfolio-top-loss-items" sheetName="Top loss items" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label="Item" filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Code" filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Prior sales" filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Current sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="Sales loss" filterKey="salesLoss" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Prior GP" filterKey="previousGp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Current GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol moduleBiMonthCell--current" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={rowKey(row)} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.itemName}</td>
+                <td>{row.itemCode || "—"}</td>
+                <td>{row.category}</td>
+                <td>{amountInt(row.previousSales)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                <td className={lossClass(row.salesLoss)}>{amountInt(row.salesLoss)}</td>
+                <td className={momTrendClass(row.salesMomPct)}>{pct(row.salesMomPct)}</td>
+                <td>{amountInt(row.previousGp)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.gp)}</td>
+                <td className="moduleBiTotalCol moduleBiMonthCell--current">{row.gpPct != null ? `${row.gpPct}%` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </ExportableTable>
@@ -620,6 +770,18 @@ function buildSlides(report, language) {
             <Kpi label="Portfolio GP%" value={`${portfolio.gpPct ?? 0}%`} note={`Prior ${prevPortfolio.gpPct ?? 0}%`} tone="green" />
             <Kpi label="Active SKUs / customers" value={`${portfolio.skus ?? 0} / ${portfolio.customers ?? 0}`} tone="teal" />
           </MisKpiPanel>
+          {report.portfolioCategories?.length ? (
+            <>
+              <h3>Category MoM · where the dip is</h3>
+              <PortfolioCategoryMomTable rows={report.portfolioCategories} language={language} />
+            </>
+          ) : null}
+          {report.portfolioTopLossItems?.length ? (
+            <>
+              <h3>Top 10 items by sales loss</h3>
+              <PortfolioTopLossItemsTable rows={report.portfolioTopLossItems} language={language} />
+            </>
+          ) : null}
           <p className="misRemark">{report.remarks.portfolio}</p>
         </Slide>
       ),

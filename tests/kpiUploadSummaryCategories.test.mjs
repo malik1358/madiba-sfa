@@ -173,20 +173,25 @@ test("category rows insert under Total sales and Collection in the upload summar
     summary.rows.find((row) => row.key === "collection_buildingMaterial").totalFiltered.statusLabel,
     /expected this month/,
   );
-  assert.ok(labels.indexOf("Avg collection days (YTD)") < labels.indexOf("Avg collection days (YTD) — Building material"));
-  assert.ok(summary.rows.some((row) => row.key === "averageCollectionDays_buildingMaterial"));
+  assert.ok(
+    labels.indexOf("Avg collection days (Rolling 3m)")
+      < labels.indexOf("Avg collection days (Rolling 3m) — Building material"),
+  );
+  assert.equal(summary.rows.some((row) => String(row.label || "").includes("(YTD)")), false);
+  assert.equal(summary.rows.some((row) => String(row.label || "").includes("(Rolling 12m)")), false);
+  assert.ok(summary.rows.some((row) => row.key === "averageCollectionDays3m_buildingMaterial"));
   for (const key of [
-    "averageCollectionDays_buildingMaterial",
-    "averageCollectionDays_nonBuilding",
-    "averageCollectionDays_electronics",
-    "averageCollectionDays_rest",
+    "averageCollectionDays3m_buildingMaterial",
+    "averageCollectionDays3m_nonBuilding",
+    "averageCollectionDays3m_electronics",
+    "averageCollectionDays3m_rest",
   ]) {
     const row = summary.rows.find((entry) => entry.key === key);
     assert.ok(row?.vsLastMonth, `${key} should have vs last month`);
     assert.equal(row.vsLastMonth.polarity, "lower-is-better");
     assert.ok(Number.isFinite(row.vsLastMonth.estimate), `${key} estimate`);
   }
-  const bmDays = summary.rows.find((row) => row.key === "averageCollectionDays_buildingMaterial");
+  const bmDays = summary.rows.find((row) => row.key === "averageCollectionDays3m_buildingMaterial");
   assert.ok(Number.isFinite(bmDays.vsLastMonth.priorActual));
   assert.ok(Number.isFinite(bmDays.vsLastMonth.delta));
 });
@@ -205,8 +210,8 @@ test("reconstructPriorOutstandingCategoryBuckets floors at zero", () => {
 
 test("buildCategoryCollectionDaysRows attaches lower-is-better MoM", () => {
   const rows = buildCategoryCollectionDaysRows({
-    parentKey: "averageCollectionDays",
-    parentLabel: "Avg collection days (YTD)",
+    parentKey: "averageCollectionDays3m",
+    parentLabel: "Avg collection days (Rolling 3m)",
     daysByCategory: buildCategoryReceivableDays({
       outstandingBuckets: { buildingMaterial: 80, electronics: 40, rest: 60 },
       creditSalesBuckets: { buildingMaterial: 100, electronics: 50, rest: 50 },
@@ -222,6 +227,7 @@ test("buildCategoryCollectionDaysRows attaches lower-is-better MoM", () => {
   });
   const bm = rows.find((row) => row.categoryKey === "buildingMaterial");
   assert.equal(bm.month, "2026-11");
+  assert.equal(bm.key, "averageCollectionDays3m_buildingMaterial");
   assert.equal(bm.vsLastMonth.polarity, "lower-is-better");
   assert.equal(bm.vsLastMonth.direction, "up");
   assert.ok(bm.vsLastMonth.delta < 0);

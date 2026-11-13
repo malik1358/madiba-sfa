@@ -279,17 +279,13 @@ test("summary table appends avg collection days with MoM indicator", () => {
     receivableDaysReport,
   });
 
-  assert.equal(summary.rows.length, 6);
+  assert.equal(summary.rows.length, 4);
   const daysRows = summary.rows.slice(3);
   assert.deepEqual(daysRows.map((row) => row.key), [
-    "averageCollectionDays",
     "averageCollectionDays3m",
-    "averageCollectionDays12m",
   ]);
   assert.deepEqual(daysRows.map((row) => row.label), [
-    "Avg collection days (YTD)",
     "Avg collection days (Rolling 3m)",
-    "Avg collection days (Rolling 12m)",
   ]);
   daysRows.forEach((daysRow) => {
     assert.equal(daysRow.kind, "collectionDays");
@@ -301,14 +297,13 @@ test("summary table appends avg collection days with MoM indicator", () => {
   });
 
   const alone = buildAverageCollectionDaysSummaryRow(receivableDaysReport);
-  assert.equal(alone.key, "averageCollectionDays");
-  assert.equal(alone.label, "Avg collection days (YTD)");
+  assert.equal(alone.key, "averageCollectionDays3m");
+  assert.equal(alone.label, "Avg collection days (Rolling 3m)");
   assert.equal(alone.vsLastMonth.direction, "up");
 
-  const allThree = buildAverageCollectionDaysSummaryRows(receivableDaysReport);
-  assert.equal(allThree.length, 3);
-  assert.equal(allThree[1].key, "averageCollectionDays3m");
-  assert.equal(allThree[2].key, "averageCollectionDays12m");
+  const daysOnly = buildAverageCollectionDaysSummaryRows(receivableDaysReport);
+  assert.equal(daysOnly.length, 1);
+  assert.equal(daysOnly[0].key, "averageCollectionDays3m");
 });
 
 test("active customers MoM is higher-is-better and appends to the KPI summary table", () => {
@@ -507,9 +502,11 @@ test("email HTML uses transposed header labels", () => {
     activeCustomersReport,
   });
   assert.equal(
-    summary.rows.find((row) => row.key === "averageCollectionDays")?.vsLastMonth.direction,
+    withActive.rows.find((row) => row.key === "averageCollectionDays3m")?.vsLastMonth.direction,
     "down",
   );
+  assert.equal(withActive.rows.some((row) => row.key === "averageCollectionDays"), false);
+  assert.equal(withActive.rows.some((row) => row.key === "averageCollectionDays12m"), false);
   const message = buildKpiUploadSummaryEmail({
     summary: withActive,
     triggers: ["sales-upload", "receipt-upload"],
@@ -522,9 +519,9 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /Total sales/);
   assert.match(message.html, /Collection/);
   assert.match(message.html, /Total cash collected/);
-  assert.match(message.html, /Avg collection days \(YTD\)/);
   assert.match(message.html, /Avg collection days \(Rolling 3m\)/);
-  assert.match(message.html, /Avg collection days \(Rolling 12m\)/);
+  assert.doesNotMatch(message.html, /Avg collection days \(YTD\)/);
+  assert.doesNotMatch(message.html, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.html, /getting worse vs last month/);
   assert.match(message.html, /Active customers/);
   assert.match(message.html, /Active customers sales \(120d\)/);
@@ -533,9 +530,9 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /Open Active Customers/);
   assert.match(message.html, /#0f4c5c/);
   assert.match(message.text, /Uploads: sales-upload, receipt-upload|sales-upload/);
-  assert.match(message.text, /Avg collection days \(YTD\)/);
   assert.match(message.text, /Avg collection days \(Rolling 3m\)/);
-  assert.match(message.text, /Avg collection days \(Rolling 12m\)/);
+  assert.doesNotMatch(message.text, /Avg collection days \(YTD\)/);
+  assert.doesNotMatch(message.text, /Avg collection days \(Rolling 12m\)/);
   assert.match(message.text, /getting worse vs last month/);
   assert.match(message.text, /Active customers/);
   assert.match(message.text, /Active customers sales \(120d\)/);

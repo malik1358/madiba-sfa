@@ -430,8 +430,13 @@ function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", p
   );
 }
 
-function PortfolioCategoryMomTable({ rows, language }) {
+function normPortfolioCategory(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function PortfolioCategoryMomTable({ rows, lossItems = [], language }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
+  const [drillCategory, setDrillCategory] = useState(null);
   const keys = [
     "category", "previousSales", "sales", "salesLoss", "salesMomPct",
     "previousGp", "gp", "previousGpPct", "gpPct",
@@ -453,7 +458,18 @@ function PortfolioCategoryMomTable({ rows, language }) {
   const priorGpTotal = sum("previousGp");
   const gpTotal = sum("gp");
 
+  const drillLossRows = useMemo(() => {
+    if (!drillCategory) return [];
+    const key = normPortfolioCategory(drillCategory);
+    return lossItems.filter((row) => normPortfolioCategory(row.category) === key);
+  }, [drillCategory, lossItems]);
+
+  const toggleDrill = useCallback((category) => {
+    setDrillCategory((current) => (current === category ? null : category));
+  }, []);
+
   return (
+    <>
     <ExportableTable filename="mis-portfolio-category-mom" sheetName="Portfolio MoM" className="moduleTableWrap moduleBiTableWrap">
       <div className="moduleTableScroll" style={{ marginTop: 12 }}>
         <table className="moduleTable moduleBiTable">
@@ -476,7 +492,21 @@ function PortfolioCategoryMomTable({ rows, language }) {
                 <td>{row.category}</td>
                 <td>{amountInt(row.previousSales)}</td>
                 <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
-                <td className={lossClass(row.salesLoss)}>{amountInt(row.salesLoss)}</td>
+                <td className={lossClass(row.salesLoss)}>
+                  {row.salesLoss > 0 ? (
+                    <button
+                      type="button"
+                      className="misSalesLossLink"
+                      title="Show items with sales loss"
+                      aria-label="Show items with sales loss"
+                      onClick={() => toggleDrill(row.category)}
+                    >
+                      {amountInt(row.salesLoss)}
+                    </button>
+                  ) : (
+                    amountInt(row.salesLoss)
+                  )}
+                </td>
                 <td className={momTrendClass(row.salesMomPct)}>{pct(row.salesMomPct)}</td>
                 <td>{amountInt(row.previousGp)}</td>
                 <td className="moduleBiMonthCell--current">{amountInt(row.gp)}</td>
@@ -505,6 +535,22 @@ function PortfolioCategoryMomTable({ rows, language }) {
         </table>
       </div>
     </ExportableTable>
+    {drillCategory ? (
+      <div className="misDrillPanel">
+        <div className="misDrillPanelHead">
+          <h3>{`Sales loss items · ${drillCategory}`}</h3>
+          <button type="button" className="misDrillPanelClose" onClick={() => setDrillCategory(null)}>
+            Close
+          </button>
+        </div>
+        {drillLossRows.length ? (
+          <PortfolioTopLossItemsTable rows={drillLossRows} language={language} />
+        ) : (
+          <p className="misMeta">No item-level sales losses in the prepared pack for this category.</p>
+        )}
+      </div>
+    ) : null}
+    </>
   );
 }
 
@@ -908,7 +954,11 @@ function buildSlides(report, language) {
           {report.portfolioCategories?.length ? (
             <>
               <h3>Category MoM · where the dip is</h3>
-              <PortfolioCategoryMomTable rows={report.portfolioCategories} language={language} />
+              <PortfolioCategoryMomTable
+                rows={report.portfolioCategories}
+                lossItems={report.portfolioLossItems || []}
+                language={language}
+              />
             </>
           ) : null}
           {report.portfolioTopLossItems?.length ? (

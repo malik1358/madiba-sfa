@@ -329,11 +329,19 @@ test("buildMisReport portfolio category MoM and top loss items exclude electroni
   assert.equal(sundry.salesLoss, 0);
 
   assert.ok(report.portfolioTopLossItems.length >= 1);
+  assert.ok(report.portfolioTopLossItems.length <= 10);
   assert.equal(report.portfolioTopLossItems[0].itemCode, "P001");
   assert.equal(report.portfolioTopLossItems[0].salesLoss, 60000);
   assert.ok(!report.portfolioTopLossItems.some(
     (row) => String(row.category || "").trim().toLowerCase() === "electronics",
   ));
+
+  const personalCareLossItems = report.portfolioLossItems.filter(
+    (row) => row.category === "Personal Care",
+  );
+  assert.ok(personalCareLossItems.length >= 1);
+  assert.ok(personalCareLossItems.some((row) => row.itemCode === "P001"));
+  assert.ok(report.portfolioLossItems.length >= report.portfolioTopLossItems.length);
 });
 
 test("buildMisReport portfolio top loss keeps prior-month item name when current month has zero sales", () => {

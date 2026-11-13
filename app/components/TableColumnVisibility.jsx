@@ -20,6 +20,7 @@ export default function TableColumnVisibility({
   tableHostRef,
   tableId,
   enabled = true,
+  syncKey = null,
 }) {
   const { language } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -30,10 +31,12 @@ export default function TableColumnVisibility({
 
   useLayoutEffect(() => {
     if (!enabled) return undefined;
-    const host = tableHostRef?.current;
-    if (!host) return undefined;
 
-    const syncLabels = () => {
+    let observer = null;
+    let frame = 0;
+    let cancelled = false;
+
+    const syncLabels = (host) => {
       const table = host.querySelector("table");
       const next = discoverTableColumnLabels(table);
       setLabels((current) => {
@@ -44,18 +47,33 @@ export default function TableColumnVisibility({
       });
     };
 
-    syncLabels();
-    const observer = new MutationObserver(syncLabels);
-    observer.observe(host, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, [enabled, tableHostRef]);
+    const attach = () => {
+      if (cancelled) return;
+      const host = tableHostRef?.current;
+      if (!host) {
+        frame = requestAnimationFrame(attach);
+        return;
+      }
+      syncLabels(host);
+      observer = new MutationObserver(() => syncLabels(host));
+      observer.observe(host, { childList: true, subtree: true });
+    };
+
+    attach();
+
+    return () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [enabled, tableHostRef, syncKey]);
 
   useLayoutEffect(() => {
     if (!enabled || !ready) return;
     const table = tableHostRef?.current?.querySelector("table");
     if (!table) return;
     applyColumnVisibilityToTable(table, hiddenLabels);
-  }, [enabled, ready, hiddenLabels, labels, tableHostRef]);
+  }, [enabled, ready, hiddenLabels, labels, tableHostRef, syncKey]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -75,7 +93,8 @@ export default function TableColumnVisibility({
     };
   }, [menuOpen]);
 
-  if (!enabled || !tableId || labels.length === 0) return null;
+  if (!enabled || !tableId) return null;
+  if (labels.length === 0) return null;
 
   const hiddenSet = new Set(hiddenLabels);
 

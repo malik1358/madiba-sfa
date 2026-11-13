@@ -49,13 +49,14 @@ export default function ExportableTable({
   }, [children]);
 
   return (
-    <div className="moduleExportableTable">
+    <div className="moduleExportableTable" ref={tableHostRef}>
       <div className="moduleExportableTableBar">
         <TableColumnFilters tableHostRef={tableHostRef} enabled={enableColumnFilters} />
         <TableColumnVisibility
           tableHostRef={tableHostRef}
           tableId={resolvedTableId}
           enabled={enableColumnVisibility && Boolean(resolvedTableId)}
+          syncKey={children}
         />
         <ExportExcelButton
           filename={filename}
@@ -68,7 +69,7 @@ export default function ExportableTable({
           }}
         />
       </div>
-      <div ref={tableHostRef} className={className} style={style}>
+      <div className={className} style={style}>
         {children}
       </div>
     </div>

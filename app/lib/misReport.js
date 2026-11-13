@@ -2,6 +2,7 @@
  * Live Management MIS (month-end style pack) from sales, receipts, and outstanding.
  * Repeat sale = line where the customer bought the same item name on an earlier day
  * (at least one calendar-day gap; same-day lines on the first purchase day stay new).
+ * Credit notes / non-positive lines do not count in repeat or new sales buckets.
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
@@ -182,8 +183,11 @@ export function buildMisReport({
     }
     const itemFirst = customer && item ? firstItem.get(`${customer}||${item}`) : null;
     // Same customer + item on a later calendar day (>=1 day gap) is repeat, including within the month.
-    if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
-    else bucket.newSales += amount;
+    // Only positive lines count as repeat/new sales; credit notes stay in total sales only.
+    if (amount > 0) {
+      if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
+      else bucket.newSales += amount;
+    }
 
     const cat = String(row.category || "").trim() || "(blank)";
     // Quarter rollups + as-of month + prior month (for category MoM compare).

@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-13** — **Item Master Analysis** (`/management/item-master-analysis`) mirrors Power BI Tally `mst_stock_item` + Swamiji Google Sheet into `item_master_analysis`, synced every 8 hours via `/api/cron/item-master-analysis-sync` (admin Sync now on `/api/admin/item-master-analysis-sync`). Requires Azure SP + Vercel `POWERBI_*` and migration `20261113140000_item_master_analysis.sql`. Does not overwrite `items_master`. See `docs/BUSINESS_RULES.md`, `docs/DATABASE.md`, `docs/DEPLOYMENT.md`.
 - **2026-11-13** — Management MIS Cash receivables remark uses **rolling 3m collection days** with improving/worsening day change; AR ageing MoM notes are green when the bucket falls and red when it rises. Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Expected Collection load no longer pulls the full sales BI cube; BM/Rest mix comes from the same `active_sales` rows used for avg days, sales chunks fetch concurrently, and a 3-minute in-process cache speeds reopen. Still live (not a prepared pack). No migration. See `docs/ARCHITECTURE.md`, `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Management MIS Inventory shows **Stock in hand** with forward-cover context, **Last 30d sales** pace, and **Days on hand**; category table columns are Stock in hand / Last 30d sales / Days on hand. Formula unchanged: `stock ÷ (sales_30d ÷ 30)`. Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.
@@ -622,3 +623,4 @@ Areas where the git checkout alone is incomplete. Do not invent missing details:
 6. **Which local/dev SQL scripts have been applied** on a developer’s Supabase project is not knowable from git alone.
 7. **`COLLECTOR_SCREEN_SETUP.md` and parts of older READMEs** can disagree with `moduleAccess.js` and migrations; prefer code + `docs/`.
 8. **Capacitor plugin behavior on specific Android OEM skins** (battery killing timers) is described in `ANDROID_APK.md` as operational guidance, not guaranteed OS behavior.
+

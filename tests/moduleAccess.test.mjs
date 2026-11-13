@@ -295,6 +295,18 @@ test("missing catalogue photos is a management report", () => {
   assert.equal(moduleLabelForPath("/management/missing-catalogue-photos", "en"), "Missing Catalogue Photos");
 });
 
+test("item master analysis is a management report", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("itemMasterAnalysis"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("itemMasterAnalysis"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("itemMasterAnalysis"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("itemMasterAnalysis"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("itemMasterAnalysis"), false);
+  assert.equal(moduleLabelForPath("/management/item-master-analysis", "en"), "Item Master Analysis");
+  assert.equal(localizedModuleLabel("itemMasterAnalysis", "ar"), "تحليل أصناف المخزون");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "itemMasterAnalysis"), true);
+});
+
 test("invoice makers can view every management report without setup access", () => {
   for (const role of ["invoice-maker", "invoice_maker"]) {
     const access = buildModuleAccess({ role });
@@ -313,6 +325,7 @@ test("invoice makers can view every management report without setup access", () 
       "potentialBadDebts",
       "legalTransfers",
       "missingCataloguePhotos",
+      "itemMasterAnalysis",
       "orderedNotInSales",
       "interCityStockTransfer",
       "eodStock",

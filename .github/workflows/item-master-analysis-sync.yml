@@ -1,0 +1,62 @@
+name: Item Master Analysis Sync
+
+on:
+  schedule:
+    # Every 8 hours. GitHub cron is UTC: 03:00, 11:00 and 19:00 KSA.
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Item Master Analysis from Power BI
+        env:
+          ITEM_MASTER_ANALYSIS_SYNC_URL: ${{ secrets.ITEM_MASTER_ANALYSIS_SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_ITEM_MASTER_ANALYSIS_SYNC_URL='https://madiba-sfa.vercel.app/api/cron/item-master-analysis-sync'
+          ITEM_MASTER_ANALYSIS_SYNC_URL_TRIMMED="$(printf '%s' "$ITEM_MASTER_ANALYSIS_SYNC_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE="$ITEM_MASTER_ANALYSIS_SYNC_URL_TRIMMED"
+
+          if [[ -z "$ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE" ]]; then
+            echo "ITEM_MASTER_ANALYSIS_SYNC_URL secret is missing; falling back to default endpoint."
+            ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE="$DEFAULT_ITEM_MASTER_ANALYSIS_SYNC_URL"
+          elif [[ ! "$ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE" =~ /api/cron/item-master-analysis-sync([/?].*)?$ ]]; then
+            echo "ITEM_MASTER_ANALYSIS_SYNC_URL secret does not point to /api/cron/item-master-analysis-sync; falling back to default endpoint."
+            ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE="$DEFAULT_ITEM_MASTER_ANALYSIS_SYNC_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_sync() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 300 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_sync "$ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE" != "$DEFAULT_ITEM_MASTER_ANALYSIS_SYNC_URL" ]]; then
+            echo "Primary ITEM_MASTER_ANALYSIS_SYNC_URL failed with HTTP $status_code; retrying default endpoint."
+            ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE="$DEFAULT_ITEM_MASTER_ANALYSIS_SYNC_URL"
+            status_code="$(post_sync "$ITEM_MASTER_ANALYSIS_SYNC_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Item Master Analysis sync failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Item Master Analysis sync succeeded with HTTP $status_code"
+          cat response.json

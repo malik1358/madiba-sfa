@@ -46,6 +46,7 @@ export const MODULES = {
   potentialBadDebts: { href: "/management/potential-bad-debts", label: "Potential Bad Debts" },
   legalTransfers: { href: "/management/legal-transfers", label: "Customers Transferred to Legal" },
   missingCataloguePhotos: { href: "/management/missing-catalogue-photos", label: "Missing Catalogue Photos" },
+  itemMasterAnalysis: { href: "/management/item-master-analysis", label: "Item Master Analysis" },
   customerGpsHistory: { href: "/management/customer-gps-history", label: "Customer GPS History" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
@@ -115,6 +116,7 @@ export const NAV_GROUPS = [
       "potentialBadDebts",
       "legalTransfers",
       "missingCataloguePhotos",
+      "itemMasterAnalysis",
       "customerGpsHistory",
       "gpsMap",
     ],
@@ -270,6 +272,7 @@ export function buildModuleAccess(context = {}) {
       potentialBadDebts: hasManagementReportAccess,
       legalTransfers: hasManagementReportAccess,
       missingCataloguePhotos: hasManagementReportAccess,
+      itemMasterAnalysis: hasManagementReportAccess,
       customerGpsHistory: isAdmin || isManager,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
       salesmanVisitPlan: isAdmin || (
@@ -492,6 +495,7 @@ export const MODULE_LABELS = {
   potentialBadDebts: { en: "Potential Bad Debts", ar: "ديون محتملة معدومة" },
   legalTransfers: { en: "Customers Transferred to Legal", ar: "عملاء محولون للقانوني" },
   missingCataloguePhotos: { en: "Missing Catalogue Photos", ar: "صور الكتالوج الناقصة" },
+  itemMasterAnalysis: { en: "Item Master Analysis", ar: "تحليل أصناف المخزون" },
   customerGpsHistory: { en: "Customer GPS History", ar: "سجل مواقع العملاء" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },

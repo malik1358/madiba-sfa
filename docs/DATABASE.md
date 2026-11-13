@@ -153,6 +153,7 @@ Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` 
 | Table | Role |
 | --- | --- |
 | `items_master` | Item master. Unique `item_code`. Extra Tally columns: `tally_unit`, `tally_item_name`, `tally_unit_source`, `tally_unit_updated_at`. |
+| `item_master_analysis` | Power BI Item Master Analysis mirror (Tally `mst_stock_item` + Swamiji Google Sheet). Unique `row_key`. Synced every 8 hours. Migration `20261113140000_item_master_analysis.sql`. Does not replace `items_master`. |
 | `products` | Selling catalog: names, `category`, `unit` default `CTN`, `price`, `vat_percent` default 15, `stock_status`, `is_active`, `do_not_use`. |
 | `product_categories`, `product_subcategories` | Category tree. |
 | `price_catalog_cache` | What `/api/pricing/cache` reads (`default`, `pricing_rules`, `order_schemes`, `order_quantity_controls`). `default.price_map` holds only positive Google Sheet / Apps Script rates after sync (no sales-history backfill). Quantity controls are returned as `quantityControls` for offline New Order checks. |
@@ -160,6 +161,8 @@ Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` 
 | `item_price_history` | `item_code`, `region` default `riyadh`, `price`, `recorded_at`, `source` default `price_sync`. |
 | `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `local_item_sales_target`, `new_skus_to_repeat_customers_target`, `updated_by`. |
 | `recommendations`, `recommendation_results` | Suggestion engine tables from the baseline schema. |
+
+`system_settings.item_master_analysis_sync_v1` stores the last Power BI sync stamp (`ok`, `source` = `executeQueries` or `export`, `rowCount`, `syncedAt`, optional `error`).
 
 Schemes and quantity limits are settings, not tables:
 
@@ -185,6 +188,7 @@ Schemes and quantity limits are settings, not tables:
 | Key | Used for |
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
+| `item_master_analysis_sync_v1` | Last Power BI Item Master Analysis sync stamp (`ok`, `source`, `rowCount`, `syncedAt`, `error`). Mirror rows live in `item_master_analysis`. |
 | `app_performance_daily_v1` | Workday app speed samples (`checks[]` with timings, counts, and `baseline` / `collecting` / `steady` / `slower` / `error`). One row per KSA hour, last 90 days. No migration. |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
 | `eod_stock_citywise_v1` | End-of-day stock upload by city (Riyadh, Dammam, Jeddah). Latest snapshot plus the previous stock date used for the comparison. Also stores `cityUploads` (last Excel path/name per city) so Imports can download Riyadh after a later Dammam file. No migration. |

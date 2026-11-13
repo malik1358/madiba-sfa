@@ -203,6 +203,11 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `CRON_SECRET` | Cron and price-sync auth. Different per environment |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Single-line service account for FCM |
 | `PRICE_SOURCE_URL` | Optional upstream price sheet. The app has a fallback if omitted |
+| `POWERBI_TENANT_ID` | Entra tenant for Power BI Item Master Analysis sync (default Pinazs tenant in `.env.example`) |
+| `POWERBI_CLIENT_ID`, `POWERBI_CLIENT_SECRET` | Azure AD app (service principal) with Dataset.Read.All + admin consent |
+| `POWERBI_WORKSPACE_ID`, `POWERBI_DATASET_ID` | Workspace and dataset that own the Item Master Analysis model |
+| `POWERBI_REPORT_ID` | Optional. Defaults to Pinazs report `c7c58c6d-d5db-495c-8698-4b08eae90c51` (export fallback) |
+| `POWERBI_ITEM_MASTER_DAX` | Optional DAX override for executeQueries |
 | `NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER` | Optional pre-filled WhatsApp number |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | SMTP. `SMTP_FROM` is required for SMTP and Resend |
 | `RESEND_API_KEY` | Alternative mail transport |
@@ -244,7 +249,9 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 - **Location / jurisdiction decision (record here when the production bucket is created):** _not decided yet_ — bucket location hint: …, jurisdiction: …, endpoint: …, decided by/date: ….
 - Switching production to R2 is a separate, approved step (Phase 4): set `ATTACHMENT_WRITE_PROVIDER=r2` (and `ATTACHMENT_DUAL_WRITE=1` for the verification period) in Vercel production only.
 
-GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `MATCHED_RECEIPT_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
+GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `ITEM_MASTER_ANALYSIS_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `MATCHED_RECEIPT_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
+
+Power BI Item Master Analysis sync also needs the `POWERBI_*` values in **Vercel production** (not GitHub). Create an Azure AD app in tenant `c52d5d0c-49e8-41df-bdda-8f7fc4f186bd`, grant Power BI **Dataset.Read.All** (application) with admin consent, add the service principal to the dataset workspace, then set workspace/dataset ids. Apply migration `20261113140000_item_master_analysis.sql` in production Supabase before the first cron run.
 
 ## Schedules
 
@@ -272,6 +279,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `returns-above-sales-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu. Current Returns Above Sales list. Sends when empty. Default To `vinit.kulkarni@noorshukran.com`, `badrish.thapliyal@noorshukran.com`, `malik@pinasz.com`. Optional `RETURNS_ABOVE_SALES_EMAIL_TO` / `_CC`. `maxDuration` 300s; curl `--max-time` 360. | `/api/cron/returns-above-sales-email` |
 | `kpi-upload-summary-email.yml` | manual | Force-send the transposed KPI Targets footer summary (Total sales + Collection + Total cash collected + Avg collection days Rolling 3m + Active customers + Active customers sales (120d)). Normal sends are scheduled 18 minutes after sales/receipt/outstanding uploads and flushed by `/api/cron/inactivity-push`. Optional `to=` on the cron URL sends a test-only copy. | `/api/cron/kpi-upload-summary-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
+| `item-master-analysis-sync.yml` | `0 */8 * * *` | Every 8 hours (03:00, 11:00, 19:00 KSA). Uses existing `CRON_SECRET`. Optional `ITEM_MASTER_ANALYSIS_SYNC_URL`. Requires Vercel `POWERBI_*` secrets and migration `20261113140000_item_master_analysis.sql`. | `/api/cron/item-master-analysis-sync` |
 | `catalogue-drive-photos.yml` | `0 */8 * * *` | Every 8 hours (03:00, 11:00, 19:00 KSA). Uses existing `CRON_SECRET`. Optional `CATALOGUE_DRIVE_PHOTOS_URL`. | `/api/cron/catalogue-drive-photos` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |

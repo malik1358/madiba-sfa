@@ -301,6 +301,7 @@ test("invoice makers can view every management report without setup access", () 
     for (const moduleKey of [
       "businessDashboard",
       "returnsAboveSales",
+      "expectedCollection",
       "activeCustomers",
       "myPerformance",
       "salesmanIncentive",

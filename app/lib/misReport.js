@@ -12,6 +12,10 @@ import {
   receivableTrailingDays,
   receivableYtdDays,
 } from "./receivableDays.js";
+import {
+  normalizeReportItemCode,
+  preferItemDisplayName,
+} from "./itemReportIdentity.js";
 
 const PORTFOLIO_EXCLUDE = new Set([
   "electronics",
@@ -67,6 +71,39 @@ function forwardCoverDays(stock, windowSales, windowDays = 30) {
 
 function normCat(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function looksLikePortfolioItemCode(value) {
+  const s = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9]{2,}$/.test(s) && /\d/.test(s);
+}
+
+function portfolioItemNameIsWeak(name, itemId, itemCode = "") {
+  const n = String(name || "").trim();
+  if (!n) return true;
+  const id = String(itemId || "").trim();
+  if (id && n.toUpperCase() === id.toUpperCase()) return true;
+  const code = normalizeReportItemCode(itemCode || id);
+  if (code && normalizeReportItemCode(n) === code) return true;
+  return false;
+}
+
+function resolvePortfolioItemLabel(cur = {}, prev = {}, itemId) {
+  let itemCode = String(cur.itemCode || "").trim() || String(prev.itemCode || "").trim();
+  if (!itemCode && looksLikePortfolioItemCode(itemId)) {
+    itemCode = normalizeReportItemCode(itemId);
+  }
+  const codeForName = itemCode || normalizeReportItemCode(itemId);
+  let itemName = String(cur.itemName || "").trim();
+  if (portfolioItemNameIsWeak(itemName, itemId, codeForName)) {
+    itemName = preferItemDisplayName(itemName, prev.itemName, codeForName);
+  }
+  if (portfolioItemNameIsWeak(itemName, itemId, codeForName)) {
+    itemName = String(prev.itemName || "").trim() || itemName;
+  }
+  if (!itemName) itemName = String(itemId || "").trim();
+  const category = String(cur.category || "").trim() || String(prev.category || "").trim();
+  return { itemCode, itemName, category };
 }
 
 function moneyRound(value) {
@@ -260,7 +297,14 @@ export function buildMisReport({
         };
         itemMo.sales += amount;
         itemMo.gp += profit;
-        if (!itemMo.itemName && itemNameRaw) itemMo.itemName = itemNameRaw;
+        if (itemNameRaw) {
+          const codeForName = itemCode || itemMo.itemCode || itemId;
+          if (portfolioItemNameIsWeak(itemMo.itemName, itemId, codeForName)) {
+            itemMo.itemName = itemNameRaw;
+          } else {
+            itemMo.itemName = preferItemDisplayName(itemMo.itemName, itemNameRaw, codeForName);
+          }
+        }
         if (!itemMo.itemCode && itemCode) itemMo.itemCode = itemCode;
         if (!itemMo.category || itemMo.category === "(blank)") itemMo.category = cat;
         portfolioItemMonthly.set(itemMoKey, itemMo);
@@ -549,22 +593,35 @@ export function buildMisReport({
   const portfolioTopLossItems = [...portfolioItemIds].map((itemId) => {
     const cur = portfolioItemMonthly.get(`${asOfYm}||${itemId}`) || {
       itemCode: "",
-      itemName: itemId,
+      itemName: "",
       category: "",
       sales: 0,
       gp: 0,
     };
     const prevRow = prevYm
-      ? (portfolioItemMonthly.get(`${prevYm}||${itemId}`) || { sales: 0, gp: 0 })
-      : { sales: 0, gp: 0 };
+      ? (portfolioItemMonthly.get(`${prevYm}||${itemId}`) || {
+        itemCode: "",
+        itemName: "",
+        category: "",
+        sales: 0,
+        gp: 0,
+      })
+      : {
+        itemCode: "",
+        itemName: "",
+        category: "",
+        sales: 0,
+        gp: 0,
+      };
+    const { itemCode, itemName, category } = resolvePortfolioItemLabel(cur, prevRow, itemId);
     const sales = moneyRound(cur.sales);
     const previousSales = moneyRound(prevRow.sales);
     const gp = moneyRound(cur.gp);
     const previousGp = moneyRound(prevRow.gp);
     return {
-      itemCode: cur.itemCode || "",
-      itemName: cur.itemName || itemId,
-      category: cur.category || prevRow.category || "",
+      itemCode,
+      itemName,
+      category,
       sales,
       previousSales,
       salesLoss: moneyRound(previousSales - sales),

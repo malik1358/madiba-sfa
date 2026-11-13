@@ -333,3 +333,41 @@ test("buildMisReport portfolio category MoM and top loss items exclude electroni
     (row) => String(row.category || "").trim().toLowerCase() === "electronics",
   ));
 });
+
+test("buildMisReport portfolio top loss keeps prior-month item name when current month has zero sales", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      {
+        transaction_date: "2026-09-10",
+        customer_code: "1",
+        item_code: "A004077",
+        item_name: "Luxury Hand Cream 50ml",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 75000,
+        profit_amount: 15000,
+      },
+      {
+        transaction_date: "2026-10-10",
+        customer_code: "2",
+        item_code: "P002",
+        item_name: "Other Soap",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 10000,
+        profit_amount: 2000,
+      },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+
+  const row = report.portfolioTopLossItems.find((r) => r.itemCode === "A004077");
+  assert.ok(row, "expected A004077 in portfolio top loss");
+  assert.equal(row.itemName, "Luxury Hand Cream 50ml");
+  assert.notEqual(row.itemName, "A004077");
+  assert.equal(row.sales, 0);
+  assert.equal(row.previousSales, 75000);
+  assert.equal(row.salesLoss, 75000);
+});

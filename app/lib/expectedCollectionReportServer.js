@@ -1,10 +1,16 @@
 import { lastDayOfMonth } from "./biReportPeriod.js";
 import { loadLegalTransferRows } from "./badDebtReportServer.js";
-import { enrichCollectionRecordsWithAvgDays } from "./collectionAvgDays.js";
+import {
+  attachAvgDaysToPayToRecords,
+  loadReceiptRowsByCustomer,
+  loadSalesRowsByCustomer,
+  lookupByCustomerCode,
+} from "./collectionAvgDays.js";
 import { buildExpectedCollectionDetailRows } from "./expectedCollectionReport.js";
 import {
   buildCustomerCategoryMixFromFacts,
   buildKpiUploadSummaryExcludedCustomerSet,
+  isKpiUploadSummaryCustomerExcluded,
   pickCustomerAvgDaysToPay,
 } from "./kpiUploadSummaryCategories.js";
 import { OUTSTANDING_DATASET_KEY, normalizeCode } from "./outstanding.js";
@@ -62,7 +68,7 @@ function groupOutstandingInvoicesByCustomer(invoices = []) {
 function resolveMonthEnd(monthOrDate = "") {
   const raw = String(monthOrDate || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return lastDayOfMonth(raw.slice(0, 7)) || raw.slice(0, 7) + "-28";
+    return lastDayOfMonth(raw.slice(0, 7)) || `${raw.slice(0, 7)}-28`;
   }
   if (/^\d{4}-\d{2}$/.test(raw)) {
     return lastDayOfMonth(raw) || `${raw}-28`;
@@ -72,9 +78,14 @@ function resolveMonthEnd(monthOrDate = "") {
   return lastDayOfMonth(monthKey) || `${monthKey}-28`;
 }
 
+function customerHasReceiptRows(receiptsByCustomer, customerCode) {
+  return lookupByCustomerCode(receiptsByCustomer, customerCode).length > 0;
+}
+
 /**
  * Live BM+Rest expected-collection detail for the management report.
  * Same rules as the KPI upload summary Collection expected-remaining categories.
+ * Only customers with at least one receipt are enriched (never-paid excluded).
  */
 export async function loadExpectedCollectionReport(admin, {
   month = "",
@@ -83,28 +94,46 @@ export async function loadExpectedCollectionReport(admin, {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
 
-  const [cube, outstandingInvoices, legalTransfers] = await Promise.all([
+  const [cube, outstandingInvoices, legalTransfers, receiptsByCustomer] = await Promise.all([
     loadSalesBiCube(admin, { allowStale: true }),
     loadOutstandingInvoices(admin),
     loadLegalTransferRows(admin).catch(() => []),
+    loadReceiptRowsByCustomer(admin),
   ]);
 
   const facts = cubeFactsList(cube);
   const customerMix = buildCustomerCategoryMixFromFacts(facts);
-  const customerRecords = groupOutstandingInvoicesByCustomer(outstandingInvoices);
-  const enrichedCustomers = customerRecords.length
-    ? await enrichCollectionRecordsWithAvgDays(admin, customerRecords, { todayIso: asOf })
-    : [];
+  const excludedLegalCustomers = buildKpiUploadSummaryExcludedCustomerSet(
+    (legalTransfers || [])
+      .filter((row) => Boolean(row?.is_transferred))
+      .map((row) => row?.customer_code),
+  );
+
+  const customerRecords = groupOutstandingInvoicesByCustomer(outstandingInvoices)
+    .filter((row) => {
+      const code = normalizeCode(row.customer_code);
+      if (!code) return false;
+      if (isKpiUploadSummaryCustomerExcluded(code, excludedLegalCustomers)) return false;
+      return customerHasReceiptRows(receiptsByCustomer, code);
+    });
+
+  const salesByCustomer = customerRecords.length
+    ? await loadSalesRowsByCustomer(
+      admin,
+      customerRecords.map((row) => row.customer_code),
+    )
+    : new Map();
+
+  const enrichedCustomers = attachAvgDaysToPayToRecords(customerRecords, {
+    salesByCustomer,
+    receiptsByCustomer,
+    todayIso: asOf,
+  });
   const enrichedByCode = new Map(
     enrichedCustomers.map((row) => [normalizeCode(row.customer_code), row]),
   );
   const avgDaysByCustomer = new Map(
     enrichedCustomers.map((row) => [normalizeCode(row.customer_code), pickCustomerAvgDaysToPay(row)]),
-  );
-  const excludedLegalCustomers = buildKpiUploadSummaryExcludedCustomerSet(
-    (legalTransfers || [])
-      .filter((row) => Boolean(row?.is_transferred))
-      .map((row) => row?.customer_code),
   );
 
   const detail = buildExpectedCollectionDetailRows(outstandingInvoices, {
@@ -118,7 +147,7 @@ export async function loadExpectedCollectionReport(admin, {
   return {
     asOf,
     monthEnd: detail.monthEnd,
-    rule: "max(lifetime avg, last paid invoice days); 120 if never paid; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end",
+    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,

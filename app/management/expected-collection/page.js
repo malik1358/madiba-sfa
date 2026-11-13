@@ -50,8 +50,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Avg days used = max(lifetime avg, days on last paid invoice); 120 if never paid. Customers with avg days above 120 and legal-queue customers are excluded. Expected amount is the BM + Rest sales-mix share of each open invoice whose approx pay date is on or before month-end (overdue still open counts).",
-    ar: "متوسط الأيام = أعلى قيمة بين متوسط العمر وأيام آخر فاتورة مسددة؛ 120 إن لم يُسدد قط. يُستبعد من يتجاوز متوسطه 120 يوماً وعملاء الطابور القانوني. المبلغ المتوقع هو حصة مواد البناء + الباقي من كل فاتورة مفتوحة تاريخ سدادها التقريبي في أو قبل نهاية الشهر (المتأخر المفتوح يُحتسب).",
+    en: "Avg days used = max(lifetime avg, days on last paid invoice). Customers with no payment yet, avg days above 120, and legal-queue customers are excluded. Expected amount is the BM + Rest sales-mix share of each open invoice whose approx pay date is on or before month-end (overdue still open counts).",
+    ar: "متوسط الأيام = أعلى قيمة بين متوسط العمر وأيام آخر فاتورة مسددة. يُستبعد من لم يسدد بعد، ومن يتجاوز متوسطه 120 يوماً، وعملاء الطابور القانوني. المبلغ المتوقع هو حصة مواد البناء + الباقي من كل فاتورة مفتوحة تاريخ سدادها التقريبي في أو قبل نهاية الشهر (المتأخر المفتوح يُحتسب).",
   },
 };
 
@@ -128,13 +128,23 @@ export default function ExpectedCollectionPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
-      const payload = await response.json();
+      const raw = await response.text();
+      let payload = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(
+          response.status === 504 || /timeout|error occurred/i.test(raw)
+            ? "Report timed out. Please refresh and try again."
+            : "Unable to load the report.",
+        );
+      }
       if (response.status === 403) {
         setAccessDenied(true);
         return;
       }
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load the report.");
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || "Unable to load the report.");
       }
       setReport(payload);
     } catch (err) {

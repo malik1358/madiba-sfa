@@ -95,3 +95,20 @@ test("buildExpectedCollectionDetailRows drops customers with avg days above 120"
   assert.equal(report.total, 1000);
   assert.equal(report.rows.some((row) => row.customerCode === "1601"), false);
 });
+
+test("buildExpectedCollectionDetailRows drops never-paid (null avg) but keeps paid avg 120", () => {
+  const report = buildExpectedCollectionDetailRows([
+    { customer_code: "1501", customer_name: "Alam", ref_no: "NFD/1106", invoice_date: "2026-07-28", pending_amount: 9251.27 },
+    { customer_code: "1493", customer_name: "Wasail", ref_no: "RNFD/082", invoice_date: "2026-07-07", pending_amount: 7473.55 },
+  ], {
+    avgDaysByCustomer: new Map([["1501", null], ["1493", 120]]),
+    customerMix: new Map([
+      ["1501", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1493", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+  assert.equal(report.invoiceCount, 1);
+  assert.equal(report.rows[0].customerCode, "1493");
+  assert.equal(report.rows[0].avgDays, 120);
+});

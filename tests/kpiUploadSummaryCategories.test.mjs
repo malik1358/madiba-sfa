@@ -330,15 +330,30 @@ test("estimate avg days uses max(lifetime, last paid invoice) and 120 when never
     avg_days_paid_only: 40,
   }), 40);
   assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 120,
+    last_paid_invoice_days: 104,
+    last_receipt_date: "2026-10-19",
+  }), 120);
+  assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: 55,
     avg_days_to_pay_6m: 8,
-  }), 120);
+  }), null);
   assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: null,
     avg_days_to_pay_6m: 15,
     last_receipt_date: "2026-09-01",
   }), 120);
-  assert.equal(pickCustomerAvgDaysToPay({}), 120);
+  assert.equal(pickCustomerAvgDaysToPay({}), null);
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-07-28",
+    avgDays: null,
+    monthEnd: "2026-11-30",
+  }), false);
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-07-07",
+    avgDays: 120,
+    monthEnd: "2026-11-30",
+  }), true);
 });
 
 test("expected remaining excludes legal-queue customer codes", () => {

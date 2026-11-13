@@ -242,7 +242,7 @@ function estimateFromParentShare(categoryActual, parentActual, parentEstimate) {
 /** Fallback when the customer has never paid (no receipt) or lifetime avg is missing. */
 export const KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS = 120;
 
-function customerHasPaidReceipt(row = {}) {
+export function customerHasPaidReceipt(row = {}) {
   const lastReceipt = String(row?.last_receipt_date || row?.lastReceiptDate || "").slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(lastReceipt)) return true;
   const paidOnly = Number(row?.avg_days_paid_only ?? row?.avgDaysPaidOnly);
@@ -291,7 +291,7 @@ export function resolveLastPaidInvoiceDays(allocations = []) {
  */
 export function pickCustomerAvgDaysToPay(row = {}) {
   if (!customerHasPaidReceipt(row)) {
-    return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
+    return null;
   }
   const lifetime = Number(row?.avg_days_to_pay ?? row?.avgDaysToPay);
   const lastPaid = Number(row?.last_paid_invoice_days ?? row?.lastPaidInvoiceDays);
@@ -315,6 +315,7 @@ export function resolveExpectedPayDate(invoiceDate, avgDays) {
  * Customers whose estimate avg days are above 120 (chronic slow payers) never qualify.
  */
 export function isExpectedCollectionAvgDaysEligible(avgDays = null) {
+  if (avgDays == null || avgDays === "") return false;
   const days = Number(avgDays);
   return Number.isFinite(days) && days >= 0 && days <= KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
 }

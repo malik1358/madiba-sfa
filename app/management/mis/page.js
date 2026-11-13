@@ -152,7 +152,7 @@ function InventoryCategoryTable({ rows, language, totalDaysOnHand }) {
             <tr>
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label="Stock value" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-              <BiExcelHead label="Days on hand" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              <BiExcelHead label="Forward cover (days)" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             </tr>
           </thead>
           <tbody>

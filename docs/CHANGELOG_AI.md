@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-13** — Management MIS Categories table headers name both months explicitly (e.g. **Oct 26 sales/GP/GP%** vs **Sep 26 sales/GP/GP%**), not bare Sales/GP/GP% for the as-of columns. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Management MIS Inventory header shows **Days on hand (month sales)** and **Days on hand (forward cover)** with MoM change on both (`stock ÷ (month sales ÷ days)` and `stock ÷ (sales_30d ÷ 30)`). Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Expected Collection groups invoices by salesman in collapsible rows with per-salesman **Expected SAR** totals (Expand all / Collapse all). Salesman comes from the outstanding invoice salesman cell. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — MIS Repeat slide adds a filterable **category-wise repeat** table (this month vs last month, Difference + MoM% green/red). Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.

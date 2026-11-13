@@ -64,10 +64,22 @@ export function bucketAmountsFromCover(stockAmount, days) {
   return amounts;
 }
 
-export function resolveItemStockValue({ qty = 0, uploadedValue = 0, unitRate = 0 } = {}) {
+/**
+ * Stock SAR for cover bands: uploaded closing value first, else qty × sales unit rate
+ * (sales_amount ÷ qty — same unit as EOD qty), else qty × catalogue wholesale.
+ * Catalogue pack rates must not win over piece-level sales rates.
+ */
+export function resolveItemStockValue({
+  qty = 0,
+  uploadedValue = 0,
+  unitRate = 0,
+  salesUnitRate = 0,
+} = {}) {
   const uploaded = toNumber(uploadedValue);
   if (uploaded > 0) return moneyRound(uploaded);
   const q = toNumber(qty);
+  const salesRate = toNumber(salesUnitRate);
+  if (q > 0 && salesRate > 0) return moneyRound(q * salesRate);
   const rate = toNumber(unitRate);
   if (q > 0 && rate > 0) return moneyRound(q * rate);
   return 0;
@@ -78,21 +90,18 @@ function addBucketAmount(target, key, amount) {
   target[key] = moneyRound(toNumber(target[key]) + moneyRound(amount));
 }
 
+function mapGet(mapOrObj, code) {
+  if (!mapOrObj) return 0;
+  if (typeof mapOrObj.get === "function") return toNumber(mapOrObj.get(code));
+  return toNumber(mapOrObj[code]);
+}
+
 export function buildItemCoverRows(stockRows = [], {
   sales30dByItem = null,
   rateByItem = null,
+  salesRateByItem = null,
   categoryByItem = null,
 } = {}) {
-  const salesGet = (code) => {
-    if (!sales30dByItem) return 0;
-    if (typeof sales30dByItem.get === "function") return toNumber(sales30dByItem.get(code));
-    return toNumber(sales30dByItem[code]);
-  };
-  const rateGet = (code) => {
-    if (!rateByItem) return 0;
-    if (typeof rateByItem.get === "function") return toNumber(rateByItem.get(code));
-    return toNumber(rateByItem[code]);
-  };
   const catGet = (code) => {
     if (!categoryByItem) return "";
     if (typeof categoryByItem.get === "function") return String(categoryByItem.get(code) || "").trim();
@@ -108,10 +117,11 @@ export function buildItemCoverRows(stockRows = [], {
     const amount = resolveItemStockValue({
       qty,
       uploadedValue,
-      unitRate: rateGet(itemCode),
+      salesUnitRate: mapGet(salesRateByItem, itemCode),
+      unitRate: mapGet(rateByItem, itemCode),
     });
     if (!amount) continue;
-    const sales30d = moneyRound(salesGet(itemCode));
+    const sales30d = moneyRound(mapGet(sales30dByItem, itemCode));
     const days = forwardCoverDays(amount, sales30d, COVER_WINDOW_DAYS);
     const bucket = assignCoverBucket(days);
     const category = String(row.category || catGet(itemCode) || "").trim() || "(blank)";

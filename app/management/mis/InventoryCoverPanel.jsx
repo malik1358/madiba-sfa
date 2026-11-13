@@ -107,10 +107,10 @@ function InventoryCoverCategoryTable({
   return (
     <ExportableTable filename="mis-inventory-categories" sheetName="Inventory" className="moduleTableWrap moduleBiTableWrap">
       <div className="moduleTableScroll" style={{ marginTop: 12 }}>
-        <table className="moduleTable moduleBiTable">
+        <table className="moduleTable moduleBiTable misInventoryCoverTable">
           <thead>
             <tr>
-              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="misInventoryStickyCol" />
               <BiExcelHead label="Stock value" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
               <BiExcelHead label={`Last ${windowDays}d sales`} filterKey="sales30d" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label="Forward cover (days)" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
@@ -133,7 +133,7 @@ function InventoryCoverCategoryTable({
               const days = row.forwardCoverDays ?? row.days;
               return (
                 <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                  <td>
+                  <td className="misInventoryStickyCol">
                     <InventoryLinkButton
                       title={canDrillItems ? t("drillHint") : t("itemDrillNeedsLive")}
                       onClick={() => onCategoryDrill?.(row.category)}
@@ -167,7 +167,7 @@ function InventoryCoverCategoryTable({
           </tbody>
           <tfoot>
             <tr>
-              <td><strong>Total</strong></td>
+              <td className="misInventoryStickyCol"><strong>Total</strong></td>
               <td className="moduleBiTotalCol"><strong>{amountInt(stockTotal)}</strong></td>
               <td><strong>{amountInt(sales30dTotal)}</strong></td>
               <td className={`moduleBiTotalCol${coverDaysTone(daysTotal)}`}>
@@ -214,10 +214,10 @@ function InventoryCoverItemTable({ rows, language, coverWindowDays = 30 }) {
   return (
     <ExportableTable filename="mis-inventory-items" sheetName="Items" className="moduleTableWrap moduleBiTableWrap">
       <div className="moduleTableScroll" style={{ marginTop: 8 }}>
-        <table className="moduleTable moduleBiTable">
+        <table className="moduleTable moduleBiTable misInventoryCoverTable">
           <thead>
             <tr>
-              <BiExcelHead label="Item code" filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Item code" filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="misInventoryStickyCol" />
               <BiExcelHead label="Item name" filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label="Stock value" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
@@ -240,7 +240,7 @@ function InventoryCoverItemTable({ rows, language, coverWindowDays = 30 }) {
           <tbody>
             {visibleRows.map((row, index) => (
               <tr key={row.itemCode} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                <td>{row.itemCode}</td>
+                <td className="misInventoryStickyCol">{row.itemCode}</td>
                 <td>{row.itemName}</td>
                 <td>{row.category}</td>
                 <td className="moduleBiTotalCol">{amountInt(row.amount)}</td>
@@ -261,7 +261,7 @@ function InventoryCoverItemTable({ rows, language, coverWindowDays = 30 }) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3}><strong>Total</strong></td>
+              <td className="misInventoryStickyCol" colSpan={3}><strong>Total</strong></td>
               <td className="moduleBiTotalCol"><strong>{amountInt(stockTotal)}</strong></td>
               <td><strong>{amountInt(sales30dTotal)}</strong></td>
               <td className={`moduleBiTotalCol${coverDaysTone(daysTotal)}`}>

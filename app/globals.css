@@ -9047,6 +9047,56 @@ tr.paymentSettleStatementLead td {
 .misInitiativeCard h3 { background: #0b2545; }
 .misInitiativeCard p { margin: 0; color: #243b4a; line-height: 1.45; }
 .misMeta { margin-top: 12px; color: #6b7c86; font-size: 12px; }
+
+/* MIS inventory cover: keep Category / Item code pinned; do not right-stick every band column. */
+.misInventoryCoverTable th.moduleBiTotalCol,
+.misInventoryCoverTable td.moduleBiTotalCol {
+  position: static;
+  right: auto;
+  left: auto;
+  box-shadow: none;
+}
+
+.misInventoryCoverTable th.misInventoryStickyCol,
+.misInventoryCoverTable td.misInventoryStickyCol,
+.misInventoryCoverTable th:first-child,
+.misInventoryCoverTable td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 10rem;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.12);
+}
+
+.misInventoryCoverTable thead th.misInventoryStickyCol,
+.misInventoryCoverTable thead th:first-child {
+  z-index: 9;
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.misInventoryCoverTable tbody td.misInventoryStickyCol,
+.misInventoryCoverTable tbody td:first-child {
+  background: #ffffff;
+}
+
+.misInventoryCoverTable tbody tr:nth-child(even) td.misInventoryStickyCol,
+.misInventoryCoverTable tbody tr:nth-child(even) td:first-child {
+  background: #f3fbfb;
+}
+
+.misInventoryCoverTable tbody tr:hover td.misInventoryStickyCol,
+.misInventoryCoverTable tbody tr:hover td:first-child {
+  background: #e5f4f4;
+}
+
+.misInventoryCoverTable tfoot td.misInventoryStickyCol,
+.misInventoryCoverTable tfoot td:first-child {
+  z-index: 5;
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
 @media (max-width: 900px) {
   .misKpiGrid, .misSplit, .misSummaryGrid, .misSwotGrid, .misInitiativeGrid { grid-template-columns: 1fr; }
   .misSlide, .misDeckStage { min-height: 0; }

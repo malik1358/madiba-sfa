@@ -53,7 +53,7 @@ test("item cover splits one category across multiple buckets", () => {
   ], {
     sales30dByItem: new Map([
       ["A1", 300000],
-      ["A2", 50000],
+      ["A2", 40000],
     ]),
   });
   assert.equal(items.length, 2);
@@ -67,6 +67,20 @@ test("item cover splits one category across multiple buckets", () => {
   assert.equal(cats[0].bucketAmounts["0-30"], 100000);
   assert.equal(cats[0].bucketAmounts[">120"], 200000);
   assert.equal(cats[0].bucketAmounts["31-60"], 0);
+});
+
+test("stock value prefers sales unit rate over catalogue pack rate", () => {
+  const items = buildItemCoverRows([
+    { itemCode: "A004082", qty: 195225, uploadedValue: 0, category: "Stationery" },
+  ], {
+    sales30dByItem: { A004082: 8612 },
+    salesRateByItem: { A004082: 0.629 },
+    rateByItem: { A004082: 132 },
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].amount, Math.round(195225 * 0.629));
+  assert.ok(items[0].amount < 200000);
+  assert.ok(items[0].amount < 195225 * 132);
 });
 
 test("buildInventoryCoverModel uses EOD items when provided", () => {

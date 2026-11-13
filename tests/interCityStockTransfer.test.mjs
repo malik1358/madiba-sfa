@@ -27,6 +27,8 @@ test("Tally section titles are not treated as stock items", () => {
   assert.equal(isEodStockSectionLabel("NON FOOD DIVISION"), true);
   assert.equal(isEodStockSectionLabel("RIYADH W/H 1"), true);
   assert.equal(isEodStockSectionLabel("Location : DAMMAM W/H 1"), true);
+  assert.equal(isEodStockSectionLabel("FRAGRANCE"), true);
+  assert.equal(isEodStockSectionLabel("STATIONARY"), true);
   assert.equal(isEodStockSectionLabel("A004426_MADIBA LIGHTER"), false);
   assert.equal(isInterCityExcludedItem({ itemCode: "NON FOOD DIVISION", itemName: "NON FOOD DIVISION" }), true);
   assert.equal(isInterCityExcludedItem({ itemCode: "RIYADH W/H 1", itemName: "RIYADH W/H 1" }), true);

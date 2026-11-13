@@ -189,12 +189,14 @@ export function enrichPhysicalCategoriesWithBuckets(categories = []) {
         : forwardCoverDays(amount, row.sales30d, COVER_WINDOW_DAYS);
     // Always recompute bands from cover days so legacy keys like ">90" do not
     // leave SAR stuck outside the current 91-120 / >120 headers.
+    // No sales pace ⇒ deep cover so Stock value still appears in a band.
+    const bandDays = days != null ? days : 999;
     return {
       ...row,
       amount,
       days,
       forwardCoverDays: days,
-      bucketAmounts: bucketAmountsFromCover(amount, days),
+      bucketAmounts: bucketAmountsFromCover(amount, bandDays),
     };
   });
 }

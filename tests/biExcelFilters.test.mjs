@@ -21,10 +21,11 @@ test("table filters keep only matching rows", () => {
   assert.deepEqual(visible.map((row) => row.name), ["Building Material", "Office supplies"]);
 });
 
-test("column options ignore values ruled out by other filters", () => {
+test("column options stay complete so multi-select is always available", () => {
   const options = buildExcelFilterOptions(rows, keys, valueOf, { q2: ["—"] });
-  assert.deepEqual(options.name, ["Building Material", "Office supplies"]);
-  assert.deepEqual(options.q1, ["100"]);
+  assert.deepEqual(options.name, ["Building Material", "Electronics", "Office supplies"]);
+  assert.deepEqual(options.q1, ["100", "200"]);
+  assert.deepEqual(options.q2, ["50", "—"]);
 });
 
 test("stale selections are pruned when options shrink", () => {

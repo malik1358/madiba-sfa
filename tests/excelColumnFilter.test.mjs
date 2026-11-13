@@ -33,7 +33,7 @@ test("select all applies only to the visible typed options", () => {
   assert.equal(excelFilterButtonLabel(["Parvez", "Belal"]), "2 selected");
 });
 
-test("filter lists keep only values still available after other columns", () => {
+test("prune removes selections that are no longer in the dataset", () => {
   assert.deepEqual(
     pruneExcelFilterSelection(["Parvez", "Belal", "Osama"], ["Belal"]),
     ["Belal"],

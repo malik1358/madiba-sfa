@@ -2,7 +2,6 @@ import {
   matchesExcelColumnFilter,
   normalizeExcelFilterValue,
   pruneExcelFilterSelection,
-  rowMatchesOtherExcelFilters,
 } from "./excelColumnFilter.js";
 
 export function excelFilterCellText(value) {
@@ -37,16 +36,23 @@ export function rowExcelValues(row, keys, valueOf) {
   return Object.fromEntries((keys || []).map((key) => [key, valueOf(row, key)]));
 }
 
-export function buildExcelFilterOptions(rows = [], keys = [], valueOf, filters = {}) {
-  return Object.fromEntries((keys || []).map((key) => {
-    const values = [];
-    for (const row of rows || []) {
-      const cells = rowExcelValues(row, keys, valueOf);
-      if (!rowMatchesOtherExcelFilters(cells, filters, key, keys, matchesExcelColumnFilter)) continue;
-      values.push(cells[key]);
+/**
+ * Build checkbox options for every filter column from the full row set.
+ * Options stay independent of applied filters so multi-select can keep picking
+ * values even after other columns (or this column) already narrow the table.
+ * The unused 4th argument is kept for call-site compatibility.
+ */
+export function buildExcelFilterOptions(rows = [], keys = [], valueOf, _filters = {}) {
+  const keyList = Array.isArray(keys) ? keys : [];
+  const buckets = Object.fromEntries(keyList.map((key) => [key, []]));
+  for (const row of rows || []) {
+    for (const key of keyList) {
+      buckets[key].push(valueOf(row, key));
     }
-    return [key, uniqueExcelFilterOptions(values)];
-  }));
+  }
+  return Object.fromEntries(
+    keyList.map((key) => [key, uniqueExcelFilterOptions(buckets[key])]),
+  );
 }
 
 export function filterRowsByExcelFilters(rows = [], keys = [], valueOf, filters = {}) {

@@ -86,7 +86,7 @@ import {
 } from "../../lib/orderQuotation";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { canRefreshOrderPricing } from "../../lib/orderPricingRefresh";
-import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
+import { matchesExcelColumnFilter, pruneExcelFilterSelection } from "../../lib/excelColumnFilter";
 import { uniqueExcelFilterOptions } from "../../lib/biExcelFilters";
 import {
   formatPendingDuration,
@@ -1244,13 +1244,10 @@ export default function PendingOrdersPage() {
   const columnFilterOptions = useMemo(() => {
     const options = {};
     HEADING_FILTER_KEYS.forEach((key) => {
-      const matching = orderFilterRows.filter(({ values }) => (
-        rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter)
-      ));
-      options[key] = uniqueColumnValues(matching.map(({ values }) => values[key]));
+      options[key] = uniqueColumnValues(orderFilterRows.map(({ values }) => values[key]));
     });
     return options;
-  }, [columnFilters, orderFilterRows]);
+  }, [orderFilterRows]);
 
   const effectiveColumnFilters = useMemo(() => {
     const next = { ...columnFilters };

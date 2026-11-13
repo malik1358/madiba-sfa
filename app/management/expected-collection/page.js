@@ -18,7 +18,10 @@ const TEXT = {
     ar: "الفواتير المفتوحة المتوقع تحصيلها حتى نهاية الشهر (مواد بناء + الباقي). نفس قواعد تقدير التحصيل المتوقع في مؤشرات الأداء.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
-  loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
+  loading: {
+    en: "Building expected collection from outstanding, receipts, and sales history…",
+    ar: "جاري بناء التحصيل المتوقع من المستحقات والإيصالات وسجل المبيعات…",
+  },
   refresh: { en: "Refresh", ar: "تحديث" },
   customer: { en: "Customer", ar: "العميل" },
   customerCode: { en: "Customer code", ar: "رمز العميل" },

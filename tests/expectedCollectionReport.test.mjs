@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildExpectedCollectionDetailRows } from "../app/lib/expectedCollectionReport.js";
+import { buildCustomerCategoryMixFromSalesRows } from "../app/lib/expectedCollectionReportServer.js";
 
 test("buildExpectedCollectionDetailRows keeps BM+Rest expected invoices and drops legal/electronics-only", () => {
   const avgDaysByCustomer = new Map([
@@ -111,4 +112,30 @@ test("buildExpectedCollectionDetailRows drops never-paid (null avg) but keeps pa
   assert.equal(report.invoiceCount, 1);
   assert.equal(report.rows[0].customerCode, "1493");
   assert.equal(report.rows[0].avgDays, 120);
+});
+
+test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {
+  const salesByCustomer = new Map([
+    ["1001", [
+      {
+        customer_code: "1001",
+        transaction_date: "2026-10-01",
+        category: "Building Material",
+        item_name: "MDF",
+        sales_amount: 80,
+      },
+      {
+        customer_code: "1001",
+        transaction_date: "2026-10-02",
+        category: "Stationery",
+        item_name: "Pen",
+        sales_amount: 20,
+      },
+    ]],
+  ]);
+  const mix = buildCustomerCategoryMixFromSalesRows(salesByCustomer);
+  assert.equal(mix.get("1001").buildingMaterial, 80);
+  assert.equal(mix.get("1001").rest, 20);
+  assert.equal(mix.get("1001").electronics, 0);
+  assert.equal(mix.get("1001").nonBuilding, 20);
 });

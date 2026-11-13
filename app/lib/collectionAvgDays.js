@@ -23,6 +23,8 @@ const SALES_SELECT = [
 
 const SALES_CODE_CHUNK = 60;
 const SALES_PAGE_SIZE = 1000;
+/** How many customer-code chunks to page from active_sales at once. */
+const SALES_FETCH_CONCURRENCY = 4;
 
 function parseJson(value) {
   try {
@@ -88,6 +90,26 @@ function salesLookupCodes(customerCode) {
   return [...new Set([raw, canonical, leading].filter(Boolean))];
 }
 
+async function loadSalesRowsForCodeChunk(admin, chunk) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await admin
+      .from("active_sales")
+      .select(SALES_SELECT)
+      .in("customer_code", chunk)
+      .order("transaction_date", { ascending: false })
+      .range(from, from + SALES_PAGE_SIZE - 1);
+    if (error) throw error;
+
+    const page = Array.isArray(data) ? data : [];
+    rows.push(...page);
+    if (page.length < SALES_PAGE_SIZE) break;
+    from += SALES_PAGE_SIZE;
+  }
+  return rows;
+}
+
 export async function loadSalesRowsByCustomer(admin, customerCodes = []) {
   const byCode = new Map();
   const codes = [...new Set(
@@ -95,26 +117,20 @@ export async function loadSalesRowsByCustomer(admin, customerCodes = []) {
   )];
   if (!admin || codes.length === 0) return byCode;
 
-  try {
-    for (let index = 0; index < codes.length; index += SALES_CODE_CHUNK) {
-      const chunk = codes.slice(index, index + SALES_CODE_CHUNK);
-      let from = 0;
-      while (true) {
-        const { data, error } = await admin
-          .from("active_sales")
-          .select(SALES_SELECT)
-          .in("customer_code", chunk)
-          .order("transaction_date", { ascending: false })
-          .range(from, from + SALES_PAGE_SIZE - 1);
-        if (error) throw error;
+  const chunks = [];
+  for (let index = 0; index < codes.length; index += SALES_CODE_CHUNK) {
+    chunks.push(codes.slice(index, index + SALES_CODE_CHUNK));
+  }
 
-        const page = Array.isArray(data) ? data : [];
-        page.forEach((row) => {
-          pushByCustomerCode(byCode, row.customer_code, row);
-        });
-        if (page.length < SALES_PAGE_SIZE) break;
-        from += SALES_PAGE_SIZE;
-      }
+  try {
+    for (let index = 0; index < chunks.length; index += SALES_FETCH_CONCURRENCY) {
+      const batch = chunks.slice(index, index + SALES_FETCH_CONCURRENCY);
+      const pages = await Promise.all(
+        batch.map((chunk) => loadSalesRowsForCodeChunk(admin, chunk)),
+      );
+      pages.flat().forEach((row) => {
+        pushByCustomerCode(byCode, row.customer_code, row);
+      });
     }
   } catch (error) {
     console.error("Unable to load sales for collection avg days:", error);

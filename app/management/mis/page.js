@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Children, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -17,6 +17,12 @@ import { compactChartNumber } from "../../lib/growthCharts";
 import { MIS_PORTFOLIO_EXCLUDE } from "../../lib/misReport";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { GrowthTrendChart } from "../business-dashboard/GrowthCharts";
+import CategoryGrowthFilters from "../business-dashboard/CategoryGrowthFilters";
+import {
+  emptyGrowthFilters,
+  hasActiveGrowthFilters,
+  normalizeGrowthFilters,
+} from "../../lib/categoryGrowth";
 
 const PORTFOLIO_EXCLUDE_SET = new Set(
   MIS_PORTFOLIO_EXCLUDE.map((value) => String(value || "").trim().toLowerCase()),
@@ -45,9 +51,15 @@ const TEXT = {
   next: { en: "Next", ar: "التالي" },
   slideOf: { en: "Slide", ar: "شريحة" },
   all: { en: "All", ar: "الكل" },
-  kpiPanel: { en: "Key figures", ar: "الأرقام الرئيسية" },
-  showKpis: { en: "Show", ar: "إظهار" },
-  hideKpis: { en: "Hide", ar: "إخفاء" },
+  sliceDice: { en: "Slice and dice", ar: "تقطيع وتصفية" },
+  showFilters: { en: "Show", ar: "إظهار" },
+  hideFilters: { en: "Hide", ar: "إخفاء" },
+  filtersHint: {
+    en: "Same salesman and field filters as Business Intelligence. Apply to recalculate this MIS pack for that slice (does not overwrite the prepared company pack).",
+    ar: "نفس عوامل تصفية المندوب والحقول في ذكاء الأعمال. طبّق لإعادة حساب تقرير الإدارة لهذه الشريحة (دون استبدال الحزمة الجاهزة للشركة).",
+  },
+  filtering: { en: "Applying filters…", ar: "جاري تطبيق التصفية…" },
+  filteredStamp: { en: "Filtered view", ar: "عرض مُصفّى" },
 };
 
 function money(value, { digits = 1 } = {}) {
@@ -151,53 +163,23 @@ function Kpi({ label, value, note, noteClassName = "", tone = "teal" }) {
   );
 }
 
-/** Collapsible KPI strip: closed by default so charts/tables keep the slide; open for full cards. */
-function MisKpiPanel({
-  language,
-  title,
-  compact = false,
-  defaultOpen = false,
-  children,
-}) {
+/** Collapsible BI-style slice/dice filters — closed by default so slides stay readable. */
+function MisFilterDrawer({ language, open, onToggle, activeCount, children }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
-  const [open, setOpen] = useState(defaultOpen);
-  const items = Children.toArray(children)
-    .filter((child) => child && typeof child === "object" && child.props?.label != null)
-    .map((child) => ({
-      label: child.props.label,
-      value: child.props.value,
-      tone: child.props.tone || "teal",
-    }));
-  const heading = title || t("kpiPanel");
-
   return (
-    <div className={`misKpiPanel${open ? " misKpiPanel--open" : ""}`}>
+    <div className={`misFilterDrawer${open ? " misFilterDrawer--open" : ""}`}>
       <button
         type="button"
-        className="misKpiPanelToggle"
+        className="misFilterDrawerToggle"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={onToggle}
       >
-        <span className="misKpiPanelChevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
-        <span className="misKpiPanelTitle">{heading}</span>
-        <span className="misKpiPanelCount">{items.length}</span>
-        <span className="misKpiPanelAction">{open ? t("hideKpis") : t("showKpis")}</span>
+        <span className="misFilterDrawerChevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span className="misFilterDrawerTitle">{t("sliceDice")}</span>
+        {activeCount > 0 ? <span className="misFilterDrawerCount">{activeCount}</span> : null}
+        <span className="misFilterDrawerAction">{open ? t("hideFilters") : t("showFilters")}</span>
       </button>
-      {!open && items.length ? (
-        <div className="misKpiChipRow" role="list">
-          {items.map((item) => (
-            <div key={item.label} className={`misKpiChip misKpiChip--${item.tone}`} role="listitem">
-              <span className="misKpiChipLabel">{item.label}</span>
-              <strong className="misKpiChipValue">{item.value}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {open ? (
-        <div className={`misKpiGrid${compact ? " misKpiGrid--compact" : ""}`}>
-          {children}
-        </div>
-      ) : null}
+      {open ? <div className="misFilterDrawerBody">{children}</div> : null}
     </div>
   );
 }
@@ -753,7 +735,7 @@ function buildSlides(report, language) {
       label: "Momentum",
       node: (
         <Slide eyebrow="MOMENTUM" title={`Performance through ${monthLabel(asOfYm)}`}>
-          <MisKpiPanel language={language} title="Headline KPIs">
+          <div className="misKpiGrid">
             <Kpi label="Sales" value={money(report.headline.sales)} note={momNote(report.headline.salesMomPct)} tone={report.headline.salesMomPct >= 0 ? "green" : "orange"} />
             <Kpi label="Gross profit" value={money(report.headline.gp)} note={momNote(report.headline.gpMomPct, `${report.headline.gpPct}% margin (was ${report.headline.previousGpPct}%)`)} tone={report.headline.gpMomPct >= 0 ? "green" : "orange"} />
             <Kpi label="Collections" value={money(report.headline.collection)} note={momNote(report.headline.collectionMomPct)} tone={report.headline.collectionMomPct >= 0 ? "green" : "orange"} />
@@ -768,7 +750,7 @@ function buildSlides(report, language) {
               tone={report.headline.gt90ArMomPct == null || report.headline.gt90ArMomPct <= 0 ? "green" : "orange"}
             />
             <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={momNote(report.headline.ytdMomPct, `${report.headline.newCustomers} new customers`)} tone={Number(report.headline.ytdMomPct) >= 0 ? "green" : "orange"} />
-          </MisKpiPanel>
+          </div>
           <p className="misRemark">{report.remarks.momentum} {report.remarks.margin}</p>
         </Slide>
       ),
@@ -805,7 +787,7 @@ function buildSlides(report, language) {
             </div>
             <div>
               <h3>AR ageing vs prior month</h3>
-              <MisKpiPanel language={language} title="AR ageing" compact>
+              <div className="misKpiGrid misKpiGrid--compact">
                 {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => {
                   const mom = report.headline.arBucketMomPct?.[bucket];
                   const prior = report.headline.previousArBuckets?.[bucket];
@@ -823,7 +805,7 @@ function buildSlides(report, language) {
                     />
                   );
                 })}
-              </MisKpiPanel>
+              </div>
               <p className="misRemark">{report.remarks.receivables}</p>
             </div>
           </div>
@@ -837,7 +819,7 @@ function buildSlides(report, language) {
         <Slide eyebrow="INVENTORY" title="Working capital in stock">
           {report.inventory ? (
             <>
-              <MisKpiPanel language={language} title="Inventory KPIs" defaultOpen>
+              <div className="misKpiGrid">
                 <Kpi
                   label="Stock in hand"
                   value={money(report.inventory.physical, { digits: 2 })}
@@ -876,7 +858,7 @@ function buildSlides(report, language) {
                   noteClassName={arMomNoteClass(report.inventory.daysMomPct)}
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
-              </MisKpiPanel>
+              </div>
               {report.inventory.categories?.length ? (
                 <InventoryCategoryTable
                   rows={report.inventory.categories}
@@ -899,12 +881,12 @@ function buildSlides(report, language) {
       label: "Repeat",
       node: (
         <Slide eyebrow="CUSTOMERS" title="Repeat business">
-          <MisKpiPanel language={language} title="Repeat KPIs">
+          <div className="misKpiGrid">
             <Kpi label="Repeat sales" value={money(report.headline.repeatSales)} note={momNote(report.headline.repeatSalesMomPct, `${report.headline.repeatPct}% of month`)} tone={Number(report.headline.repeatSalesMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Repeat customers" value={String(report.headline.repeatCustomers)} note={`Prior month ${report.headline.previousRepeatCustomers}`} tone="teal" />
             <Kpi label="New customers" value={String(report.headline.newCustomers)} note={momNote(report.headline.newCustomersMomPct, `prior ${report.headline.previousNewCustomers}`)} tone={Number(report.headline.newCustomersMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Prior repeat mix" value={`${report.headline.previousRepeatPct}%`} note={money(report.headline.previousRepeatSales)} tone="orange" />
-          </MisKpiPanel>
+          </div>
           <h3>Category repeat · {monthLabel(asOfYm)} vs {monthLabel(report.previousMonth)}</h3>
           <p className="misMeta">Filter any column. Difference and MoM% are green when up, red when down.</p>
           {(report.repeatCategories || []).length ? (
@@ -946,12 +928,12 @@ function buildSlides(report, language) {
           <p className="misMeta">
             Excluded from this portfolio: Electronics, Building Material, Office supplies, and Stationery.
           </p>
-          <MisKpiPanel language={language} title="Portfolio KPIs">
+          <div className="misKpiGrid">
             <Kpi label="Portfolio sales" value={money(portfolio.sales || 0)} note={momNote(pctChangeSafe(portfolio.sales, prevPortfolio.sales), `prior ${money(prevPortfolio.sales || 0)}`)} tone="teal" />
             <Kpi label="Portfolio GP" value={money(portfolio.gp || 0)} note={momNote(pctChangeSafe(portfolio.gp, prevPortfolio.gp), `prior ${money(prevPortfolio.gp || 0)}`)} tone="green" />
             <Kpi label="Portfolio GP%" value={`${portfolio.gpPct ?? 0}%`} note={`Prior ${prevPortfolio.gpPct ?? 0}%`} tone="green" />
             <Kpi label="Active SKUs / customers" value={`${portfolio.skus ?? 0} / ${portfolio.customers ?? 0}`} tone="teal" />
-          </MisKpiPanel>
+          </div>
           {report.portfolioCategories?.length ? (
             <>
               <h3>Category MoM · where the dip is</h3>
@@ -1115,29 +1097,66 @@ export default function MisPage() {
   const [builtAt, setBuiltAt] = useState("");
   const [error, setError] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterDraft, setFilterDraft] = useState(() => emptyGrowthFilters());
+  const [filterApplied, setFilterApplied] = useState(() => emptyGrowthFilters());
+  const [filterCatalogs, setFilterCatalogs] = useState({});
+  const [filtering, setFiltering] = useState(false);
+  const [filteredView, setFilteredView] = useState(false);
   usePopupMessages({ error });
 
   const canOpen = access?.canAccess?.("mis");
+  const activeFilterCount = useMemo(() => {
+    const filters = normalizeGrowthFilters(filterApplied);
+    let count = 0;
+    if (filters.dateFrom || filters.dateTo) count += 1;
+    if (filters.amountMin != null || filters.amountMax != null) count += 1;
+    if (filters.quantityMin != null || filters.quantityMax != null) count += 1;
+    Object.values(filters.values || {}).forEach((values) => {
+      if (Array.isArray(values) && values.length) count += 1;
+    });
+    return count;
+  }, [filterApplied]);
 
-  const load = useCallback(async (date, { rebuild = false } = {}) => {
+  const load = useCallback(async (date, { rebuild = false, filters = null } = {}) => {
+    const usingFilters = filters && hasActiveGrowthFilters(filters);
     setLoading(true);
-    setPreparing(Boolean(rebuild));
+    setPreparing(Boolean(rebuild) && !usingFilters);
+    setFiltering(Boolean(usingFilters));
     setError("");
     try {
       const supabase = getSupabaseClient();
       if (!supabase) throw new Error("Supabase is not configured.");
       const session = await resolveAuthSession(supabase, 12000);
       if (!session?.access_token) throw new Error("Please login again.");
-      const params = new URLSearchParams({ asOf: date });
-      if (rebuild) params.set("rebuild", "1");
-      const { response, payload } = await fetchJsonWithTimeout(
-        `/api/business-dashboard/mis?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } },
-        rebuild ? 90000 : 20000,
-      );
+      let response;
+      let payload;
+      if (usingFilters) {
+        ({ response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/mis",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ asOf: date, filters }),
+          },
+          90000,
+        ));
+      } else {
+        const params = new URLSearchParams({ asOf: date });
+        if (rebuild) params.set("rebuild", "1");
+        ({ response, payload } = await fetchJsonWithTimeout(
+          `/api/business-dashboard/mis?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } },
+          rebuild ? 90000 : 20000,
+        ));
+      }
       if (payload?.code === "MIS_NOT_PREPARED") {
         setReport(null);
         setBuiltAt("");
+        setFilteredView(false);
         setError(payload?.error || "Month-end MIS is not prepared yet.");
         return;
       }
@@ -1146,15 +1165,19 @@ export default function MisPage() {
       }
       setReport(payload.report || null);
       setBuiltAt(payload.builtAt || payload.report?.meta?.preparedAt || "");
+      if (payload.catalogs) setFilterCatalogs(payload.catalogs);
+      setFilteredView(Boolean(payload.filtered || usingFilters));
       if (payload.asOfDate) setAsOf(payload.asOfDate);
       if (payload.message) setError(payload.message);
       setSlideIndex(0);
     } catch (err) {
       setReport(null);
       setBuiltAt("");
+      setFilteredView(false);
       setError(err?.message || "Unable to load MIS");
     } finally {
       setPreparing(false);
+      setFiltering(false);
       setLoading(false);
     }
   }, []);
@@ -1248,7 +1271,12 @@ export default function MisPage() {
                 <button
                   type="button"
                   className="moduleButton moduleButtonPrimary"
-                  onClick={() => load(asOf, { rebuild: true })}
+                  onClick={() => {
+                    const empty = emptyGrowthFilters();
+                    setFilterDraft(empty);
+                    setFilterApplied(empty);
+                    load(asOf, { rebuild: true });
+                  }}
                   disabled={loading}
                 >
                   {t("refresh")}
@@ -1260,10 +1288,44 @@ export default function MisPage() {
                     {new Date(builtAt).toLocaleString()}
                   </span>
                 ) : null}
+                {filteredView ? (
+                  <span className="misPreparedStamp misPreparedStamp--filtered">{t("filteredStamp")}</span>
+                ) : null}
               </div>
 
+              <MisFilterDrawer
+                language={language}
+                open={filtersOpen}
+                onToggle={() => setFiltersOpen((value) => !value)}
+                activeCount={activeFilterCount}
+              >
+                <CategoryGrowthFilters
+                  language={language}
+                  draft={filterDraft}
+                  catalogs={filterCatalogs}
+                  applied={filterApplied}
+                  onDraftChange={setFilterDraft}
+                  onGroupByChange={() => {}}
+                  onApply={() => {
+                    const next = normalizeGrowthFilters(filterDraft);
+                    setFilterApplied(next);
+                    load(asOf, { filters: next });
+                  }}
+                  onClear={() => {
+                    const empty = emptyGrowthFilters();
+                    setFilterDraft(empty);
+                    setFilterApplied(empty);
+                    load(asOf, { rebuild: false });
+                  }}
+                  lockGroupBy="category"
+                  showSearch={false}
+                  showStatusFilters={false}
+                  hint={t("filtersHint")}
+                />
+              </MisFilterDrawer>
+
               {loading ? (
-                <div className="moduleCard"><p>{preparing ? t("preparing") : t("loading")}</p></div>
+                <div className="moduleCard"><p>{preparing ? t("preparing") : (filtering ? t("filtering") : t("loading"))}</p></div>
               ) : !report || !active ? (
                 <div className="moduleCard">
                   <p>{error ? t("notPrepared") : t("noData")}</p>

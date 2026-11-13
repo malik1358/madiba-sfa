@@ -30,6 +30,7 @@ const TEXT = {
   items: { en: "Items", ar: "الأصناف" },
   item: { en: "Item", ar: "الصنف" },
   itemCode: { en: "Item code", ar: "رمز الصنف" },
+  mergedFrom: { en: "Merged codes", ar: "رموز مدمجة" },
   gpPercent: { en: "GP %", ar: "هامش %" },
   eligibleMonths: { en: "Eligible months", ar: "الأشهر المؤهلة" },
   peakMonth: { en: "Highest month", ar: "أعلى شهر" },
@@ -54,8 +55,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Company seasonal peaks are the top completed months at least 25% above the median monthly sales (up to three). Those calendar months are dropped for every item. Expected SAR is the second-highest remaining month (or the only month when history is thin). Amounts are ex-VAT net sales.",
-    ar: "ذروة الشركة الموسمية هي أعلى الأشهر المكتملة التي تزيد 25% على الأقل عن وسيط المبيعات الشهرية (حتى ثلاثة أشهر). تُستبعد تلك الأشهر التقويمية لكل صنف. القيمة المتوقعة هي ثاني أعلى شهر متبقٍ (أو الشهر الوحيد عند قلة التاريخ). المبالغ صافي مبيعات بدون ضريبة.",
+    en: "Company seasonal peaks are the top completed months at least 25% above the median monthly sales (up to three). Those calendar months are dropped for every item. Replacement item codes (for example old 100-pc gloves → current 70-pc gloves) are merged so history is not double-counted. Expected SAR is the second-highest remaining month (or the only month when history is thin). Amounts are ex-VAT net sales.",
+    ar: "ذروة الشركة الموسمية هي أعلى الأشهر المكتملة التي تزيد 25% على الأقل عن وسيط المبيعات الشهرية (حتى ثلاثة أشهر). تُستبعد تلك الأشهر التقويمية لكل صنف. رموز الأصناف البديلة (مثل قفازات 100 قطعة القديمة ← 70 قطعة الحالية) تُدمج حتى لا تُحسب مرتين. القيمة المتوقعة هي ثاني أعلى شهر متبقٍ (أو الشهر الوحيد عند قلة التاريخ). المبالغ صافي مبيعات بدون ضريبة.",
   },
 };
 
@@ -101,6 +102,7 @@ function itemCellValue(row, key) {
   if (key === "itemCode") return row.itemCode || "";
   if (key === "itemName") return row.itemName || "";
   if (key === "category") return row.category || "";
+  if (key === "mergedFrom") return row.mergedFrom || "";
   if (key === "gpPercent") return formatPercent(row.gpPercent);
   if (key === "eligibleMonthCount") return String(row.eligibleMonthCount ?? "");
   if (key === "peakMonth") return monthLabel(row.peakMonth);
@@ -312,6 +314,7 @@ export default function ExpectedStockedSalesPage() {
                       <BiExcelHead label={t("itemCode")} filterKey="itemCode" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("item")} filterKey="itemName" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("category")} filterKey="category" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("mergedFrom")} filterKey="mergedFrom" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("gpPercent")} filterKey="gpPercent" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("eligibleMonths")} filterKey="eligibleMonthCount" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("peakMonth")} filterKey="peakMonth" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
@@ -327,6 +330,7 @@ export default function ExpectedStockedSalesPage() {
                         <td>{row.itemCode}</td>
                         <td>{row.itemName}</td>
                         <td>{row.category}</td>
+                        <td>{row.mergedFrom || "—"}</td>
                         <td>{formatPercent(row.gpPercent)}</td>
                         <td>{row.eligibleMonthCount}</td>
                         <td>{monthLabel(row.peakMonth)}</td>
@@ -341,6 +345,7 @@ export default function ExpectedStockedSalesPage() {
                     <tr>
                       <td>{t("total")}</td>
                       <td>{visibleItems.length}</td>
+                      <td />
                       <td />
                       <td />
                       <td />

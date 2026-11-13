@@ -3,9 +3,12 @@ import { test } from "node:test";
 import {
   buildExpectedStockedSalesReport,
   detectSeasonalCalendarMonths,
+  expectedStockedFamilyKeysMatch,
+  expectedStockedItemFamilyKey,
   isLocalProductItemCode,
   pickSecondHighestMonth,
 } from "../app/lib/expectedStockedSales.js";
+import { resolveCanonicalItemCode } from "../app/lib/itemCodeAliases.js";
 
 test("LP item codes are local products", () => {
   assert.equal(isLocalProductItemCode("LP00318"), true);
@@ -27,6 +30,18 @@ test("detects seasonal calendar months from company peaks above median", () => {
 
   assert.deepEqual(season.calendarMonths, ["08", "09", "10"]);
   assert.deepEqual(season.peakYearMonths, ["2026-09", "2026-10", "2026-08"]);
+});
+
+test("glove pack changes share one family key and canonical code", () => {
+  assert.equal(
+    expectedStockedFamilyKeysMatch(
+      expectedStockedItemFamilyKey("A003948_Gloves, clear vinyl, L 100 pcs/box, 10 boxes /carton -"),
+      expectedStockedItemFamilyKey("MADIBA VINYL GLOVES SIZE LARGE TRANSPARENT CLEAR (VG-L-70-MDB)"),
+    ),
+    true,
+  );
+  assert.equal(resolveCanonicalItemCode("A003948"), "A006299");
+  assert.equal(resolveCanonicalItemCode("A006299"), "A006299");
 });
 
 test("second highest month is used when at least two eligible months exist", () => {
@@ -101,4 +116,37 @@ test("buildExpectedStockedSalesReport applies GP, LP, and seasonal filters", () 
   assert.equal(stationery.expectedSales, 200);
   assert.equal(personal.expectedSales, 60);
   assert.equal(stationery.sharePercent, 76.92);
+});
+
+test("old and new glove codes are merged so history is not double-counted", () => {
+  const now = new Date("2026-11-14T08:00:00+03:00");
+  const rows = [
+    // Company filler so Aug/Sep/Oct become seasonal peaks (must dominate glove months).
+    { transaction_date: "2026-05-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 100, profit_amount: 20 },
+    { transaction_date: "2026-06-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 110, profit_amount: 22 },
+    { transaction_date: "2026-07-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 120, profit_amount: 24 },
+    { transaction_date: "2026-08-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 5000, profit_amount: 1000 },
+    { transaction_date: "2026-09-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 6000, profit_amount: 1200 },
+    { transaction_date: "2026-10-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 5500, profit_amount: 1100 },
+
+    // Old 100-pc large gloves
+    { transaction_date: "2026-05-10", item_code: "A003948", item_name: "Gloves, clear vinyl, L 100 pcs/box, 10 boxes /carton -", category: "Personal Care", quantity: 10, sales_amount: 1000, profit_amount: 200 },
+    { transaction_date: "2026-06-10", item_code: "A003948", item_name: "Gloves, clear vinyl, L 100 pcs/box, 10 boxes /carton -", category: "Personal Care", quantity: 12, sales_amount: 1200, profit_amount: 240 },
+    { transaction_date: "2026-07-10", item_code: "A003948", item_name: "MADIBA VINYL GLOVES SIZE Do Not Use", category: "Personal Care", quantity: 8, sales_amount: 800, profit_amount: 160 },
+
+    // New 70-pc large gloves — same product family
+    { transaction_date: "2026-05-15", item_code: "A006299", item_name: "MADIBA VINYL GLOVES SIZE LARGE TRANSPARENT CLEAR (VG-L-70-MDB)", category: "Personal Care", quantity: 5, sales_amount: 500, profit_amount: 100 },
+    { transaction_date: "2026-06-15", item_code: "A006299", item_name: "MADIBA VINYL GLOVES SIZE LARGE TRANSPARENT CLEAR (VG-L-70-MDB)", category: "Personal Care", quantity: 6, sales_amount: 600, profit_amount: 120 },
+    { transaction_date: "2026-07-15", item_code: "A006299", item_name: "MADIBA VINYL GLOVES SIZE LARGE TRANSPARENT CLEAR (VG-L-70-MDB)", category: "Personal Care", quantity: 7, sales_amount: 700, profit_amount: 140 },
+  ];
+
+  const report = buildExpectedStockedSalesReport(rows, { now });
+  const gloves = report.rows.filter((row) => row.itemCode === "A006299" || row.itemCode === "A003948");
+  assert.equal(gloves.length, 1);
+  assert.equal(gloves[0].itemCode, "A006299");
+  assert.match(gloves[0].mergedFrom, /A003948/);
+  // May = 1000+500, Jun = 1200+600, Jul = 800+700 → peak Jun 1800, second Jul 1500
+  assert.equal(gloves[0].peakSales, 1800);
+  assert.equal(gloves[0].expectedSales, 1500);
+  assert.equal(gloves[0].expectedMonth, "2026-07");
 });

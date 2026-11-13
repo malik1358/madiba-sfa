@@ -1,5 +1,13 @@
 export const PRICE_CODE_ALIASES = {
+  // Photocopy paper rebrands / replacements
   A005425: ["A004555", "A000057", "A003234"],
+  // MADIBA vinyl gloves: old 100 pcs/box codes → current 70 pcs/box codes
+  A006297: ["A003946"],
+  A006298: ["A003947"],
+  A006299: ["A003948"],
+  A006300: ["A003949"],
+  // Soap / returns history: old code is the same product
+  A003928: ["A003927"],
 };
 
 export function normalizeItemCode(value) {
@@ -17,6 +25,18 @@ export function getRelatedItemCodes(itemCode) {
   });
 
   return [...related];
+}
+
+/** Preferred live code for a replacement family (target of PRICE_CODE_ALIASES). */
+export function resolveCanonicalItemCode(itemCode) {
+  const code = normalizeItemCode(itemCode);
+  if (!code) return "";
+  for (const [targetCode, sourceCodes] of Object.entries(PRICE_CODE_ALIASES)) {
+    const target = normalizeItemCode(targetCode);
+    const family = [target, ...(sourceCodes || []).map(normalizeItemCode)].filter(Boolean);
+    if (family.includes(code)) return target;
+  }
+  return code;
 }
 
 export function lookupPositiveRate(rateMap, itemCode, fallback = 0) {

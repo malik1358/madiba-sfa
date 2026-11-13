@@ -7,7 +7,8 @@
 
 import { monthKeyFromDateKey, salesDateKey } from "./categoryGrowth.js";
 import { normalizeCategoryName, UNCLASSIFIED_CATEGORY } from "./categoryIdentity.js";
-import { preferItemDisplayName, normalizeReportItemCode } from "./itemReportIdentity.js";
+import { resolveCanonicalItemCode } from "./itemCodeAliases.js";
+import { preferItemDisplayName, normalizeReportItemCode, isDoNotUseItemName } from "./itemReportIdentity.js";
 import { getKsaDateString } from "./workdayActivity.js";
 import { grossProfitPercent } from "./madibaBrandGp.js";
 
@@ -29,6 +30,7 @@ export const EXPECTED_STOCKED_SALES_ITEM_FILTER_KEYS = [
   "itemCode",
   "itemName",
   "category",
+  "mergedFrom",
   "gpPercent",
   "eligibleMonthCount",
   "peakMonth",
@@ -70,6 +72,55 @@ export function normalizeExpectedStockedItemCode(value) {
 /** Local products (building / local pack) — excluded from this report. */
 export function isLocalProductItemCode(value) {
   return /^LP/i.test(normalizeExpectedStockedItemCode(value));
+}
+
+/**
+ * Pack-count-insensitive product key so old 100pcs gloves match new 70pcs gloves.
+ * Explicit PRICE_CODE_ALIASES still win; this catches unnamed successors.
+ */
+export function expectedStockedItemFamilyKey(name = "") {
+  let text = String(name || "").toUpperCase();
+  if (!text) return "";
+  text = text.replace(/^[A-Z]\d+(?:\/\d+)?_/, "");
+  text = text.replace(/DO\s*NOT\s*USE+/g, " ");
+  text = text.replace(/\([^)]*\)/g, " ");
+
+  text = text.replace(
+    /\bGLOVES?,?\s*CLEAR\s*VINYL,?\s*(XL|S|M|L)\b/g,
+    (_, size) => {
+      const map = { S: "SMALL", M: "MEDIUM", L: "LARGE", XL: "XL" };
+      return `VINYL GLOVES SIZE ${map[size] || size}`;
+    },
+  );
+  text = text.replace(/\bSIZE\s+S\b/g, "SIZE SMALL");
+  text = text.replace(/\bSIZE\s+M\b/g, "SIZE MEDIUM");
+  text = text.replace(/\bSIZE\s+L\b/g, "SIZE LARGE");
+
+  text = text.replace(
+    /\b\d+\s*(?:PCS?|PIECES?|PC|SHEETS?|SHEE|RM|ROLLS?|BOXES?|BAGS?|PACKETS?|PACKS?|CTN|CARTONS?|TRAYS?|SHR(?:INK)?|MTRS?|GM|KG|LTR|ML)\b/g,
+    " ",
+  );
+  text = text.replace(/\b\d+\s*[X×]\s*\d+(?:\s*[X×]\s*\d+)*\b/g, " ");
+  text = text.replace(/\b(?:TRANSPARENT|CLEAR|COLOU?R|BOXES?|BOX|CARTONS?|CARTON|CTN|PACKS?|PACKETS?|BAGS?|TRAYS?|SHRINK)\b/g, " ");
+  text = text.replace(/[^A-Z0-9"]+/g, " ").trim().replace(/\s+/g, " ");
+  return text;
+}
+
+function stripOptionalBrandPrefix(key = "") {
+  return String(key || "").replace(/^(?:MADIBA|OMNIA|PAPERLINE|GOLDEN\s+STAR)\s+/i, "").trim();
+}
+
+export function expectedStockedFamilyKeysMatch(left = "", right = "") {
+  const rawA = String(left || "").trim();
+  const rawB = String(right || "").trim();
+  if (!rawA || !rawB) return false;
+  const a = stripOptionalBrandPrefix(rawA);
+  const b = stripOptionalBrandPrefix(rawB);
+  if (!a || !b) return false;
+  if (a === b || rawA === rawB) return true;
+  if (a.length < 12 || b.length < 12) return false;
+  return a.endsWith(` ${b}`) || b.endsWith(` ${a}`) || a.endsWith(b) || b.endsWith(a)
+    || rawA.endsWith(` ${rawB}`) || rawB.endsWith(` ${rawA}`) || rawA.endsWith(rawB) || rawB.endsWith(rawA);
 }
 
 export function currentIncompleteMonthKey(now = new Date()) {
@@ -174,12 +225,130 @@ function emptyItemBucket(itemCode) {
     category: UNCLASSIFIED_CATEGORY,
     lifeSales: 0,
     lifeProfit: 0,
+    lastSaleDate: "",
+    sourceCodes: new Set([itemCode]),
     months: new Map(),
   };
 }
 
+function mergeItemBucketInto(target, source) {
+  if (!target || !source || target === source) return target;
+  target.itemName = preferItemDisplayName(target.itemName, source.itemName, target.itemCode);
+  if ((!target.category || target.category === UNCLASSIFIED_CATEGORY)
+    && source.category
+    && source.category !== UNCLASSIFIED_CATEGORY) {
+    target.category = source.category;
+  }
+  target.lifeSales += Number(source.lifeSales || 0);
+  target.lifeProfit += Number(source.lifeProfit || 0);
+  if (source.lastSaleDate && (!target.lastSaleDate || source.lastSaleDate > target.lastSaleDate)) {
+    target.lastSaleDate = source.lastSaleDate;
+  }
+  (source.sourceCodes || []).forEach((code) => target.sourceCodes.add(code));
+  source.months.forEach((monthRow, month) => {
+    const existing = target.months.get(month) || { month, sales: 0, qty: 0 };
+    existing.sales += Number(monthRow.sales || 0);
+    existing.qty += Number(monthRow.qty || 0);
+    target.months.set(month, existing);
+  });
+  return target;
+}
+
+function preferLiveItemBucket(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  const leftDnu = isDoNotUseItemName(left?.itemName);
+  const rightDnu = isDoNotUseItemName(right?.itemName);
+  if (leftDnu && !rightDnu) return right;
+  if (!leftDnu && rightDnu) return left;
+  const leftLast = String(left?.lastSaleDate || "");
+  const rightLast = String(right?.lastSaleDate || "");
+  if (leftLast !== rightLast) return leftLast > rightLast ? left : right;
+  return String(left?.itemCode || "").localeCompare(String(right?.itemCode || "")) >= 0 ? left : right;
+}
+
+/**
+ * Collapse replacement codes into one bucket (aliases + pack-changed name families).
+ */
+export function collapseExpectedStockedItemBuckets(byItem = new Map()) {
+  const working = new Map();
+  (byItem || new Map()).forEach((bucket, code) => {
+    const copy = emptyItemBucket(code);
+    mergeItemBucketInto(copy, bucket);
+    working.set(code, copy);
+  });
+  if (working.size <= 1) return working;
+
+  const parent = new Map();
+  function find(code) {
+    const key = normalizeExpectedStockedItemCode(code);
+    if (!parent.has(key)) parent.set(key, key);
+    const root = parent.get(key);
+    if (root !== key) {
+      const resolved = find(root);
+      parent.set(key, resolved);
+      return resolved;
+    }
+    return key;
+  }
+  function union(a, b) {
+    const left = find(a);
+    const right = find(b);
+    if (left === right) return;
+    const keep = preferLiveItemBucket(working.get(left), working.get(right));
+    const dropCode = keep.itemCode === left ? right : left;
+    parent.set(dropCode, keep.itemCode);
+  }
+
+  // Known replacement families (PRICE_CODE_ALIASES) — already canonicalized on ingest,
+  // but keep this for any residual source codes still present as separate buckets.
+  [...working.keys()].forEach((code) => {
+    const canonical = resolveCanonicalItemCode(code);
+    if (!canonical || canonical === code) return;
+    if (!working.has(canonical)) {
+      const moved = emptyItemBucket(canonical);
+      mergeItemBucketInto(moved, working.get(code));
+      working.set(canonical, moved);
+      working.delete(code);
+      parent.set(code, canonical);
+      parent.set(canonical, canonical);
+      return;
+    }
+    union(canonical, code);
+  });
+
+  // Pack-changed / renamed successors that share a family key.
+  const keyed = [...working.values()]
+    .map((bucket) => ({
+      code: bucket.itemCode,
+      key: expectedStockedItemFamilyKey(bucket.itemName),
+    }))
+    .filter((entry) => entry.key);
+
+  for (let i = 0; i < keyed.length; i += 1) {
+    for (let j = i + 1; j < keyed.length; j += 1) {
+      if (!expectedStockedFamilyKeysMatch(keyed[i].key, keyed[j].key)) continue;
+      union(keyed[i].code, keyed[j].code);
+    }
+  }
+
+  const merged = new Map();
+  working.forEach((bucket, code) => {
+    const root = find(code);
+    let target = merged.get(root);
+    if (!target) {
+      target = emptyItemBucket(root);
+      merged.set(root, target);
+    }
+    mergeItemBucketInto(target, bucket);
+    target.itemCode = root;
+  });
+  return merged;
+}
+
 /**
  * Aggregate active_sales lines into per-item lifetime totals and monthly nets.
+ * Replacement item codes (aliases / pack changes) are collapsed so history is not double-counted.
  */
 export function aggregateExpectedStockedSalesLines(rows = [], { incompleteMonth = "" } = {}) {
   const byItem = new Map();
@@ -188,8 +357,9 @@ export function aggregateExpectedStockedSalesLines(rows = [], { incompleteMonth 
   let sourceRowCount = 0;
 
   (rows || []).forEach((row) => {
-    const itemCode = normalizeExpectedStockedItemCode(row?.item_code || row?.itemCode);
-    if (!itemCode || isLocalProductItemCode(itemCode)) return;
+    const rawCode = normalizeExpectedStockedItemCode(row?.item_code || row?.itemCode);
+    if (!rawCode || isLocalProductItemCode(rawCode)) return;
+    const itemCode = resolveCanonicalItemCode(rawCode) || rawCode;
     const dateKey = salesDateKey(row?.transaction_date);
     const month = monthKeyFromDateKey(dateKey);
     if (!month || month === incompleteMonth) return;
@@ -208,9 +378,11 @@ export function aggregateExpectedStockedSalesLines(rows = [], { incompleteMonth 
       bucket = emptyItemBucket(itemCode);
       byItem.set(itemCode, bucket);
     }
+    bucket.sourceCodes.add(rawCode);
     bucket.itemName = preferItemDisplayName(bucket.itemName, row?.item_name || row?.itemName, itemCode);
     const category = normalizeCategoryName(row?.category);
     if (category && category !== UNCLASSIFIED_CATEGORY) bucket.category = category;
+    if (!bucket.lastSaleDate || dateKey > bucket.lastSaleDate) bucket.lastSaleDate = dateKey;
 
     const safeSales = Number.isFinite(sales) ? sales : 0;
     const safeProfit = Number.isFinite(profit) ? profit : 0;
@@ -224,7 +396,8 @@ export function aggregateExpectedStockedSalesLines(rows = [], { incompleteMonth 
     bucket.months.set(month, monthRow);
   });
 
-  return { byItem, firstDate, lastDate, sourceRowCount };
+  const collapsed = collapseExpectedStockedItemBuckets(byItem);
+  return { byItem: collapsed, firstDate, lastDate, sourceRowCount };
 }
 
 export function buildExpectedStockedSalesReport(rows = [], {
@@ -272,10 +445,16 @@ export function buildExpectedStockedSalesReport(rows = [], {
     const picked = pickSecondHighestMonth(eligibleMonths);
     if (!picked || !(picked.expectedSales > 0)) return;
 
+    const mergedFrom = [...(bucket.sourceCodes || [])]
+      .map((code) => normalizeExpectedStockedItemCode(code))
+      .filter((code) => code && code !== bucket.itemCode)
+      .sort((a, b) => a.localeCompare(b));
+
     itemRows.push({
       itemCode: bucket.itemCode,
       itemName: bucket.itemName || bucket.itemCode,
       category: bucket.category || UNCLASSIFIED_CATEGORY,
+      mergedFrom: mergedFrom.join(", "),
       gpPercent: roundPercent(gpPercent),
       lifeSales: roundMoney(bucket.lifeSales),
       lifeProfit: roundMoney(bucket.lifeProfit),

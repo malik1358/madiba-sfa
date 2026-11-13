@@ -577,7 +577,7 @@ export function buildMisReport({
     const [ym, itemId] = key.split("||");
     if (ym === asOfYm || (prevYm && ym === prevYm)) portfolioItemIds.add(itemId);
   }
-  const portfolioTopLossItems = [...portfolioItemIds].map((itemId) => {
+  const portfolioLossItems = [...portfolioItemIds].map((itemId) => {
     const cur = portfolioItemMonthly.get(`${asOfYm}||${itemId}`) || {
       itemCode: "",
       itemName: "",
@@ -623,7 +623,9 @@ export function buildMisReport({
     .filter((row) => row.salesLoss > 0)
     .filter((row) => !PORTFOLIO_EXCLUDE.has(normCat(row.category)))
     .sort((a, b) => b.salesLoss - a.salesLoss)
-    .slice(0, 10);
+    .slice(0, 200);
+
+  const portfolioTopLossItems = portfolioLossItems.slice(0, 10);
 
   const findCategoryPeriod = (period, category) => {
     if (!period) return null;
@@ -784,6 +786,7 @@ export function buildMisReport({
     inventory,
     portfolio,
     portfolioCategories,
+    portfolioLossItems,
     portfolioTopLossItems,
     repeatCategories,
     categories: categoryRows,

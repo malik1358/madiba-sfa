@@ -1,6 +1,7 @@
 /**
  * Live Management MIS (month-end style pack) from sales, receipts, and outstanding.
- * Repeat sale = line where the customer bought the same item name in an earlier month.
+ * Repeat sale = line where the customer bought the same item name on an earlier day
+ * (at least one calendar-day gap; same-day lines on the first purchase day stay new).
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
@@ -157,6 +158,8 @@ export function buildMisReport({
     skus: new Set(),
     customers: new Set(),
   }]));
+  const portfolioCategoryMonthly = new Map();
+  const portfolioItemMonthly = new Map();
 
   for (const row of salesRows) {
     const day = String(row.transaction_date || "").slice(0, 10);
@@ -178,8 +181,8 @@ export function buildMisReport({
       else if (custFirstYm < ym) bucket.repeatCustomers.add(customer);
     }
     const itemFirst = customer && item ? firstItem.get(`${customer}||${item}`) : null;
-    const itemFirstYm = monthKey(itemFirst);
-    if (itemFirstYm && itemFirstYm < ym) bucket.repeatSales += amount;
+    // Same customer + item on a later calendar day (>=1 day gap) is repeat, including within the month.
+    if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
     else bucket.newSales += amount;
 
     const cat = String(row.category || "").trim() || "(blank)";
@@ -210,6 +213,33 @@ export function buildMisReport({
       portfolioMonthly[ym].gp += profit;
       if (row.item_code) portfolioMonthly[ym].skus.add(String(row.item_code));
       if (customer && amount > 0) portfolioMonthly[ym].customers.add(customer);
+
+      const catMoKey = `${ym}||${catNorm}`;
+      const catMo = portfolioCategoryMonthly.get(catMoKey) || { category: cat, sales: 0, gp: 0 };
+      catMo.sales += amount;
+      catMo.gp += profit;
+      if (!catMo.category || catMo.category === "(blank)") catMo.category = cat;
+      portfolioCategoryMonthly.set(catMoKey, catMo);
+
+      const itemCode = String(row.item_code || "").trim();
+      const itemNameRaw = String(row.item_name || "").trim();
+      const itemId = itemCode ? itemCode.toUpperCase() : itemNameRaw.toLowerCase();
+      if (itemId) {
+        const itemMoKey = `${ym}||${itemId}`;
+        const itemMo = portfolioItemMonthly.get(itemMoKey) || {
+          itemCode,
+          itemName: itemNameRaw || itemId,
+          category: cat,
+          sales: 0,
+          gp: 0,
+        };
+        itemMo.sales += amount;
+        itemMo.gp += profit;
+        if (!itemMo.itemName && itemNameRaw) itemMo.itemName = itemNameRaw;
+        if (!itemMo.itemCode && itemCode) itemMo.itemCode = itemCode;
+        if (!itemMo.category || itemMo.category === "(blank)") itemMo.category = cat;
+        portfolioItemMonthly.set(itemMoKey, itemMo);
+      }
     }
 
     const itemName = String(row.item_name || "").toLowerCase();
@@ -402,6 +432,74 @@ export function buildMisReport({
     };
   }
 
+  const portfolioCategoryNorms = new Set();
+  for (const key of portfolioCategoryMonthly.keys()) {
+    const [ym, norm] = key.split("||");
+    if (ym === asOfYm || (prevYm && ym === prevYm)) portfolioCategoryNorms.add(norm);
+  }
+  const portfolioCategories = [...portfolioCategoryNorms].map((norm) => {
+    const cur = portfolioCategoryMonthly.get(`${asOfYm}||${norm}`) || { category: norm, sales: 0, gp: 0 };
+    const prevRow = prevYm
+      ? (portfolioCategoryMonthly.get(`${prevYm}||${norm}`) || { sales: 0, gp: 0 })
+      : { sales: 0, gp: 0 };
+    const sales = moneyRound(cur.sales);
+    const previousSales = moneyRound(prevRow.sales);
+    const gp = moneyRound(cur.gp);
+    const previousGp = moneyRound(prevRow.gp);
+    return {
+      category: cur.category || prevRow.category || norm,
+      sales,
+      previousSales,
+      salesLoss: moneyRound(previousSales - sales),
+      salesMomPct: pctChange(sales, previousSales),
+      gp,
+      previousGp,
+      gpMomPct: pctChange(gp, previousGp),
+      gpPct: gpPct(cur.sales, cur.gp),
+      previousGpPct: gpPct(prevRow.sales, prevRow.gp),
+    };
+  }).sort((a, b) => b.salesLoss - a.salesLoss);
+
+  const portfolioItemIds = new Set();
+  for (const key of portfolioItemMonthly.keys()) {
+    const [ym, itemId] = key.split("||");
+    if (ym === asOfYm || (prevYm && ym === prevYm)) portfolioItemIds.add(itemId);
+  }
+  const portfolioTopLossItems = [...portfolioItemIds].map((itemId) => {
+    const cur = portfolioItemMonthly.get(`${asOfYm}||${itemId}`) || {
+      itemCode: "",
+      itemName: itemId,
+      category: "",
+      sales: 0,
+      gp: 0,
+    };
+    const prevRow = prevYm
+      ? (portfolioItemMonthly.get(`${prevYm}||${itemId}`) || { sales: 0, gp: 0 })
+      : { sales: 0, gp: 0 };
+    const sales = moneyRound(cur.sales);
+    const previousSales = moneyRound(prevRow.sales);
+    const gp = moneyRound(cur.gp);
+    const previousGp = moneyRound(prevRow.gp);
+    return {
+      itemCode: cur.itemCode || "",
+      itemName: cur.itemName || itemId,
+      category: cur.category || prevRow.category || "",
+      sales,
+      previousSales,
+      salesLoss: moneyRound(previousSales - sales),
+      salesMomPct: pctChange(sales, previousSales),
+      gp,
+      previousGp,
+      gpMomPct: pctChange(gp, previousGp),
+      gpPct: gpPct(cur.sales, cur.gp),
+      previousGpPct: gpPct(prevRow.sales, prevRow.gp),
+    };
+  })
+    .filter((row) => row.salesLoss > 0)
+    .filter((row) => !PORTFOLIO_EXCLUDE.has(normCat(row.category)))
+    .sort((a, b) => b.salesLoss - a.salesLoss)
+    .slice(0, 10);
+
   const findCategoryPeriod = (period, category) => {
     if (!period) return null;
     const exact = categoryByPeriod.get(`${period}||${category}`);
@@ -556,6 +654,8 @@ export function buildMisReport({
     collections,
     inventory,
     portfolio,
+    portfolioCategories,
+    portfolioTopLossItems,
     categories: categoryRows,
     salesmen: salesmanRows,
     madiba: madibaRows,

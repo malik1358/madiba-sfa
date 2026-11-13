@@ -13,12 +13,14 @@ import {
   receivableDaysChangeTone,
   ksaMonthKey,
   lastOutstandingUploadByMonth,
+  mergePriorOutstanding,
   parseStoredOutstandingUploadedAt,
   planOutstandingMonthUploads,
   receivableTrailingDays,
   receivableYtdDays,
   receivablesFromOutstandingPlan,
   sumFilteredTallyOutstandingRows,
+  summarizeOutstandingAr,
   sumTallyOutstandingRows,
   tallyReceivablesByMonth,
   trailingMonthKeys,
@@ -210,6 +212,48 @@ test("uploaded Tally outstanding is one balance on the as-of month", () => {
 
   const placed = tallyReceivablesByMonth(12500.5, "2026-10-16");
   assert.deepEqual(placed, { "2026-10": 12500.5 });
+});
+
+test("summarizeOutstandingAr totals ageing buckets for MIS prior snapshot", () => {
+  const summary = summarizeOutstandingAr([
+    {
+      total_outstanding: 1000,
+      buckets: { "0-30": 400, "31-60": 200, "61-90": 100, "91-120": 50, ">120": 250 },
+    },
+    {
+      total_outstanding: 500.25,
+      buckets: { "0-30": 100.25, "31-60": 0, "61-90": 0, "91-120": 400, ">120": 0 },
+    },
+  ]);
+  assert.equal(summary.totalAr, 1500.25);
+  assert.equal(summary.gt90Ar, 700);
+  assert.equal(summary.arBuckets["0-30"], 500.25);
+  assert.equal(summary.arBuckets[">120"], 250);
+});
+
+test("mergePriorOutstanding fills missing AR buckets from month-end upload", () => {
+  const merged = mergePriorOutstanding(
+    { totalAr: 900000, gt90Ar: null, arBuckets: null },
+    {
+      totalAr: 910000,
+      gt90Ar: 200000,
+      arBuckets: { "0-30": 100000, "31-60": 200000, "61-90": 110000, "91-120": 50000, ">120": 150000 },
+    },
+  );
+  assert.equal(merged.totalAr, 900000);
+  assert.equal(merged.gt90Ar, 200000);
+  assert.equal(merged.arBuckets["0-30"], 100000);
+
+  const preferUpload = mergePriorOutstanding(
+    {
+      totalAr: 910000,
+      gt90Ar: 200000,
+      arBuckets: { "0-30": 100000, "31-60": 200000, "61-90": 110000, "91-120": 50000, ">120": 150000 },
+    },
+    { totalAr: 900000, gt90Ar: null, arBuckets: null },
+  );
+  assert.equal(preferUpload.totalAr, 910000);
+  assert.equal(preferUpload.arBuckets["61-90"], 110000);
 });
 
 test("each month keeps the last outstanding import from that month", () => {

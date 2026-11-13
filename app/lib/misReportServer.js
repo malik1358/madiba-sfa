@@ -7,6 +7,8 @@ import {
   deserializePreparedMis,
   serializePreparedMis,
 } from "./misPrepared.js";
+import { RECEIVABLE_DAYS_DATASET_KEY, mergePriorOutstanding } from "./receivableDays.js";
+import { loadMonthEndOutstandingSnapshot } from "./receivableDaysServer.js";
 import { salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales } from "./salesBiCubeServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
@@ -121,6 +123,15 @@ export async function loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }
 }
 
 export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null }) {
+  // Prefer active_sales so repeat sales can use real transaction dates (cube facts are month-dated).
+  try {
+    const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
+    if (rows.length) {
+      return { rows, source: "active_sales", preparedAt: null };
+    }
+  } catch (error) {
+    console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+  }
   try {
     const salesCube = cube || await loadSalesBiCube(admin, { allowStale: true });
     const rows = salesRowsFromCube(salesCube, { asOfYm });
@@ -128,10 +139,9 @@ export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = 
       return { rows, source: salesCube.source || "sales_bi_cube", preparedAt: salesCube.builtAt || null };
     }
   } catch (error) {
-    console.error("MIS: sales BI cube unavailable, scanning active_sales:", error);
+    console.error("MIS: sales BI cube also unavailable:", error);
   }
-  const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
-  return { rows, source: "active_sales", preparedAt: null };
+  return { rows: [], source: "none", preparedAt: null };
 }
 
 export async function loadMisReceiptRows(admin) {
@@ -209,12 +219,22 @@ function priorOutstandingFromPrepared(prepared, asOfYm) {
 async function priorOutstandingFromReceivableDays(admin, prevYm) {
   if (!prevYm) return null;
   try {
-    const { RECEIVABLE_DAYS_DATASET_KEY } = await import("./receivableDays.js");
     const dataset = await readSettingJson(admin, RECEIVABLE_DAYS_DATASET_KEY);
     const total = Number(dataset?.monthlyReceivables?.[prevYm]);
     if (!Number.isFinite(total)) return null;
     return { totalAr: total, gt90Ar: null, arBuckets: null };
   } catch {
+    return null;
+  }
+}
+
+async function priorOutstandingFromMonthEndUpload(admin, prevYm) {
+  if (!prevYm) return null;
+  try {
+    const liveDataset = await readSettingJson(admin, OUTSTANDING_DATASET_KEY);
+    return await loadMonthEndOutstandingSnapshot(admin, prevYm, { liveDataset });
+  } catch (error) {
+    console.error("MIS: prior outstanding from month-end upload failed:", error);
     return null;
   }
 }
@@ -234,15 +254,28 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
   const ytdFromDate = `${year}-01-01`;
 
   const existingPrepared = await readPreparedMisReport(admin).catch(() => null);
-  const [salesLoad, receiptRows, outstandingRows, inventoryPhysical, receivablePrior] = await Promise.all([
+  const [
+    salesLoad,
+    receiptRows,
+    outstandingRows,
+    inventoryPhysical,
+    monthEndPrior,
+    receivablePrior,
+  ] = await Promise.all([
     loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube }),
     loadMisReceiptRows(admin),
     loadMisOutstandingRows(admin),
     loadMisInventoryPhysical(admin, asOfYm),
+    priorOutstandingFromMonthEndUpload(admin, prevYm),
     priorOutstandingFromReceivableDays(admin, prevYm),
   ]);
 
-  const priorOutstanding = priorOutstandingFromPrepared(existingPrepared, asOfYm) || receivablePrior;
+  // Prefer last daily outstanding upload of the prior KSA month for AR ageing MoM.
+  const priorOutstanding = mergePriorOutstanding(
+    monthEndPrior,
+    priorOutstandingFromPrepared(existingPrepared, asOfYm),
+    receivablePrior,
+  );
 
   const salesRows = salesLoad.rows || [];
   const report = buildMisReport({
@@ -263,6 +296,11 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
       inventorySource: inventoryPhysical == null ? null : MIS_INVENTORY_SETTING_KEY,
       salesSource: salesLoad.source || null,
       salesPreparedAt: salesLoad.preparedAt || null,
+      priorOutstandingSource: monthEndPrior?.arBuckets
+        ? "month_end_outstanding_upload"
+        : (priorOutstanding?.arBuckets
+          ? "prepared"
+          : (priorOutstanding?.totalAr != null ? "receivable_days_total" : null)),
       ytdFromDate,
       toDateExclusive,
       source: "prepared_build",

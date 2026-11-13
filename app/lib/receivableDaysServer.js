@@ -19,11 +19,14 @@ import {
   buildReceivableDaysReport,
   filterOutstandingRowsForReceivableFilters,
   hasReceivableFieldFilters,
+  ksaMonthKey,
+  lastOutstandingUploadByMonth,
   outstandingHistoryKey,
   parseStoredOutstandingUploadedAt,
   planOutstandingMonthUploads,
   receivablesFromOutstandingPlan,
   sumFilteredTallyOutstandingRows,
+  summarizeOutstandingAr,
   sumTallyOutstandingRows,
 } from "./receivableDays.js";
 import { UPLOAD_FILES_BUCKET, downloadStoredUpload } from "./uploadFilesStorage.js";
@@ -211,7 +214,7 @@ async function listOutstandingStoredFiles(admin) {
   return files;
 }
 
-export function totalOutstandingFromWorkbook(bytes, filters = null, customerCodesFromSales = null) {
+export function outstandingRowsFromWorkbook(bytes) {
   const workbook = XLSX.read(Buffer.from(bytes), { type: "buffer" });
   const sheetNames = prioritizeOutstandingSheets(workbook.SheetNames || []);
   const parsedBySheetName = [];
@@ -227,11 +230,52 @@ export function totalOutstandingFromWorkbook(bytes, filters = null, customerCode
   const parsedSheets = selectPreferredOutstandingParses(parsedBySheetName);
   if (!parsedSheets.length) throw new Error("Unable to read an outstanding sheet.");
   const parsed = parsedSheets.length === 1 ? parsedSheets[0] : mergeParsedOutstandingSheets(parsedSheets);
-  const rows = (parsed.rows || []).map((row) => buildOutstandingRow(row));
+  return (parsed.rows || []).map((row) => buildOutstandingRow(row)).filter(Boolean);
+}
+
+export function totalOutstandingFromWorkbook(bytes, filters = null, customerCodesFromSales = null) {
+  const rows = outstandingRowsFromWorkbook(bytes);
   if (filters && hasReceivableFieldFilters(filters)) {
     return sumFilteredTallyOutstandingRows(rows, filters, customerCodesFromSales);
   }
   return sumTallyOutstandingRows(rows);
+}
+
+/**
+ * Prior-month AR for MIS MoM: last daily outstanding upload in that KSA month
+ * (same month-end file selection as Net receivable days).
+ */
+export async function loadMonthEndOutstandingSnapshot(admin, monthYm, {
+  liveDataset = null,
+} = {}) {
+  const month = String(monthYm || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return null;
+
+  const liveUploadedAt = String(liveDataset?.uploadedAt || "");
+  if (liveUploadedAt && ksaMonthKey(liveUploadedAt) === month) {
+    const liveRows = (Array.isArray(liveDataset?.rows) ? liveDataset.rows : [])
+      .map((row) => buildOutstandingRow(row))
+      .filter(Boolean);
+    if (liveRows.length) return summarizeOutstandingAr(liveRows);
+  }
+
+  let storedFiles = [];
+  try {
+    storedFiles = await listOutstandingStoredFiles(admin);
+  } catch (error) {
+    console.error("Month-end outstanding: could not list stored files:", error);
+    return null;
+  }
+  const match = lastOutstandingUploadByMonth(storedFiles).find((row) => row.month === month);
+  if (!match?.filePath) return null;
+  try {
+    const file = await downloadStoredUpload(admin, match.filePath);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    return summarizeOutstandingAr(outstandingRowsFromWorkbook(bytes));
+  } catch (error) {
+    console.error(`Month-end outstanding: could not read ${match.filePath}:`, error);
+    return null;
+  }
 }
 
 async function outstandingUploadsByMonth(admin, currentUpload, filters = null, customerCodesFromSales = null) {

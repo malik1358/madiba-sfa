@@ -167,3 +167,91 @@ test("buildMisReport selected portfolio excludes electronics and building materi
   assert.equal(report.portfolio["2026-10"].sales, 40000);
   assert.equal(report.portfolio["2026-10"].gpPct, 25);
 });
+
+test("buildMisReport portfolio category MoM and top loss items exclude electronics", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      {
+        transaction_date: "2026-09-10",
+        customer_code: "1",
+        item_code: "P001",
+        item_name: "Soap A",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 100000,
+        profit_amount: 20000,
+      },
+      {
+        transaction_date: "2026-10-10",
+        customer_code: "1",
+        item_code: "P001",
+        item_name: "Soap A",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 40000,
+        profit_amount: 8000,
+      },
+      {
+        transaction_date: "2026-09-05",
+        customer_code: "2",
+        item_code: "S001",
+        item_name: "Gift wrap",
+        category: "Sundry",
+        salesman_name: "B",
+        sales_amount: 50000,
+        profit_amount: 15000,
+      },
+      {
+        transaction_date: "2026-10-05",
+        customer_code: "2",
+        item_code: "S001",
+        item_name: "Gift wrap",
+        category: "Sundry",
+        salesman_name: "B",
+        sales_amount: 50000,
+        profit_amount: 15000,
+      },
+      {
+        transaction_date: "2026-09-01",
+        customer_code: "3",
+        item_code: "E001",
+        item_name: "Fan",
+        category: "Electronics",
+        salesman_name: "C",
+        sales_amount: 200000,
+        profit_amount: 5000,
+      },
+      {
+        transaction_date: "2026-10-01",
+        customer_code: "3",
+        item_code: "E001",
+        item_name: "Fan",
+        category: "Electronics",
+        salesman_name: "C",
+        sales_amount: 50000,
+        profit_amount: 2000,
+      },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+
+  const personalCare = report.portfolioCategories.find((row) => row.category === "Personal Care");
+  assert.ok(personalCare);
+  assert.equal(personalCare.sales, 40000);
+  assert.equal(personalCare.previousSales, 100000);
+  assert.equal(personalCare.salesLoss, 60000);
+  assert.ok(personalCare.salesMomPct < 0);
+
+  const sundry = report.portfolioCategories.find((row) => row.category === "Sundry");
+  assert.ok(sundry);
+  assert.equal(sundry.salesLoss, 0);
+
+  assert.ok(report.portfolioTopLossItems.length >= 1);
+  assert.equal(report.portfolioTopLossItems[0].itemCode, "P001");
+  assert.equal(report.portfolioTopLossItems[0].salesLoss, 60000);
+  assert.ok(!report.portfolioTopLossItems.some(
+    (row) => String(row.category || "").trim().toLowerCase() === "electronics",
+  ));
+});

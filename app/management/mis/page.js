@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -29,6 +29,10 @@ const PORTFOLIO_EXCLUDE_SET = new Set(
   MIS_PORTFOLIO_EXCLUDE.map((value) => String(value || "").trim().toLowerCase()),
 );
 
+const MIS_FETCH_REBUILD_MS = 240_000;
+const MIS_FETCH_FILTER_MS = 240_000;
+const MIS_FETCH_PREPARED_MS = 25_000;
+
 const TEXT = {
   title: { en: "Management MIS", ar: "تقرير الإدارة" },
   subtitle: {
@@ -52,15 +56,31 @@ const TEXT = {
   next: { en: "Next", ar: "التالي" },
   slideOf: { en: "Slide", ar: "شريحة" },
   all: { en: "All", ar: "الكل" },
-  sliceDice: { en: "Slice and dice", ar: "تقطيع وتصفية" },
+  sliceDice: { en: "Slice and dice (all slides)", ar: "تقطيع وتصفية (كل الشرائح)" },
+  sliceDiceScope: {
+    en: "One filter set for the full Management MIS deck — every slide uses the same slice.",
+    ar: "مجموعة تصفية واحدة لعرض تقرير الإدارة بالكامل — كل الشريحات تستخدم نفس القطاع.",
+  },
   showFilters: { en: "Show", ar: "إظهار" },
   hideFilters: { en: "Hide", ar: "إخفاء" },
   filtersHint: {
-    en: "Same salesman and field filters as Business Intelligence. Apply to recalculate this MIS pack for that slice (does not overwrite the prepared company pack).",
-    ar: "نفس عوامل تصفية المندوب والحقول في ذكاء الأعمال. طبّق لإعادة حساب تقرير الإدارة لهذه الشريحة (دون استبدال الحزمة الجاهزة للشركة).",
+    en: "Same salesman and field filters as Business Intelligence. Apply recalculates the entire MIS pack for all slides at once (does not overwrite the prepared company snapshot). Clear returns to the company pack.",
+    ar: "نفس عوامل تصفية المندوب والحقول في ذكاء الأعمال. التطبيق يعيد حساب تقرير الإدارة بالكامل لكل الشرائح دفعة واحدة (دون استبدال الحزمة الجاهزة للشركة). المسح يعيد الحزمة الجاهزة للشركة.",
   },
-  filtering: { en: "Applying filters…", ar: "جاري تطبيق التصفية…" },
-  filteredStamp: { en: "Filtered view", ar: "عرض مُصفّى" },
+  filtering: { en: "Applying filters to all slides…", ar: "جاري تطبيق التصفية على كل الشرائح…" },
+  filteredStamp: { en: "Filtered · all slides", ar: "مُصفّى · كل الشرائح" },
+  timeoutRebuild: {
+    en: "Refresh timed out on this device. The backend may still be preparing — wait a moment and open MIS again without Refresh, or try Refresh once more.",
+    ar: "انتهت مهلة التحديث على هذا الجهاز. قد يستمر التجهيز في الخلفية — انتظر ثم افتح التقرير دون تحديث، أو أعد المحاولة.",
+  },
+  timeoutRebuildRecovered: {
+    en: "Refresh took longer than expected, but a prepared pack is available — loaded the saved snapshot.",
+    ar: "استغرق التحديث وقتاً أطول من المتوقع، لكن الحزمة الجاهزة متوفرة — تم تحميل اللقطة المحفوظة.",
+  },
+  timeoutFilter: {
+    en: "Filter apply timed out. Your previous slide view is unchanged — try again or Clear to return to the company pack.",
+    ar: "انتهت مهلة تطبيق التصفية. العرض السابق كما هو — أعد المحاولة أو امسح للعودة إلى حزمة الشركة.",
+  },
 };
 
 function money(value, { digits = 1 } = {}) {
@@ -180,9 +200,24 @@ function MisFilterDrawer({ language, open, onToggle, activeCount, children }) {
         {activeCount > 0 ? <span className="misFilterDrawerCount">{activeCount}</span> : null}
         <span className="misFilterDrawerAction">{open ? t("hideFilters") : t("showFilters")}</span>
       </button>
-      {open ? <div className="misFilterDrawerBody">{children}</div> : null}
+      {open ? (
+        <div className="misFilterDrawerBody">
+          <p className="misFilterDrawerScope">{t("sliceDiceScope")}</p>
+          {children}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function resolveSlideIndexAfterReport(nextReport, slideIdBefore, language) {
+  if (!nextReport) return 0;
+  const nextSlides = buildSlides(nextReport, language);
+  if (slideIdBefore) {
+    const idx = nextSlides.findIndex((slide) => slide.id === slideIdBefore);
+    if (idx >= 0) return idx;
+  }
+  return 0;
 }
 
 function BarRow({ label, value, max, highlight }) {
@@ -1039,6 +1074,8 @@ export default function MisPage() {
   const [filterCatalogs, setFilterCatalogs] = useState({});
   const [filtering, setFiltering] = useState(false);
   const [filteredView, setFilteredView] = useState(false);
+  const reportRef = useRef(null);
+  const slideIdRef = useRef(null);
   usePopupMessages({ error });
 
   const canOpen = access?.canAccess?.("mis");
@@ -1056,6 +1093,8 @@ export default function MisPage() {
 
   const load = useCallback(async (date, { rebuild = false, filters = null } = {}) => {
     const usingFilters = filters && hasActiveGrowthFilters(filters);
+    const slideIdBefore = slideIdRef.current;
+    const hadReport = Boolean(reportRef.current);
     setLoading(true);
     setPreparing(Boolean(rebuild) && !usingFilters);
     setFiltering(Boolean(usingFilters));
@@ -1078,7 +1117,7 @@ export default function MisPage() {
             },
             body: JSON.stringify({ asOf: date, filters }),
           },
-          90000,
+          MIS_FETCH_FILTER_MS,
         ));
       } else {
         const params = new URLSearchParams({ asOf: date });
@@ -1086,14 +1125,14 @@ export default function MisPage() {
         ({ response, payload } = await fetchJsonWithTimeout(
           `/api/business-dashboard/mis?${params.toString()}`,
           { headers: { Authorization: `Bearer ${session.access_token}` } },
-          rebuild ? 90000 : 20000,
+          rebuild ? MIS_FETCH_REBUILD_MS : MIS_FETCH_PREPARED_MS,
         ));
       }
       if (payload?.code === "MIS_NOT_PREPARED") {
         setReport(null);
         setBuiltAt("");
         setFilteredView(false);
-        setError(payload?.error || "Month-end MIS is not prepared yet.");
+        setError(payload?.error || t("notPrepared"));
         return;
       }
       if (!response.ok || !payload?.success) {
@@ -1105,8 +1144,59 @@ export default function MisPage() {
       setFilteredView(Boolean(payload.filtered || usingFilters));
       if (payload.asOfDate) setAsOf(payload.asOfDate);
       if (payload.message) setError(payload.message);
-      setSlideIndex(0);
+      setSlideIndex(resolveSlideIndexAfterReport(payload.report, slideIdBefore, language));
     } catch (err) {
+      const timedOut = String(err?.message || "").toLowerCase().includes("timed out");
+      if (timedOut) {
+        try {
+          const supabase = getSupabaseClient();
+          const session = await resolveAuthSession(supabase, 12000);
+          if (session?.access_token) {
+            const params = new URLSearchParams({ asOf: date });
+            const recovered = await fetchJsonWithTimeout(
+              `/api/business-dashboard/mis?${params.toString()}`,
+              { headers: { Authorization: `Bearer ${session.access_token}` } },
+              MIS_FETCH_PREPARED_MS,
+            );
+            if (recovered.response?.ok && recovered.payload?.success && recovered.payload?.report) {
+              setReport(recovered.payload.report);
+              setBuiltAt(recovered.payload.builtAt || recovered.payload.report?.meta?.preparedAt || "");
+              if (recovered.payload.catalogs) setFilterCatalogs(recovered.payload.catalogs);
+              setFilteredView(Boolean(recovered.payload.filtered));
+              if (recovered.payload.asOfDate) setAsOf(recovered.payload.asOfDate);
+              setError(rebuild ? t("timeoutRebuildRecovered") : "");
+              setSlideIndex(resolveSlideIndexAfterReport(recovered.payload.report, slideIdBefore, language));
+              return;
+            }
+          }
+        } catch {
+          // fall through to timeout messaging below
+        }
+      }
+      if (timedOut && usingFilters && hadReport) {
+        setError(t("timeoutFilter"));
+        return;
+      }
+      if (timedOut && rebuild) {
+        if (hadReport) {
+          setError(t("timeoutRebuild"));
+        } else {
+          setReport(null);
+          setBuiltAt("");
+          setFilteredView(false);
+          setError(t("timeoutRebuild"));
+        }
+        return;
+      }
+      if (timedOut && usingFilters) {
+        setError(t("timeoutFilter"));
+        if (!hadReport) {
+          setReport(null);
+          setBuiltAt("");
+          setFilteredView(false);
+        }
+        return;
+      }
       setReport(null);
       setBuiltAt("");
       setFilteredView(false);
@@ -1116,7 +1206,7 @@ export default function MisPage() {
       setFiltering(false);
       setLoading(false);
     }
-  }, []);
+  }, [language, t]);
 
   useEffect(() => {
     if (accessLoading) return;
@@ -1133,6 +1223,14 @@ export default function MisPage() {
     () => (report ? buildSlides(report, language) : []),
     [report, language],
   );
+
+  useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  useEffect(() => {
+    slideIdRef.current = slides[slideIndex]?.id ?? null;
+  }, [slides, slideIndex]);
 
   useEffect(() => {
     if (!slides.length) return undefined;
@@ -1264,7 +1362,7 @@ export default function MisPage() {
                 <div className="moduleCard"><p>{preparing ? t("preparing") : (filtering ? t("filtering") : t("loading"))}</p></div>
               ) : !report || !active ? (
                 <div className="moduleCard">
-                  <p>{error ? t("notPrepared") : t("noData")}</p>
+                  <p>{error || (!report ? t("notPrepared") : t("noData"))}</p>
                 </div>
               ) : (
                 <div className="misDeck misDeck--presenter">

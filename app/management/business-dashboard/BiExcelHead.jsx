@@ -7,8 +7,8 @@ import { buildExcelFilterOptions, filterRowsByExcelFilters, pruneExcelFilters } 
 export function useBiExcelFilters(rows = [], keys = [], valueOf) {
   const [filters, setFilters] = useState({});
   const options = useMemo(
-    () => buildExcelFilterOptions(rows, keys, valueOf, filters),
-    [rows, keys, valueOf, filters],
+    () => buildExcelFilterOptions(rows, keys, valueOf),
+    [rows, keys, valueOf],
   );
 
   useEffect(() => {

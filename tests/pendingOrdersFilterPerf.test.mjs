@@ -5,10 +5,6 @@ import {
   findOutstandingForCustomer,
   getOutstandingLookup,
 } from "../app/lib/outstanding.js";
-import {
-  matchesExcelColumnFilter,
-  rowMatchesOtherExcelFilters,
-} from "../app/lib/excelColumnFilter.js";
 
 const FILTER_KEYS = [
   "orderId",
@@ -86,14 +82,10 @@ test("pending-order filter rebuild stays fast with large outstanding dataset", (
     values: filterValuesForOrder(order, outstandingAmountByOrderId.get(order.id)),
   }));
 
-  const columnFilters = Object.fromEntries(FILTER_KEYS.map((key) => [key, []]));
   const optionsStarted = Date.now();
   const options = {};
   FILTER_KEYS.forEach((key) => {
-    const matching = filterRows.filter(({ values }) => (
-      rowMatchesOtherExcelFilters(values, columnFilters, key, FILTER_KEYS, matchesExcelColumnFilter)
-    ));
-    options[key] = [...new Set(matching.map(({ values }) => values[key]))];
+    options[key] = [...new Set(filterRows.map(({ values }) => values[key]))];
   });
   const optionsMs = Date.now() - optionsStarted;
 

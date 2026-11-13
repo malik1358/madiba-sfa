@@ -361,8 +361,17 @@ export function isEodStockSectionLabel(value) {
     || text === "personal care"
     || text === "office supplies"
     || text === "stationery"
+    || text === "stationary"
     || text === "electronics"
     || text === "sundry"
+    || text === "fragrance"
+    || text === "fragrances"
+    || text === "body care"
+    || text === "baby care"
+    || text === "cosmetics"
+    || text === "pos supplies"
+    || text === "pos supply"
+    || text === "unclassified"
   ) {
     return true;
   }

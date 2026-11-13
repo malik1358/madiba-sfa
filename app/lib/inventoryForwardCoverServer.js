@@ -2,6 +2,7 @@ import {
   buildEodStockReportRows,
   EOD_STOCK_CITIES,
   EOD_STOCK_DATASET_KEY,
+  isEodStockSectionLabel,
   readEodStockDataset,
 } from "./eodStock.js";
 import {
@@ -17,7 +18,7 @@ import { loadPreparedMisReport } from "./misReportServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 const PAGE_SIZE = 1000;
-const SALES_SELECT = "item_code,item_name,category,sales_amount,transaction_date";
+const SALES_SELECT = "item_code,item_name,category,sales_amount,quantity,transaction_date";
 
 async function readSettingJson(admin, key) {
   const { data, error } = await admin
@@ -99,36 +100,54 @@ async function loadWholesaleRateByItem(admin) {
 
 function aggregateSales30d(saleRows = []) {
   const sales30dByItem = new Map();
+  const qtySoldByItem = new Map();
+  const salesRateByItem = new Map();
   let sales30d = 0;
   for (const row of saleRows || []) {
     const code = String(row.item_code || row.itemCode || "").trim().toUpperCase();
     const amount = Number(row.sales_amount);
+    const qty = Number(row.quantity);
     if (!code || !Number.isFinite(amount)) continue;
     sales30d += amount;
     sales30dByItem.set(code, (sales30dByItem.get(code) || 0) + amount);
+    // Positive qty only — returns must not distort the unit rate used for stock value.
+    if (Number.isFinite(qty) && qty > 0 && amount > 0) {
+      qtySoldByItem.set(code, (qtySoldByItem.get(code) || 0) + qty);
+    }
   }
   for (const [code, value] of sales30dByItem) {
     sales30dByItem.set(code, Math.round(value));
+    const qtySold = qtySoldByItem.get(code) || 0;
+    if (qtySold > 0) {
+      salesRateByItem.set(code, value / qtySold);
+    }
   }
-  return { sales30dByItem, sales30d: Math.round(sales30d) };
+  return { sales30dByItem, salesRateByItem, sales30d: Math.round(sales30d) };
 }
 
 function eodStockLines(dataset) {
   const reportRows = buildEodStockReportRows(dataset);
   return reportRows
     .map((row) => {
+      const itemCode = String(row.itemCode || "").trim().toUpperCase();
+      const itemName = String(row.itemName || row.itemCode || "").trim();
       const uploadedValue = EOD_STOCK_CITIES.reduce(
         (sum, city) => sum + Number(row[`${city}Value`] || 0),
         0,
       );
       return {
-        itemCode: String(row.itemCode || "").trim().toUpperCase(),
-        itemName: row.itemName || row.itemCode,
+        itemCode,
+        itemName: itemName || itemCode,
         qty: Number(row.total || 0),
         uploadedValue,
       };
     })
-    .filter((row) => row.itemCode && (row.qty > 0 || row.uploadedValue > 0));
+    .filter((row) => (
+      row.itemCode
+      && !isEodStockSectionLabel(row.itemCode)
+      && !isEodStockSectionLabel(row.itemName)
+      && (row.qty > 0 || row.uploadedValue > 0)
+    ));
 }
 
 export async function loadMisInventoryCover(admin, {
@@ -197,7 +216,7 @@ export async function loadMisInventoryCover(admin, {
     };
   }
 
-  const { sales30dByItem, sales30d } = aggregateSales30d(saleRows);
+  const { sales30dByItem, salesRateByItem, sales30d } = aggregateSales30d(saleRows);
   const categoryBySales = categoryByItemCodeFromSales(saleRows);
   const categoryByItem = new Map(priceMaps.categoryBySheet);
   for (const [code, category] of categoryBySales) {
@@ -206,6 +225,7 @@ export async function loadMisInventoryCover(admin, {
 
   const items = buildItemCoverRows(stockLines, {
     sales30dByItem,
+    salesRateByItem,
     rateByItem: priceMaps.rateByItem,
     categoryByItem,
   });

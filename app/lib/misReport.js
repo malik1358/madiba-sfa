@@ -39,6 +39,12 @@ function lastDayOfMonth(ym) {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
+function daysInMonth(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  if (!y || !m) return 30;
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
 /** Inclusive window start for a trailing dayCount ending on endYmd. */
 function trailingWindowStart(endYmd, dayCount = 30) {
   const [y, m, d] = String(endYmd || "").slice(0, 10).split("-").map(Number);
@@ -408,7 +414,7 @@ export function buildMisReport({
     : inventoryInput?.previous?.physical != null
       ? Number(inventoryInput.previous.physical)
       : null;
-  // Days on hand / forward cover = stock ÷ (last-30-day sales ÷ 30).
+  // Forward cover = stock ÷ (last-30-day sales ÷ 30).
   const inventoryDays = forwardCoverDays(
     inventoryPhysicalAmount,
     sales30d,
@@ -419,6 +425,13 @@ export function buildMisReport({
     previousSales30d,
     FORWARD_COVER_WINDOW_DAYS,
   );
+  // Month-sales days on hand (receipt-month pace) = stock ÷ (as-of month sales ÷ days in month).
+  const monthDays = daysInMonth(asOfYm);
+  const prevMonthDays = prevYm ? daysInMonth(prevYm) : 30;
+  const inventoryDaysMonth = forwardCoverDays(inventoryPhysicalAmount, curSales, monthDays);
+  const previousInventoryDaysMonth = prevYm
+    ? forwardCoverDays(previousInventoryPhysical, prevSales, prevMonthDays)
+    : null;
   const inventoryCategories = inventoryInput?.byCategory && typeof inventoryInput.byCategory === "object"
     ? Object.entries(inventoryInput.byCategory)
       .map(([category, amount]) => {
@@ -447,6 +460,8 @@ export function buildMisReport({
       : null,
     sales30d,
     previousSales30d: previousSales30d || null,
+    monthSales: curSales || null,
+    previousMonthSales: prevSales || null,
     coverWindowDays: FORWARD_COVER_WINDOW_DAYS,
     coverFrom: coverStart || null,
     coverTo: coverEnd || null,
@@ -454,6 +469,11 @@ export function buildMisReport({
     previousDays: previousInventoryDays,
     daysMomPct: inventoryDays != null && previousInventoryDays != null
       ? pctChange(inventoryDays, previousInventoryDays)
+      : null,
+    daysMonth: inventoryDaysMonth,
+    previousDaysMonth: previousInventoryDaysMonth,
+    daysMonthMomPct: inventoryDaysMonth != null && previousInventoryDaysMonth != null
+      ? pctChange(inventoryDaysMonth, previousInventoryDaysMonth)
       : null,
     categories: inventoryCategories,
   } : null;

@@ -23,7 +23,9 @@ test("forwardCoverDays and assignCoverBucket bands", () => {
   assert.equal(assignCoverBucket(60), "31-60");
   assert.equal(assignCoverBucket(61), "61-90");
   assert.equal(assignCoverBucket(90), "61-90");
-  assert.equal(assignCoverBucket(91), ">90");
+  assert.equal(assignCoverBucket(91), "91-120");
+  assert.equal(assignCoverBucket(120), "91-120");
+  assert.equal(assignCoverBucket(121), ">120");
   assert.equal(assignCoverBucket(null), null);
 });
 
@@ -39,7 +41,8 @@ test("physical categories place full stock in one cover bucket", () => {
     "0-30": 100,
     "31-60": 0,
     "61-90": 0,
-    ">90": 0,
+    "91-120": 0,
+    ">120": 0,
   });
 });
 
@@ -55,14 +58,14 @@ test("item cover splits one category across multiple buckets", () => {
   });
   assert.equal(items.length, 2);
   assert.equal(items.find((row) => row.itemCode === "A1").bucket, "0-30");
-  assert.equal(items.find((row) => row.itemCode === "A2").bucket, ">90");
+  assert.equal(items.find((row) => row.itemCode === "A2").bucket, ">120");
 
   const cats = rollCategoriesFromItems(items);
   assert.equal(cats.length, 1);
   assert.equal(cats[0].category, "Sundry");
   assert.equal(cats[0].amount, 300000);
   assert.equal(cats[0].bucketAmounts["0-30"], 100000);
-  assert.equal(cats[0].bucketAmounts[">90"], 200000);
+  assert.equal(cats[0].bucketAmounts[">120"], 200000);
   assert.equal(cats[0].bucketAmounts["31-60"], 0);
 });
 

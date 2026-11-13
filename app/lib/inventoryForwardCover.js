@@ -4,7 +4,7 @@
  */
 
 export const COVER_WINDOW_DAYS = 30;
-export const COVER_BUCKET_KEYS = ["0-30", "31-60", "61-90", ">90"];
+export const COVER_BUCKET_KEYS = ["0-30", "31-60", "61-90", "91-120", ">120"];
 export const MAX_INVENTORY_COVER_ITEMS = 8000;
 
 function toNumber(value) {
@@ -44,7 +44,7 @@ export function emptyBucketAmounts() {
   return Object.fromEntries(COVER_BUCKET_KEYS.map((key) => [key, 0]));
 }
 
-/** Assign a cover-day value to AR-style bands: 0-30, 31-60, 61-90, >90. */
+/** Assign a cover-day value to AR-style bands: 0-30, 31-60, 61-90, 91-120, >120. */
 export function assignCoverBucket(days) {
   if (days == null || !Number.isFinite(Number(days))) return null;
   const d = Number(days);
@@ -52,7 +52,8 @@ export function assignCoverBucket(days) {
   if (d <= 30) return "0-30";
   if (d <= 60) return "31-60";
   if (d <= 90) return "61-90";
-  return ">90";
+  if (d <= 120) return "91-120";
+  return ">120";
 }
 
 /** Place the full stock amount into the single band matching category/item cover. */

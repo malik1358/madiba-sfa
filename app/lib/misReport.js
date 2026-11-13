@@ -190,8 +190,12 @@ export function buildMisReport({
     }
 
     const cat = String(row.category || "").trim() || "(blank)";
-    // Quarter rollups for history + the as-of month as its own column.
-    const periodKeys = new Set([quarterKey(ym), ym === asOfYm ? asOfYm : null].filter(Boolean));
+    // Quarter rollups + as-of month + prior month (for category MoM compare).
+    const periodKeys = new Set([
+      quarterKey(ym),
+      ym === asOfYm ? asOfYm : null,
+      prevYm && ym === prevYm ? prevYm : null,
+    ].filter(Boolean));
 
     for (const period of periodKeys) {
       const catKey = `${period}||${cat}`;
@@ -500,13 +504,58 @@ export function buildMisReport({
     .sort((a, b) => b.salesLoss - a.salesLoss)
     .slice(0, 10);
 
-  const categoryRows = [...categoryByPeriod.values()]
+  const findCategoryPeriod = (period, category) => {
+    if (!period) return null;
+    const exact = categoryByPeriod.get(`${period}||${category}`);
+    if (exact) return exact;
+    const key = normCat(category);
+    return [...categoryByPeriod.values()].find(
+      (row) => row.period === period && normCat(row.category) === key,
+    ) || null;
+  };
+
+  const categoryDisplayNames = new Map();
+  for (const row of categoryByPeriod.values()) {
+    if (row.period !== asOfYm && row.period !== prevYm) continue;
+    const key = normCat(row.category);
+    if (!categoryDisplayNames.has(key) || row.period === asOfYm) {
+      categoryDisplayNames.set(key, row.category);
+    }
+  }
+
+  const asOfCategoryRows = [...categoryDisplayNames.entries()].map(([key, category]) => {
+    const cur = findCategoryPeriod(asOfYm, category) || { sales: 0, gp: 0 };
+    const prev = findCategoryPeriod(prevYm, category) || { sales: 0, gp: 0 };
+    const sales = moneyRound(cur.sales);
+    const previousSales = moneyRound(prev.sales);
+    const gp = moneyRound(cur.gp);
+    const previousGp = moneyRound(prev.gp);
+    return {
+      period: asOfYm,
+      category,
+      sales,
+      previousSales,
+      salesMomPct: pctChange(sales, previousSales),
+      gp,
+      previousGp,
+      gpMomPct: pctChange(gp, previousGp),
+      gpPct: gpPct(sales, gp),
+      previousGpPct: gpPct(previousSales, previousGp),
+      _sortKey: key,
+    };
+  }).sort((a, b) => b.sales - a.sales || b.previousSales - a.previousSales);
+
+  const otherCategoryRows = [...categoryByPeriod.values()]
+    .filter((row) => row.period !== asOfYm && row.period !== prevYm)
     .map((row) => ({
-      ...row,
+      period: row.period,
+      category: row.category,
       sales: moneyRound(row.sales),
       gp: moneyRound(row.gp),
     }))
     .sort((a, b) => a.period.localeCompare(b.period) || b.sales - a.sales);
+
+  const categoryRows = [...otherCategoryRows, ...asOfCategoryRows.map(({ _sortKey, ...row }) => row)];
 
   const salesmanRows = [...salesmanByPeriod.values()]
     .map((row) => ({ ...row, sales: moneyRound(row.sales) }))

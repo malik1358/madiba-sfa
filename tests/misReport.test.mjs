@@ -37,7 +37,22 @@ test("buildMisReport computes month sales, GP, MoM and item-level repeat", () =>
   assert.equal(report.headline.newCustomers, 1);
   assert.equal(report.headline.repeatCustomers, 1);
   assert.ok(report.remarks.bottomLine);
-  assert.ok(report.categories.some((row) => row.period === "2026-10" && row.category === "Building Material"));
+  assert.equal(report.previousMonth, "2026-09");
+  const building = report.categories.find((row) => row.period === "2026-10" && row.category === "Building Material");
+  assert.ok(building);
+  assert.equal(building.sales, 150000);
+  assert.equal(building.previousSales, 200000);
+  assert.ok(building.salesMomPct < 0);
+  assert.equal(building.gp, 28000);
+  assert.equal(building.previousGp, 30000);
+  assert.equal(building.gpPct, 18.7);
+  assert.equal(building.previousGpPct, 15);
+  // Prior-only category still appears on the as-of mix with zero current sales.
+  const personal = report.categories.find((row) => row.period === "2026-10" && row.category === "Personal Care");
+  assert.ok(personal);
+  assert.equal(personal.sales, 0);
+  assert.equal(personal.previousSales, 50000);
+  assert.equal(personal.salesMomPct, -100);
 });
 
 test("buildMisReport counts same-month repurchase after a one-day gap as repeat", () => {

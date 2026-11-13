@@ -223,10 +223,11 @@ export async function loadMisInventoryCover(admin, {
     if (!categoryByItem.has(code)) categoryByItem.set(code, category);
   }
 
+  // Do not fall back to catalogue wholesale here: pack rates × piece qty inflate SAR
+  // (e.g. 132 vs ~0.63 sales unit). Prefer closing value or qty × sales unit rate only.
   const items = buildItemCoverRows(stockLines, {
     sales30dByItem,
     salesRateByItem,
-    rateByItem: priceMaps.rateByItem,
     categoryByItem,
   });
 

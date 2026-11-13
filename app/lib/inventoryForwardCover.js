@@ -123,7 +123,8 @@ export function buildItemCoverRows(stockRows = [], {
     if (!amount) continue;
     const sales30d = moneyRound(mapGet(sales30dByItem, itemCode));
     const days = forwardCoverDays(amount, sales30d, COVER_WINDOW_DAYS);
-    const bucket = assignCoverBucket(days);
+    // No sales pace ⇒ treat as deep cover so value still lands in a band (not only the Stock total).
+    const bucket = assignCoverBucket(days) || ">120";
     const category = String(row.category || catGet(itemCode) || "").trim() || "(blank)";
     rows.push({
       itemCode,
@@ -134,7 +135,7 @@ export function buildItemCoverRows(stockRows = [], {
       sales30d,
       forwardCoverDays: days,
       bucket,
-      bucketAmounts: bucketAmountsFromCover(amount, days),
+      bucketAmounts: bucketAmountsFromCover(amount, days ?? 999),
     });
   }
   rows.sort((a, b) => b.amount - a.amount || a.itemCode.localeCompare(b.itemCode));

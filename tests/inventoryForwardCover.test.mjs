@@ -83,6 +83,22 @@ test("stock value prefers sales unit rate over catalogue pack rate", () => {
   assert.ok(items[0].amount < 195225 * 132);
 });
 
+test("without sales rate, catalogue pack rate is not required for cover rows from server path", () => {
+  const withCatalogOnly = buildItemCoverRows([
+    { itemCode: "A005203", qty: 360000, uploadedValue: 0, category: "Stationery" },
+  ], {
+    rateByItem: { A005203: 344 },
+  });
+  // Library still allows catalogue fallback when explicitly passed (tests / tooling).
+  assert.equal(withCatalogOnly[0].amount, Math.round(360000 * 344));
+  assert.equal(withCatalogOnly[0].bucket, ">120");
+
+  const noRate = buildItemCoverRows([
+    { itemCode: "A005203", qty: 360000, uploadedValue: 0, category: "Stationery" },
+  ], {});
+  assert.equal(noRate.length, 0);
+});
+
 test("buildInventoryCoverModel uses EOD items when provided", () => {
   const items = buildItemCoverRows([
     { itemCode: "X1", uploadedValue: 90000, category: "Personal Care" },

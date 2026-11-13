@@ -6,7 +6,12 @@
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
-import { receivableDays, receivableYtdDays } from "./receivableDays.js";
+import {
+  creditSalesTrailingMonths,
+  receivableDays,
+  receivableTrailingDays,
+  receivableYtdDays,
+} from "./receivableDays.js";
 
 const PORTFOLIO_EXCLUDE = new Set([
   "electronics",
@@ -321,7 +326,7 @@ export function buildMisReport({
     months.filter((ym) => prevYm && ym <= prevYm).reduce((sum, ym) => sum + monthly[ym].gp, 0),
   );
 
-  // Match BI Net receivable days: (AR ÷ YTD sales) × days YTD — not AR ÷ (month sales / 30).
+  // Headline collection days stay YTD DSO (same shape as BI YTD).
   const collectionDays = receivableDays(totalAr, ytdSales, receivableYtdDays(asOfYm, asOf));
   const previousCollectionDays = prevYm && priorOutstanding?.totalAr != null
     ? receivableDays(
@@ -332,6 +337,25 @@ export function buildMisReport({
     : null;
   const collectionDaysMomPct = collectionDays != null && previousCollectionDays != null
     ? pctChange(collectionDays, previousCollectionDays)
+    : null;
+
+  // Cash-slide remark uses rolling 3-month DSO: (AR ÷ trailing 3m sales) × trailing 3m days.
+  const monthlySalesMap = Object.fromEntries(months.map((ym) => [ym, monthly[ym].sales]));
+  const sales3m = creditSalesTrailingMonths(monthlySalesMap, asOfYm, 3);
+  const previousSales3m = prevYm ? creditSalesTrailingMonths(monthlySalesMap, prevYm, 3) : 0;
+  const collectionDays3m = receivableDays(totalAr, sales3m, receivableTrailingDays(asOfYm, 3, asOf));
+  const previousCollectionDays3m = prevYm && priorOutstanding?.totalAr != null
+    ? receivableDays(
+      priorOutstanding.totalAr,
+      previousSales3m,
+      receivableTrailingDays(prevYm, 3),
+    )
+    : null;
+  const collectionDays3mChange = collectionDays3m != null && previousCollectionDays3m != null
+    ? Math.round((collectionDays3m - previousCollectionDays3m) * 10) / 10
+    : null;
+  const collectionDays3mMomPct = collectionDays3m != null && previousCollectionDays3m != null
+    ? pctChange(collectionDays3m, previousCollectionDays3m)
     : null;
 
   const FORWARD_COVER_WINDOW_DAYS = 30;
@@ -617,6 +641,10 @@ export function buildMisReport({
       collectionDays,
       previousCollectionDays,
       collectionDaysMomPct,
+      collectionDays3m,
+      previousCollectionDays3m,
+      collectionDays3mChange,
+      collectionDays3mMomPct,
       totalAr: moneyRound(totalAr),
       previousTotalAr: priorOutstanding?.totalAr != null ? moneyRound(priorOutstanding.totalAr) : null,
       totalArMomPct: priorOutstanding?.totalAr != null
@@ -676,9 +704,21 @@ export function buildMisReport({
       prevRepeatPct: prevYm ? monthlyRepeat[prevYm].pct : 0,
       gt90: moneyRound(gt90),
       collectionDays,
+      collectionDays3m,
+      previousCollectionDays3m,
+      collectionDays3mChange,
       portfolioGpPct: portfolio[asOfYm]?.gpPct || 0,
     }),
   };
+}
+
+function formatDaysChange(change) {
+  if (change == null || !Number.isFinite(Number(change))) return "";
+  const n = Number(change);
+  const signed = `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
+  if (n < 0) return `${signed} improving vs prior month`;
+  if (n > 0) return `${signed} worsening vs prior month`;
+  return "unchanged vs prior month";
 }
 
 function buildMisRemarks({
@@ -694,19 +734,28 @@ function buildMisRemarks({
   prevRepeatPct,
   gt90,
   collectionDays,
+  collectionDays3m,
+  previousCollectionDays3m,
+  collectionDays3mChange,
   portfolioGpPct,
 }) {
   const salesMom = pctChange(curSales, prevSales);
   const gpMom = pctChange(curGp, prevGp);
   const monthLabel = asOfYm;
   const prevLabel = prevYm || "prior month";
+  const days3mLabel = collectionDays3m ?? collectionDays ?? "—";
+  const daysChangeBit = collectionDays3mChange != null
+    ? `; ${formatDaysChange(collectionDays3mChange)}`
+    : (previousCollectionDays3m != null
+      ? `; was ${previousCollectionDays3m}`
+      : "");
   return {
     momentum: salesMom >= 0
       ? `${monthLabel} sales rose ${salesMom}% vs ${prevLabel} while GP moved ${gpMom >= 0 ? "up" : "down"} ${Math.abs(gpMom)}%.`
       : `${monthLabel} sales normalized ${salesMom}% vs ${prevLabel} while absolute GP ${gpMom >= 0 ? "improved" : "softened"} (${gpMom}%).`,
     margin: `GP% ${gpPctNow}% vs ${gpPctPrev}% in ${prevLabel}.`,
     repeat: `Repeat mix ${repeatPct}% (was ${prevRepeatPct}%); path to >50% by year-end remains the commercial priority.`,
-    receivables: `>90-day AR is SAR ${(gt90 / 1000).toFixed(0)}K; collection days ~${collectionDays ?? "—"}. Drive aged AR below SAR 1.0M.`,
+    receivables: `>90-day AR is SAR ${(gt90 / 1000).toFixed(0)}K; rolling 3m collection days ~${days3mLabel}${daysChangeBit}. Drive aged AR below SAR 1.0M.`,
     portfolio: `Selected high-margin portfolio GP% ${portfolioGpPct}% — protect and rebuild volume without diluting margin.`,
     bottomLine: salesMom >= 0
       ? "Preserve quality while converting growth into cash and repeat depth."

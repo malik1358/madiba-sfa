@@ -150,7 +150,36 @@ test("buildMisReport collection days uses YTD DSO not month/30", () => {
   });
   // (500000 / 1000000) × 304 = 152 — not 500000 / (100000 / 30) = 150.
   assert.equal(report.headline.collectionDays, 152);
-  assert.match(report.remarks.receivables, /collection days ~152/);
+});
+
+test("buildMisReport receivables remark uses rolling 3m collection days and change", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-08-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+      { transaction_date: "2026-09-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+      { transaction_date: "2026-10-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [
+      { total_outstanding: 300000, buckets: { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 100000, ">120": 200000 } },
+    ],
+    priorOutstanding: {
+      totalAr: 360000,
+      gt90Ar: 250000,
+      arBuckets: { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 50000, ">120": 200000 },
+    },
+  });
+  // Trailing 3m sales Aug–Oct = 600000; days Aug 1–Oct 31 = 92.
+  // (300000 / 600000) × 92 = 46.
+  assert.equal(report.headline.collectionDays3m, 46);
+  // Prior: Sep end AR 360000; Jul–Sep sales only Aug+Sep = 400000 in this fixture; days Jul1–Sep30 = 92.
+  // Jul has 0 sales so sales3m = 400000; (360000/400000)*92 = 82.8.
+  assert.equal(report.headline.previousCollectionDays3m, 82.8);
+  assert.equal(report.headline.collectionDays3mChange, -36.8);
+  assert.match(report.remarks.receivables, /rolling 3m collection days ~46/);
+  assert.match(report.remarks.receivables, /improving vs prior month/);
+  assert.match(report.remarks.receivables, />90-day AR is SAR 300K/);
 });
 
 test("buildMisReport tracks MADIBA monthly sales for focus categories", () => {

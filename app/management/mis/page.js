@@ -204,12 +204,14 @@ function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
   const keys = ["category", "sales", "previousSales", "gp", "previousGp", "gpPct", "previousGpPct"];
   const valueOf = useCallback((row, key) => {
     if (key === "gpPct") {
-      return row.sales || row.gpPct != null ? `${Number(row.gpPct ?? ((row.gp / row.sales) * 100) || 0).toFixed(1)}%` : "—";
+      const pctValue = row.gpPct != null ? Number(row.gpPct) : (Number(row.sales) ? (row.gp / row.sales) * 100 : null);
+      return pctValue != null && Number.isFinite(pctValue) ? `${pctValue.toFixed(1)}%` : "—";
     }
     if (key === "previousGpPct") {
-      return row.previousSales || row.previousGpPct != null
-        ? `${Number(row.previousGpPct ?? ((row.previousGp / row.previousSales) * 100) || 0).toFixed(1)}%`
-        : "—";
+      const pctValue = row.previousGpPct != null
+        ? Number(row.previousGpPct)
+        : (Number(row.previousSales) ? (row.previousGp / row.previousSales) * 100 : null);
+      return pctValue != null && Number.isFinite(pctValue) ? `${pctValue.toFixed(1)}%` : "—";
     }
     return row[key];
   }, []);

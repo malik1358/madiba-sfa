@@ -11,7 +11,9 @@ import { RECEIVABLE_DAYS_DATASET_KEY, mergePriorOutstanding } from "./receivable
 import { loadMonthEndOutstandingSnapshot } from "./receivableDaysServer.js";
 import { applyMisGrowthFilters, buildMisFilterCatalogs, hasActiveGrowthFilters, normalizeGrowthFilters } from "./misFilters.js";
 import { salesBiFactToGrowthRow } from "./salesBiCube.js";
+import { MIS_ACTIVE_SALES_SCAN_MS, misSalesShouldUseCube } from "./misSalesLoad.js";
 import { loadSalesBiCube, pageActiveSales } from "./salesBiCubeServer.js";
+import { withTimeout } from "./authSession.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 const MIS_INVENTORY_SETTING_KEY = "mis_inventory_physical_v1";
@@ -123,24 +125,46 @@ export async function loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }
   throw lastError || new Error("Unable to load active_sales for MIS");
 }
 
-export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null }) {
+export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null, activeSalesBudgetMs = MIS_ACTIVE_SALES_SCAN_MS } = {}) {
   // Prefer active_sales so repeat sales can use real transaction dates (cube facts are month-dated).
+  let activeTimedOut = false;
+  let activeErrored = false;
+  let activeRows = [];
   try {
-    const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
-    if (rows.length) {
-      return { rows, source: "active_sales", preparedAt: null };
-    }
+    activeRows = await withTimeout(
+      loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }),
+      activeSalesBudgetMs,
+      "MIS_ACTIVE_SALES_TIMEOUT",
+    );
   } catch (error) {
-    console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+    const message = String(error?.message || "");
+    if (message === "MIS_ACTIVE_SALES_TIMEOUT") {
+      activeTimedOut = true;
+      console.warn(`MIS: active_sales scan exceeded ${activeSalesBudgetMs}ms, using sales BI cube`);
+    } else {
+      activeErrored = true;
+      console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+    }
   }
+
+  if (!misSalesShouldUseCube({ timedOut: activeTimedOut, errored: activeErrored, rowCount: activeRows.length })) {
+    return { rows: activeRows, source: "active_sales", preparedAt: null };
+  }
+
   try {
     const salesCube = cube || await loadSalesBiCube(admin, { allowStale: true });
     const rows = salesRowsFromCube(salesCube, { asOfYm });
     if (rows.length) {
-      return { rows, source: salesCube.source || "sales_bi_cube", preparedAt: salesCube.builtAt || null };
+      const source = activeTimedOut || activeErrored
+        ? `${salesCube.source || "sales_bi_cube"}_after_active_sales`
+        : (salesCube.source || "sales_bi_cube");
+      return { rows, source, preparedAt: salesCube.builtAt || null };
     }
   } catch (error) {
     console.error("MIS: sales BI cube also unavailable:", error);
+  }
+  if (activeRows.length) {
+    return { rows: activeRows, source: "active_sales_partial", preparedAt: null };
   }
   return { rows: [], source: "none", preparedAt: null };
 }

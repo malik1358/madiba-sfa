@@ -410,7 +410,9 @@ export function isKpiUploadSummaryCustomerExcluded(customerCode, excludedCustome
 
 /**
  * Still-open invoices expected to pay this month (incl. overdue) by category mix.
- * Optional excludedCustomerCodes skips legal-queue (and similar) accounts.
+ * Matches Expected Collection report: **Building material + Rest only**
+ * (electronics share omitted). Optional excludedCustomerCodes skips legal-queue
+ * (and similar) accounts.
  */
 export function sumExpectedCollectionCategoryBuckets(invoices = [], {
   avgDaysByCustomer = new Map(),
@@ -432,10 +434,38 @@ export function sumExpectedCollectionCategoryBuckets(invoices = [], {
       avgDays,
       monthEnd,
     })) return;
-    const mix = customerMix.get(customer);
-    buckets = mergeCategoryBuckets(buckets, splitAmountByCategoryMix(amount, mix));
+    const mix = customerMix instanceof Map
+      ? customerMix.get(customer)
+      : customerMix?.[customer];
+    const split = splitAmountByCategoryMix(amount, mix);
+    buckets = mergeCategoryBuckets(buckets, {
+      buildingMaterial: split.buildingMaterial,
+      electronics: 0,
+      rest: split.rest,
+    });
   });
   return withKpiUploadSummaryNonBuilding(buckets);
+}
+
+/**
+ * Collection month-end estimate for the KPI upload summary email:
+ * MTD collected + Expected Collection Total (BM + Rest open expected by month-end).
+ */
+export function resolveExpectedCollectionMonthEndEstimate({
+  collectionActual = 0,
+  expectedCollectionBuckets = null,
+} = {}) {
+  const expected = withKpiUploadSummaryNonBuilding(
+    expectedCollectionBuckets || emptyKpiUploadSummaryCategoryBuckets(),
+  );
+  const expectedAddOn = roundMoney(
+    Number(expected.buildingMaterial || 0) + Number(expected.rest || 0),
+  );
+  return {
+    expectedAddOn,
+    estimate: roundMoney(Number(collectionActual || 0) + expectedAddOn),
+    expectedBuckets: expected,
+  };
 }
 
 /**
@@ -611,8 +641,8 @@ function buildOneCategorySummaryRow({
 /**
  * Build Sales/Collection category detail rows from pre-aggregated buckets.
  * Building material + Non-building = parent; Electronics + Rest = Non-building.
- * Collection month-end estimate = MTD collected + open invoices expected this month
- * (including overdue still open).
+ * Collection month-end estimate = MTD collected + Expected Collection open invoices
+ * (BM + Rest only; electronics omitted; including overdue still open).
  */
 export function buildKpiUploadSummaryCategoryRows({
   salesBuckets = null,
@@ -674,7 +704,7 @@ export function buildKpiUploadSummaryCategoryRows({
       parentEstimate: collectionEstimate,
       parentTarget: collectionTarget,
       expectedRemaining: expectedRemaining[categoryKey],
-      statusLabel: "MTD + open expected this month",
+      statusLabel: "MTD + Expected Collection (BM + Rest)",
     })
   ));
   return {

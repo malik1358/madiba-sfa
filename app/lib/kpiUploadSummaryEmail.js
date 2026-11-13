@@ -17,10 +17,12 @@ import {
   buildKpiUploadSummaryCategoryRows,
   insertKpiUploadSummaryCategoryRows,
   reconstructPriorOutstandingCategoryBuckets,
+  resolveExpectedCollectionMonthEndEstimate,
   sumCreditSalesCategoryBucketsFromFacts,
   trailingMonthsEndingAt,
   withKpiUploadSummaryNonBuilding,
 } from "./kpiUploadSummaryCategories.js";
+import { achievementPercent } from "./performanceKpis.js";
 import {
   receivableDaysChangeTone,
   receivableTrailingDays,
@@ -503,6 +505,81 @@ export function buildKpiUploadSummaryTable({
       vsLastMonth: comparison,
     };
   });
+
+  // Collection / Total cash month-end estimates use Expected Collection (BM+Rest),
+  // not workday pace — same Total Expected SAR as /management/expected-collection.
+  if (categoryBreakdown?.expectedCollectionBuckets) {
+    const collectionRow = tableRows.find((row) => row.key === "collection");
+    const cashRow = tableRows.find((row) => row.key === "totalCashCollected");
+    if (collectionRow) {
+      const collectionActual = Number(collectionRow.totalFiltered?.actual || 0);
+      const collectionTarget = Number(collectionRow.totalFiltered?.target || 0);
+      const { estimate: collectionEstimate } = resolveExpectedCollectionMonthEndEstimate({
+        collectionActual,
+        expectedCollectionBuckets: categoryBreakdown.expectedCollectionBuckets,
+      });
+      const liveCollection = buildFilteredPerformanceKpi("collection", {
+        actual: collectionActual,
+        target: collectionTarget,
+        estimate: collectionEstimate,
+        reportDate,
+        todayIso,
+        salesAsOfDate,
+        receiptAsOfDate,
+      });
+      collectionRow.paceEstimate = {
+        estimate: collectionEstimate,
+        target: collectionTarget,
+        achievement: collectionTarget > 0
+          ? achievementPercent(collectionEstimate, collectionTarget)
+          : null,
+      };
+      collectionRow.totalFiltered = {
+        ...collectionRow.totalFiltered,
+        statusLabel: "MTD + Expected Collection (BM + Rest)",
+        statusTone: liveCollection.status?.tone || collectionRow.totalFiltered.statusTone,
+      };
+      collectionRow.vsLastMonth = compareKpiEstimateToPriorMonth(
+        collectionEstimate,
+        collectionRow.vsLastMonth?.priorActual,
+      );
+
+      if (cashRow) {
+        const cashActual = Number(cashRow.totalFiltered?.actual || 0);
+        const cashTarget = Number(cashRow.totalFiltered?.target || 0);
+        const cashPace = estimates.cashCollection?.estimate;
+        const totalCashEstimate = cashPace != null || collectionEstimate != null
+          ? Math.round(((Number(collectionEstimate) || 0) + (Number(cashPace) || 0)) * 100) / 100
+          : null;
+        if (totalCashEstimate != null) {
+          const liveCash = buildFilteredPerformanceKpi("totalCashCollected", {
+            actual: cashActual,
+            target: cashTarget,
+            estimate: totalCashEstimate,
+            reportDate,
+            todayIso,
+            salesAsOfDate,
+            receiptAsOfDate,
+          });
+          cashRow.paceEstimate = {
+            estimate: totalCashEstimate,
+            target: cashTarget,
+            achievement: cashTarget > 0
+              ? achievementPercent(totalCashEstimate, cashTarget)
+              : null,
+          };
+          cashRow.totalFiltered = {
+            ...cashRow.totalFiltered,
+            statusTone: liveCash.status?.tone || cashRow.totalFiltered.statusTone,
+          };
+          cashRow.vsLastMonth = compareKpiEstimateToPriorMonth(
+            totalCashEstimate,
+            cashRow.vsLastMonth?.priorActual,
+          );
+        }
+      }
+    }
+  }
 
   const categoryPack = categoryBreakdown
     ? (() => {

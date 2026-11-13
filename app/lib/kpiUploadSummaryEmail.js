@@ -16,18 +16,16 @@ import {
   buildCategoryReceivableDays,
   buildKpiUploadSummaryCategoryRows,
   insertKpiUploadSummaryCategoryRows,
-  monthsThroughYtd,
   reconstructPriorOutstandingCategoryBuckets,
   sumCreditSalesCategoryBucketsFromFacts,
   trailingMonthsEndingAt,
   withKpiUploadSummaryNonBuilding,
 } from "./kpiUploadSummaryCategories.js";
 import {
+  receivableDaysChangeTone,
   receivableTrailingDays,
-  receivableYtdDays,
 } from "./receivableDays.js";
 import { previousMonthKey } from "./categoryGrowth.js";
-import { receivableDaysChangeTone } from "./receivableDays.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 
@@ -54,17 +52,10 @@ export const KPI_UPLOAD_SUMMARY_KPI_KEYS = [
   "totalCashCollected",
 ];
 
-/** Company-wide DSO rows appended after the salesman KPI footer rows (same three views as BI). */
-export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY = "averageCollectionDays";
-export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days (YTD)";
+/** Company-wide rolling 3m DSO row appended after the salesman KPI footer rows. */
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_KEY = "averageCollectionDays3m";
+export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_LABEL = "Avg collection days (Rolling 3m)";
 export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS = [
-  {
-    key: "averageCollectionDays",
-    label: "Avg collection days (YTD)",
-    field: "receivable_days",
-    previousField: "previous_receivable_days",
-    statusLabel: "Lower is better · YTD DSO",
-  },
   {
     key: "averageCollectionDays3m",
     label: "Avg collection days (Rolling 3m)",
@@ -72,14 +63,6 @@ export const KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS = [
     previousField: "receivable_days_3m",
     usePriorMonthRow: true,
     statusLabel: "Lower is better · Rolling 3m DSO",
-  },
-  {
-    key: "averageCollectionDays12m",
-    label: "Avg collection days (Rolling 12m)",
-    field: "receivable_days_12m",
-    previousField: "receivable_days_12m",
-    usePriorMonthRow: true,
-    statusLabel: "Lower is better · Rolling 12m DSO",
   },
 ];
 
@@ -200,7 +183,7 @@ export function withFlatKpiTargets(row = {}) {
 }
 
 /**
- * MoM comparison for average collection days (YTD DSO).
+ * MoM comparison for average collection days (rolling 3m DSO).
  * Lower days is improvement: direction "up" = improving (green), "down" = getting worse.
  */
 export function compareAverageCollectionDaysToPriorMonth(currentDays, previousDays) {
@@ -262,7 +245,7 @@ function priorReceivableMonthRow(report = null, monthKey = "") {
 }
 
 /**
- * Build one company Avg collection days email row (YTD / 3m / 12m) from the BI report.
+ * Build one company Avg collection days email row (rolling 3m) from the BI report.
  */
 export function buildAverageCollectionDaysSummaryRow(report = null, variant = KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS[0]) {
   const config = variant && typeof variant === "object"
@@ -306,7 +289,7 @@ export function buildAverageCollectionDaysSummaryRow(report = null, variant = KP
 }
 
 /**
- * Build all three company Avg collection days rows (YTD, rolling 3m, rolling 12m).
+ * Build company Avg collection days rows included in the upload summary (rolling 3m only).
  */
 export function buildAverageCollectionDaysSummaryRows(report = null) {
   return KPI_UPLOAD_SUMMARY_COLLECTION_DAYS_VARIANTS
@@ -458,8 +441,8 @@ export function buildActiveCustomersSummaryRows(report = null) {
 /**
  * Build the three KPI Targets footer summaries, then transpose so those row
  * labels become email columns (one email row per KPI). Optionally append
- * company Avg collection days for YTD, rolling 3m, and rolling 12m DSO with
- * MoM improve/worsen on each, and company Active customers count + 120-day sales with MoM.
+ * company Avg collection days for rolling 3m DSO with MoM improve/worsen,
+ * and company Active customers count + 120-day sales with MoM.
  */
 export function buildKpiUploadSummaryTable({
   rows = [],
@@ -557,19 +540,9 @@ export function buildKpiUploadSummaryTable({
     const asOf = String(todayIso || salesAsOfDate || reportDate || "").slice(0, 10);
     const facts = Array.isArray(categoryBreakdown.cubeFacts) ? categoryBreakdown.cubeFacts : [];
     const salesmanCodes = categoryBreakdown.salesmanCodes || null;
-    const daysYtd = receivableYtdDays(monthKey, asOf);
     const days3m = receivableTrailingDays(monthKey, 3, asOf);
-    const days12m = receivableTrailingDays(monthKey, 12, asOf);
-    const creditYtd = sumCreditSalesCategoryBucketsFromFacts(facts, {
-      months: monthsThroughYtd(monthKey),
-      salesmanCodes,
-    });
     const credit3m = sumCreditSalesCategoryBucketsFromFacts(facts, {
       months: trailingMonthsEndingAt(monthKey, 3),
-      salesmanCodes,
-    });
-    const credit12m = sumCreditSalesCategoryBucketsFromFacts(facts, {
-      months: trailingMonthsEndingAt(monthKey, 12),
       salesmanCodes,
     });
     const creditThisMonth = sumCreditSalesCategoryBucketsFromFacts(facts, {
@@ -585,34 +558,13 @@ export function buildKpiUploadSummaryTable({
       collectionMtd,
     });
     // Prior DSO uses reconstructed prior-month-end AR and full prior-month calendar windows.
-    const priorCreditYtd = priorMonthKeyValue
-      ? sumCreditSalesCategoryBucketsFromFacts(facts, {
-        months: monthsThroughYtd(priorMonthKeyValue),
-        salesmanCodes,
-      })
-      : null;
     const priorCredit3m = priorMonthKeyValue
       ? sumCreditSalesCategoryBucketsFromFacts(facts, {
         months: trailingMonthsEndingAt(priorMonthKeyValue, 3),
         salesmanCodes,
       })
       : null;
-    const priorCredit12m = priorMonthKeyValue
-      ? sumCreditSalesCategoryBucketsFromFacts(facts, {
-        months: trailingMonthsEndingAt(priorMonthKeyValue, 12),
-        salesmanCodes,
-      })
-      : null;
-    const priorYtdDays = priorMonthKeyValue ? receivableYtdDays(priorMonthKeyValue) : 0;
     const prior3mDays = priorMonthKeyValue ? receivableTrailingDays(priorMonthKeyValue, 3) : 0;
-    const prior12mDays = priorMonthKeyValue ? receivableTrailingDays(priorMonthKeyValue, 12) : 0;
-    const priorDaysByCategoryYtd = priorCreditYtd
-      ? buildCategoryReceivableDays({
-        outstandingBuckets: priorOutstanding,
-        creditSalesBuckets: priorCreditYtd,
-        days: priorYtdDays,
-      })
-      : null;
     const priorDaysByCategory3m = priorCredit3m
       ? buildCategoryReceivableDays({
         outstandingBuckets: priorOutstanding,
@@ -620,27 +572,7 @@ export function buildKpiUploadSummaryTable({
         days: prior3mDays,
       })
       : null;
-    const priorDaysByCategory12m = priorCredit12m
-      ? buildCategoryReceivableDays({
-        outstandingBuckets: priorOutstanding,
-        creditSalesBuckets: priorCredit12m,
-        days: prior12mDays,
-      })
-      : null;
     const collectionDaysByParent = {
-      averageCollectionDays: buildCategoryCollectionDaysRows({
-        parentKey: "averageCollectionDays",
-        parentLabel: "Avg collection days (YTD)",
-        daysByCategory: buildCategoryReceivableDays({
-          outstandingBuckets: categoryBreakdown.outstandingBuckets,
-          creditSalesBuckets: creditYtd,
-          days: daysYtd,
-        }),
-        priorDaysByCategory: priorDaysByCategoryYtd,
-        compareFn: compareAverageCollectionDaysToPriorMonth,
-        month: monthKey,
-        statusLabel: "Lower is better · YTD category DSO",
-      }),
       averageCollectionDays3m: buildCategoryCollectionDaysRows({
         parentKey: "averageCollectionDays3m",
         parentLabel: "Avg collection days (Rolling 3m)",
@@ -653,19 +585,6 @@ export function buildKpiUploadSummaryTable({
         compareFn: compareAverageCollectionDaysToPriorMonth,
         month: monthKey,
         statusLabel: "Lower is better · Rolling 3m category DSO",
-      }),
-      averageCollectionDays12m: buildCategoryCollectionDaysRows({
-        parentKey: "averageCollectionDays12m",
-        parentLabel: "Avg collection days (Rolling 12m)",
-        daysByCategory: buildCategoryReceivableDays({
-          outstandingBuckets: categoryBreakdown.outstandingBuckets,
-          creditSalesBuckets: credit12m,
-          days: days12m,
-        }),
-        priorDaysByCategory: priorDaysByCategory12m,
-        compareFn: compareAverageCollectionDaysToPriorMonth,
-        month: monthKey,
-        statusLabel: "Lower is better · Rolling 12m category DSO",
       }),
     };
     const withDaysCategories = insertKpiUploadSummaryCategoryRows(tableRows, { collectionDaysByParent });
@@ -1038,7 +957,7 @@ export function buildKpiUploadSummaryEmail({
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #d7e3ea;border-radius:12px;padding:18px;">
     <h1 style="margin:0 0 8px;font-size:20px;color:#0f4c5c;">KPI Targets summary</h1>
     <p style="margin:0 0 12px;color:#475569;font-size:13px;">${escapeHtml(metaBits.join(" · "))}</p>
-    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets with Building material / Non-building / Electronics / Rest under Total sales, Collection, and each Avg collection days line. Collection month-end = MTD collected + still-open invoices whose historical pay day falls on/before month-end (overdue open still counts). Category DSO = (category outstanding ÷ category credit sales) × window days. Building material + Non-building = parent; Electronics + Rest = Non-building. Lower collection days is better; higher active customers and 120-day sales are better.</p>
+    <p style="margin:0 0 14px;font-size:13px;">Footer rows from KPI Targets with Building material / Non-building / Electronics / Rest under Total sales, Collection, and Avg collection days (Rolling 3m). Collection month-end = MTD collected + still-open invoices whose historical pay day falls on/before month-end (overdue open still counts). Category DSO = (category outstanding ÷ category credit sales) × rolling 3m window days. Building material + Non-building = parent; Electronics + Rest = Non-building. Lower collection days is better; higher active customers and 120-day sales are better.</p>
     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#0f4c5c;color:#ffffff;">${headerCells}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="4" style="padding:12px;border:1px solid #d7e3ea;">No KPI rows.</td></tr>`}</tbody>

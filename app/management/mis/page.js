@@ -409,6 +409,60 @@ function SalesmanTable({ rows, language }) {
   );
 }
 
+function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const keys = ["category", "previousSales", "sales", "delta", "salesMomPct"];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct") return row[key] != null ? `${row[key]}%` : "—";
+    if (["previousSales", "sales", "delta"].includes(key)) return amountInt(row[key]);
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const priorTotal = visibleRows.reduce((acc, row) => acc + Number(row.previousSales || 0), 0);
+  const salesTotal = visibleRows.reduce((acc, row) => acc + Number(row.sales || 0), 0);
+  const deltaTotal = Math.round(salesTotal - priorTotal);
+
+  return (
+    <ExportableTable filename="mis-repeat-category-mom" sheetName="Repeat by category" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={`${previousLabel} repeat`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={`${currentLabel} repeat`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="Difference" filterKey="delta" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.category}</td>
+                <td>{amountInt(row.previousSales)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                <td className={momTrendClass(row.delta)}>{amountInt(row.delta)}</td>
+                <td className={`moduleBiTotalCol ${momTrendClass(row.salesMomPct)}`}>{pct(row.salesMomPct)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td><strong>Total</strong></td>
+              <td><strong>{amountInt(priorTotal)}</strong></td>
+              <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
+              <td className={momTrendClass(deltaTotal)}><strong>{amountInt(deltaTotal)}</strong></td>
+              <td className={`moduleBiTotalCol ${momTrendClass(pctChangeSafe(salesTotal, priorTotal))}`}>
+                <strong>{pct(pctChangeSafe(salesTotal, priorTotal))}</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </ExportableTable>
+  );
+}
+
 function PortfolioCategoryMomTable({ rows, language }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
   const keys = [
@@ -833,6 +887,18 @@ function buildSlides(report, language) {
             <Kpi label="New customers" value={String(report.headline.newCustomers)} note={momNote(report.headline.newCustomersMomPct, `prior ${report.headline.previousNewCustomers}`)} tone={Number(report.headline.newCustomersMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Prior repeat mix" value={`${report.headline.previousRepeatPct}%`} note={money(report.headline.previousRepeatSales)} tone="orange" />
           </MisKpiPanel>
+          <h3>Category repeat · {monthLabel(asOfYm)} vs {monthLabel(report.previousMonth)}</h3>
+          <p className="misMeta">Filter any column. Difference and MoM% are green when up, red when down.</p>
+          {(report.repeatCategories || []).length ? (
+            <RepeatCategoryMomTable
+              rows={report.repeatCategories}
+              language={language}
+              currentLabel={monthLabel(asOfYm)}
+              previousLabel={monthLabel(report.previousMonth)}
+            />
+          ) : (
+            <p className="misRemark">No category repeat sales for this as-of month yet.</p>
+          )}
           <h3>Historical month-on-month growth</h3>
           <GrowthTrendChart
             periods={months}

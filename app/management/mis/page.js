@@ -129,16 +129,10 @@ function monthLabel(ym) {
   return `${names[Number(m) - 1] || m} ${String(y).slice(2)}`;
 }
 
-/** AR / DSO / inventory-days MoM: lower is better → up=red, down=green. */
+/** AR / DSO MoM: lower is better → up=red, down=green. */
 function arMomNoteClass(momPct) {
   if (momPct == null || !Number.isFinite(Number(momPct)) || Number(momPct) === 0) return "";
   return Number(momPct) > 0 ? "misKpiNote--worse" : "misKpiNote--better";
-}
-
-function daysOnHandValue(days, momPct) {
-  if (days == null || !Number.isFinite(Number(days))) return "—";
-  if (momPct == null || !Number.isFinite(Number(momPct))) return String(days);
-  return `${days} (${pct(momPct)})`;
 }
 
 function Kpi({ label, value, note, noteClassName = "", tone = "teal" }) {
@@ -832,43 +826,36 @@ function buildSlides(report, language) {
         <Slide eyebrow="INVENTORY" title="Working capital in stock">
           {report.inventory ? (
             <>
-              <MisKpiPanel language={language} title="Inventory KPIs" defaultOpen>
+              <MisKpiPanel language={language} title="Inventory KPIs">
                 <Kpi
                   label="Stock in hand"
                   value={money(report.inventory.physical, { digits: 2 })}
-                  note={report.inventory.physicalMomPct == null
-                    ? null
-                    : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : "")}
+                  note={[
+                    report.inventory.days != null ? `${report.inventory.days} days forward cover` : null,
+                    report.inventory.sales30d != null ? `last 30d sales ${money(report.inventory.sales30d, { digits: 2 })}` : null,
+                    report.inventory.physicalMomPct == null
+                      ? null
+                      : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : ""),
+                  ].filter(Boolean).join(" · ") || null}
                   tone="teal"
                 />
                 <Kpi
-                  label="Days on hand (month sales)"
-                  value={daysOnHandValue(report.inventory.daysMonth, report.inventory.daysMonthMomPct)}
-                  note={[
-                    report.inventory.monthSales != null ? `month sales ${money(report.inventory.monthSales, { digits: 2 })}` : null,
-                    report.inventory.daysMonthMomPct == null
-                      ? "stock ÷ (month sales ÷ days in month)"
-                      : momNote(
-                        report.inventory.daysMonthMomPct,
-                        report.inventory.previousDaysMonth != null ? `was ${report.inventory.previousDaysMonth}` : "",
-                      ),
-                  ].filter(Boolean).join(" · ")}
-                  noteClassName={arMomNoteClass(report.inventory.daysMonthMomPct)}
-                  tone={report.inventory.daysMonth > 90 ? "orange" : "green"}
+                  label="Last 30d sales"
+                  value={report.inventory.sales30d != null ? money(report.inventory.sales30d, { digits: 2 }) : "—"}
+                  note={report.inventory.coverFrom && report.inventory.coverTo
+                    ? `${report.inventory.coverFrom} → ${report.inventory.coverTo}`
+                    : "Pace for forward cover"}
+                  tone="teal"
                 />
                 <Kpi
-                  label="Days on hand (forward cover)"
-                  value={daysOnHandValue(report.inventory.days, report.inventory.daysMomPct)}
+                  label="Days on hand"
+                  value={report.inventory.days != null ? String(report.inventory.days) : "—"}
                   note={[
-                    report.inventory.sales30d != null ? `last 30d sales ${money(report.inventory.sales30d, { digits: 2 })}` : null,
+                    report.inventory.physical != null ? `stock ${money(report.inventory.physical, { digits: 2 })}` : null,
                     report.inventory.daysMomPct == null
                       ? "stock ÷ (last 30d sales ÷ 30)"
-                      : momNote(
-                        report.inventory.daysMomPct,
-                        report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "",
-                      ),
+                      : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "last 30 days pace"),
                   ].filter(Boolean).join(" · ")}
-                  noteClassName={arMomNoteClass(report.inventory.daysMomPct)}
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
               </MisKpiPanel>

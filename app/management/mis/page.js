@@ -129,12 +129,18 @@ function monthLabel(ym) {
   return `${names[Number(m) - 1] || m} ${String(y).slice(2)}`;
 }
 
-function Kpi({ label, value, note, tone = "teal" }) {
+/** AR / DSO MoM: lower is better → up=red, down=green. */
+function arMomNoteClass(momPct) {
+  if (momPct == null || !Number.isFinite(Number(momPct)) || Number(momPct) === 0) return "";
+  return Number(momPct) > 0 ? "misKpiNote--worse" : "misKpiNote--better";
+}
+
+function Kpi({ label, value, note, noteClassName = "", tone = "teal" }) {
   return (
     <div className={`misKpi misKpi--${tone}`}>
       <div className="misKpiLabel">{label}</div>
       <div className="misKpiValue">{value}</div>
-      {note ? <div className="misKpiNote">{note}</div> : null}
+      {note ? <div className={`misKpiNote${noteClassName ? ` ${noteClassName}` : ""}`}>{note}</div> : null}
     </div>
   );
 }
@@ -691,8 +697,9 @@ function buildSlides(report, language) {
               label=">90-day AR"
               value={money(report.headline.gt90Ar)}
               note={report.headline.gt90ArMomPct == null
-                ? `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`
-                : momNote(report.headline.gt90ArMomPct, `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`)}
+                ? `Total AR ${money(report.headline.totalAr)} · rolling 3m ~${report.headline.collectionDays3m ?? report.headline.collectionDays ?? "—"} days`
+                : momNote(report.headline.gt90ArMomPct, `Total AR ${money(report.headline.totalAr)} · rolling 3m ~${report.headline.collectionDays3m ?? report.headline.collectionDays ?? "—"} days`)}
+              noteClassName={arMomNoteClass(report.headline.gt90ArMomPct)}
               tone={report.headline.gt90ArMomPct == null || report.headline.gt90ArMomPct <= 0 ? "green" : "orange"}
             />
             <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={momNote(report.headline.ytdMomPct, `${report.headline.newCustomers} new customers`)} tone={Number(report.headline.ytdMomPct) >= 0 ? "green" : "orange"} />
@@ -737,13 +744,17 @@ function buildSlides(report, language) {
                 {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => {
                   const mom = report.headline.arBucketMomPct?.[bucket];
                   const prior = report.headline.previousArBuckets?.[bucket];
+                  const noteTone = arMomNoteClass(mom);
                   return (
                     <Kpi
                       key={bucket}
                       label={bucket}
                       value={money(value)}
                       note={mom == null ? (prior == null ? "No prior snapshot" : money(prior)) : momNote(mom, prior != null ? `was ${money(prior)}` : "")}
-                      tone={bucket.includes("90") || bucket.includes(">") ? "orange" : "teal"}
+                      noteClassName={noteTone}
+                      tone={mom == null
+                        ? (bucket.includes("90") || bucket.includes(">") ? "orange" : "teal")
+                        : (Number(mom) > 0 ? "orange" : "green")}
                     />
                   );
                 })}

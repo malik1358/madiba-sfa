@@ -8960,6 +8960,8 @@ tr.paymentSettleStatementLead td {
 .misKpiLabel { color: #0f4c5c; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
 .misKpiValue { color: #0b2545; font-size: 1.35rem; font-weight: 800; margin-top: 4px; }
 .misKpiNote { color: #5b6b76; font-size: 12px; margin-top: 4px; }
+.misKpiNote--better { color: #166534; font-weight: 700; }
+.misKpiNote--worse { color: #b91c1c; font-weight: 700; }
 .misSplit { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .misBarRow { display: grid; grid-template-columns: 64px 1fr 90px; gap: 8px; align-items: center; margin-bottom: 8px; }
 .misBarLabel { font-size: 12px; color: #0f4c5c; font-weight: 700; }

@@ -152,6 +152,12 @@ test("buildMisReport inventory days use last-30-day forward cover", () => {
   assert.equal(report.inventory.coverTo, "2026-10-31");
   // 1_000_000 ÷ (450_000 / 30) = 66.67 → 67
   assert.equal(report.inventory.days, 67);
+  // Oct sales = 450000, 31 days → 1_000_000 ÷ (450000/31) ≈ 69
+  assert.equal(report.inventory.monthSales, 450000);
+  assert.equal(report.inventory.daysMonth, 69);
+  // Sep sales = 999999, 30 days → 900000 ÷ (999999/30) ≈ 27
+  assert.equal(report.inventory.previousDaysMonth, 27);
+  assert.ok(Number.isFinite(report.inventory.daysMonthMomPct));
   const sundry = report.inventory.categories.find((row) => row.category === "Sundry");
   const fragrance = report.inventory.categories.find((row) => row.category === "Fragrance");
   assert.equal(sundry.sales30d, 300000);

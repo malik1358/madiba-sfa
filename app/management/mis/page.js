@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Children, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -45,6 +45,9 @@ const TEXT = {
   next: { en: "Next", ar: "التالي" },
   slideOf: { en: "Slide", ar: "شريحة" },
   all: { en: "All", ar: "الكل" },
+  kpiPanel: { en: "Key figures", ar: "الأرقام الرئيسية" },
+  showKpis: { en: "Show", ar: "إظهار" },
+  hideKpis: { en: "Hide", ar: "إخفاء" },
 };
 
 function money(value, { digits = 1 } = {}) {
@@ -126,6 +129,55 @@ function Slide({ eyebrow, title, children, variant = "" }) {
       </div>
       <div className="misSlideBody">{children}</div>
     </section>
+  );
+}
+
+function InventoryCategoryTable({ rows, language, totalDaysOnHand }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const keys = ["category", "amount", "forwardCoverDays"];
+  const valueOf = useCallback((row, key) => {
+    if (key === "forwardCoverDays") {
+      return row.forwardCoverDays != null ? String(row.forwardCoverDays) : "—";
+    }
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const stockTotal = visibleRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+  return (
+    <ExportableTable filename="mis-inventory-categories" sheetName="Inventory" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Stock value" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              <BiExcelHead label="Forward cover (days)" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.category}</td>
+                <td className="moduleBiTotalCol">{amountInt(row.amount)}</td>
+                <td className={`moduleBiTotalCol${row.forwardCoverDays != null && row.forwardCoverDays > 90 ? " moduleBiMonthCell--down" : row.forwardCoverDays != null ? " moduleBiMonthCell--up" : ""}`}>
+                  {row.forwardCoverDays != null ? amountInt(row.forwardCoverDays) : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td><strong>Total</strong></td>
+              <td className="moduleBiTotalCol"><strong>{amountInt(stockTotal)}</strong></td>
+              <td className={`moduleBiTotalCol${totalDaysOnHand != null && totalDaysOnHand > 90 ? " moduleBiMonthCell--down" : totalDaysOnHand != null ? " moduleBiMonthCell--up" : ""}`}>
+                <strong>{totalDaysOnHand != null ? amountInt(totalDaysOnHand) : "—"}</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </ExportableTable>
   );
 }
 
@@ -409,7 +461,7 @@ function buildSlides(report, language) {
             </div>
             <div>
               <h3>AR ageing vs prior month</h3>
-              <div className="misKpiGrid misKpiGrid--compact">
+              <MisKpiPanel language={language} title="AR ageing" compact>
                 {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => {
                   const mom = report.headline.arBucketMomPct?.[bucket];
                   const prior = report.headline.previousArBuckets?.[bucket];
@@ -423,7 +475,7 @@ function buildSlides(report, language) {
                     />
                   );
                 })}
-              </div>
+              </MisKpiPanel>
               <p className="misRemark">{report.remarks.receivables}</p>
             </div>
           </div>
@@ -437,7 +489,7 @@ function buildSlides(report, language) {
         <Slide eyebrow="INVENTORY" title="Working capital in stock">
           {report.inventory ? (
             <>
-              <div className="misKpiGrid">
+              <MisKpiPanel language={language} title="Inventory KPIs">
                 <Kpi
                   label="Physical stock"
                   value={money(report.inventory.physical, { digits: 2 })}
@@ -450,30 +502,17 @@ function buildSlides(report, language) {
                   label="Days on hand"
                   value={report.inventory.days != null ? String(report.inventory.days) : "—"}
                   note={report.inventory.daysMomPct == null
-                    ? `vs ${monthLabel(asOfYm)} sales pace`
-                    : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "")}
+                    ? "Forward cover vs last 30 days sales"
+                    : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "last 30 days pace")}
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
-              </div>
+              </MisKpiPanel>
               {report.inventory.categories?.length ? (
-                <div className="moduleTableScroll" style={{ marginTop: 12 }}>
-                  <table className="moduleTable moduleBiTable">
-                    <thead>
-                      <tr>
-                        <th>Category</th>
-                        <th className="moduleBiTotalCol">Stock value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.inventory.categories.map((row, index) => (
-                        <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                          <td>{row.category}</td>
-                          <td className="moduleBiTotalCol">{amountInt(row.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <InventoryCategoryTable
+                  rows={report.inventory.categories}
+                  language={language}
+                  totalDaysOnHand={report.inventory.days}
+                />
               ) : null}
             </>
           ) : (
@@ -489,12 +528,12 @@ function buildSlides(report, language) {
       label: "Repeat",
       node: (
         <Slide eyebrow="CUSTOMERS" title="Repeat business">
-          <div className="misKpiGrid">
+          <MisKpiPanel language={language} title="Repeat KPIs">
             <Kpi label="Repeat sales" value={money(report.headline.repeatSales)} note={momNote(report.headline.repeatSalesMomPct, `${report.headline.repeatPct}% of month`)} tone={Number(report.headline.repeatSalesMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Repeat customers" value={String(report.headline.repeatCustomers)} note={`Prior month ${report.headline.previousRepeatCustomers}`} tone="teal" />
             <Kpi label="New customers" value={String(report.headline.newCustomers)} note={momNote(report.headline.newCustomersMomPct, `prior ${report.headline.previousNewCustomers}`)} tone={Number(report.headline.newCustomersMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Prior repeat mix" value={`${report.headline.previousRepeatPct}%`} note={money(report.headline.previousRepeatSales)} tone="orange" />
-          </div>
+          </MisKpiPanel>
           <h3>Historical month-on-month growth</h3>
           <GrowthTrendChart
             periods={months}
@@ -524,12 +563,12 @@ function buildSlides(report, language) {
           <p className="misMeta">
             Excluded from this portfolio: Electronics, Building Material, Office supplies, and Stationery.
           </p>
-          <div className="misKpiGrid">
+          <MisKpiPanel language={language} title="Portfolio KPIs">
             <Kpi label="Portfolio sales" value={money(portfolio.sales || 0)} note={momNote(pctChangeSafe(portfolio.sales, prevPortfolio.sales), `prior ${money(prevPortfolio.sales || 0)}`)} tone="teal" />
             <Kpi label="Portfolio GP" value={money(portfolio.gp || 0)} note={momNote(pctChangeSafe(portfolio.gp, prevPortfolio.gp), `prior ${money(prevPortfolio.gp || 0)}`)} tone="green" />
             <Kpi label="Portfolio GP%" value={`${portfolio.gpPct ?? 0}%`} note={`Prior ${prevPortfolio.gpPct ?? 0}%`} tone="green" />
             <Kpi label="Active SKUs / customers" value={`${portfolio.skus ?? 0} / ${portfolio.customers ?? 0}`} tone="teal" />
-          </div>
+          </MisKpiPanel>
           <p className="misRemark">{report.remarks.portfolio}</p>
         </Slide>
       ),

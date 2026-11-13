@@ -26,10 +26,30 @@ function monthKey(value) {
   return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
 }
 
-function daysInMonth(ym) {
+function lastDayOfMonth(ym) {
   const [y, m] = String(ym).split("-").map(Number);
-  if (!y || !m) return 30;
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (!y || !m) return "";
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/** Inclusive window start for a trailing dayCount ending on endYmd. */
+function trailingWindowStart(endYmd, dayCount = 30) {
+  const [y, m, d] = String(endYmd || "").slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const dt = new Date(Date.UTC(y, m - 1, d - (Math.max(1, dayCount) - 1)));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Forward cover / days on hand from stock vs sales pace over a fixed window.
+ * stock ÷ (windowSales ÷ windowDays)
+ */
+function forwardCoverDays(stock, windowSales, windowDays = 30) {
+  const stockN = moneyRound(stock);
+  const salesN = moneyRound(windowSales);
+  const days = Math.max(1, Number(windowDays) || 30);
+  if (!Number.isFinite(stockN) || !salesN) return null;
+  return Math.round(stockN / (salesN / days));
 }
 
 function normCat(value) {
@@ -276,6 +296,33 @@ export function buildMisReport({
     ? pctChange(collectionDays, previousCollectionDays)
     : null;
 
+  const FORWARD_COVER_WINDOW_DAYS = 30;
+  const coverEnd = asOf;
+  const coverStart = trailingWindowStart(coverEnd, FORWARD_COVER_WINDOW_DAYS);
+  const prevCoverEnd = prevYm ? lastDayOfMonth(prevYm) : "";
+  const prevCoverStart = prevCoverEnd
+    ? trailingWindowStart(prevCoverEnd, FORWARD_COVER_WINDOW_DAYS)
+    : "";
+  let sales30d = 0;
+  let previousSales30d = 0;
+  const sales30dByCat = new Map();
+  for (const row of salesRows) {
+    const day = String(row.transaction_date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    const amount = toNumber(row.sales_amount);
+    if (coverStart && day >= coverStart && day <= coverEnd) {
+      sales30d += amount;
+      const cat = String(row.category || "").trim() || "(blank)";
+      const key = normCat(cat);
+      sales30dByCat.set(key, (sales30dByCat.get(key) || 0) + amount);
+    }
+    if (prevCoverStart && day >= prevCoverStart && day <= prevCoverEnd) {
+      previousSales30d += amount;
+    }
+  }
+  sales30d = moneyRound(sales30d);
+  previousSales30d = moneyRound(previousSales30d);
+
   const inventoryInput = inventoryPhysical && typeof inventoryPhysical === "object"
     ? inventoryPhysical
     : inventoryPhysical == null
@@ -289,18 +336,32 @@ export function buildMisReport({
     : inventoryInput?.previous?.physical != null
       ? Number(inventoryInput.previous.physical)
       : null;
-  const inventoryDays = curSales && Number.isFinite(inventoryPhysicalAmount)
-    ? Math.round(moneyRound(inventoryPhysicalAmount) / (curSales / daysInMonth(asOfYm)))
-    : null;
-  const previousInventoryDays = prevSales && Number.isFinite(previousInventoryPhysical)
-    ? Math.round(moneyRound(previousInventoryPhysical) / (prevSales / daysInMonth(prevYm)))
-    : null;
+  // Days on hand / forward cover = stock ÷ (last-30-day sales ÷ 30).
+  const inventoryDays = forwardCoverDays(
+    inventoryPhysicalAmount,
+    sales30d,
+    FORWARD_COVER_WINDOW_DAYS,
+  );
+  const previousInventoryDays = forwardCoverDays(
+    previousInventoryPhysical,
+    previousSales30d,
+    FORWARD_COVER_WINDOW_DAYS,
+  );
   const inventoryCategories = inventoryInput?.byCategory && typeof inventoryInput.byCategory === "object"
     ? Object.entries(inventoryInput.byCategory)
-      .map(([category, amount]) => ({
-        category: String(category || "").trim() || "(blank)",
-        amount: moneyRound(amount),
-      }))
+      .map(([category, amount]) => {
+        const label = String(category || "").trim() || "(blank)";
+        const stockAmount = moneyRound(amount);
+        const catSales30d = moneyRound(sales30dByCat.get(normCat(label)) || 0);
+        const days = forwardCoverDays(stockAmount, catSales30d, FORWARD_COVER_WINDOW_DAYS);
+        return {
+          category: label,
+          amount: stockAmount,
+          sales30d: catSales30d,
+          days,
+          forwardCoverDays: days,
+        };
+      })
       .filter((row) => row.amount)
       .sort((a, b) => b.amount - a.amount)
     : [];
@@ -312,6 +373,11 @@ export function buildMisReport({
     physicalMomPct: Number.isFinite(previousInventoryPhysical)
       ? pctChange(inventoryPhysicalAmount, previousInventoryPhysical)
       : null,
+    sales30d,
+    previousSales30d: previousSales30d || null,
+    coverWindowDays: FORWARD_COVER_WINDOW_DAYS,
+    coverFrom: coverStart || null,
+    coverTo: coverEnd || null,
     days: inventoryDays,
     previousDays: previousInventoryDays,
     daysMomPct: inventoryDays != null && previousInventoryDays != null

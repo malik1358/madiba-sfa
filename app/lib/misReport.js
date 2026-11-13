@@ -196,6 +196,8 @@ export function buildMisReport({
   const portfolioCategoryMonthly = new Map();
   /** Repeat sales by month+category (`ym||category`). */
   const repeatCategoryMonthly = new Map();
+  /** Repeat sales by month+category+item (`ym||category||itemId`). */
+  const repeatItemMonthly = new Map();
   const portfolioItemMonthly = new Map();
 
   for (const row of salesRows) {
@@ -228,6 +230,32 @@ export function buildMisReport({
         const rRow = repeatCategoryMonthly.get(rKey) || { ym, category: catLabel, sales: 0 };
         rRow.sales += amount;
         repeatCategoryMonthly.set(rKey, rRow);
+
+        const itemCode = String(row.item_code || "").trim();
+        const itemNameRaw = String(row.item_name || "").trim();
+        const itemId = itemCode ? itemCode.toUpperCase() : itemNameRaw.toLowerCase();
+        if (itemId) {
+          const riKey = `${ym}||${catLabel}||${itemId}`;
+          const riRow = repeatItemMonthly.get(riKey) || {
+            ym,
+            category: catLabel,
+            itemCode,
+            itemName: itemNameRaw || itemId,
+            sales: 0,
+          };
+          riRow.sales += amount;
+          if (itemNameRaw) {
+            const codeForName = itemCode || riRow.itemCode || itemId;
+            if (portfolioItemNameIsWeak(riRow.itemName, itemId, codeForName)) {
+              riRow.itemName = itemNameRaw;
+            } else {
+              riRow.itemName = preferItemDisplayName(riRow.itemName, itemNameRaw, codeForName);
+            }
+          }
+          if (!riRow.itemCode && itemCode) riRow.itemCode = itemCode;
+          if (!riRow.category || riRow.category === "(blank)") riRow.category = catLabel;
+          repeatItemMonthly.set(riKey, riRow);
+        }
       } else {
         bucket.newSales += amount;
       }
@@ -555,6 +583,18 @@ export function buildMisReport({
     const category = rest.join("||");
     if (ym === asOfYm || (prevYm && ym === prevYm)) repeatCategoryNames.add(category);
   }
+  const repeatItemIdsByCategory = new Map();
+  for (const key of repeatItemMonthly.keys()) {
+    const parts = String(key).split("||");
+    if (parts.length < 3) continue;
+    const ym = parts[0];
+    const itemId = parts[parts.length - 1];
+    const category = parts.slice(1, -1).join("||");
+    if (!(ym === asOfYm || (prevYm && ym === prevYm))) continue;
+    if (!repeatItemIdsByCategory.has(category)) repeatItemIdsByCategory.set(category, new Set());
+    repeatItemIdsByCategory.get(category).add(itemId);
+  }
+
   const repeatCategories = [...repeatCategoryNames].map((category) => {
     const cur = repeatCategoryMonthly.get(`${asOfYm}||${category}`) || { category, sales: 0 };
     const prevRow = prevYm
@@ -563,12 +603,47 @@ export function buildMisReport({
     const sales = moneyRound(cur.sales);
     const previousSales = moneyRound(prevRow.sales);
     const delta = moneyRound(sales - previousSales);
+    const itemIds = [...(repeatItemIdsByCategory.get(category) || [])];
+    const items = itemIds.map((itemId) => {
+      const curItem = repeatItemMonthly.get(`${asOfYm}||${category}||${itemId}`) || {
+        category,
+        itemCode: "",
+        itemName: "",
+        sales: 0,
+      };
+      const prevItem = prevYm
+        ? (repeatItemMonthly.get(`${prevYm}||${category}||${itemId}`) || {
+          category,
+          itemCode: "",
+          itemName: "",
+          sales: 0,
+        })
+        : {
+          category,
+          itemCode: "",
+          itemName: "",
+          sales: 0,
+        };
+      const { itemCode, itemName } = resolvePortfolioItemLabel(curItem, prevItem, itemId);
+      const itemSales = moneyRound(curItem.sales);
+      const itemPreviousSales = moneyRound(prevItem.sales);
+      const itemDelta = moneyRound(itemSales - itemPreviousSales);
+      return {
+        itemCode,
+        itemName,
+        sales: itemSales,
+        previousSales: itemPreviousSales,
+        delta: itemDelta,
+        salesMomPct: pctChange(itemSales, itemPreviousSales),
+      };
+    }).sort((a, b) => a.delta - b.delta || b.previousSales - a.previousSales);
     return {
       category: cur.category || prevRow.category || category,
       sales,
       previousSales,
       delta,
       salesMomPct: pctChange(sales, previousSales),
+      items,
     };
   }).sort((a, b) => b.sales - a.sales);
 

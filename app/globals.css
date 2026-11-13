@@ -9021,6 +9021,27 @@ tr.paymentSettleStatementLead td {
   color: #0f4c5c;
   font-weight: 800;
 }
+.misDrillLink {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.misDrillLink:hover,
+.misDrillLink:focus-visible {
+  text-decoration-thickness: 2px;
+  outline: none;
+}
+.misRepeatItemModal.moduleModal {
+  width: min(960px, 100%);
+}
 .misKpiGrid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px;
 }

@@ -76,11 +76,47 @@ test("buildMisReport exposes category-wise repeat MoM", () => {
   assert.equal(building.sales, 40000);
   assert.equal(building.delta, -30000);
   assert.ok(building.salesMomPct < 0);
+  assert.ok(Array.isArray(building.items));
+  assert.equal(building.items.length, 1);
+  assert.equal(building.items[0].itemName, "Hammer");
+  assert.equal(building.items[0].previousSales, 70000);
+  assert.equal(building.items[0].sales, 40000);
+  assert.equal(building.items[0].delta, -30000);
   assert.ok(personal);
   assert.equal(personal.previousSales, 0);
   assert.equal(personal.sales, 60000);
   assert.equal(personal.delta, 60000);
   assert.ok(personal.salesMomPct > 0);
+  assert.ok(Array.isArray(personal.items));
+  assert.equal(personal.items.length, 1);
+  assert.equal(personal.items[0].itemName, "Soap");
+  assert.equal(personal.items[0].delta, 60000);
+});
+
+test("buildMisReport repeat category items sort worst delta first and keep prior labels", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-01", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 10000, profit_amount: 2000 },
+      { transaction_date: "2026-09-10", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 90000, profit_amount: 18000 },
+      { transaction_date: "2026-09-02", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 5000, profit_amount: 1000 },
+      { transaction_date: "2026-09-12", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 40000, profit_amount: 8000 },
+      { transaction_date: "2026-10-05", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 20000, profit_amount: 4000 },
+      { transaction_date: "2026-10-08", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 50000, profit_amount: 10000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  const building = report.repeatCategories.find((row) => row.category === "Building Material");
+  assert.ok(building);
+  assert.equal(building.items.length, 2);
+  assert.equal(building.items[0].itemCode, "H1");
+  assert.equal(building.items[0].itemName, "Hammer");
+  assert.equal(building.items[0].previousSales, 90000);
+  assert.equal(building.items[0].sales, 20000);
+  assert.equal(building.items[0].delta, -70000);
+  assert.equal(building.items[1].itemCode, "N1");
+  assert.equal(building.items[1].delta, 10000);
 });
 
 test("buildMisReport counts same-month repurchase after a one-day gap as repeat", () => {

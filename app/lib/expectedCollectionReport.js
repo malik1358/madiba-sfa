@@ -81,6 +81,76 @@ export function groupExpectedCollectionRowsBySalesman(rows = []) {
     ));
 }
 
+/**
+ * Group detail rows by customer with Expected SAR (and related) totals.
+ * Used under an expanded salesman so duplicate customer invoice lines collapse.
+ */
+export function groupExpectedCollectionRowsByCustomer(rows = []) {
+  const byKey = new Map();
+  (rows || []).forEach((row) => {
+    const code = normalizeCode(row?.customerCode);
+    const name = String(row?.customerName || "").trim();
+    const key = code || normalizeName(name) || "__UNKNOWN__";
+    const current = byKey.get(key) || {
+      key,
+      customerCode: code,
+      customerName: name || code || "—",
+      salesmanCode: normalizeCode(row?.salesmanCode || row?.salesmanName),
+      salesmanName: String(row?.salesmanName || row?.salesmanCode || "").trim(),
+      avgDays: row?.avgDays ?? null,
+      lifetimeAvg: row?.lifetimeAvg ?? null,
+      lastPaidInvoiceDays: row?.lastPaidInvoiceDays ?? null,
+      lastReceiptDate: row?.lastReceiptDate || "",
+      invoiceCount: 0,
+      pendingAmount: 0,
+      amount: 0,
+      bmValue: 0,
+      restValue: 0,
+      rows: [],
+    };
+    current.invoiceCount += 1;
+    current.pendingAmount = money(current.pendingAmount + Number(row?.pendingAmount || 0));
+    current.amount = money(current.amount + Number(row?.amount || 0));
+    current.bmValue = money(current.bmValue + Number(row?.bmValue || 0));
+    current.restValue = money(current.restValue + Number(row?.restValue || 0));
+    if (!current.customerName && name) current.customerName = name;
+    if (current.avgDays == null && row?.avgDays != null) current.avgDays = row.avgDays;
+    if (current.lifetimeAvg == null && row?.lifetimeAvg != null) current.lifetimeAvg = row.lifetimeAvg;
+    if (current.lastPaidInvoiceDays == null && row?.lastPaidInvoiceDays != null) {
+      current.lastPaidInvoiceDays = row.lastPaidInvoiceDays;
+    }
+    if (!current.lastReceiptDate && row?.lastReceiptDate) {
+      current.lastReceiptDate = row.lastReceiptDate;
+    }
+    current.rows.push(row);
+    byKey.set(key, current);
+  });
+
+  return [...byKey.values()]
+    .map((group) => ({
+      key: group.key,
+      customerCode: group.customerCode,
+      customerName: group.customerName || group.customerCode || "—",
+      salesmanCode: group.salesmanCode,
+      salesmanName: group.salesmanName,
+      avgDays: group.avgDays,
+      lifetimeAvg: group.lifetimeAvg,
+      lastPaidInvoiceDays: group.lastPaidInvoiceDays,
+      lastReceiptDate: group.lastReceiptDate,
+      invoiceCount: group.invoiceCount,
+      pendingAmount: group.pendingAmount,
+      amount: group.amount,
+      bmValue: group.bmValue,
+      restValue: group.restValue,
+      rows: group.rows,
+    }))
+    .sort((left, right) => (
+      right.amount - left.amount
+      || String(left.customerName).localeCompare(String(right.customerName))
+      || String(left.customerCode).localeCompare(String(right.customerCode))
+    ));
+}
+
 function daysBetween(from, to) {
   const a = Date.parse(`${String(from || "").slice(0, 10)}T00:00:00Z`);
   const b = Date.parse(`${String(to || "").slice(0, 10)}T00:00:00Z`);

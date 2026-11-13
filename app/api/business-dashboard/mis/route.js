@@ -4,9 +4,9 @@ import { hasActiveGrowthFilters, normalizeGrowthFilters } from "../../../lib/mis
 import {
   buildFilteredMisReport,
   defaultMisAsOfDate,
-  loadMisFilterCatalogs,
   loadPreparedMisReport,
   rebuildPreparedMisReport,
+  resolveMisCatalogs,
 } from "../../../lib/misReportServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -83,7 +83,7 @@ export async function GET(request) {
 
     if (rebuild) {
       const prepared = await rebuildPreparedMisReport(admin, { asOfDate });
-      const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
+      const catalogs = resolveMisCatalogs(prepared.report);
       return Response.json({
         success: true,
         prepared: true,
@@ -107,7 +107,7 @@ export async function GET(request) {
       }, { status: 404 });
     }
 
-    const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
+    const catalogs = resolveMisCatalogs(loaded.report);
     return Response.json({
       success: true,
       prepared: true,
@@ -138,7 +138,7 @@ export async function POST(request) {
     const filters = normalizeGrowthFilters(body?.filters || {});
     if (!hasActiveGrowthFilters(filters)) {
       const loaded = await loadPreparedMisReport(admin, { asOfDate });
-      const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
+      const catalogs = resolveMisCatalogs(loaded.report);
       return Response.json({
         success: true,
         prepared: true,
@@ -159,7 +159,7 @@ export async function POST(request) {
       filtered: true,
       asOfDate,
       builtAt: new Date().toISOString(),
-      catalogs: report.catalogs || {},
+      catalogs: resolveMisCatalogs(report),
       report,
     });
   } catch (error) {

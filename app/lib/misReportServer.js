@@ -354,6 +354,13 @@ export async function buildFilteredMisReport(admin, { asOfDate, filters, cube = 
   return buildMisReportFromSources(admin, { asOfDate, filters, cube });
 }
 
+/** Slice-and-dice field catalogs embedded in a prepared or filtered MIS pack (no extra load). */
+export function resolveMisCatalogs(report) {
+  const catalogs = report?.catalogs;
+  if (catalogs && typeof catalogs === "object" && !Array.isArray(catalogs)) return catalogs;
+  return {};
+}
+
 /** Field-filter catalogs for MIS Slice and dice (same dimensions as BI). Prefer cube for speed. */
 export async function loadMisFilterCatalogs(admin, { asOfDate = "" } = {}) {
   const asOf = String(asOfDate || defaultMisAsOfDate(getKsaDateString())).slice(0, 10);

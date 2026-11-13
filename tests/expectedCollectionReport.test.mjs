@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildExpectedCollectionDetailRows,
+  groupExpectedCollectionRowsByCustomer,
   groupExpectedCollectionRowsBySalesman,
 } from "../app/lib/expectedCollectionReport.js";
 import { buildCustomerCategoryMixFromSalesRows } from "../app/lib/expectedCollectionReportServer.js";
@@ -165,6 +166,55 @@ test("buildExpectedCollectionDetailRows carries salesman and groupExpectedCollec
   assert.equal(groups[0].invoiceCount, 2);
   assert.equal(groups[1].salesmanName, "Belal");
   assert.equal(groups[1].amount, 200);
+});
+
+test("groupExpectedCollectionRowsByCustomer merges same customer invoices with Expected SAR total", () => {
+  const report = buildExpectedCollectionDetailRows([
+    {
+      customer_code: "2001",
+      customer_name: "Larsen & Toubro Saudi Arabia LLC",
+      salesman: "Ahmed",
+      ref_no: "L1",
+      invoice_date: "2026-10-10",
+      pending_amount: 1000,
+    },
+    {
+      customer_code: "2001",
+      customer_name: "Larsen & Toubro Saudi Arabia LLC",
+      salesman: "Ahmed",
+      ref_no: "L2",
+      invoice_date: "2026-10-20",
+      pending_amount: 500,
+    },
+    {
+      customer_code: "2002",
+      customer_name: "QTC Joint Venture",
+      salesman: "Ahmed",
+      ref_no: "Q1",
+      invoice_date: "2026-10-15",
+      pending_amount: 300,
+    },
+  ], {
+    avgDaysByCustomer: new Map([
+      ["2001", 40],
+      ["2002", 30],
+    ]),
+    customerMix: new Map([
+      ["2001", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+      ["2002", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+
+  const customers = groupExpectedCollectionRowsByCustomer(report.rows);
+  assert.equal(customers.length, 2);
+  assert.equal(customers[0].customerCode, "2001");
+  assert.equal(customers[0].invoiceCount, 2);
+  assert.equal(customers[0].amount, 1500);
+  assert.equal(customers[0].rows.length, 2);
+  assert.equal(customers[1].customerCode, "2002");
+  assert.equal(customers[1].invoiceCount, 1);
+  assert.equal(customers[1].amount, 300);
 });
 
 test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {

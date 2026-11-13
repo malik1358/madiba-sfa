@@ -7422,6 +7422,33 @@ th:has(.moduleTableColumnFilterInput) {
   color: #0f4c5c;
 }
 
+.moduleTable tbody tr.expectedCollectionCustomerRow td,
+.moduleTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionCustomerRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:hover td.moduleBiTotalCol {
+  background: #1a6b7a;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.moduleTable tbody tr.expectedCollectionCustomerRow td .moduleCode,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td .moduleCode {
+  color: #d5eef2;
+  font-weight: 500;
+}
+
+.moduleTable tbody tr.expectedCollectionCustomerRow .stockTakeReportExpandBtn,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow .stockTakeReportExpandBtn {
+  border-color: #9ec4cc;
+  background: #fff;
+  color: #0f4c5c;
+}
+
 .moduleTable tbody tr.expectedCollectionDetailRow td,
 .moduleTable tbody tr.expectedCollectionDetailRow:nth-child(even) td,
 .moduleTable tbody tr.expectedCollectionDetailRow:hover td,

@@ -40,6 +40,23 @@ test("buildMisReport computes month sales, GP, MoM and item-level repeat", () =>
   assert.ok(report.categories.some((row) => row.period === "2026-10" && row.category === "Building Material"));
 });
 
+test("buildMisReport counts same-month repurchase after a one-day gap as repeat", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-10-01", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 100000, profit_amount: 20000 },
+      { transaction_date: "2026-10-01", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 25000, profit_amount: 5000 },
+      { transaction_date: "2026-10-02", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 80000, profit_amount: 16000 },
+      { transaction_date: "2026-10-15", customer_code: "2002", item_name: "Soap", category: "Personal Care", salesman_name: "OSAMA", sales_amount: 40000, profit_amount: 8000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  // Same-day first purchases stay new; next-day Hammer is repeat.
+  assert.equal(report.headline.repeatSales, 80000);
+  assert.equal(report.monthlyRepeat["2026-10"].sales, 80000);
+});
+
 test("buildMisReport attaches prior AR bucket MoM when provided", () => {
   const report = buildMisReport({
     asOfDate: "2026-10-31",

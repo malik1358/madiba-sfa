@@ -58,3 +58,40 @@ test("buildExpectedCollectionDetailRows keeps BM+Rest expected invoices and drop
   assert.equal(report.rows[0].approxPayDate, "2026-11-14");
   assert.equal(report.rows.some((row) => row.refNo === "LATE" || row.customerCode === "1258C"), false);
 });
+
+test("buildExpectedCollectionDetailRows drops customers with avg days above 120", () => {
+  const report = buildExpectedCollectionDetailRows([
+    {
+      customer_code: "1601",
+      customer_name: "ROWAD AL GHAD SANITARY WARE Co.",
+      ref_no: "2498",
+      invoice_date: "2026-01-10",
+      pending_amount: 21668,
+    },
+    {
+      customer_code: "1001",
+      customer_name: "On-time Customer",
+      ref_no: "A1",
+      invoice_date: "2026-10-15",
+      pending_amount: 1000,
+    },
+  ], {
+    avgDaysByCustomer: new Map([
+      ["1601", 180],
+      ["1001", 30],
+    ]),
+    enrichedByCode: new Map([
+      ["1601", { avg_days_to_pay: 145, last_paid_invoice_days: 180 }],
+    ]),
+    customerMix: new Map([
+      ["1601", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1001", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+
+  assert.equal(report.invoiceCount, 1);
+  assert.equal(report.customerCount, 1);
+  assert.equal(report.total, 1000);
+  assert.equal(report.rows.some((row) => row.customerCode === "1601"), false);
+});

@@ -118,7 +118,7 @@ export async function loadExpectedCollectionReport(admin, {
   return {
     asOf,
     monthEnd: detail.monthEnd,
-    rule: "max(lifetime avg, last paid invoice days); 120 if never paid; exclude legal; BM+Rest share; approx pay ≤ month-end",
+    rule: "max(lifetime avg, last paid invoice days); 120 if never paid; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,

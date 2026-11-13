@@ -165,6 +165,8 @@ test("buildMisReport inventory days use last-30-day forward cover", () => {
   assert.equal(sundry.forwardCoverDays, 60);
   assert.equal(fragrance.days, 80); // 400000 ÷ (150000/30)
   assert.equal(fragrance.forwardCoverDays, 80);
+  assert.equal(sundry.bucketAmounts["31-60"], 600000);
+  assert.equal(fragrance.bucketAmounts["61-90"], 400000);
   // Prior cover ends 2026-09-30 → window 2026-09-01..2026-09-30 (only Sep 15 sale).
   assert.equal(report.inventory.previousSales30d, 999999);
   assert.equal(report.inventory.previousDays, 27); // 900000 ÷ (999999/30) ≈ 27

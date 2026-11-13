@@ -17,6 +17,7 @@ import { compactChartNumber } from "../../lib/growthCharts";
 import { MIS_PORTFOLIO_EXCLUDE } from "../../lib/misReport";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { GrowthTrendChart } from "../business-dashboard/GrowthCharts";
+import InventoryCoverPanel from "./InventoryCoverPanel";
 import CategoryGrowthFilters from "../business-dashboard/CategoryGrowthFilters";
 import {
   emptyGrowthFilters,
@@ -206,68 +207,6 @@ function Slide({ eyebrow, title, children, variant = "" }) {
       </div>
       <div className="misSlideBody">{children}</div>
     </section>
-  );
-}
-
-function InventoryCategoryTable({ rows, language, totalDaysOnHand, coverWindowDays = 30 }) {
-  const t = useMemo(() => translate(language, TEXT), [language]);
-  const windowDays = Math.max(1, Number(coverWindowDays) || 30);
-  const keys = ["category", "amount", "sales30d", "forwardCoverDays"];
-  const valueOf = useCallback((row, key) => {
-    if (key === "forwardCoverDays") {
-      const days = row.forwardCoverDays ?? row.days;
-      return days != null ? String(days) : "—";
-    }
-    if (key === "sales30d") return row.sales30d ?? 0;
-    return row[key];
-  }, []);
-  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
-  const stockTotal = visibleRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const sales30dTotal = visibleRows.reduce((sum, row) => sum + Number(row.sales30d || 0), 0);
-  const daysTotal = sales30dTotal
-    ? Math.round(stockTotal / (sales30dTotal / windowDays))
-    : (totalDaysOnHand != null ? totalDaysOnHand : null);
-
-  return (
-    <ExportableTable filename="mis-inventory-categories" sheetName="Inventory" className="moduleTableWrap moduleBiTableWrap">
-      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
-        <table className="moduleTable moduleBiTable">
-          <thead>
-            <tr>
-              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Stock in hand" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label={`Last ${windowDays}d sales`} filterKey="sales30d" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Days on hand" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.map((row, index) => {
-              const days = row.forwardCoverDays ?? row.days;
-              return (
-                <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                  <td>{row.category}</td>
-                  <td>{amountInt(row.amount)}</td>
-                  <td>{amountInt(row.sales30d)}</td>
-                  <td className={`moduleBiTotalCol${days != null && days > 90 ? " moduleBiMonthCell--down" : days != null ? " moduleBiMonthCell--up" : ""}`}>
-                    {days != null ? amountInt(days) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td><strong>Total</strong></td>
-              <td><strong>{amountInt(stockTotal)}</strong></td>
-              <td><strong>{amountInt(sales30dTotal)}</strong></td>
-              <td className={`moduleBiTotalCol${daysTotal != null && daysTotal > 90 ? " moduleBiMonthCell--down" : daysTotal != null ? " moduleBiMonthCell--up" : ""}`}>
-                <strong>{daysTotal != null ? amountInt(daysTotal) : "—"}</strong>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </ExportableTable>
   );
 }
 
@@ -859,20 +798,17 @@ function buildSlides(report, language) {
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
               </div>
-              {report.inventory.categories?.length ? (
-                <InventoryCategoryTable
-                  rows={report.inventory.categories}
-                  language={language}
-                  totalDaysOnHand={report.inventory.days}
-                  coverWindowDays={report.inventory.coverWindowDays || 30}
-                />
-              ) : null}
             </>
           ) : (
             <p className="misRemark">
-              Physical inventory is not published for {monthLabel(asOfYm)} yet.
+              Physical inventory is not published for {monthLabel(asOfYm)} yet. Use Latest stock for EOD cover.
             </p>
           )}
+          <InventoryCoverPanel
+            preparedInventory={report.inventory}
+            language={language}
+            asOfDate={report.asOfDate || asOfYm}
+          />
         </Slide>
       ),
     },

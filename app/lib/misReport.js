@@ -7,15 +7,21 @@
  */
 
 import {
+  bucketAmountsFromCover,
+  COVER_WINDOW_DAYS,
+  forwardCoverDays,
+  trailingWindowStart,
+} from "./inventoryForwardCover.js";
+import {
+  normalizeReportItemCode,
+  preferItemDisplayName,
+} from "./itemReportIdentity.js";
+import {
   creditSalesTrailingMonths,
   receivableDays,
   receivableTrailingDays,
   receivableYtdDays,
 } from "./receivableDays.js";
-import {
-  normalizeReportItemCode,
-  preferItemDisplayName,
-} from "./itemReportIdentity.js";
 
 const PORTFOLIO_EXCLUDE = new Set([
   "electronics",
@@ -47,26 +53,6 @@ function daysInMonth(ym) {
   const [y, m] = String(ym).split("-").map(Number);
   if (!y || !m) return 30;
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
-}
-
-/** Inclusive window start for a trailing dayCount ending on endYmd. */
-function trailingWindowStart(endYmd, dayCount = 30) {
-  const [y, m, d] = String(endYmd || "").slice(0, 10).split("-").map(Number);
-  if (!y || !m || !d) return "";
-  const dt = new Date(Date.UTC(y, m - 1, d - (Math.max(1, dayCount) - 1)));
-  return dt.toISOString().slice(0, 10);
-}
-
-/**
- * Forward cover / days on hand from stock vs sales pace over a fixed window.
- * stock ÷ (windowSales ÷ windowDays)
- */
-function forwardCoverDays(stock, windowSales, windowDays = 30) {
-  const stockN = moneyRound(stock);
-  const salesN = moneyRound(windowSales);
-  const days = Math.max(1, Number(windowDays) || 30);
-  if (!Number.isFinite(stockN) || !salesN) return null;
-  return Math.round(stockN / (salesN / days));
 }
 
 function normCat(value) {
@@ -418,7 +404,7 @@ export function buildMisReport({
     ? pctChange(collectionDays3m, previousCollectionDays3m)
     : null;
 
-  const FORWARD_COVER_WINDOW_DAYS = 30;
+  const FORWARD_COVER_WINDOW_DAYS = COVER_WINDOW_DAYS;
   const coverEnd = asOf;
   const coverStart = trailingWindowStart(coverEnd, FORWARD_COVER_WINDOW_DAYS);
   const prevCoverEnd = prevYm ? lastDayOfMonth(prevYm) : "";
@@ -489,6 +475,7 @@ export function buildMisReport({
           sales30d: catSales30d,
           days,
           forwardCoverDays: days,
+          bucketAmounts: bucketAmountsFromCover(stockAmount, days),
         };
       })
       .filter((row) => row.amount)

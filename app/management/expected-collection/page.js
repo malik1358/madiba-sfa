@@ -43,6 +43,7 @@ const TEXT = {
   invoiceDate: { en: "Invoice date", ar: "تاريخ الفاتورة" },
   pending: { en: "Pending SAR", ar: "المتبقي (ر.س)" },
   amount: { en: "Expected SAR", ar: "المتوقع (ر.س)" },
+  totalExpected: { en: "Total Expected SAR", ar: "إجمالي المتوقع (ر.س)" },
   daysToEnd: { en: "Days → month-end", ar: "أيام حتى نهاية الشهر" },
   approxPay: { en: "Approx pay", ar: "تقريبي للسداد" },
   bm: { en: "BM SAR", ar: "مواد بناء (ر.س)" },
@@ -79,11 +80,11 @@ const FILTER_KEYS = [
   "refNo",
   "invoiceDate",
   "pendingAmount",
-  "amount",
   "daysToMonthEnd",
   "approxPayDate",
   "bmValue",
   "restValue",
+  "amount",
 ];
 
 function formatAmount(value) {
@@ -311,11 +312,11 @@ export default function ExpectedCollectionPage() {
                       <BiExcelHead label={t("invoice")} filterKey="refNo" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("invoiceDate")} filterKey="invoiceDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("pending")} filterKey="pendingAmount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("amount")} filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
                       <BiExcelHead label={t("daysToEnd")} filterKey="daysToMonthEnd" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("approxPay")} filterKey="approxPayDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("bm")} filterKey="bmValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("rest")} filterKey="restValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("totalExpected")} filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
                     </tr>
                   </thead>
                   <tbody>
@@ -345,10 +346,10 @@ export default function ExpectedCollectionPage() {
                           </td>
                           <td colSpan={8} />
                           <td><strong>{formatAmount(group.pendingAmount)}</strong></td>
-                          <td className="moduleBiTotalCol"><strong>{formatAmount(group.amount)}</strong></td>
                           <td colSpan={2} />
                           <td><strong>{formatAmount(group.bmValue)}</strong></td>
                           <td><strong>{formatAmount(group.restValue)}</strong></td>
+                          <td className="moduleBiTotalCol"><strong>{formatAmount(group.amount)}</strong></td>
                         </tr>
                       );
                       if (!expanded) return [summary];
@@ -389,11 +390,11 @@ export default function ExpectedCollectionPage() {
                             <td>{single ? (single.refNo || "—") : "—"}</td>
                             <td>{single ? (single.invoiceDate || "—") : "—"}</td>
                             <td><strong>{formatAmount(customer.pendingAmount)}</strong></td>
-                            <td className="moduleBiTotalCol"><strong>{formatAmount(customer.amount)}</strong></td>
                             <td>{single ? formatMaybe(single.daysToMonthEnd) : "—"}</td>
                             <td>{single ? formatMaybe(single.approxPayDate) : "—"}</td>
                             <td><strong>{formatAmount(customer.bmValue)}</strong></td>
                             <td><strong>{formatAmount(customer.restValue)}</strong></td>
+                            <td className="moduleBiTotalCol"><strong>{formatAmount(customer.amount)}</strong></td>
                           </tr>
                         );
                         if (!multi || !customerExpanded) return [customerSummary];
@@ -415,11 +416,11 @@ export default function ExpectedCollectionPage() {
                               <td>{row.refNo || "—"}</td>
                               <td>{row.invoiceDate || "—"}</td>
                               <td>{formatAmount(row.pendingAmount)}</td>
-                              <td className="moduleBiTotalCol">{formatAmount(row.amount)}</td>
                               <td>{formatMaybe(row.daysToMonthEnd)}</td>
                               <td>{formatMaybe(row.approxPayDate)}</td>
                               <td>{formatAmount(row.bmValue)}</td>
                               <td>{formatAmount(row.restValue)}</td>
+                              <td className="moduleBiTotalCol">{formatAmount(row.amount)}</td>
                             </tr>
                           )),
                         ];
@@ -431,10 +432,10 @@ export default function ExpectedCollectionPage() {
                     <tr className="moduleBiTotalRow">
                       <td colSpan={10}><strong>{t("total")}</strong></td>
                       <td><strong>{formatAmount(totals.pendingAmount)}</strong></td>
-                      <td className="moduleBiTotalCol"><strong>{formatAmount(totals.amount)}</strong></td>
                       <td colSpan={2} />
                       <td><strong>{formatAmount(totals.bmValue)}</strong></td>
                       <td><strong>{formatAmount(totals.restValue)}</strong></td>
+                      <td className="moduleBiTotalCol"><strong>{formatAmount(totals.amount)}</strong></td>
                     </tr>
                   </tfoot>
                 </table>

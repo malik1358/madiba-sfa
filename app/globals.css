@@ -8860,6 +8860,92 @@ tr.paymentSettleStatementLead td {
 }
 .misSlide h2 { margin: 0; color: #0b2545; font-size: 1.35rem; }
 .misSlide h3 { margin: 0 0 10px; color: #0f4c5c; font-size: 0.95rem; }
+.misKpiPanel {
+  margin-bottom: 12px;
+  border: 1px solid #c5d6df;
+  border-radius: 12px;
+  background: #eef5f8;
+  overflow: hidden;
+}
+.misKpiPanelToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: #0f4c5c;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.misKpiPanelToggle:hover { background: rgba(15, 76, 92, 0.06); }
+.misKpiPanelChevron {
+  width: 1rem;
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+}
+.misKpiPanelTitle {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.misKpiPanelCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #0f4c5c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+.misKpiPanelAction {
+  margin-inline-start: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5b6b76;
+}
+.misKpiChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+.misKpiChip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 7.5rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #d7e2e8;
+  border-left: 4px solid #0f4c5c;
+}
+.misKpiChip--green { border-left-color: #16a34a; }
+.misKpiChip--orange { border-left-color: #d97706; }
+.misKpiChip--teal { border-left-color: #0f4c5c; }
+.misKpiChipLabel {
+  color: #0f4c5c;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.misKpiChipValue {
+  color: #0b2545;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.misKpiPanel--open .misKpiGrid { margin-bottom: 0; padding: 0 10px 10px; }
 .misKpiGrid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px;
 }

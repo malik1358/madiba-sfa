@@ -9,6 +9,7 @@ import {
 } from "./misPrepared.js";
 import { RECEIVABLE_DAYS_DATASET_KEY, mergePriorOutstanding } from "./receivableDays.js";
 import { loadMonthEndOutstandingSnapshot } from "./receivableDaysServer.js";
+import { applyMisGrowthFilters, buildMisFilterCatalogs, hasActiveGrowthFilters, normalizeGrowthFilters } from "./misFilters.js";
 import { salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales } from "./salesBiCubeServer.js";
 import { getKsaDateString } from "./workdayActivity.js";
@@ -240,7 +241,7 @@ async function priorOutstandingFromMonthEndUpload(admin, prevYm) {
 }
 
 /** Build MIS metrics from cube + register datasets (used only while preparing). */
-export async function buildMisReportFromSources(admin, { asOfDate, cube = null } = {}) {
+export async function buildMisReportFromSources(admin, { asOfDate, cube = null, filters = null } = {}) {
   const asOf = String(asOfDate || defaultMisAsOfDate(getKsaDateString())).slice(0, 10);
   const year = asOf.slice(0, 4);
   const asOfYm = asOf.slice(0, 7);
@@ -252,13 +253,15 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const toDateExclusive = nextDay.toISOString().slice(0, 10);
   const ytdFromDate = `${year}-01-01`;
+  const normalizedFilters = normalizeGrowthFilters(filters || {});
+  const filtering = hasActiveGrowthFilters(normalizedFilters);
 
   const existingPrepared = await readPreparedMisReport(admin).catch(() => null);
   const [
     salesLoad,
-    receiptRows,
-    outstandingRows,
-    inventoryPhysical,
+    receiptRowsRaw,
+    outstandingRowsRaw,
+    inventoryPhysicalRaw,
     monthEndPrior,
     receivablePrior,
   ] = await Promise.all([
@@ -277,7 +280,18 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
     receivablePrior,
   );
 
-  const salesRows = salesLoad.rows || [];
+  const catalogs = buildMisFilterCatalogs(salesLoad.rows || []);
+  const filtered = applyMisGrowthFilters({
+    salesRows: salesLoad.rows || [],
+    receiptRows: receiptRowsRaw,
+    outstandingRows: outstandingRowsRaw,
+    inventoryPhysical: inventoryPhysicalRaw,
+    filters: normalizedFilters,
+  });
+  const salesRows = filtered.salesRows;
+  const receiptRows = filtered.receiptRows;
+  const outstandingRows = filtered.outstandingRows;
+  const inventoryPhysical = filtered.inventoryPhysical;
   const report = buildMisReport({
     salesRows,
     receiptRows,
@@ -289,6 +303,7 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
 
   return {
     ...report,
+    catalogs,
     meta: {
       salesRowCount: salesRows.length,
       receiptRowCount: receiptRows.length,
@@ -303,9 +318,34 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null }
           : (priorOutstanding?.totalAr != null ? "receivable_days_total" : null)),
       ytdFromDate,
       toDateExclusive,
-      source: "prepared_build",
+      source: filtering ? "filtered_build" : "prepared_build",
+      filtered: filtering,
+      filters: filtering ? normalizedFilters : null,
     },
   };
+}
+
+/** Ephemeral filtered MIS for the UI; never writes the prepared company pack. */
+export async function buildFilteredMisReport(admin, { asOfDate, filters, cube = null } = {}) {
+  return buildMisReportFromSources(admin, { asOfDate, filters, cube });
+}
+
+/** Field-filter catalogs for MIS Slice and dice (same dimensions as BI). Prefer cube for speed. */
+export async function loadMisFilterCatalogs(admin, { asOfDate = "" } = {}) {
+  const asOf = String(asOfDate || defaultMisAsOfDate(getKsaDateString())).slice(0, 10);
+  const asOfYm = asOf.slice(0, 7);
+  try {
+    const cube = await loadSalesBiCube(admin, { allowStale: true });
+    const rows = salesRowsFromCube(cube, { asOfYm });
+    if (rows.length) return buildMisFilterCatalogs(rows);
+  } catch (error) {
+    console.error("MIS: filter catalogs from cube failed:", error);
+  }
+  const nextDay = new Date(`${asOf}T12:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const toDateExclusive = nextDay.toISOString().slice(0, 10);
+  const salesLoad = await loadMisSalesRows(admin, { asOfYm, toDateExclusive });
+  return buildMisFilterCatalogs(salesLoad.rows || []);
 }
 
 export async function readPreparedMisReport(admin) {

@@ -1,7 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { isManagementRole } from "../../../lib/moduleAccess.js";
+import { hasActiveGrowthFilters, normalizeGrowthFilters } from "../../../lib/misFilters.js";
 import {
+  buildFilteredMisReport,
   defaultMisAsOfDate,
+  loadMisFilterCatalogs,
   loadPreparedMisReport,
   rebuildPreparedMisReport,
 } from "../../../lib/misReportServer.js";
@@ -52,33 +55,43 @@ async function getProfile(admin, userId) {
   return data;
 }
 
+async function requireMisAccess(request) {
+  if (!supabaseUrl || !serviceKey) {
+    const error = new Error("Supabase is not configured");
+    error.status = 500;
+    throw error;
+  }
+  const user = await getAuthUser(request);
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const profile = await getProfile(admin, user.id);
+  if (!isManagementRole(profile.role)) {
+    const error = new Error("MIS is available to admin and manager only.");
+    error.status = 403;
+    throw error;
+  }
+  return { admin, profile, user };
+}
+
 export async function GET(request) {
   try {
-    if (!supabaseUrl || !serviceKey) {
-      return Response.json({ success: false, error: "Supabase is not configured" }, { status: 500 });
-    }
-
-    const user = await getAuthUser(request);
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const profile = await getProfile(admin, user.id);
-    if (!isManagementRole(profile.role)) {
-      return Response.json({ success: false, error: "MIS is available to admin and manager only." }, { status: 403 });
-    }
-
+    const { admin } = await requireMisAccess(request);
     const url = new URL(request.url);
     const asOfDate = parseAsOfDate(url.searchParams.get("asOf") || url.searchParams.get("date"));
     const rebuild = wantsRebuild(url);
 
     if (rebuild) {
       const prepared = await rebuildPreparedMisReport(admin, { asOfDate });
+      const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
       return Response.json({
         success: true,
         prepared: true,
         rebuilt: true,
+        filtered: false,
         asOfDate: prepared.asOfDate,
         builtAt: prepared.builtAt,
+        catalogs,
         report: prepared.report,
       });
     }
@@ -94,21 +107,66 @@ export async function GET(request) {
       }, { status: 404 });
     }
 
+    const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
     return Response.json({
       success: true,
       prepared: true,
       rebuilt: false,
+      filtered: false,
       asOfDate: loaded.asOfDate,
       builtAt: loaded.builtAt,
       staleRequest: Boolean(loaded.staleRequest),
       message: loaded.message || null,
+      catalogs,
       report: loaded.report,
     });
   } catch (error) {
     console.error("MIS report error", error);
     return Response.json(
       { success: false, error: error?.message || "Unable to load MIS report" },
-      { status: 400 },
+      { status: error?.status || 400 },
+    );
+  }
+}
+
+/** Apply BI slice/dice filters to an ephemeral MIS pack (does not overwrite prepared). */
+export async function POST(request) {
+  try {
+    const { admin } = await requireMisAccess(request);
+    const body = await request.json().catch(() => ({}));
+    const asOfDate = parseAsOfDate(body?.asOf || body?.date);
+    const filters = normalizeGrowthFilters(body?.filters || {});
+    if (!hasActiveGrowthFilters(filters)) {
+      const loaded = await loadPreparedMisReport(admin, { asOfDate });
+      const catalogs = await loadMisFilterCatalogs(admin, { asOfDate }).catch(() => ({}));
+      return Response.json({
+        success: true,
+        prepared: true,
+        rebuilt: false,
+        filtered: false,
+        asOfDate: loaded.asOfDate || asOfDate,
+        builtAt: loaded.builtAt || "",
+        catalogs,
+        report: loaded.report,
+      });
+    }
+
+    const report = await buildFilteredMisReport(admin, { asOfDate, filters });
+    return Response.json({
+      success: true,
+      prepared: false,
+      rebuilt: false,
+      filtered: true,
+      asOfDate,
+      builtAt: new Date().toISOString(),
+      catalogs: report.catalogs || {},
+      report,
+    });
+  } catch (error) {
+    console.error("MIS filtered report error", error);
+    return Response.json(
+      { success: false, error: error?.message || "Unable to filter MIS report" },
+      { status: error?.status || 400 },
     );
   }
 }

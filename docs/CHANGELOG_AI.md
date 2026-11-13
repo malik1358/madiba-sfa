@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-11-13** — Management MIS portfolio **top loss items** use prior-month item code/name when the as-of month has no sales lines (fixes code shown as item name with blank Code). Rebuild prepared pack (`?rebuild=1` / Refresh) after deploy. No migration. See `docs/BUSINESS_RULES.md`.
+- **2026-11-13** — Management MIS Categories table headers name both months explicitly (e.g. **Oct 26 sales/GP/GP%** vs **Sep 26 sales/GP/GP%**), not bare Sales/GP/GP% for the as-of columns. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Management MIS Inventory header shows **Days on hand (month sales)** and **Days on hand (forward cover)** with MoM change on both (`stock ÷ (month sales ÷ days)` and `stock ÷ (sales_30d ÷ 30)`). Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Expected Collection groups invoices by salesman in collapsible rows with per-salesman **Expected SAR** totals (Expand all / Collapse all). Salesman comes from the outstanding invoice salesman cell. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — MIS Repeat slide adds a filterable **category-wise repeat** table (this month vs last month, Difference + MoM% green/red). Rebuild prepared pack after deploy. No migration. See `docs/BUSINESS_RULES.md`.

@@ -121,6 +121,15 @@ export async function loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }
 }
 
 export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null }) {
+  // Prefer active_sales so repeat sales can use real transaction dates (cube facts are month-dated).
+  try {
+    const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
+    if (rows.length) {
+      return { rows, source: "active_sales", preparedAt: null };
+    }
+  } catch (error) {
+    console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+  }
   try {
     const salesCube = cube || await loadSalesBiCube(admin, { allowStale: true });
     const rows = salesRowsFromCube(salesCube, { asOfYm });
@@ -128,10 +137,9 @@ export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = 
       return { rows, source: salesCube.source || "sales_bi_cube", preparedAt: salesCube.builtAt || null };
     }
   } catch (error) {
-    console.error("MIS: sales BI cube unavailable, scanning active_sales:", error);
+    console.error("MIS: sales BI cube also unavailable:", error);
   }
-  const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
-  return { rows, source: "active_sales", preparedAt: null };
+  return { rows: [], source: "none", preparedAt: null };
 }
 
 export async function loadMisReceiptRows(admin) {

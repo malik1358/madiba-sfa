@@ -1,6 +1,7 @@
 /**
  * Live Management MIS (month-end style pack) from sales, receipts, and outstanding.
- * Repeat sale = line where the customer bought the same item name in an earlier month.
+ * Repeat sale = line where the customer bought the same item name on an earlier day
+ * (at least one calendar-day gap; same-day lines on the first purchase day stay new).
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
@@ -178,8 +179,8 @@ export function buildMisReport({
       else if (custFirstYm < ym) bucket.repeatCustomers.add(customer);
     }
     const itemFirst = customer && item ? firstItem.get(`${customer}||${item}`) : null;
-    const itemFirstYm = monthKey(itemFirst);
-    if (itemFirstYm && itemFirstYm < ym) bucket.repeatSales += amount;
+    // Same customer + item on a later calendar day (>=1 day gap) is repeat, including within the month.
+    if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
     else bucket.newSales += amount;
 
     const cat = String(row.category || "").trim() || "(blank)";

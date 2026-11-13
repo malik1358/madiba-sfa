@@ -83,6 +83,24 @@ function pctChangeSafe(current, previous) {
   return Math.round(((cur / prev) - 1) * 1000) / 10;
 }
 
+function momCellClass(momPct, { current = false } = {}) {
+  const parts = [];
+  if (current) parts.push("moduleBiMonthCell--current");
+  if (momPct == null || !Number.isFinite(Number(momPct))) return parts.join(" ") || undefined;
+  if (Number(momPct) > 0) parts.push("moduleBiMonthCell--up");
+  else if (Number(momPct) < 0) parts.push("moduleBiMonthCell--down");
+  return parts.join(" ") || undefined;
+}
+
+function amountWithMom(value, momPct) {
+  return (
+    <span className="moduleBiAmountDelta">
+      <strong>{amountInt(value)}</strong>
+      {momPct == null || !Number.isFinite(Number(momPct)) ? null : <em>{pct(momPct)}</em>}
+    </span>
+  );
+}
+
 function cumulativeSeries(months, valuesByMonth) {
   let running = 0;
   return months.map((ym) => {
@@ -181,18 +199,31 @@ function InventoryCategoryTable({ rows, language, totalDaysOnHand }) {
   );
 }
 
-function CategoryTable({ rows, language }) {
+function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
-  const keys = ["category", "sales", "gp", "gpPct"];
+  const keys = ["category", "sales", "previousSales", "gp", "previousGp", "gpPct", "previousGpPct"];
   const valueOf = useCallback((row, key) => {
     if (key === "gpPct") {
-      return row.sales ? `${((row.gp / row.sales) * 100).toFixed(1)}%` : "—";
+      return row.sales || row.gpPct != null ? `${Number(row.gpPct ?? ((row.gp / row.sales) * 100) || 0).toFixed(1)}%` : "—";
+    }
+    if (key === "previousGpPct") {
+      return row.previousSales || row.previousGpPct != null
+        ? `${Number(row.previousGpPct ?? ((row.previousGp / row.previousSales) * 100) || 0).toFixed(1)}%`
+        : "—";
     }
     return row[key];
   }, []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
   const salesTotal = visibleRows.reduce((sum, row) => sum + Number(row.sales || 0), 0);
+  const previousSalesTotal = visibleRows.reduce((sum, row) => sum + Number(row.previousSales || 0), 0);
   const gpTotal = visibleRows.reduce((sum, row) => sum + Number(row.gp || 0), 0);
+  const previousGpTotal = visibleRows.reduce((sum, row) => sum + Number(row.previousGp || 0), 0);
+  const salesMomTotal = pctChangeSafe(salesTotal, previousSalesTotal);
+  const gpMomTotal = pctChangeSafe(gpTotal, previousGpTotal);
+  const gpPctTotal = salesTotal ? Math.round((gpTotal / salesTotal) * 1000) / 10 : null;
+  const previousGpPctTotal = previousSalesTotal
+    ? Math.round((previousGpTotal / previousSalesTotal) * 1000) / 10
+    : null;
 
   return (
     <ExportableTable filename="mis-categories" sheetName="Categories" className="moduleTableWrap moduleBiTableWrap">
@@ -201,27 +232,52 @@ function CategoryTable({ rows, language }) {
           <thead>
             <tr>
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              <BiExcelHead label="Sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${previousMonthLabel} sales`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${previousMonthLabel} GP`} filterKey="previousGp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${previousMonthLabel} GP%`} filterKey="previousGpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((row, index) => (
               <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
                 <td>{row.category}</td>
-                <td>{amountInt(row.sales)}</td>
-                <td>{amountInt(row.gp)}</td>
-                <td className="moduleBiTotalCol">{row.sales ? `${((row.gp / row.sales) * 100).toFixed(1)}%` : "—"}</td>
+                <td className={momCellClass(row.salesMomPct, { current: true })}>
+                  {amountWithMom(row.sales, row.salesMomPct)}
+                </td>
+                <td>{amountInt(row.previousSales)}</td>
+                <td className={momCellClass(row.gpMomPct, { current: true })}>
+                  {amountWithMom(row.gp, row.gpMomPct)}
+                </td>
+                <td>{amountInt(row.previousGp)}</td>
+                <td className="moduleBiMonthCell--current">
+                  {row.sales || row.gpPct != null ? `${Number(row.gpPct ?? 0).toFixed(1)}%` : "—"}
+                </td>
+                <td className="moduleBiTotalCol">
+                  {row.previousSales || row.previousGpPct != null ? `${Number(row.previousGpPct ?? 0).toFixed(1)}%` : "—"}
+                </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td>Total</td>
-              <td>{amountInt(salesTotal)}</td>
-              <td>{amountInt(gpTotal)}</td>
-              <td className="moduleBiTotalCol">{salesTotal ? `${((gpTotal / salesTotal) * 100).toFixed(1)}%` : "—"}</td>
+              <td className={momCellClass(salesMomTotal, { current: true })}>
+                {amountWithMom(salesTotal, salesMomTotal)}
+              </td>
+              <td>{amountInt(previousSalesTotal)}</td>
+              <td className={momCellClass(gpMomTotal, { current: true })}>
+                {amountWithMom(gpTotal, gpMomTotal)}
+              </td>
+              <td>{amountInt(previousGpTotal)}</td>
+              <td className="moduleBiMonthCell--current">
+                {gpPctTotal != null ? `${gpPctTotal.toFixed(1)}%` : "—"}
+              </td>
+              <td className="moduleBiTotalCol">
+                {previousGpPctTotal != null ? `${previousGpPctTotal.toFixed(1)}%` : "—"}
+              </td>
             </tr>
           </tfoot>
         </table>
@@ -578,7 +634,11 @@ function buildSlides(report, language) {
       label: "Categories",
       node: (
         <Slide eyebrow="MIX" title={`Category sales · ${monthLabel(asOfYm)}`}>
-          <CategoryTable rows={asOfCats} language={language} />
+          <CategoryTable
+            rows={asOfCats}
+            language={language}
+            previousMonthLabel={report.previousMonth ? monthLabel(report.previousMonth) : "Last month"}
+          />
         </Slide>
       ),
     },

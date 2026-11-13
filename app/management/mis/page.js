@@ -289,7 +289,12 @@ function InventoryCategoryTable({ rows, language, totalDaysOnHand, coverWindowDa
   );
 }
 
-function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
+function CategoryTable({
+  rows,
+  language,
+  asOfMonthLabel = "This month",
+  previousMonthLabel = "Last month",
+}) {
   const t = useMemo(() => translate(language, TEXT), [language]);
   const keys = ["category", "sales", "previousSales", "gp", "previousGp", "gpPct", "previousGpPct"];
   const valueOf = useCallback((row, key) => {
@@ -324,11 +329,11 @@ function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
           <thead>
             <tr>
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} sales`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} sales`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} GP`} filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} GP`} filterKey="previousGp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} GP%`} filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} GP%`} filterKey="previousGpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             </tr>
           </thead>
@@ -971,6 +976,7 @@ function buildSlides(report, language) {
           <CategoryTable
             rows={asOfCats}
             language={language}
+            asOfMonthLabel={monthLabel(asOfYm)}
             previousMonthLabel={report.previousMonth ? monthLabel(report.previousMonth) : "Last month"}
           />
         </Slide>

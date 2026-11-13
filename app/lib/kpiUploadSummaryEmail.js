@@ -667,6 +667,26 @@ function isCategorySplitRow(row) {
     || /_(rest)$/.test(String(row?.key || ""));
 }
 
+/** Top-level KPI module row (not a category child under Total sales / Collection / DSO). */
+export function isKpiUploadSummaryModuleParentRow(row) {
+  return Boolean(row) && !isCategorySplitRow(row);
+}
+
+/**
+ * Insert a blank break after each module: a parent row plus its category children.
+ * No break after the final module.
+ */
+export function shouldInsertKpiUploadSummaryModuleBreak(rows = [], index = 0) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (index < 0 || index >= list.length - 1) return false;
+  const next = list[index + 1];
+  return isKpiUploadSummaryModuleParentRow(next);
+}
+
+const KPI_UPLOAD_SUMMARY_MODULE_BREAK_HTML = `<tr aria-hidden="true">
+      <td colspan="4" style="padding:10px 0;border:none;height:12px;line-height:12px;font-size:0;background:transparent;">&nbsp;</td>
+    </tr>`;
+
 function isCategoryCollectionDaysRow(row) {
   return row?.kind === "categoryCollectionDays"
     || String(row?.key || "").startsWith("averageCollectionDays");
@@ -933,17 +953,21 @@ export function buildKpiUploadSummaryEmail({
     )),
   ].join("");
 
-  const bodyRows = (summary?.rows || []).map((row, index) => {
+  const summaryRows = summary?.rows || [];
+  const bodyRows = summaryRows.map((row, index) => {
     const bg = index % 2 === 0 ? "#ffffff" : "#f0f7f8";
     const labelStyle = isCategorySplitRow(row)
       ? "padding:10px 8px 10px 20px;border:1px solid #d7e3ea;vertical-align:top;font-weight:600;color:#345c6e;"
       : "padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;font-weight:700;color:#0f4c5c;";
-    return `<tr style="background:${bg};">
+    const dataRow = `<tr style="background:${bg};">
       <td style="${labelStyle}">${escapeHtml(row.label)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${totalFilteredHtml(row)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${paceEstimateHtml(row)}</td>
       <td style="padding:10px 8px;border:1px solid #d7e3ea;vertical-align:top;">${vsLastMonthHtml(row, summary?.priorMonth)}</td>
     </tr>`;
+    return shouldInsertKpiUploadSummaryModuleBreak(summaryRows, index)
+      ? `${dataRow}${KPI_UPLOAD_SUMMARY_MODULE_BREAK_HTML}`
+      : dataRow;
   }).join("");
 
   const metaBits = [
@@ -970,12 +994,17 @@ export function buildKpiUploadSummaryEmail({
   </div>
 </body></html>`;
 
-  const textRows = (summary?.rows || []).map((row) => [
-    row.label,
-    `  Total (filtered): ${totalFilteredText(row)}`,
-    `  Estimated month-end sales: ${paceEstimateText(row)}`,
-    `  vs last month: ${vsLastMonthText(row, summary?.priorMonth)}`,
-  ].join("\n"));
+  const textRows = summaryRows.flatMap((row, index) => {
+    const block = [
+      row.label,
+      `  Total (filtered): ${totalFilteredText(row)}`,
+      `  Estimated month-end sales: ${paceEstimateText(row)}`,
+      `  vs last month: ${vsLastMonthText(row, summary?.priorMonth)}`,
+    ].join("\n");
+    return shouldInsertKpiUploadSummaryModuleBreak(summaryRows, index)
+      ? [block, ""]
+      : [block];
+  });
 
   return {
     subject,

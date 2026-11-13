@@ -13,11 +13,13 @@ import {
   compareActiveCustomersToPriorMonth,
   compareAverageCollectionDaysToPriorMonth,
   isKpiUploadSummaryDue,
+  isKpiUploadSummaryModuleParentRow,
   kpiUploadSummarySignature,
   mergeKpiUploadSummaryPending,
   nextKpiUploadSummarySendAfter,
   resolveKpiUploadSummaryEmailCc,
   resolveKpiUploadSummaryEmailRecipients,
+  shouldInsertKpiUploadSummaryModuleBreak,
 } from "../app/lib/kpiUploadSummaryEmail.js";
 import { buildFilteredPerformanceKpi } from "../app/lib/kpiTargetsTable.js";
 import { resolveExpectedPacePercent } from "../app/lib/performanceKpis.js";
@@ -529,6 +531,26 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.html, /growing vs last month/);
   assert.match(message.html, /Open Active Customers/);
   assert.match(message.html, /#0f4c5c/);
+  assert.match(message.html, /aria-hidden="true"/);
+  assert.match(message.html, /colspan="4"[^>]*padding:10px 0/);
+  const moduleParents = withActive.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => isKpiUploadSummaryModuleParentRow(row));
+  assert.ok(moduleParents.length >= 4);
+  for (const { index } of moduleParents.slice(0, -1)) {
+    let end = index;
+    while (
+      end + 1 < withActive.rows.length
+      && !isKpiUploadSummaryModuleParentRow(withActive.rows[end + 1])
+    ) {
+      end += 1;
+    }
+    assert.equal(shouldInsertKpiUploadSummaryModuleBreak(withActive.rows, end), true);
+  }
+  assert.equal(
+    shouldInsertKpiUploadSummaryModuleBreak(withActive.rows, withActive.rows.length - 1),
+    false,
+  );
   assert.match(message.text, /Uploads: sales-upload, receipt-upload|sales-upload/);
   assert.match(message.text, /Avg collection days \(Rolling 3m\)/);
   assert.doesNotMatch(message.text, /Avg collection days \(YTD\)/);
@@ -538,6 +560,10 @@ test("email HTML uses transposed header labels", () => {
   assert.match(message.text, /Active customers sales \(120d\)/);
   assert.match(message.text, /growing vs last month/);
   assert.match(message.text, /\/management\/active-customers/);
+  assert.match(
+    message.text,
+    /Total cash collected[\s\S]*\n\nAvg collection days \(Rolling 3m\)/,
+  );
 });
 
 test("recipients default to malik and accept overrides", () => {

@@ -70,6 +70,40 @@ test("buildMisReport attaches prior AR bucket MoM when provided", () => {
   assert.equal(report.inventory.categories.length, 2);
 });
 
+test("buildMisReport inventory days use last-30-day forward cover", () => {
+  // Window 2026-10-02..2026-10-31. Sep sales must not affect current cover.
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 999999, profit_amount: 1 },
+      { transaction_date: "2026-10-05", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 300000, profit_amount: 30000 },
+      { transaction_date: "2026-10-20", customer_code: "2", item_name: "B", category: "Fragrance", salesman_name: "B", sales_amount: 150000, profit_amount: 20000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+    inventoryPhysical: {
+      physical: 1000000,
+      previousPhysical: 900000,
+      byCategory: { Sundry: 600000, Fragrance: 400000 },
+    },
+  });
+  assert.equal(report.inventory.sales30d, 450000);
+  assert.equal(report.inventory.coverFrom, "2026-10-02");
+  assert.equal(report.inventory.coverTo, "2026-10-31");
+  // 1_000_000 ÷ (450_000 / 30) = 66.67 → 67
+  assert.equal(report.inventory.days, 67);
+  const sundry = report.inventory.categories.find((row) => row.category === "Sundry");
+  const fragrance = report.inventory.categories.find((row) => row.category === "Fragrance");
+  assert.equal(sundry.sales30d, 300000);
+  assert.equal(sundry.days, 60); // 600000 ÷ (300000/30)
+  assert.equal(sundry.forwardCoverDays, 60);
+  assert.equal(fragrance.days, 80); // 400000 ÷ (150000/30)
+  assert.equal(fragrance.forwardCoverDays, 80);
+  // Prior cover ends 2026-09-30 → window 2026-09-01..2026-09-30 (only Sep 15 sale).
+  assert.equal(report.inventory.previousSales30d, 999999);
+  assert.equal(report.inventory.previousDays, 27); // 900000 ÷ (999999/30) ≈ 27
+});
+
 test("buildMisReport collection days uses YTD DSO not month/30", () => {
   const report = buildMisReport({
     asOfDate: "2026-10-31",

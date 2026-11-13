@@ -215,17 +215,24 @@ function Slide({ eyebrow, title, children, variant = "" }) {
   );
 }
 
-function InventoryCategoryTable({ rows, language, totalDaysOnHand }) {
+function InventoryCategoryTable({ rows, language, totalDaysOnHand, coverWindowDays = 30 }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
-  const keys = ["category", "amount", "forwardCoverDays"];
+  const windowDays = Math.max(1, Number(coverWindowDays) || 30);
+  const keys = ["category", "amount", "sales30d", "forwardCoverDays"];
   const valueOf = useCallback((row, key) => {
     if (key === "forwardCoverDays") {
-      return row.forwardCoverDays != null ? String(row.forwardCoverDays) : "—";
+      const days = row.forwardCoverDays ?? row.days;
+      return days != null ? String(days) : "—";
     }
+    if (key === "sales30d") return row.sales30d ?? 0;
     return row[key];
   }, []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
   const stockTotal = visibleRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const sales30dTotal = visibleRows.reduce((sum, row) => sum + Number(row.sales30d || 0), 0);
+  const daysTotal = sales30dTotal
+    ? Math.round(stockTotal / (sales30dTotal / windowDays))
+    : (totalDaysOnHand != null ? totalDaysOnHand : null);
 
   return (
     <ExportableTable filename="mis-inventory-categories" sheetName="Inventory" className="moduleTableWrap moduleBiTableWrap">
@@ -234,27 +241,33 @@ function InventoryCategoryTable({ rows, language, totalDaysOnHand }) {
           <thead>
             <tr>
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Stock value" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-              <BiExcelHead label="Forward cover (days)" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              <BiExcelHead label="Stock in hand" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={`Last ${windowDays}d sales`} filterKey="sales30d" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Days on hand" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, index) => (
-              <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                <td>{row.category}</td>
-                <td className="moduleBiTotalCol">{amountInt(row.amount)}</td>
-                <td className={`moduleBiTotalCol${row.forwardCoverDays != null && row.forwardCoverDays > 90 ? " moduleBiMonthCell--down" : row.forwardCoverDays != null ? " moduleBiMonthCell--up" : ""}`}>
-                  {row.forwardCoverDays != null ? amountInt(row.forwardCoverDays) : "—"}
-                </td>
-              </tr>
-            ))}
+            {visibleRows.map((row, index) => {
+              const days = row.forwardCoverDays ?? row.days;
+              return (
+                <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                  <td>{row.category}</td>
+                  <td>{amountInt(row.amount)}</td>
+                  <td>{amountInt(row.sales30d)}</td>
+                  <td className={`moduleBiTotalCol${days != null && days > 90 ? " moduleBiMonthCell--down" : days != null ? " moduleBiMonthCell--up" : ""}`}>
+                    {days != null ? amountInt(days) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr>
               <td><strong>Total</strong></td>
-              <td className="moduleBiTotalCol"><strong>{amountInt(stockTotal)}</strong></td>
-              <td className={`moduleBiTotalCol${totalDaysOnHand != null && totalDaysOnHand > 90 ? " moduleBiMonthCell--down" : totalDaysOnHand != null ? " moduleBiMonthCell--up" : ""}`}>
-                <strong>{totalDaysOnHand != null ? amountInt(totalDaysOnHand) : "—"}</strong>
+              <td><strong>{amountInt(stockTotal)}</strong></td>
+              <td><strong>{amountInt(sales30dTotal)}</strong></td>
+              <td className={`moduleBiTotalCol${daysTotal != null && daysTotal > 90 ? " moduleBiMonthCell--down" : daysTotal != null ? " moduleBiMonthCell--up" : ""}`}>
+                <strong>{daysTotal != null ? amountInt(daysTotal) : "—"}</strong>
               </td>
             </tr>
           </tfoot>
@@ -750,19 +763,34 @@ function buildSlides(report, language) {
             <>
               <MisKpiPanel language={language} title="Inventory KPIs">
                 <Kpi
-                  label="Physical stock"
+                  label="Stock in hand"
                   value={money(report.inventory.physical, { digits: 2 })}
-                  note={report.inventory.physicalMomPct == null
-                    ? null
-                    : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : "")}
+                  note={[
+                    report.inventory.days != null ? `${report.inventory.days} days forward cover` : null,
+                    report.inventory.sales30d != null ? `last 30d sales ${money(report.inventory.sales30d, { digits: 2 })}` : null,
+                    report.inventory.physicalMomPct == null
+                      ? null
+                      : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : ""),
+                  ].filter(Boolean).join(" · ") || null}
+                  tone="teal"
+                />
+                <Kpi
+                  label="Last 30d sales"
+                  value={report.inventory.sales30d != null ? money(report.inventory.sales30d, { digits: 2 }) : "—"}
+                  note={report.inventory.coverFrom && report.inventory.coverTo
+                    ? `${report.inventory.coverFrom} → ${report.inventory.coverTo}`
+                    : "Pace for forward cover"}
                   tone="teal"
                 />
                 <Kpi
                   label="Days on hand"
                   value={report.inventory.days != null ? String(report.inventory.days) : "—"}
-                  note={report.inventory.daysMomPct == null
-                    ? "Forward cover vs last 30 days sales"
-                    : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "last 30 days pace")}
+                  note={[
+                    report.inventory.physical != null ? `stock ${money(report.inventory.physical, { digits: 2 })}` : null,
+                    report.inventory.daysMomPct == null
+                      ? "stock ÷ (last 30d sales ÷ 30)"
+                      : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "last 30 days pace"),
+                  ].filter(Boolean).join(" · ")}
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
               </MisKpiPanel>
@@ -771,6 +799,7 @@ function buildSlides(report, language) {
                   rows={report.inventory.categories}
                   language={language}
                   totalDaysOnHand={report.inventory.days}
+                  coverWindowDays={report.inventory.coverWindowDays || 30}
                 />
               ) : null}
             </>

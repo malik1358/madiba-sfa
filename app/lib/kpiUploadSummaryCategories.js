@@ -312,12 +312,19 @@ export function resolveExpectedPayDate(invoiceDate, avgDays) {
 /**
  * Open invoice counts toward this month's expected remaining when its historical
  * pay day is on/before month-end — including overdue (expected pay already passed).
+ * Customers whose estimate avg days are above 120 (chronic slow payers) never qualify.
  */
+export function isExpectedCollectionAvgDaysEligible(avgDays = null) {
+  const days = Number(avgDays);
+  return Number.isFinite(days) && days >= 0 && days <= KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
+}
+
 export function isOpenInvoiceExpectedThisMonth({
   invoiceDate = "",
   avgDays = null,
   monthEnd = "",
 } = {}) {
+  if (!isExpectedCollectionAvgDaysEligible(avgDays)) return false;
   const expectedPayDate = resolveExpectedPayDate(invoiceDate, avgDays);
   const end = String(monthEnd || "").slice(0, 10);
   if (!expectedPayDate || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return false;

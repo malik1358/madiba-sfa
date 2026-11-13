@@ -253,6 +253,22 @@ test("overdue still-open invoices count toward this month expected remaining", (
   });
   assert.equal(expected.buildingMaterial, 100000);
 
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-01-10",
+    avgDays: 180,
+    monthEnd: "2026-11-30",
+  }), false);
+  const slow = sumExpectedCollectionCategoryBuckets([
+    { customer_code: "1601", invoice_date: "2026-01-10", pending_amount: 21668 },
+  ], {
+    avgDaysByCustomer: new Map([["1601", 180]]),
+    customerMix: new Map([
+      ["1601", withKpiUploadSummaryNonBuilding({ buildingMaterial: 0, electronics: 0, rest: 100 })],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+  assert.equal(slow.rest, 0);
+
   const outstanding = sumOutstandingCategoryBuckets([
     { customer_code: "1002", pending_amount: 150000 },
   ], mix);

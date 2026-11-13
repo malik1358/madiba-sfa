@@ -187,14 +187,14 @@ export function enrichPhysicalCategoriesWithBuckets(categories = []) {
       : row.days != null
         ? row.days
         : forwardCoverDays(amount, row.sales30d, COVER_WINDOW_DAYS);
+    // Always recompute bands from cover days so legacy keys like ">90" do not
+    // leave SAR stuck outside the current 91-120 / >120 headers.
     return {
       ...row,
       amount,
       days,
       forwardCoverDays: days,
-      bucketAmounts: row.bucketAmounts && typeof row.bucketAmounts === "object"
-        ? { ...emptyBucketAmounts(), ...row.bucketAmounts }
-        : bucketAmountsFromCover(amount, days),
+      bucketAmounts: bucketAmountsFromCover(amount, days),
     };
   });
 }

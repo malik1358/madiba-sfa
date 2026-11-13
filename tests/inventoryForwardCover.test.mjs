@@ -29,6 +29,21 @@ test("forwardCoverDays and assignCoverBucket bands", () => {
   assert.equal(assignCoverBucket(null), null);
 });
 
+test("enrichPhysicalCategoriesWithBuckets rebuilds legacy >90 into current bands", () => {
+  const rows = enrichPhysicalCategoriesWithBuckets([
+    {
+      category: "Sundry",
+      amount: 400000,
+      sales30d: 100000,
+      days: 120,
+      bucketAmounts: { "0-30": 0, "31-60": 0, "61-90": 0, ">90": 400000 },
+    },
+  ]);
+  assert.equal(rows[0].bucketAmounts["91-120"], 400000);
+  assert.equal(rows[0].bucketAmounts[">120"], 0);
+  assert.equal(rows[0].bucketAmounts[">90"], undefined);
+});
+
 test("physical categories place full stock in one cover bucket", () => {
   const rows = enrichPhysicalCategoriesWithBuckets([
     { category: "Sundry", amount: 600000, sales30d: 300000, forwardCoverDays: 60 },

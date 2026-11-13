@@ -269,6 +269,68 @@ export function sumTallyOutstandingRows(rows = []) {
   return Math.round(total * 100) / 100;
 }
 
+const EMPTY_AR_BUCKETS = Object.freeze({
+  "0-30": 0,
+  "31-60": 0,
+  "61-90": 0,
+  "91-120": 0,
+  ">120": 0,
+});
+
+/** Company AR total + ageing buckets from uploaded outstanding customer rows. */
+export function summarizeOutstandingAr(rows = []) {
+  const arBuckets = { ...EMPTY_AR_BUCKETS };
+  let totalAr = 0;
+  let gt90Ar = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    totalAr += toNumber(row?.total_outstanding ?? row?.totalOutstanding);
+    const buckets = row?.buckets || {};
+    for (const key of Object.keys(arBuckets)) {
+      arBuckets[key] += toNumber(buckets[key]);
+    }
+    gt90Ar += toNumber(buckets["91-120"]) + toNumber(buckets[">120"]);
+  }
+  return {
+    totalAr: Math.round(totalAr * 100) / 100,
+    gt90Ar: Math.round(gt90Ar * 100) / 100,
+    arBuckets: Object.fromEntries(
+      Object.entries(arBuckets).map(([key, value]) => [key, Math.round(value * 100) / 100]),
+    ),
+  };
+}
+
+/** Fill missing prior-AR fields without overwriting values already present. */
+export function mergePriorOutstanding(...sources) {
+  let result = null;
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    if (!result) {
+      result = {
+        totalAr: source.totalAr != null && Number.isFinite(Number(source.totalAr))
+          ? Number(source.totalAr)
+          : null,
+        gt90Ar: source.gt90Ar != null && Number.isFinite(Number(source.gt90Ar))
+          ? Number(source.gt90Ar)
+          : null,
+        arBuckets: source.arBuckets && typeof source.arBuckets === "object"
+          ? { ...source.arBuckets }
+          : null,
+      };
+      continue;
+    }
+    if (result.totalAr == null && source.totalAr != null && Number.isFinite(Number(source.totalAr))) {
+      result.totalAr = Number(source.totalAr);
+    }
+    if (result.gt90Ar == null && source.gt90Ar != null && Number.isFinite(Number(source.gt90Ar))) {
+      result.gt90Ar = Number(source.gt90Ar);
+    }
+    if (!result.arBuckets && source.arBuckets && typeof source.arBuckets === "object") {
+      result.arBuckets = { ...source.arBuckets };
+    }
+  }
+  return result;
+}
+
 /** Field filters beyond the shared Period dates. */
 export function hasReceivableFieldFilters(input = {}) {
   return hasActiveGrowthFilters({

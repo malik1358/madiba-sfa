@@ -620,3 +620,4 @@ Areas where the git checkout alone is incomplete. Do not invent missing details:
 6. **Which local/dev SQL scripts have been applied** on a developer’s Supabase project is not knowable from git alone.
 7. **`COLLECTOR_SCREEN_SETUP.md` and parts of older READMEs** can disagree with `moduleAccess.js` and migrations; prefer code + `docs/`.
 8. **Capacitor plugin behavior on specific Android OEM skins** (battery killing timers) is described in `ANDROID_APK.md` as operational guidance, not guaranteed OS behavior.
+

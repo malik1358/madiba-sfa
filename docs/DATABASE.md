@@ -206,6 +206,7 @@ Schemes and quantity limits are settings, not tables:
 | `offline_data_version_v1` | Client cache busting |
 | `customer_meta:<code>` | Per-customer extra meta |
 | `tally_statement_v1:<code>` | Parsed Tally customer ledger lines for Payment Settlement. Shared by every user. The comparison is rebuilt from live SFA data; the PDF is not stored. |
+| `table_column_prefs_v1:<userId>` | Per-user hidden columns for management tables. JSON `{ version: 1, tables: { "<tableId>": { hidden: ["Header label", ...] } } }`. Column identity is the header label (`data-column-filter-label`); table identity is `ExportableTable` `tableId` (defaults to `filename`). Read/write only via JWT `/api/user/table-column-prefs` for that user’s key. No migration. |
 | `customer_order_block_override:<code>` | Admin same-day override to allow credit draft/submit when Avg Days to Pay auto-block is triggered. JSON includes `is_unblocked`, `unblocked_on_ksa_date` (KSA `YYYY-MM-DD`), `updated_at`, `updated_by`, optional `note`. Active only while `unblocked_on_ksa_date` equals today in Asia/Riyadh; next KSA day it is ignored. |
 | `customer_inactive_meta:<code>` | Inactive-with-outstanding flags |
 | `visit_report_latest:<code>` / `visit_report_history:<code>:` | Field visit reports |

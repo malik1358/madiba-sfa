@@ -108,6 +108,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 **Field / customers**
 
 - `/api/user/sales-scope` — visible salesman codes
+- `/api/user/table-column-prefs` — GET/PUT per-user hidden table columns in `system_settings.table_column_prefs_v1:<auth.user.id>` (JWT only; merges one `tableId` on PUT)
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
   - Lookup `?q=` returns at most 20 code/name matches inside the caller's sales scope, including inactive customers. Payment Settlement uses that search and then loads one customer. It does not call `/api/customers/visible` on open. Exact `?code=` lookup is unchanged.
   - Visible scope still calls Auth Admin `listUsers` for salesman/promoter peer graphs. Admin / report-user / manager already receive every sales-team profile, so a `listUsers` failure is ignored for those roles (empty auth list) instead of failing Outstanding Compare and other all-access screens.

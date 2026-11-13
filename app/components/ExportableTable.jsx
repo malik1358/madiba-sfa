@@ -3,20 +3,25 @@
 import { useLayoutEffect, useRef } from "react";
 import ExportExcelButton from "./ExportExcelButton";
 import TableColumnFilters from "./TableColumnFilters";
+import TableColumnVisibility from "./TableColumnVisibility";
 import { rowsFromHtmlTable } from "../lib/excelExport";
 import { syncStackedHeaderSticky } from "../lib/tableColumnFilter";
+import { normalizeTableId } from "../lib/tableColumnVisibility";
 
 export default function ExportableTable({
   filename,
+  tableId,
   sheetName = "Sheet1",
   className = "",
   style,
   disabled = false,
   enableColumnFilters = true,
+  enableColumnVisibility = true,
   onError,
   children,
 }) {
   const tableHostRef = useRef(null);
+  const resolvedTableId = normalizeTableId(tableId || filename);
 
   useLayoutEffect(() => {
     const host = tableHostRef.current;
@@ -47,6 +52,11 @@ export default function ExportableTable({
     <div className="moduleExportableTable">
       <div className="moduleExportableTableBar">
         <TableColumnFilters tableHostRef={tableHostRef} enabled={enableColumnFilters} />
+        <TableColumnVisibility
+          tableHostRef={tableHostRef}
+          tableId={resolvedTableId}
+          enabled={enableColumnVisibility && Boolean(resolvedTableId)}
+        />
         <ExportExcelButton
           filename={filename}
           sheetName={sheetName}

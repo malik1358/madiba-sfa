@@ -6,6 +6,10 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 
 - One speed sample is taken at 09:00, 12:00, 15:00 and 18:00 KSA, including Friday. Each sample records the same public build-info time, Auth health time, keyed settings read, customer count, and two-day order count. The Actions job keeps the fastest of three public build-info hits. Auth health keeps the fastest of two attempts. Database probes warm one connection first and keep the fastest of two attempts. History is `system_settings.app_performance_daily_v1`, one row per KSA hour, kept for 90 days. The first samples are `baseline` / `collecting`. After three earlier samples, a timing is `slower` only when it is at least 2× the median, at least 500 ms above that median, and above the metric absolute floor (1s for network/DB probes; 400 ms for the in-region build-info probe). A slower or failed run emails `malik@pinasz.com`. A repeat in the same KSA hour does not send a second email.
 
+## Management table columns
+
+- `ExportableTable` (and BI grids via `BiExcelHead` / `BiExcelTableShell`) expose a **Columns** control plus a chip strip of hidden header names. Preferences are per signed-in user and per table id (`tableId`, defaulting to the export `filename`), stored server-side in `system_settings.table_column_prefs_v1:<userId>` so they follow the user across devices. Column identity is the header label (`data-column-filter-label`), not DOM index. At least one column must stay visible. Excel export skips hidden columns. No migration.
+
 ## Roles and gates
 
 - `buildModuleAccess` in `app/lib/moduleAccess.js` decides every management screen. Do not hide a page only with CSS.

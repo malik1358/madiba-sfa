@@ -107,6 +107,57 @@ function Kpi({ label, value, note, tone = "teal" }) {
   );
 }
 
+/** Collapsible KPI strip: closed by default so charts/tables keep the slide; open for full cards. */
+function MisKpiPanel({
+  language,
+  title,
+  compact = false,
+  defaultOpen = false,
+  children,
+}) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const [open, setOpen] = useState(defaultOpen);
+  const items = Children.toArray(children)
+    .filter((child) => child && typeof child === "object" && child.props?.label != null)
+    .map((child) => ({
+      label: child.props.label,
+      value: child.props.value,
+      tone: child.props.tone || "teal",
+    }));
+  const heading = title || t("kpiPanel");
+
+  return (
+    <div className={`misKpiPanel${open ? " misKpiPanel--open" : ""}`}>
+      <button
+        type="button"
+        className="misKpiPanelToggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="misKpiPanelChevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span className="misKpiPanelTitle">{heading}</span>
+        <span className="misKpiPanelCount">{items.length}</span>
+        <span className="misKpiPanelAction">{open ? t("hideKpis") : t("showKpis")}</span>
+      </button>
+      {!open && items.length ? (
+        <div className="misKpiChipRow" role="list">
+          {items.map((item) => (
+            <div key={item.label} className={`misKpiChip misKpiChip--${item.tone}`} role="listitem">
+              <span className="misKpiChipLabel">{item.label}</span>
+              <strong className="misKpiChipValue">{item.value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {open ? (
+        <div className={`misKpiGrid${compact ? " misKpiGrid--compact" : ""}`}>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function BarRow({ label, value, max, highlight }) {
   const width = max > 0 ? Math.max(4, Math.round((Math.abs(value) / max) * 100)) : 0;
   return (
@@ -410,7 +461,7 @@ function buildSlides(report, language) {
       label: "Momentum",
       node: (
         <Slide eyebrow="MOMENTUM" title={`Performance through ${monthLabel(asOfYm)}`}>
-          <div className="misKpiGrid">
+          <MisKpiPanel language={language} title="Headline KPIs">
             <Kpi label="Sales" value={money(report.headline.sales)} note={momNote(report.headline.salesMomPct)} tone={report.headline.salesMomPct >= 0 ? "green" : "orange"} />
             <Kpi label="Gross profit" value={money(report.headline.gp)} note={momNote(report.headline.gpMomPct, `${report.headline.gpPct}% margin (was ${report.headline.previousGpPct}%)`)} tone={report.headline.gpMomPct >= 0 ? "green" : "orange"} />
             <Kpi label="Collections" value={money(report.headline.collection)} note={momNote(report.headline.collectionMomPct)} tone={report.headline.collectionMomPct >= 0 ? "green" : "orange"} />
@@ -424,7 +475,7 @@ function buildSlides(report, language) {
               tone={report.headline.gt90ArMomPct == null || report.headline.gt90ArMomPct <= 0 ? "green" : "orange"}
             />
             <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={momNote(report.headline.ytdMomPct, `${report.headline.newCustomers} new customers`)} tone={Number(report.headline.ytdMomPct) >= 0 ? "green" : "orange"} />
-          </div>
+          </MisKpiPanel>
           <p className="misRemark">{report.remarks.momentum} {report.remarks.margin}</p>
         </Slide>
       ),

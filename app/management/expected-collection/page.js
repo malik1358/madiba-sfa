@@ -50,8 +50,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Avg days used = max(lifetime avg, days on last paid invoice); 120 if never paid. Legal-queue customers are excluded. Expected amount is the BM + Rest sales-mix share of each open invoice whose approx pay date is on or before month-end (overdue still open counts).",
-    ar: "متوسط الأيام = أعلى قيمة بين متوسط العمر وأيام آخر فاتورة مسددة؛ 120 إن لم يُسدد قط. يُستبعد عملاء الطابور القانوني. المبلغ المتوقع هو حصة مواد البناء + الباقي من كل فاتورة مفتوحة تاريخ سدادها التقريبي في أو قبل نهاية الشهر (المتأخر المفتوح يُحتسب).",
+    en: "Avg days used = max(lifetime avg, days on last paid invoice); 120 if never paid. Customers with avg days above 120 and legal-queue customers are excluded. Expected amount is the BM + Rest sales-mix share of each open invoice whose approx pay date is on or before month-end (overdue still open counts).",
+    ar: "متوسط الأيام = أعلى قيمة بين متوسط العمر وأيام آخر فاتورة مسددة؛ 120 إن لم يُسدد قط. يُستبعد من يتجاوز متوسطه 120 يوماً وعملاء الطابور القانوني. المبلغ المتوقع هو حصة مواد البناء + الباقي من كل فاتورة مفتوحة تاريخ سدادها التقريبي في أو قبل نهاية الشهر (المتأخر المفتوح يُحتسب).",
   },
 };
 

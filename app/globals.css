@@ -7394,29 +7394,40 @@ th:has(.moduleTableColumnFilterInput) {
   padding-inline-start: 18px;
 }
 
-.expectedCollectionSalesmanRow td {
+/* Beat zebra / sticky total-col light fills so white summary text stays readable. */
+.moduleTable tbody tr.expectedCollectionSalesmanRow td,
+.moduleTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionSalesmanRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:hover td.moduleBiTotalCol {
   background: #0f4c5c;
-  color: #fff;
+  color: #ffffff;
   font-weight: 600;
 }
 
-.expectedCollectionSalesmanRow td .moduleCode {
+.moduleTable tbody tr.expectedCollectionSalesmanRow td .moduleCode,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td .moduleCode {
   color: #cfe8ec;
   font-weight: 500;
 }
 
-.expectedCollectionSalesmanRow .stockTakeReportExpandBtn {
+.moduleTable tbody tr.expectedCollectionSalesmanRow .stockTakeReportExpandBtn,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow .stockTakeReportExpandBtn {
   border-color: #9ec4cc;
   background: #fff;
   color: #0f4c5c;
 }
 
-.expectedCollectionSalesmanRow .moduleBiTotalCol {
-  background: #0a3a46;
-  color: #fff;
-}
-
-.expectedCollectionDetailRow td {
+.moduleTable tbody tr.expectedCollectionDetailRow td,
+.moduleTable tbody tr.expectedCollectionDetailRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionDetailRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow:hover td {
   background: #f4f8f9;
   color: #35545c;
 }

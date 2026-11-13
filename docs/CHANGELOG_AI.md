@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-11-13** — Management MIS inventory adds cover-band stock columns **0-30 / 31-60 / 61-90 / >90**, category/bucket hyperlink drill to item lists, and a **Latest stock** toggle (EOD via `/api/business-dashboard/mis/inventory-cover`). Rebuild prepared pack for published physical buckets. No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`.
+- **2026-11-13** — Expected Collection salesman summary rows keep teal background + white text over zebra/total-column light fills so Expected SAR stays readable. No migration.
 - **2026-11-13** — Management MIS adds BI **Slice and dice** filters in a collapsible drawer (same `CategoryGrowthFilters` as BI). Apply rebuilds an ephemeral filtered pack from sales/receipts/outstanding; does not overwrite `mis_report_prepared_v1`. KPI cards are full grids again (not collapsed). No migration. See `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`.
 - **2026-11-13** — Management MIS portfolio **top loss items** use prior-month item code/name when the as-of month has no sales lines (fixes code shown as item name with blank Code). Rebuild prepared pack (`?rebuild=1` / Refresh) after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-13** — Management MIS Categories table headers name both months explicitly (e.g. **Oct 26 sales/GP/GP%** vs **Sep 26 sales/GP/GP%**), not bare Sales/GP/GP% for the as-of columns. No migration. See `docs/BUSINESS_RULES.md`.

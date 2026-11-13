@@ -55,6 +55,34 @@ test("buildMisReport computes month sales, GP, MoM and item-level repeat", () =>
   assert.equal(personal.salesMomPct, -100);
 });
 
+
+test("buildMisReport exposes category-wise repeat MoM", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-01", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 50000, profit_amount: 10000 },
+      { transaction_date: "2026-09-10", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 70000, profit_amount: 14000 },
+      { transaction_date: "2026-10-05", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 40000, profit_amount: 8000 },
+      { transaction_date: "2026-09-02", customer_code: "2002", item_name: "Soap", category: "Personal Care", salesman_name: "OSAMA", sales_amount: 20000, profit_amount: 4000 },
+      { transaction_date: "2026-10-12", customer_code: "2002", item_name: "Soap", category: "Personal Care", salesman_name: "OSAMA", sales_amount: 60000, profit_amount: 12000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  const building = report.repeatCategories.find((row) => row.category === "Building Material");
+  const personal = report.repeatCategories.find((row) => row.category === "Personal Care");
+  assert.ok(building);
+  assert.equal(building.previousSales, 70000);
+  assert.equal(building.sales, 40000);
+  assert.equal(building.delta, -30000);
+  assert.ok(building.salesMomPct < 0);
+  assert.ok(personal);
+  assert.equal(personal.previousSales, 0);
+  assert.equal(personal.sales, 60000);
+  assert.equal(personal.delta, 60000);
+  assert.ok(personal.salesMomPct > 0);
+});
+
 test("buildMisReport counts same-month repurchase after a one-day gap as repeat", () => {
   const report = buildMisReport({
     asOfDate: "2026-10-31",

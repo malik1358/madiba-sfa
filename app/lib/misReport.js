@@ -165,6 +165,8 @@ export function buildMisReport({
     customers: new Set(),
   }]));
   const portfolioCategoryMonthly = new Map();
+  /** Repeat sales by month+category (`ym||category`). */
+  const repeatCategoryMonthly = new Map();
   const portfolioItemMonthly = new Map();
 
   for (const row of salesRows) {
@@ -190,8 +192,16 @@ export function buildMisReport({
     // Same customer + item on a later calendar day (>=1 day gap) is repeat, including within the month.
     // Only positive lines count as repeat/new sales; credit notes stay in total sales only.
     if (amount > 0) {
-      if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
-      else bucket.newSales += amount;
+      if (itemFirst && day > itemFirst) {
+        bucket.repeatSales += amount;
+        const catLabel = String(row.category || "").trim() || "(blank)";
+        const rKey = `${ym}||${catLabel}`;
+        const rRow = repeatCategoryMonthly.get(rKey) || { ym, category: catLabel, sales: 0 };
+        rRow.sales += amount;
+        repeatCategoryMonthly.set(rKey, rRow);
+      } else {
+        bucket.newSales += amount;
+      }
     }
 
     const cat = String(row.category || "").trim() || "(blank)";
@@ -488,6 +498,29 @@ export function buildMisReport({
     };
   }).sort((a, b) => b.salesLoss - a.salesLoss);
 
+  const repeatCategoryNames = new Set();
+  for (const key of repeatCategoryMonthly.keys()) {
+    const [ym, ...rest] = key.split("||");
+    const category = rest.join("||");
+    if (ym === asOfYm || (prevYm && ym === prevYm)) repeatCategoryNames.add(category);
+  }
+  const repeatCategories = [...repeatCategoryNames].map((category) => {
+    const cur = repeatCategoryMonthly.get(`${asOfYm}||${category}`) || { category, sales: 0 };
+    const prevRow = prevYm
+      ? (repeatCategoryMonthly.get(`${prevYm}||${category}`) || { sales: 0 })
+      : { sales: 0 };
+    const sales = moneyRound(cur.sales);
+    const previousSales = moneyRound(prevRow.sales);
+    const delta = moneyRound(sales - previousSales);
+    return {
+      category: cur.category || prevRow.category || category,
+      sales,
+      previousSales,
+      delta,
+      salesMomPct: pctChange(sales, previousSales),
+    };
+  }).sort((a, b) => b.sales - a.sales);
+
   const portfolioItemIds = new Set();
   for (const key of portfolioItemMonthly.keys()) {
     const [ym, itemId] = key.split("||");
@@ -688,6 +721,7 @@ export function buildMisReport({
     portfolio,
     portfolioCategories,
     portfolioTopLossItems,
+    repeatCategories,
     categories: categoryRows,
     salesmen: salesmanRows,
     madiba: madibaRows,

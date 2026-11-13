@@ -81,6 +81,17 @@ const TEXT = {
     en: "Filter apply timed out. Your previous slide view is unchanged — try again or Clear to return to the company pack.",
     ar: "انتهت مهلة تطبيق التصفية. العرض السابق كما هو — أعد المحاولة أو امسح للعودة إلى حزمة الشركة.",
   },
+  close: { en: "Close", ar: "إغلاق" },
+  repeatItemDrill: { en: "Open items that drove this repeat change", ar: "فتح الأصناف التي حرّكت تغيّر التكرار" },
+  repeatItemDrillTitle: { en: "Repeat by item", ar: "التكرار حسب الصنف" },
+  repeatItemDrillHint: {
+    en: "Items in this category sorted by repeat Difference (worst loss first).",
+    ar: "أصناف هذه الفئة مرتبة حسب فرق التكرار (أكبر خسارة أولاً).",
+  },
+  repeatItemDrillEmpty: {
+    en: "No item breakdown in this pack. Tap Refresh to rebuild MIS.",
+    ar: "لا يوجد تفصيل أصناف في هذه الحزمة. اضغط تحديث لإعادة بناء التقرير.",
+  },
 };
 
 function money(value, { digits = 1 } = {}) {
@@ -376,9 +387,9 @@ function SalesmanTable({ rows, language }) {
   );
 }
 
-function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
+function RepeatCategoryItemDrillTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
-  const keys = ["category", "previousSales", "sales", "delta", "salesMomPct"];
+  const keys = ["itemName", "itemCode", "previousSales", "sales", "delta", "salesMomPct"];
   const valueOf = useCallback((row, key) => {
     if (key === "salesMomPct") return row[key] != null ? `${row[key]}%` : "—";
     if (["previousSales", "sales", "delta"].includes(key)) return amountInt(row[key]);
@@ -388,14 +399,16 @@ function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", p
   const priorTotal = visibleRows.reduce((acc, row) => acc + Number(row.previousSales || 0), 0);
   const salesTotal = visibleRows.reduce((acc, row) => acc + Number(row.sales || 0), 0);
   const deltaTotal = Math.round(salesTotal - priorTotal);
+  const rowKey = (row) => `${row.itemCode || ""}||${row.itemName}`;
 
   return (
-    <ExportableTable filename="mis-repeat-category-mom" sheetName="Repeat by category" className="moduleTableWrap moduleBiTableWrap">
-      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+    <ExportableTable filename="mis-repeat-category-items" sheetName="Repeat items" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 8 }}>
         <table className="moduleTable moduleBiTable">
           <thead>
             <tr>
-              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Item" filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Code" filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label={`${previousLabel} repeat`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
               <BiExcelHead label={`${currentLabel} repeat`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label="Difference" filterKey="delta" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
@@ -404,8 +417,9 @@ function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", p
           </thead>
           <tbody>
             {visibleRows.map((row, index) => (
-              <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                <td>{row.category}</td>
+              <tr key={rowKey(row)} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.itemName}</td>
+                <td>{row.itemCode || "—"}</td>
                 <td>{amountInt(row.previousSales)}</td>
                 <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
                 <td className={momTrendClass(row.delta)}>{amountInt(row.delta)}</td>
@@ -415,7 +429,7 @@ function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", p
           </tbody>
           <tfoot>
             <tr>
-              <td><strong>Total</strong></td>
+              <td colSpan={2}><strong>Total</strong></td>
               <td><strong>{amountInt(priorTotal)}</strong></td>
               <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
               <td className={momTrendClass(deltaTotal)}><strong>{amountInt(deltaTotal)}</strong></td>
@@ -427,6 +441,107 @@ function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", p
         </table>
       </div>
     </ExportableTable>
+  );
+}
+
+function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const [drillRow, setDrillRow] = useState(null);
+  const keys = ["category", "previousSales", "sales", "delta", "salesMomPct"];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct") return row[key] != null ? `${row[key]}%` : "—";
+    if (["previousSales", "sales", "delta"].includes(key)) return amountInt(row[key]);
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const priorTotal = visibleRows.reduce((acc, row) => acc + Number(row.previousSales || 0), 0);
+  const salesTotal = visibleRows.reduce((acc, row) => acc + Number(row.sales || 0), 0);
+  const deltaTotal = Math.round(salesTotal - priorTotal);
+  const drillItems = Array.isArray(drillRow?.items) ? drillRow.items : [];
+
+  return (
+    <>
+      <ExportableTable filename="mis-repeat-category-mom" sheetName="Repeat by category" className="moduleTableWrap moduleBiTableWrap">
+        <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+          <table className="moduleTable moduleBiTable">
+            <thead>
+              <tr>
+                <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label={`${previousLabel} repeat`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label={`${currentLabel} repeat`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+                <BiExcelHead label="Difference" filterKey="delta" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row, index) => (
+                <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                  <td>{row.category}</td>
+                  <td>{amountInt(row.previousSales)}</td>
+                  <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                  <td className={momTrendClass(row.delta)}>
+                    <button
+                      type="button"
+                      className="misDrillLink"
+                      onClick={() => setDrillRow(row)}
+                      title={t("repeatItemDrill")}
+                    >
+                      {amountInt(row.delta)}
+                    </button>
+                  </td>
+                  <td className={`moduleBiTotalCol ${momTrendClass(row.salesMomPct)}`}>{pct(row.salesMomPct)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td><strong>Total</strong></td>
+                <td><strong>{amountInt(priorTotal)}</strong></td>
+                <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
+                <td className={momTrendClass(deltaTotal)}><strong>{amountInt(deltaTotal)}</strong></td>
+                <td className={`moduleBiTotalCol ${momTrendClass(pctChangeSafe(salesTotal, priorTotal))}`}>
+                  <strong>{pct(pctChangeSafe(salesTotal, priorTotal))}</strong>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </ExportableTable>
+
+      {drillRow ? (
+        <div
+          className="moduleModalOverlay"
+          role="presentation"
+          onClick={() => setDrillRow(null)}
+        >
+          <div
+            className="moduleModal misRepeatItemModal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("repeatItemDrillTitle")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="moduleSectionHeader">
+              <h2>{t("repeatItemDrillTitle")}: {drillRow.category}</h2>
+              <button type="button" className="moduleInlineButton" onClick={() => setDrillRow(null)}>
+                {t("close")}
+              </button>
+            </div>
+            <p className="moduleHint">{t("repeatItemDrillHint")}</p>
+            {drillItems.length ? (
+              <RepeatCategoryItemDrillTable
+                rows={drillItems}
+                language={language}
+                currentLabel={currentLabel}
+                previousLabel={previousLabel}
+              />
+            ) : (
+              <p className="moduleHint">{t("repeatItemDrillEmpty")}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

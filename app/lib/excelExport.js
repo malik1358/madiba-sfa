@@ -40,6 +40,14 @@ export function cellTextFromNode(node) {
   return String(node?.innerText || node?.textContent || "").replace(/\s+/g, " ").trim();
 }
 
+function isHiddenExportCell(cell) {
+  if (!cell) return false;
+  if (cell.classList?.contains?.("moduleTableColHidden")) return true;
+  if (typeof cell.getAttribute === "function" && cell.getAttribute("aria-hidden") === "true") return true;
+  if (cell.style?.display === "none") return true;
+  return false;
+}
+
 function isGenericColumnFilterInput(element) {
   return Boolean(element?.classList?.contains?.("moduleTableColumnFilterInput"));
 }
@@ -86,20 +94,23 @@ export function rowsFromHtmlTable(table) {
     .filter((row) => !isExcelFilterHeaderRow(row));
   const lastHeaderRow = headerRows[headerRows.length - 1];
   const lastHeaderCells = [...(lastHeaderRow?.querySelectorAll(":scope > th, :scope > td") || [])];
-  const leadingHeaders = headerRows.length > 1
+  const leadingHeaderCells = headerRows.length > 1
     ? [...headerRows[0].querySelectorAll(":scope > th, :scope > td")]
       .filter((cell) => Number(cell.rowSpan || 1) > 1)
-      .map((cell, index) => excelHeaderTextFromCell(cell, index))
     : [];
-  const headers = [
-    ...leadingHeaders,
-    ...lastHeaderCells.map((cell, index) => excelHeaderTextFromCell(cell, index)),
-  ];
+  const headerCells = [...leadingHeaderCells, ...lastHeaderCells];
+  const visibleIndexes = headerCells
+    .map((cell, index) => (isHiddenExportCell(cell) ? -1 : index))
+    .filter((index) => index >= 0);
+  const headers = visibleIndexes.map((index) => excelHeaderTextFromCell(headerCells[index], index));
   const bodyRows = [...table.querySelectorAll(":scope > tbody > tr, :scope > tfoot > tr")].map((row) => {
     if (row.hidden || row.classList?.contains?.("moduleTableRowFilteredOut")) return null;
     const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
     if (cells.length === 1 && Number(cells[0].colSpan || 1) > 1) return null;
-    return cells.map((cell) => cellTextFromNode(cell));
+    if (cells.length === headerCells.length) {
+      return visibleIndexes.map((index) => cellTextFromNode(cells[index]));
+    }
+    return cells.filter((cell) => !isHiddenExportCell(cell)).map((cell) => cellTextFromNode(cell));
   }).filter(Boolean);
 
   return rowsFromTableMatrix(headers, bodyRows);

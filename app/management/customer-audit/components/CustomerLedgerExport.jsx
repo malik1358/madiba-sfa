@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import BiExcelTableShell from "../../../components/BiExcelTableShell";
 import BiExcelHead, { useBiExcelFilters } from "../../business-dashboard/BiExcelHead";
 import {
   datewiseFilterValue,
@@ -240,64 +241,71 @@ export default function CustomerLedgerExport({
             </p>
           </div>
         </div>
-        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-          <table className="moduleTable moduleBiTable paymentSettleTable customerLedgerTable">
-            <thead>
-              <tr>
-                <BiExcelHead label="Date" filterKey="date" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Type" filterKey="kind" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Voucher" filterKey="voucher" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Sales excl VAT" filterKey="excl" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Sales incl VAT" filterKey="incl" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Collected" filterKey="collected" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-                <BiExcelHead label="Open" filterKey="open" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} className="moduleBiTotalCol" />
-                <BiExcelHead label="Detail" filterKey="detail" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
-              </tr>
-            </thead>
-            <tbody>
-              {visibleLedgerLines.map((row) => (
-                <tr key={row.id} className={`customerLedgerRow customerLedgerRow--${String(row.kind || "other").toLowerCase().replace(/\s+/g, "-")}`}>
-                  <td>{row.date || "—"}</td>
-                  <td><span className={kindClass(row.kind)}>{row.kind}</span></td>
-                  <td>{row.voucher}</td>
-                  <td>{formatOptionalMoney(row.sales_excl_vat)}</td>
-                  <td>{formatOptionalMoney(row.sales_incl_vat)}</td>
-                  <td className={row.collected_amount != null && Number(row.collected_amount) > 0.009 ? "moduleBiMonthCell--up" : ""}>
-                    {formatOptionalMoney(row.collected_amount)}
-                  </td>
-                  <td className={`moduleBiTotalCol${row.open_amount != null && Number(row.open_amount) > 0.009 ? " moduleBiMonthCell--down" : ""}`}>
-                    {formatOptionalMoney(row.open_amount)}
-                  </td>
-                  <td>
-                    {row.kind === "Invoice" && row.detail
-                      ? <span className={statusClass(row.detail)}>{row.detail}</span>
-                      : (row.detail || "—")}
-                  </td>
-                </tr>
-              ))}
-              {!visibleLedgerLines.length && (
+        <div style={{ marginTop: "10px" }}>
+          <BiExcelTableShell
+            tableId="customer-audit-ledger"
+            filename="customer-audit-ledger"
+            sheetName="Ledger"
+            className="moduleTableWrap"
+          >
+            <table className="moduleTable moduleBiTable paymentSettleTable customerLedgerTable">
+              <thead>
                 <tr>
-                  <td colSpan={8}>
-                    {ledgerLines.length
-                      ? "No rows match these column filters."
-                      : "No dated sales or collections found for this customer."}
-                  </td>
+                  <BiExcelHead label="Date" filterKey="date" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Type" filterKey="kind" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Voucher" filterKey="voucher" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Sales excl VAT" filterKey="excl" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Sales incl VAT" filterKey="incl" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Collected" filterKey="collected" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
+                  <BiExcelHead label="Open" filterKey="open" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} className="moduleBiTotalCol" />
+                  <BiExcelHead label="Detail" filterKey="detail" options={ledgerOptions} filters={ledgerFilters} onChange={setLedgerFilter} />
                 </tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td><strong>Total</strong></td>
-                <td><strong>{formatCount(visibleLedgerLines.length)}</strong></td>
-                <td />
-                <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "sales_excl_vat"))}</strong></td>
-                <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "sales_incl_vat"))}</strong></td>
-                <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "collected_amount"))}</strong></td>
-                <td className="moduleBiTotalCol"><strong>{formatMoney(sumDatewise(visibleLedgerLines, "open_amount"))}</strong></td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {visibleLedgerLines.map((row) => (
+                  <tr key={row.id} className={`customerLedgerRow customerLedgerRow--${String(row.kind || "other").toLowerCase().replace(/\s+/g, "-")}`}>
+                    <td>{row.date || "—"}</td>
+                    <td><span className={kindClass(row.kind)}>{row.kind}</span></td>
+                    <td>{row.voucher}</td>
+                    <td>{formatOptionalMoney(row.sales_excl_vat)}</td>
+                    <td>{formatOptionalMoney(row.sales_incl_vat)}</td>
+                    <td className={row.collected_amount != null && Number(row.collected_amount) > 0.009 ? "moduleBiMonthCell--up" : ""}>
+                      {formatOptionalMoney(row.collected_amount)}
+                    </td>
+                    <td className={`moduleBiTotalCol${row.open_amount != null && Number(row.open_amount) > 0.009 ? " moduleBiMonthCell--down" : ""}`}>
+                      {formatOptionalMoney(row.open_amount)}
+                    </td>
+                    <td>
+                      {row.kind === "Invoice" && row.detail
+                        ? <span className={statusClass(row.detail)}>{row.detail}</span>
+                        : (row.detail || "—")}
+                    </td>
+                  </tr>
+                ))}
+                {!visibleLedgerLines.length && (
+                  <tr>
+                    <td colSpan={8}>
+                      {ledgerLines.length
+                        ? "No rows match these column filters."
+                        : "No dated sales or collections found for this customer."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td><strong>Total</strong></td>
+                  <td><strong>{formatCount(visibleLedgerLines.length)}</strong></td>
+                  <td />
+                  <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "sales_excl_vat"))}</strong></td>
+                  <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "sales_incl_vat"))}</strong></td>
+                  <td><strong>{formatMoney(sumDatewise(visibleLedgerLines, "collected_amount"))}</strong></td>
+                  <td className="moduleBiTotalCol"><strong>{formatMoney(sumDatewise(visibleLedgerLines, "open_amount"))}</strong></td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </BiExcelTableShell>
         </div>
       </div>
 
@@ -312,22 +320,28 @@ export default function CustomerLedgerExport({
           </div>
           <span>{formatCount(visibleOpenInvoices.length)} open</span>
         </div>
-        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-          <table className="moduleTable moduleBiTable paymentSettleTable">
-            <thead>
-              <tr>
-                <BiExcelHead label="Sales Date" filterKey="date" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Voucher" filterKey="voucher" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Sales excl VAT" filterKey="excl" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Sales incl VAT" filterKey="incl" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Paid" filterKey="paid" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Machine Open" filterKey="machine" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Tally Open" filterKey="tally" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Open Δ" filterKey="delta" options={openOptions} filters={openFilters} onChange={setOpenFilter} className="moduleBiTotalCol" />
-                <BiExcelHead label="Status" filterKey="status" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-                <BiExcelHead label="Days" filterKey="days" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
-              </tr>
-            </thead>
+        <div style={{ marginTop: "10px" }}>
+          <BiExcelTableShell
+            tableId="customer-audit-open-invoices"
+            filename="customer-audit-open-invoices"
+            sheetName="OpenInvoices"
+            className="moduleTableWrap"
+          >
+            <table className="moduleTable moduleBiTable paymentSettleTable">
+              <thead>
+                <tr>
+                  <BiExcelHead label="Sales Date" filterKey="date" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Voucher" filterKey="voucher" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Sales excl VAT" filterKey="excl" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Sales incl VAT" filterKey="incl" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Paid" filterKey="paid" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Machine Open" filterKey="machine" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Tally Open" filterKey="tally" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Open Δ" filterKey="delta" options={openOptions} filters={openFilters} onChange={setOpenFilter} className="moduleBiTotalCol" />
+                  <BiExcelHead label="Status" filterKey="status" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                  <BiExcelHead label="Days" filterKey="days" options={openOptions} filters={openFilters} onChange={setOpenFilter} />
+                </tr>
+              </thead>
             <tbody>
               {visibleOpenInvoices.map((invoice) => {
                 const openDelta = settlementTransactionDelta(invoice);
@@ -378,6 +392,7 @@ export default function CustomerLedgerExport({
               </tr>
             </tfoot>
           </table>
+          </BiExcelTableShell>
         </div>
       </div>
 
@@ -392,54 +407,61 @@ export default function CustomerLedgerExport({
           </div>
           <span>{formatCount(visibleReversed.length)} excluded from ledger</span>
         </div>
-        <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-          <table className="moduleTable moduleBiTable paymentSettleTable">
-            <thead>
-              <tr>
-                <BiExcelHead label="Sales Date" filterKey="date" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Invoice Voucher" filterKey="voucher" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Sales excl VAT" filterKey="excl" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Sales incl VAT" filterKey="incl" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Credit Note Date" filterKey="cnDate" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Credit Note Voucher" filterKey="cnVoucher" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Credit Note Amount" filterKey="cnAmount" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} className="moduleBiTotalCol" />
-                <BiExcelHead label="Reversal Days" filterKey="days" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-                <BiExcelHead label="Status" filterKey="status" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
-              </tr>
-            </thead>
-            <tbody>
-              {visibleReversed.map((row) => (
-                <tr key={`rev-${row.invoice_date}::${row.voucher_number}::${row.credit_note_voucher}`}>
-                  <td>{row.invoice_date || "—"}</td>
-                  <td>{row.voucher_number || "—"}</td>
-                  <td>{formatMoney(row.amount_excl_vat)}</td>
-                  <td>{formatMoney(row.amount_incl_vat)}</td>
-                  <td>{row.credit_note_date || "—"}</td>
-                  <td>{row.credit_note_voucher || "—"}</td>
-                  <td className="moduleBiTotalCol">{formatMoney(row.credit_note_amount)}</td>
-                  <td>{row.reversal_days != null ? row.reversal_days : "—"}</td>
-                  <td><span className={statusClass("Reversed")}>Reversed</span></td>
-                </tr>
-              ))}
-              {!visibleReversed.length && (
+        <div style={{ marginTop: "10px" }}>
+          <BiExcelTableShell
+            tableId="customer-audit-reversed-invoices"
+            filename="customer-audit-reversed-invoices"
+            sheetName="Reversed"
+            className="moduleTableWrap"
+          >
+            <table className="moduleTable moduleBiTable paymentSettleTable">
+              <thead>
                 <tr>
-                  <td colSpan={9}>
-                    {reversedInvoices.length
-                      ? "No rows match these column filters."
-                      : "No immediate credit-note reversals for this customer."}
-                  </td>
+                  <BiExcelHead label="Sales Date" filterKey="date" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Invoice Voucher" filterKey="voucher" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Sales excl VAT" filterKey="excl" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Sales incl VAT" filterKey="incl" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Credit Note Date" filterKey="cnDate" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Credit Note Voucher" filterKey="cnVoucher" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Credit Note Amount" filterKey="cnAmount" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} className="moduleBiTotalCol" />
+                  <BiExcelHead label="Reversal Days" filterKey="days" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
+                  <BiExcelHead label="Status" filterKey="status" options={reversedOptions} filters={reversedFilters} onChange={setReversedFilter} />
                 </tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={2}><strong>Total</strong></td>
-                <td><strong>{formatMoney(reversedExclTotal)}</strong></td>
-                <td><strong>{formatMoney(reversedInclTotal)}</strong></td>
-                <td colSpan={5} />
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {visibleReversed.map((row) => (
+                  <tr key={`rev-${row.invoice_date}::${row.voucher_number}::${row.credit_note_voucher}`}>
+                    <td>{row.invoice_date || "—"}</td>
+                    <td>{row.voucher_number || "—"}</td>
+                    <td>{formatMoney(row.amount_excl_vat)}</td>
+                    <td>{formatMoney(row.amount_incl_vat)}</td>
+                    <td>{row.credit_note_date || "—"}</td>
+                    <td>{row.credit_note_voucher || "—"}</td>
+                    <td className="moduleBiTotalCol">{formatMoney(row.credit_note_amount)}</td>
+                    <td>{row.reversal_days != null ? row.reversal_days : "—"}</td>
+                    <td><span className={statusClass("Reversed")}>Reversed</span></td>
+                  </tr>
+                ))}
+                {!visibleReversed.length && (
+                  <tr>
+                    <td colSpan={9}>
+                      {reversedInvoices.length
+                        ? "No rows match these column filters."
+                        : "No immediate credit-note reversals for this customer."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={2}><strong>Total</strong></td>
+                  <td><strong>{formatMoney(reversedExclTotal)}</strong></td>
+                  <td><strong>{formatMoney(reversedInclTotal)}</strong></td>
+                  <td colSpan={5} />
+                </tr>
+              </tfoot>
+            </table>
+          </BiExcelTableShell>
         </div>
       </div>
     </section>

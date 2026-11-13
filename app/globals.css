@@ -4364,6 +4364,107 @@ table.auditMatrix td.auditTrendSame {
   margin-bottom: 8px;
 }
 
+.moduleTableColHidden {
+  display: none !important;
+}
+
+.moduleTableColumnVisibility {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.moduleExportableTableBar > .moduleTableColumnVisibility:first-child {
+  margin-right: auto;
+}
+
+.moduleTableColumnVisibilityControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.moduleTableColumnVisibilityMenu {
+  position: relative;
+}
+
+.moduleTableColumnVisibilityButton {
+  min-height: 34px;
+  font-size: 12px;
+}
+
+.moduleTableColumnVisibilityShowAll {
+  min-height: 34px;
+  font-size: 12px;
+}
+
+.moduleTableColumnVisibilityDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #8fb4bc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(7, 63, 76, 0.16);
+}
+
+.moduleTableColumnVisibilityOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 4px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.moduleTableColumnVisibilityOption input {
+  margin-top: 2px;
+}
+
+.moduleTableColumnVisibilityChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+  max-width: min(720px, 100%);
+}
+
+.moduleTableColumnVisibilityChipsLabel {
+  color: #0b6173;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.moduleTableColumnVisibilityChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid #b7d0d6;
+  border-radius: 999px;
+  background: #eef7f8;
+  color: #0b6173;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.moduleTableColumnVisibilityChip span {
+  opacity: 0.7;
+}
+
 .moduleTableColumnFilterStatus {
   display: flex;
   align-items: center;

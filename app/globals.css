@@ -7394,6 +7394,33 @@ th:has(.moduleTableColumnFilterInput) {
   padding-inline-start: 18px;
 }
 
+.expectedCollectionSalesmanRow td {
+  background: #0f4c5c;
+  color: #fff;
+  font-weight: 600;
+}
+
+.expectedCollectionSalesmanRow td .moduleCode {
+  color: #cfe8ec;
+  font-weight: 500;
+}
+
+.expectedCollectionSalesmanRow .stockTakeReportExpandBtn {
+  border-color: #9ec4cc;
+  background: #fff;
+  color: #0f4c5c;
+}
+
+.expectedCollectionSalesmanRow .moduleBiTotalCol {
+  background: #0a3a46;
+  color: #fff;
+}
+
+.expectedCollectionDetailRow td {
+  background: #f4f8f9;
+  color: #35545c;
+}
+
 .stockTakeLineActions {
   display: flex;
   flex-direction: column;

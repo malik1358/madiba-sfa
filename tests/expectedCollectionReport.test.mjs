@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildExpectedCollectionDetailRows } from "../app/lib/expectedCollectionReport.js";
+import {
+  buildExpectedCollectionDetailRows,
+  groupExpectedCollectionRowsBySalesman,
+} from "../app/lib/expectedCollectionReport.js";
 import { buildCustomerCategoryMixFromSalesRows } from "../app/lib/expectedCollectionReportServer.js";
 
 test("buildExpectedCollectionDetailRows keeps BM+Rest expected invoices and drops legal/electronics-only", () => {
@@ -112,6 +115,56 @@ test("buildExpectedCollectionDetailRows drops never-paid (null avg) but keeps pa
   assert.equal(report.invoiceCount, 1);
   assert.equal(report.rows[0].customerCode, "1493");
   assert.equal(report.rows[0].avgDays, 120);
+});
+
+test("buildExpectedCollectionDetailRows carries salesman and groupExpectedCollectionRowsBySalesman totals Expected SAR", () => {
+  const report = buildExpectedCollectionDetailRows([
+    {
+      customer_code: "1001",
+      customer_name: "BM Customer",
+      salesman: "Ahmed",
+      ref_no: "A1",
+      invoice_date: "2026-10-15",
+      pending_amount: 1000,
+    },
+    {
+      customer_code: "1002",
+      customer_name: "Rest Customer",
+      salesman: "Ahmed",
+      ref_no: "B1",
+      invoice_date: "2026-10-20",
+      pending_amount: 500,
+    },
+    {
+      customer_code: "1003",
+      customer_name: "Other Customer",
+      salesman: "Belal",
+      ref_no: "C1",
+      invoice_date: "2026-10-10",
+      pending_amount: 200,
+    },
+  ], {
+    avgDaysByCustomer: new Map([
+      ["1001", 30],
+      ["1002", 40],
+      ["1003", 20],
+    ]),
+    customerMix: new Map([
+      ["1001", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+      ["1002", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1003", { buildingMaterial: 50, electronics: 0, rest: 50 }],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+
+  assert.equal(report.rows[0].salesmanName, "Ahmed");
+  const groups = groupExpectedCollectionRowsBySalesman(report.rows);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].salesmanName, "Ahmed");
+  assert.equal(groups[0].amount, 1500);
+  assert.equal(groups[0].invoiceCount, 2);
+  assert.equal(groups[1].salesmanName, "Belal");
+  assert.equal(groups[1].amount, 200);
 });
 
 test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {

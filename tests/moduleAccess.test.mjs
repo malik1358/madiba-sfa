@@ -130,6 +130,19 @@ test("active customers is a management report in Reports", () => {
   assert.equal(reports.items.some((item) => item.moduleKey === "activeCustomers"), true);
 });
 
+test("customer map is a management report in Reports", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("customerMap"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("customerMap"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("customerMap"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("customerMap"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }).canAccess("customerMap"), false);
+  assert.equal(moduleLabelForPath("/management/customer-map", "en"), "Customer Map");
+  assert.equal(localizedModuleLabel("customerMap", "ar"), "خريطة العملاء");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
+    .find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "customerMap"), true);
+});
+
 test("promoter coverage is available to all app roles", () => {
   const roles = ["admin", "report-user", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
@@ -353,6 +366,7 @@ test("invoice makers can view every management report without setup access", () 
       "legalTransfers",
       "missingCataloguePhotos",
       "itemMasterAnalysis",
+      "customerMap",
       "orderedNotInSales",
       "interCityStockTransfer",
       "eodStock",

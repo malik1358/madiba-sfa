@@ -9230,3 +9230,92 @@ tr.paymentSettleStatementLead td {
   .misKpiGrid, .misSplit, .misSummaryGrid, .misSwotGrid, .misInitiativeGrid { grid-template-columns: 1fr; }
   .misSlide, .misDeckStage { min-height: 0; }
 }
+
+.customerMapSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.customerMapSummary > div {
+  padding: 12px 14px;
+  border: 1px solid #d1dde0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f7fbfb 0%, #eef6f6 100%);
+}
+
+.customerMapSummary strong {
+  display: block;
+  color: #0f4c5c;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.customerMapSummary span {
+  color: #5f757c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.customerMapCanvas {
+  width: 100%;
+  height: min(70vh, 620px);
+  min-height: 360px;
+  border: 1px solid #c5d6da;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #e8f2f3;
+  z-index: 0;
+}
+
+.customerMapCanvas--loading {
+  display: grid;
+  place-items: center;
+  color: #5f757c;
+  font-weight: 700;
+}
+
+.customerMapAreaRow--selected td {
+  background: #ffe8d6 !important;
+}
+
+.customerMapCountLabel {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  font-size: 12px !important;
+}
+
+.customerMapPopup {
+  font-size: 13px;
+  line-height: 1.35;
+  min-width: 160px;
+}
+
+.customerMapPopup strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #0f4c5c;
+}
+
+.customerMapPopupLinks {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.customerMapPopupLinks a {
+  color: #0f4c5c;
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .customerMapCanvas {
+    height: 55vh;
+    min-height: 280px;
+  }
+}

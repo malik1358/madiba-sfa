@@ -613,7 +613,7 @@ function textSections(groups, options = {}) {
 
 export function buildCollectionStaleOverdueReportUrl(env = process.env) {
   const base = resolveAppOrigin(env).replace(/\/+$/, "");
-  return `${base}/management/payment-collections`;
+  return `${base}/management/collection-stale-overdue`;
 }
 
 export function buildCollectionStaleOverdueEmail({
@@ -644,7 +644,7 @@ export function buildCollectionStaleOverdueEmail({
       <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
       ${summaryCards(totals, groups.length)}
       ${renderSalesmanSections(groups, { todayKey: date, todayIso })}
-      ${link ? `<p style="margin:16px 0 0;"><a href="${escapeHtml(link)}" style="color:#0f766e;font-weight:700;">Open Payment Collections</a></p>` : ""}
+      ${link ? `<p style="margin:16px 0 0;"><a href="${escapeHtml(link)}" style="color:#0f766e;font-weight:700;">Open Stale Overdue Collections report</a></p>` : ""}
       <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Daily digest for credit follow-up. Default To: malik@pinasz.com. CC: Soyeb and Fazlur.</p>
     </div>
   </div>

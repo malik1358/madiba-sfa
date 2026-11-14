@@ -5,6 +5,7 @@ import {
   buildCollectionStaleOverdueEmail,
   buildCollectionStaleOverdueSalesmanSection,
   buildCollectionStaleOverdueEmailRow,
+  buildCollectionStaleOverdueReportUrl,
   filterCollectionStaleOverdueRows,
   filterCollectionStaleOverdueRowsForProfile,
   groupCollectionStaleOverdueBySalesman,
@@ -18,6 +19,7 @@ import {
 import {
   attachLastNearCollectionVisit,
   attachLastVisitWithoutOrder,
+  loadCollectionStaleOverdueReport,
   loadLastNearCollectionVisitByCustomer,
   resolveCollectionStaleOverdueEmailSchedule,
   resolveCollectionStaleOverdueRouteTrigger,
@@ -421,7 +423,7 @@ test("buildCollectionStaleOverdueEmail includes last visit without order column"
 test("buildCollectionStaleOverdueEmail renders one table section per salesman", () => {
   const message = buildCollectionStaleOverdueEmail({
     date: "2026-09-26",
-    reportUrl: "https://madiba-sfa.vercel.app/management/payment-collections",
+    reportUrl: "https://madiba-sfa.vercel.app/management/collection-stale-overdue",
     groups: [
       {
         salesmanName: "Parvez (S01)",
@@ -475,6 +477,55 @@ test("digest recipients default To malik and CC soyeb/fazlur", () => {
   const cc = resolveCollectionStaleOverdueDigestCc({}, ["malik@pinasz.com"]);
   assert.ok(cc.includes("soyeb@noorshukran.com"));
   assert.ok(cc.includes("fazlur.rahiman@noorshukran.com"));
+});
+
+test("buildCollectionStaleOverdueReportUrl points at the frontend report", () => {
+  assert.equal(
+    buildCollectionStaleOverdueReportUrl({ NEXT_PUBLIC_APP_URL: "https://madiba-sfa.vercel.app" }),
+    "https://madiba-sfa.vercel.app/management/collection-stale-overdue",
+  );
+});
+
+test("loadCollectionStaleOverdueReport returns filtered email rows for the UI", async () => {
+  const report = await loadCollectionStaleOverdueReport({}, {
+    now: new Date("2026-09-26T12:00:00+03:00"),
+    loadDueCustomers: async () => ([
+      {
+        customer_code: "C1",
+        customer_name: "Shop One",
+        city: "Riyadh",
+        area: "Olaya",
+        salesman_name: "Parvez",
+        salesman_code: "PARVEZ",
+        total_due_amount: 12500,
+        outstanding_30_60: 12500,
+        max_overdue_days: 45,
+        collection_history: [],
+        latest_collection: { saved_at: "2026-09-01T08:00:00Z", visit_outcome: "ASKED_COME_LATER" },
+        last_visit_without_order_at: "2026-09-10T09:00:00+03:00",
+      },
+      {
+        customer_code: "C2",
+        customer_name: "Fresh Shop",
+        salesman_name: "Sara",
+        salesman_code: "SARA",
+        total_due_amount: 800,
+        outstanding_above_120: 800,
+        max_overdue_days: 140,
+        collection_history: [{ saved_at: "2026-09-25T10:00:00Z", amount_received: 50 }],
+        latest_collection: { saved_at: "2026-09-25T10:00:00Z" },
+        last_visit_without_order_at: "2026-09-24T09:00:00+03:00",
+      },
+    ]),
+  });
+
+  assert.equal(report.date, "2026-09-26");
+  assert.equal(report.customerCount, 1);
+  assert.equal(report.groupCount, 1);
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].customerCode, "C1");
+  assert.equal(report.summary.customers, 1);
+  assert.ok(report.summary.dueAmount > 0);
 });
 
 test("runCollectionStaleOverdueEmailCycle CCs soyeb and fazlur on digest", async () => {

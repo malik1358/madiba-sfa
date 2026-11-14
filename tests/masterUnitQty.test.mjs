@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   buildMasterUnitConvMap,
   formatMasterStockQty,
+  mergePackingMasterUnitConvMap,
+  parsePackingMasterConv,
   toMasterStockQty,
   unitsMatch,
 } from "../app/lib/masterUnitQty.js";
@@ -60,6 +62,21 @@ test("buildMasterUnitConvMap prefers multi-unit conversion rows", () => {
   ]);
   assert.equal(map.A000057.conv, 5);
   assert.equal(map.A000057.masterUom, "Ctn");
+});
+
+test("parsePackingMasterConv reads CTN OF N Pack OF M PC", () => {
+  assert.deepEqual(parsePackingMasterConv("CTN OF 12 Pack OF 6 PC"), {
+    masterUom: "Ctn",
+    baseUom: "Pcs",
+    conv: 72,
+  });
+  const merged = mergePackingMasterUnitConvMap(
+    { A000057: { masterUom: "Ctn", baseUom: "RM", conv: 5 } },
+    { A006789: "CTN OF 12 Pack OF 6 PC" },
+  );
+  assert.equal(merged.A000057.conv, 5);
+  assert.equal(merged.A006789.conv, 72);
+  assert.equal(merged.A006789.masterUom, "Ctn");
 });
 
 test("Available label shows master unit when conversion map is present", () => {

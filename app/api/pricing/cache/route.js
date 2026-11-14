@@ -13,6 +13,7 @@ import {
 import { loadMasterUnitConvMap } from "../../../lib/masterUnitQtyServer.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { overlayGoogleSheetItemNames } from "../../../lib/pricePayload.js";
+import { loadCatalogueSheetPacking } from "../../../lib/productCatalogueServer.js";
 import { loadRetailPriceMaps } from "../../../lib/retailPricingServer.js";
 
 export const runtime = "nodejs";
@@ -146,7 +147,9 @@ export async function GET() {
       ? overlayGoogleSheetItemNames(cachedSheetItems, googleSheetItems)
       : cachedSheetItems;
 
-    const masterUnits = await loadMasterUnitConvMap(admin).catch(() => ({}));
+    const masterUnits = await loadMasterUnitConvMap(admin, {
+      loadSheetPacking: loadCatalogueSheetPacking,
+    }).catch(() => ({}));
     let eodStock = buildEodStockAvailability(null, { masterUnits });
     try {
       eodStock = buildEodStockAvailability(readEodStockDataset(eodStockRow?.setting_value), {

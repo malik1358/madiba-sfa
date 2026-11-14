@@ -9313,6 +9313,12 @@ tr.paymentSettleStatementLead td {
   font-weight: 700;
 }
 
+.customerMapPopupHint {
+  margin-top: 8px;
+  color: #0f4c5c;
+  font-weight: 700;
+}
+
 @media (max-width: 700px) {
   .customerMapCanvas {
     height: 55vh;

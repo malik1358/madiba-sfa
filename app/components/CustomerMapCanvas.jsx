@@ -52,12 +52,14 @@ function areaPopupHtml(area, language) {
   const withGps = Number(area.with_gps || 0).toLocaleString("en-SA");
   const label = language === "ar" ? "عملاء" : "customers";
   const gpsLabel = language === "ar" ? "مع GPS" : "with GPS";
+  const listHint = language === "ar" ? "انقر لعرض قائمة العملاء" : "Click to show customer list";
   return `
     <div class="customerMapPopup">
       <strong>${city}</strong>
       <div>${name}</div>
       <div>${customers} ${label}</div>
       <div>${withGps} ${gpsLabel}</div>
+      <div class="customerMapPopupHint">${listHint}</div>
     </div>
   `;
 }

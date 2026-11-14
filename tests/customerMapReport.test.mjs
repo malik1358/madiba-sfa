@@ -5,7 +5,9 @@ import {
   buildCustomerMapAreaRows,
   buildCustomerMapReport,
   customerMapAreaKey,
+  customerMapCustomerExportRows,
   customerMapExportRows,
+  customersForAreaKey,
   filterCustomerMapRows,
   normalizeCustomerMapPoint,
 } from "../app/lib/customerMapReport.js";
@@ -96,10 +98,20 @@ test("buildCustomerMapReport returns summary points and export rows", () => {
   assert.equal(report.summary.without_gps, 1);
   assert.equal(report.summary.cities, 2);
   assert.equal(report.mapPoints.length, 2);
+  assert.equal(report.customers.length, 3);
   assert.deepEqual(report.salesmen, ["SM01", "SM02"]);
 
   const exported = customerMapExportRows(report.areaRows);
   assert.equal(exported[0].City, "Riyadh");
   assert.equal(exported[0].Customers, 2);
   assert.equal(exported[0]["With GPS"], 2);
+
+  const malazKey = customerMapAreaKey("Riyadh", "Al Malaz District");
+  const malazCustomers = customersForAreaKey(report.customers, malazKey);
+  assert.equal(malazCustomers.length, 2);
+  assert.equal(malazCustomers.every((row) => row.has_gps), true);
+
+  const customerExport = customerMapCustomerExportRows(malazCustomers);
+  assert.equal(customerExport[0].GPS, "Yes");
+  assert.ok(customerExport.some((row) => row.Code === "1001"));
 });

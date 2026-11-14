@@ -468,6 +468,7 @@ test("role access matrix defaults match built-in module flags", () => {
 test("role module matrix overrides grant and revoke page access", () => {
   const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
   matrix.manager.upload = false;
+  matrix.collector.collectionStaleOverdue = true;
 
   const salesman = buildModuleAccess({
     role: "salesman",
@@ -481,6 +482,18 @@ test("role module matrix overrides grant and revoke page access", () => {
     roleModuleMatrix: matrix,
   });
   assert.equal(manager.canAccess("upload"), false);
+
+  assert.equal(buildModuleAccess({
+    role: "collector",
+    salesmanCode: "CL01",
+    collectionOnlyMetadata: true,
+  }).canAccess("collectionStaleOverdue"), false);
+  assert.equal(buildModuleAccess({
+    role: "collector",
+    salesmanCode: "CL01",
+    collectionOnlyMetadata: true,
+    roleModuleMatrix: matrix,
+  }).canAccess("collectionStaleOverdue"), true);
 });
 
 test("stored role matrix cannot hide Business Intelligence from salesmen", () => {

@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Real catalogue items with stock in Riyadh but not Dammam (and vice versa). Suggested transfer covers ≥15 days from the destination city’s peak weekly sales in 6 months; never-sold items get a minimum of 5. Building materials and Tally section titles are excluded.",
-    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس). النقل المقترح يغطي 15 يوماً على الأقل من أعلى مبيعات أسبوعية للوجهة خلال 6 أشهر؛ الأصناف غير المباعة تحصل على حد أدنى 5. مواد البناء وعناوين أقسام تالي مستثناة.",
+    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Suggested transfer covers ≥15 days from destination peak weekly sales; never-sold items get a minimum of 5. Building materials excluded.",
+    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. النقل المقترح يغطي 15 يوماً؛ غير المباعة حد أدنى 5. مواد البناء مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -39,27 +39,29 @@ const TEXT = {
   salesWindow: { en: "Sales window", ar: "فترة المبيعات" },
   riyadh: { en: "Riyadh", ar: "الرياض" },
   dammam: { en: "Dammam", ar: "الدمام" },
+  store: { en: "Store", ar: "المتجر" },
   riyadhToDammam: { en: "Riyadh → Dammam", ar: "الرياض ← الدمام" },
   dammamToRiyadh: { en: "Dammam → Riyadh", ar: "الدمام ← الرياض" },
+  riyadhToStore: { en: "Riyadh → Store", ar: "الرياض ← المتجر" },
   items: { en: "Items", ar: "الأصناف" },
   suggestedTotal: { en: "Suggested qty", ar: "الكمية المقترحة" },
   noRows: {
-    en: "No catalogue items are stocked in the source city only on the latest end-of-day file.",
-    ar: "لا توجد أصناف كتالوج متوفرة في مدينة المصدر فقط في آخر ملف مخزون.",
+    en: "No catalogue items are stocked in the source location only on the latest end-of-day file.",
+    ar: "لا توجد أصناف كتالوج متوفرة في موقع المصدر فقط في آخر ملف مخزون.",
   },
   thinSource: {
-    en: "EOD catalogue stock in {city} is almost empty ({count} items). Re-upload that city’s end-of-day stock file (Imports → End-of-day Stock). A Dammam-only upload does not restore Riyadh lines.",
-    ar: "مخزون نهاية اليوم في {city} شبه فارغ ({count} أصناف). أعد رفع ملف مخزون تلك المدينة (الاستيراد ← مخزون نهاية اليوم). رفع الدمام وحده لا يعيد أصناف الرياض.",
+    en: "EOD catalogue stock in {city} is almost empty ({count} items). Re-upload that location’s end-of-day stock file (Imports → End-of-day Stock). A Dammam-only upload does not restore Riyadh lines. For Store, upload a Store/Dukan godown file or a Location Summary that names the store.",
+    ar: "مخزون نهاية اليوم في {city} شبه فارغ ({count} أصناف). أعد رفع ملف المخزون (الاستيراد ← مخزون نهاية اليوم). لرفع المتجر استخدم ملف Store/Dukan أو ملخص مواقع يسمي المتجر.",
   },
   stockCoverage: {
     en: "Catalogue stock rows",
     ar: "صفوف مخزون الكتالوج",
   },
   lastUpload: { en: "Last upload", ar: "آخر رفع" },
-  citiesInFile: { en: "Cities in last file", ar: "المدن في آخر ملف" },
+  citiesInFile: { en: "Locations in last file", ar: "المواقع في آخر ملف" },
   noStock: {
-    en: "Upload end-of-day stock for Riyadh and Dammam first (Imports → End-of-day Stock).",
-    ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام (الاستيراد ← مخزون نهاية اليوم).",
+    en: "Upload end-of-day stock for Riyadh and Dammam first (Imports → End-of-day Stock). Upload Store/Dukan separately when available.",
+    ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام. ارفع المتجر/الدكان عند توفره.",
   },
   capped: { en: "Capped by source stock", ar: "محدود بمخزون المصدر" },
   unsoldMin: { en: "Min 5 (not sold yet)", ar: "حد أدنى 5 (لم يُبع بعد)" },
@@ -74,6 +76,7 @@ const TEXT = {
 const DIRECTION_CITIES = {
   riyadhToDammam: { source: "riyadh", destination: "dammam" },
   dammamToRiyadh: { source: "dammam", destination: "riyadh" },
+  riyadhToStore: { source: "riyadh", destination: "store" },
 };
 
 function withCity(template, cityName) {
@@ -301,13 +304,19 @@ export default function InterCityStockTransferPage() {
     : "";
   const summary = report?.summary || {};
   const cities = DIRECTION_CITIES[direction] || DIRECTION_CITIES.riyadhToDammam;
-  const sourceStockCount = direction === "riyadhToDammam"
-    ? Number(summary.riyadhStockItems || 0)
-    : Number(summary.dammamStockItems || 0);
-  const thinSourceHint = sourceStockCount < 20
+  const sourceStockCount = direction === "dammamToRiyadh"
+    ? Number(summary.dammamStockItems || 0)
+    : direction === "riyadhToStore"
+      ? Number(summary.riyadhStockItems || 0)
+      : Number(summary.riyadhStockItems || 0);
+  const thinThreshold = direction === "riyadhToStore" ? 1 : 20;
+  const thinSourceHint = sourceStockCount < thinThreshold
     ? withCity(t("thinSource"), t(cities.source)).replace("{count}", String(sourceStockCount))
     : "";
-  const emptyHint = thinSourceHint || t("noRows");
+  const emptyStoreHint = direction === "riyadhToStore" && Number(summary.storeStockItems || 0) === 0
+    ? withCity(t("thinSource"), t("store")).replace("{count}", "0")
+    : "";
+  const emptyHint = thinSourceHint || emptyStoreHint || t("noRows");
   const citiesPresentLabel = Array.isArray(report?.citiesPresent) && report.citiesPresent.length
     ? report.citiesPresent.map((city) => t(city) || city).join(", ")
     : "—";
@@ -341,9 +350,10 @@ export default function InterCityStockTransferPage() {
               {windowLabel ? ` · ${t("salesWindow")}: ${windowLabel}` : ""}
             </p>
             <p className="moduleHint">
-              {`${t("stockCoverage")}: ${t("riyadh")} ${summary.riyadhStockItems || 0} · ${t("dammam")} ${summary.dammamStockItems || 0}`}
+              {`${t("stockCoverage")}: ${t("riyadh")} ${summary.riyadhStockItems || 0} · ${t("dammam")} ${summary.dammamStockItems || 0} · ${t("store")} ${summary.storeStockItems || 0}`}
               {` · ${t("riyadhToDammam")}: ${summary.riyadhToDammamItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToDammamSuggestedQty || 0)})`}
               {` · ${t("dammamToRiyadh")}: ${summary.dammamToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.dammamToRiyadhSuggestedQty || 0)})`}
+              {` · ${t("riyadhToStore")}: ${summary.riyadhToStoreItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToStoreSuggestedQty || 0)})`}
             </p>
             {thinSourceHint && !loading ? <p className="moduleHint">{thinSourceHint}</p> : null}
 
@@ -361,6 +371,13 @@ export default function InterCityStockTransferPage() {
                 onClick={() => setDirection("dammamToRiyadh")}
               >
                 {t("dammamToRiyadh")} ({summary.dammamToRiyadhItems || 0})
+              </button>
+              <button
+                type="button"
+                className={`moduleInlineButton${direction === "riyadhToStore" ? " moduleInlineButton--active" : ""}`}
+                onClick={() => setDirection("riyadhToStore")}
+              >
+                {t("riyadhToStore")} ({summary.riyadhToStoreItems || 0})
               </button>
             </div>
 

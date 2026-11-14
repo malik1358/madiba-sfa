@@ -13,12 +13,29 @@ export const INTER_CITY_TRANSFER_UNSOLD_MIN_QTY = 5;
 export const INTER_CITY_TRANSFER_DIRECTIONS = {
   riyadhToDammam: { key: "riyadhToDammam", source: "riyadh", destination: "dammam" },
   dammamToRiyadh: { key: "dammamToRiyadh", source: "dammam", destination: "riyadh" },
+  riyadhToStore: { key: "riyadhToStore", source: "riyadh", destination: "store" },
 };
 
 const CITY_LABELS = {
   riyadh: "Riyadh",
   dammam: "Dammam",
+  store: "Store",
 };
+
+/** Warehouse Riyadh qty only (excludes Store/Dukan). */
+export function interCityRiyadhWarehouseQty(row = {}) {
+  return roundEodQty(row?.cities?.riyadh?.qty ?? row?.riyadh ?? 0);
+}
+
+/** Store / Dukan qty. */
+export function interCityStoreQty(row = {}) {
+  return roundEodQty(row?.cities?.store?.qty ?? row?.store ?? 0);
+}
+
+/** Riyadh region for city-vs-city compare = warehouse + store. */
+export function interCityRiyadhRegionQty(row = {}) {
+  return roundEodQty(interCityRiyadhWarehouseQty(row) + interCityStoreQty(row));
+}
 
 export function interCityTransferCityLabel(city) {
   return CITY_LABELS[city] || String(city || "").trim();
@@ -98,19 +115,23 @@ export function stockQtyPositive(value) {
 }
 
 /**
- * Items with stock in one city and none in the other (Riyadh ↔ Dammam).
+ * Items with stock in one place and none in the other:
+ * Riyadh ↔ Dammam, and Riyadh warehouse → Store (Dukan).
  * Building-material items (category, name pattern, or LP* codes) are omitted.
- * @returns {{ riyadhToDammam: object[], dammamToRiyadh: object[] }}
+ * @returns {{ riyadhToDammam: object[], dammamToRiyadh: object[], riyadhToStore: object[] }}
  */
 export function findInterCityStockImbalances(stockRows = [], { categoryByCode = null } = {}) {
   const riyadhToDammam = [];
   const dammamToRiyadh = [];
+  const riyadhToStore = [];
   const categories = categoryByCode instanceof Map ? categoryByCode : null;
 
   (stockRows || []).forEach((row) => {
     const itemCode = normalizeInterCityItemCode(row?.itemCode || row?.item_code);
     if (!itemCode) return;
-    const riyadhQty = roundEodQty(row?.cities?.riyadh?.qty ?? row?.riyadh ?? 0);
+    const riyadhWarehouseQty = interCityRiyadhWarehouseQty(row);
+    const storeQty = interCityStoreQty(row);
+    const riyadhQty = interCityRiyadhRegionQty(row);
     const dammamQty = roundEodQty(row?.cities?.dammam?.qty ?? row?.dammam ?? 0);
     const itemName = String(row?.itemName || row?.item_name || itemCode).trim() || itemCode;
     const category = String(
@@ -120,7 +141,16 @@ export function findInterCityStockImbalances(stockRows = [], { categoryByCode = 
     ).trim();
     if (isInterCityExcludedItem({ itemCode, itemName, category })) return;
     const unit = String(row?.unit || "").trim();
-    const base = { itemCode, itemName, unit, category, riyadhQty, dammamQty };
+    const base = {
+      itemCode,
+      itemName,
+      unit,
+      category,
+      riyadhQty,
+      dammamQty,
+      storeQty,
+      riyadhWarehouseQty,
+    };
 
     if (stockQtyPositive(riyadhQty) && !stockQtyPositive(dammamQty)) {
       riyadhToDammam.push({
@@ -142,11 +172,22 @@ export function findInterCityStockImbalances(stockRows = [], { categoryByCode = 
         direction: INTER_CITY_TRANSFER_DIRECTIONS.dammamToRiyadh.key,
       });
     }
+    if (stockQtyPositive(riyadhWarehouseQty) && !stockQtyPositive(storeQty)) {
+      riyadhToStore.push({
+        ...base,
+        sourceCity: "riyadh",
+        destinationCity: "store",
+        sourceQty: riyadhWarehouseQty,
+        destinationQty: storeQty,
+        direction: INTER_CITY_TRANSFER_DIRECTIONS.riyadhToStore.key,
+      });
+    }
   });
 
   riyadhToDammam.sort((a, b) => a.itemCode.localeCompare(b.itemCode));
   dammamToRiyadh.sort((a, b) => a.itemCode.localeCompare(b.itemCode));
-  return { riyadhToDammam, dammamToRiyadh };
+  riyadhToStore.sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+  return { riyadhToDammam, dammamToRiyadh, riyadhToStore };
 }
 
 /**
@@ -230,7 +271,9 @@ export function suggestTransferQty({
 
 export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new Map()) {
   return (imbalanceRows || []).map((row) => {
-    const peakKey = `${row.itemCode}|${row.destinationCity}`;
+    // Store has no voucher city — use Riyadh sales pace as demand proxy for stocking the shop.
+    const peakCity = row.destinationCity === "store" ? "riyadh" : row.destinationCity;
+    const peakKey = `${row.itemCode}|${peakCity}`;
     const peak = peakMap.get(peakKey) || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
     const suggestion = suggestTransferQty({
       sourceQty: row.sourceQty,
@@ -265,6 +308,7 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
 export function summarizeInterCityStockCoverage(stockRows = []) {
   let riyadhItems = 0;
   let dammamItems = 0;
+  let storeItems = 0;
   let bothItems = 0;
   let skippedNonCatalogue = 0;
   (stockRows || []).forEach((row) => {
@@ -275,15 +319,18 @@ export function summarizeInterCityStockCoverage(stockRows = []) {
       skippedNonCatalogue += 1;
       return;
     }
-    const riyadhQty = roundEodQty(row?.cities?.riyadh?.qty ?? row?.riyadh ?? 0);
+    const riyadhQty = interCityRiyadhRegionQty(row);
     const dammamQty = roundEodQty(row?.cities?.dammam?.qty ?? row?.dammam ?? 0);
+    const storeQty = interCityStoreQty(row);
     const hasR = stockQtyPositive(riyadhQty);
     const hasD = stockQtyPositive(dammamQty);
+    const hasStore = stockQtyPositive(storeQty);
     if (hasR) riyadhItems += 1;
     if (hasD) dammamItems += 1;
+    if (hasStore) storeItems += 1;
     if (hasR && hasD) bothItems += 1;
   });
-  return { riyadhItems, dammamItems, bothItems, skippedNonCatalogue };
+  return { riyadhItems, dammamItems, storeItems, bothItems, skippedNonCatalogue };
 }
 
 export function buildInterCityStockTransferReport({
@@ -301,6 +348,7 @@ export function buildInterCityStockTransferReport({
   const peaks = buildPeakWeeklySalesByItemCity(saleRows);
   const riyadhToDammam = decorateInterCityTransferRows(imbalances.riyadhToDammam, peaks);
   const dammamToRiyadh = decorateInterCityTransferRows(imbalances.dammamToRiyadh, peaks);
+  const riyadhToStore = decorateInterCityTransferRows(imbalances.riyadhToStore, peaks);
 
   const sumSuggested = (rows) => roundEodQty(
     rows.reduce((total, row) => total + Number(row.suggestedQty || 0), 0),
@@ -328,14 +376,24 @@ export function buildInterCityStockTransferReport({
         itemCount: dammamToRiyadh.length,
         suggestedTotalQty: sumSuggested(dammamToRiyadh),
       },
+      riyadhToStore: {
+        ...INTER_CITY_TRANSFER_DIRECTIONS.riyadhToStore,
+        label: "Riyadh → Store",
+        rows: riyadhToStore,
+        itemCount: riyadhToStore.length,
+        suggestedTotalQty: sumSuggested(riyadhToStore),
+      },
     },
     summary: {
       riyadhToDammamItems: riyadhToDammam.length,
       dammamToRiyadhItems: dammamToRiyadh.length,
+      riyadhToStoreItems: riyadhToStore.length,
       riyadhToDammamSuggestedQty: sumSuggested(riyadhToDammam),
       dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
+      riyadhToStoreSuggestedQty: sumSuggested(riyadhToStore),
       riyadhStockItems: coverage.riyadhItems,
       dammamStockItems: coverage.dammamItems,
+      storeStockItems: coverage.storeItems,
       bothCityStockItems: coverage.bothItems,
     },
   };
@@ -354,15 +412,27 @@ function convertInterCityQty(raw, stockUnit, master) {
 function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
   return (rows || []).map((row) => {
     const master = lookupMasterUnitConv(masterUnits, row.itemCode);
-    if (!master) return row;
+    if (!master) {
+      // Prefer an explicit carton unit label when already in CTN.
+      const unit = String(row.unit || "").trim();
+      if (/^(ctn|carton|cartons|cx)$/i.test(unit)) {
+        return { ...row, unit: "CTN" };
+      }
+      return row;
+    }
     const unit = row.unit || "";
+    const masterUnit = /^(ctn|carton|cartons|cx|box|boxes)$/i.test(master.masterUom)
+      ? "CTN"
+      : (master.masterUom || unit);
     return {
       ...row,
-      unit: master.masterUom || unit,
+      unit: masterUnit,
       sourceQty: convertInterCityQty(row.sourceQty, unit, master),
       destinationQty: convertInterCityQty(row.destinationQty, unit, master),
       riyadhQty: convertInterCityQty(row.riyadhQty, unit, master),
       dammamQty: convertInterCityQty(row.dammamQty, unit, master),
+      storeQty: convertInterCityQty(row.storeQty, unit, master),
+      riyadhWarehouseQty: convertInterCityQty(row.riyadhWarehouseQty, unit, master),
       peakWeeklyQty: convertInterCityQty(row.peakWeeklyQty, unit, master),
       destinationSalesQty6m: convertInterCityQty(row.destinationSalesQty6m, unit, master),
       dailyDemand: convertInterCityQty(row.dailyDemand, unit, master),
@@ -374,7 +444,7 @@ function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
   });
 }
 
-/** Convert stock/sales qty columns to master units for display (math already done in raw units). */
+/** Convert stock/sales qty columns to master units (cartons when Master UOM is CTN). */
 export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
   if (!report || typeof report !== "object") return report;
   const map = masterUnits && typeof masterUnits === "object" ? masterUnits : {};
@@ -384,6 +454,10 @@ export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
   );
   const dammamToRiyadh = applyMasterUnitsToInterCityRows(
     report.directions?.dammamToRiyadh?.rows || [],
+    map,
+  );
+  const riyadhToStore = applyMasterUnitsToInterCityRows(
+    report.directions?.riyadhToStore?.rows || [],
     map,
   );
   const sumSuggested = (rows) => roundEodQty(
@@ -403,11 +477,19 @@ export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
         rows: dammamToRiyadh,
         suggestedTotalQty: sumSuggested(dammamToRiyadh),
       },
+      riyadhToStore: {
+        ...report.directions?.riyadhToStore,
+        rows: riyadhToStore,
+        itemCount: riyadhToStore.length,
+        suggestedTotalQty: sumSuggested(riyadhToStore),
+      },
     },
     summary: {
       ...report.summary,
       riyadhToDammamSuggestedQty: sumSuggested(riyadhToDammam),
       dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
+      riyadhToStoreSuggestedQty: sumSuggested(riyadhToStore),
+      riyadhToStoreItems: riyadhToStore.length,
     },
   };
 }

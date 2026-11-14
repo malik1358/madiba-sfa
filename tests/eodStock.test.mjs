@@ -177,6 +177,39 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.equal(wideTally.rows.find((row) => row.itemCode === "16-INCH PORTABLE VENTILATION FAN").cities.riyadh.qty, 6);
 });
 
+test("Location Summary switches between Riyadh warehouse and Store/Dukan", () => {
+  const parsed = parseEodStockSheets([{
+    name: "Riyadh-Region",
+    matrix: [
+      ["ABC LTD"],
+      ["Riyadh-Region"],
+      ["Location Summary"],
+      ["1-Jan-26 to 11-Nov-26"],
+      ["", "Location : RIYADH W/H 1"],
+      ["Particulars", "1-Jan-26 to 11-Nov-26"],
+      ["", "Closing Balance"],
+      ["", "Quantity", "(Alt. Units)"],
+      ["A004700_WAREHOUSE ONLY ITEM", 20, 1],
+      ["", "Location : DUKAN STORE"],
+      ["A004701_STORE ONLY ITEM", 7, 1],
+      ["A004700_WAREHOUSE ONLY ITEM", 2, 1],
+    ],
+  }]);
+  assert.equal(parsed.ok, true);
+  assert.ok(parsed.citiesPresent.includes("riyadh"));
+  assert.ok(parsed.citiesPresent.includes("store"));
+  assert.equal(parsed.rows.find((row) => row.itemCode === "A004700").cities.riyadh.qty, 20);
+  assert.equal(parsed.rows.find((row) => row.itemCode === "A004700").cities.store.qty, 2);
+  assert.equal(parsed.rows.find((row) => row.itemCode === "A004701").cities.store.qty, 7);
+  assert.equal(parsed.rows.find((row) => row.itemCode === "A004701").cities.riyadh.qty, 0);
+});
+
+test("inferEodCityFromFileName recognizes Store/Dukan uploads", () => {
+  assert.equal(inferEodCityFromFileName("Dukan_Store.xlsx"), "store");
+  assert.equal(inferEodCityFromFileName("store-stock.xlsx"), "store");
+  assert.equal(inferEodCityFromFileName("Riyadh.xlsx"), "riyadh");
+});
+
 test("order qty stock hint keeps last upload and shows date when older than 24 hours", () => {
   const availability = buildEodStockAvailability({
     stockDate: "2026-10-27",

@@ -6,8 +6,10 @@ import {
   readEodStockDataset,
 } from "./eodStock.js";
 import {
+  aggregateSalesForCover,
   buildInventoryCoverModel,
   buildItemCoverRows,
+  COVER_RATE_LOOKBACK_DAYS,
   COVER_WINDOW_DAYS,
   enrichPhysicalCategoriesWithBuckets,
   trailingWindowStart,
@@ -98,33 +100,6 @@ async function loadWholesaleRateByItem(admin) {
   return { rateByItem, categoryBySheet };
 }
 
-function aggregateSales30d(saleRows = []) {
-  const sales30dByItem = new Map();
-  const qtySoldByItem = new Map();
-  const salesRateByItem = new Map();
-  let sales30d = 0;
-  for (const row of saleRows || []) {
-    const code = String(row.item_code || row.itemCode || "").trim().toUpperCase();
-    const amount = Number(row.sales_amount);
-    const qty = Number(row.quantity);
-    if (!code || !Number.isFinite(amount)) continue;
-    sales30d += amount;
-    sales30dByItem.set(code, (sales30dByItem.get(code) || 0) + amount);
-    // Positive qty only — returns must not distort the unit rate used for stock value.
-    if (Number.isFinite(qty) && qty > 0 && amount > 0) {
-      qtySoldByItem.set(code, (qtySoldByItem.get(code) || 0) + qty);
-    }
-  }
-  for (const [code, value] of sales30dByItem) {
-    sales30dByItem.set(code, Math.round(value));
-    const qtySold = qtySoldByItem.get(code) || 0;
-    if (qtySold > 0) {
-      salesRateByItem.set(code, value / qtySold);
-    }
-  }
-  return { sales30dByItem, salesRateByItem, sales30d: Math.round(sales30d) };
-}
-
 function eodStockLines(dataset) {
   const reportRows = buildEodStockReportRows(dataset);
   return reportRows
@@ -191,6 +166,7 @@ export async function loadMisInventoryCover(admin, {
 
   const coverTo = getKsaDateString();
   const coverFrom = trailingWindowStart(coverTo, COVER_WINDOW_DAYS);
+  const rateFrom = trailingWindowStart(coverTo, COVER_RATE_LOOKBACK_DAYS);
   const [dataset, priceMaps, saleRows] = await Promise.all([
     loadEodDataset(admin),
     loadWholesaleRateByItem(admin),
@@ -199,7 +175,7 @@ export async function loadMisInventoryCover(admin, {
       "active_sales",
       SALES_SELECT,
       (query) => query
-        .gte("transaction_date", coverFrom)
+        .gte("transaction_date", rateFrom)
         .lte("transaction_date", coverTo)
         .order("transaction_date", { ascending: true }),
     ),
@@ -216,7 +192,10 @@ export async function loadMisInventoryCover(admin, {
     };
   }
 
-  const { sales30dByItem, salesRateByItem, sales30d } = aggregateSales30d(saleRows);
+  const { sales30dByItem, salesRateByItem, sales30d } = aggregateSalesForCover(saleRows, {
+    coverFrom,
+    coverTo,
+  });
   const categoryBySales = categoryByItemCodeFromSales(saleRows);
   const categoryByItem = new Map(priceMaps.categoryBySheet);
   for (const [code, category] of categoryBySales) {
@@ -224,7 +203,8 @@ export async function loadMisInventoryCover(admin, {
   }
 
   // Do not fall back to catalogue wholesale here: pack rates × piece qty inflate SAR
-  // (e.g. 132 vs ~0.63 sales unit). Prefer closing value or qty × sales unit rate only.
+  // (e.g. 132 vs ~0.63 sales unit). Prefer closing value or qty × sales unit rate
+  // (30d rate, else up to 180d lookback so slow movers like welding rods still value).
   const items = buildItemCoverRows(stockLines, {
     sales30dByItem,
     salesRateByItem,

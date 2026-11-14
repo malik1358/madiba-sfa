@@ -1,11 +1,42 @@
+import { ACTIVE_CUSTOMERS_WINDOW_DAYS, rollingWindowBounds } from "./activeCustomers.js";
+import { salesDateKey } from "./categoryGrowth.js";
 import { customerHasSavedGps } from "./customerMasterQuery.js";
+import { getKsaDateString } from "./workdayActivity.js";
 
 export const CUSTOMER_MAP_BLANK_CITY = "(no city)";
 export const CUSTOMER_MAP_BLANK_AREA = "(no area)";
+export const CUSTOMER_MAP_SCOPE_ALL = "all";
+export const CUSTOMER_MAP_SCOPE_TRADING = "trading";
 
 function toFiniteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+export function normalizeCustomerMapScope(rawValue, { activeOnly } = {}) {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (value === CUSTOMER_MAP_SCOPE_ALL || value === CUSTOMER_MAP_SCOPE_TRADING) return value;
+  // Legacy activeOnly=0 meant show everyone; activeOnly=1 used master is_active.
+  if (activeOnly === false || activeOnly === 0 || activeOnly === "0") return CUSTOMER_MAP_SCOPE_ALL;
+  return CUSTOMER_MAP_SCOPE_TRADING;
+}
+
+export function customerMapTradingWindow(asOfDate = getKsaDateString()) {
+  return rollingWindowBounds(asOfDate, ACTIVE_CUSTOMERS_WINDOW_DAYS);
+}
+
+export function customerBoughtInWindow(row, window = customerMapTradingWindow()) {
+  const purchaseDate = salesDateKey(row?.latest_transaction_date || row?.bought_on);
+  if (!purchaseDate || !window?.start || !window?.end) return false;
+  return purchaseDate >= window.start && purchaseDate <= window.end;
+}
+
+export function customerHasOutstandingBalance(row) {
+  return Number(row?.total_outstanding || 0) > 0;
+}
+
+export function isCustomerMapTradingActive(row, window = customerMapTradingWindow()) {
+  return customerBoughtInWindow(row, window) || customerHasOutstandingBalance(row);
 }
 
 export function normalizeCustomerMapLabel(value, blankLabel) {
@@ -37,13 +68,15 @@ export function parseCustomerMapAreaKey(key) {
   };
 }
 
-export function normalizeCustomerMapListRow(row) {
+export function normalizeCustomerMapListRow(row, window = customerMapTradingWindow()) {
   if (!row) return null;
   const city = customerMapCityLabel(row.city);
   const area = customerMapAreaLabel(row.area);
   const hasGps = customerHasSavedGps(row);
   const latitude = hasGps ? toFiniteNumber(row.latitude) : null;
   const longitude = hasGps ? toFiniteNumber(row.longitude) : null;
+  const boughtInWindow = customerBoughtInWindow(row, window);
+  const hasOutstanding = customerHasOutstandingBalance(row);
   return {
     customer_code: String(row.customer_code || "").trim(),
     customer_name: String(row.customer_name || "").trim(),
@@ -55,6 +88,11 @@ export function normalizeCustomerMapListRow(row) {
     latitude,
     longitude,
     is_active: row.is_active !== false,
+    latest_transaction_date: salesDateKey(row.latest_transaction_date) || "",
+    total_outstanding: Number(row.total_outstanding || 0),
+    bought_in_window: boughtInWindow,
+    has_outstanding: hasOutstanding,
+    trading_active: boughtInWindow || hasOutstanding,
   };
 }
 
@@ -69,15 +107,21 @@ export function filterCustomerMapRows(rows, {
   areaKey = "",
   salesman = "",
   search = "",
-  activeOnly = true,
+  scope = CUSTOMER_MAP_SCOPE_TRADING,
+  activeOnly,
+  asOfDate = getKsaDateString(),
 } = {}) {
   const cityNeedle = String(city || "").trim();
   const areaNeedle = String(areaKey || "").trim();
   const salesmanNeedle = String(salesman || "").trim().toUpperCase();
   const searchNeedle = String(search || "").trim().toUpperCase();
+  const normalizedScope = normalizeCustomerMapScope(scope, { activeOnly });
+  const window = customerMapTradingWindow(asOfDate);
 
   return (rows || []).filter((row) => {
-    if (activeOnly && row?.is_active === false) return false;
+    if (normalizedScope === CUSTOMER_MAP_SCOPE_TRADING && !isCustomerMapTradingActive(row, window)) {
+      return false;
+    }
     if (cityNeedle && customerMapCityLabel(row?.city) !== cityNeedle) return false;
     if (areaNeedle && customerMapAreaKey(row?.city, row?.area) !== areaNeedle) return false;
     if (salesmanNeedle) {
@@ -170,9 +214,9 @@ export function buildCustomerMapCityRows(areaRows) {
   });
 }
 
-export function buildCustomerMapListRows(rows) {
+export function buildCustomerMapListRows(rows, window = customerMapTradingWindow()) {
   return (rows || [])
-    .map((row) => normalizeCustomerMapListRow(row))
+    .map((row) => normalizeCustomerMapListRow(row, window))
     .filter((row) => row?.customer_code)
     .sort((left, right) => {
       const nameCompare = String(left.customer_name).localeCompare(String(right.customer_name));
@@ -188,10 +232,13 @@ export function customersForAreaKey(listRows, areaKey) {
 }
 
 export function buildCustomerMapReport(rows, filters = {}) {
-  const filtered = filterCustomerMapRows(rows, filters);
+  const asOfDate = salesDateKey(filters.asOfDate) || getKsaDateString();
+  const scope = normalizeCustomerMapScope(filters.scope, { activeOnly: filters.activeOnly });
+  const window = customerMapTradingWindow(asOfDate);
+  const filtered = filterCustomerMapRows(rows, { ...filters, scope, asOfDate });
   const areaRows = buildCustomerMapAreaRows(filtered);
   const cityRows = buildCustomerMapCityRows(areaRows);
-  const customers = buildCustomerMapListRows(filtered);
+  const customers = buildCustomerMapListRows(filtered, window);
   const mapPoints = customers.filter((row) => row.has_gps && row.latitude != null && row.longitude != null);
 
   const withGps = mapPoints.length;
@@ -204,7 +251,11 @@ export function buildCustomerMapReport(rows, filters = {}) {
       without_gps: Math.max(0, total - withGps),
       cities: cityRows.length,
       areas: areaRows.length,
+      bought_in_window: customers.filter((row) => row.bought_in_window).length,
+      with_outstanding: customers.filter((row) => row.has_outstanding).length,
     },
+    scope,
+    tradingWindow: window,
     cityRows,
     areaRows,
     customers,

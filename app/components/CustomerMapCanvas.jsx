@@ -7,15 +7,6 @@ const AREA_ZOOM_THRESHOLD = 12;
 const SAUDI_CENTER = [24.0, 45.0];
 const SAUDI_ZOOM = 6;
 
-function areaRadius(count) {
-  const value = Number(count || 0);
-  if (value <= 1) return 10;
-  if (value <= 5) return 14;
-  if (value <= 15) return 18;
-  if (value <= 40) return 24;
-  return 30;
-}
-
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -64,6 +55,36 @@ function areaPopupHtml(area, language) {
   `;
 }
 
+function areaBubbleSize(count) {
+  const value = Number(count || 0);
+  if (value <= 1) return 28;
+  if (value <= 5) return 34;
+  if (value <= 15) return 40;
+  if (value <= 40) return 48;
+  return 56;
+}
+
+function createCustomerPinIcon(L, selected) {
+  return L.divIcon({
+    className: `customerMapPin${selected ? " customerMapPin--selected" : ""}`,
+    html: `<span class="customerMapPinDot" aria-hidden="true"></span>`,
+    iconSize: [28, 36],
+    iconAnchor: [14, 34],
+    popupAnchor: [0, -30],
+  });
+}
+
+function createAreaBubbleIcon(L, count, selected) {
+  const size = areaBubbleSize(count);
+  return L.divIcon({
+    className: `customerMapAreaBubble${selected ? " customerMapAreaBubble--selected" : ""}`,
+    html: `<span class="customerMapAreaBubbleInner">${escapeHtml(String(count))}</span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}
+
 export default function CustomerMapCanvas({
   mapPoints = [],
   areaRows = [],
@@ -77,11 +98,16 @@ export default function CustomerMapCanvas({
   const layerRef = useRef(null);
   const leafletRef = useRef(null);
   const onSelectAreaRef = useRef(onSelectArea);
+  const dataRef = useRef({ mapPoints, areaRows, selectedAreaKey, language });
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     onSelectAreaRef.current = onSelectArea;
   }, [onSelectArea]);
+
+  useEffect(() => {
+    dataRef.current = { mapPoints, areaRows, selectedAreaKey, language };
+  }, [mapPoints, areaRows, selectedAreaKey, language]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +123,9 @@ export default function CustomerMapCanvas({
         center: SAUDI_CENTER,
         zoom: SAUDI_ZOOM,
         scrollWheelZoom: true,
+        // HTML markers stay sharp at high zoom; SVG paths can collapse to dots/squares.
+        preferCanvas: false,
+        maxZoom: 19,
       });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -129,17 +158,27 @@ export default function CustomerMapCanvas({
 
     const redraw = () => {
       layer.clearLayers();
+      const {
+        mapPoints: points,
+        areaRows: areas,
+        selectedAreaKey: areaKey,
+        language: lang,
+      } = dataRef.current;
       const zoom = map.getZoom();
-      const showCustomers = zoom >= AREA_ZOOM_THRESHOLD;
+      const showCustomers = zoom >= AREA_ZOOM_THRESHOLD || Boolean(areaKey);
+      const visiblePoints = areaKey
+        ? points.filter((point) => point.area_key === areaKey)
+        : points;
 
       if (showCustomers) {
-        for (const point of mapPoints) {
-          const marker = L.circleMarker([point.latitude, point.longitude], {
-            radius: 7,
-            color: "#0f4c5c",
-            weight: 1,
-            fillColor: selectedAreaKey && point.area_key === selectedAreaKey ? "#e36414" : "#2a9d8f",
-            fillOpacity: 0.9,
+        for (const point of visiblePoints) {
+          if (point.latitude == null || point.longitude == null) continue;
+          const selected = Boolean(areaKey) && point.area_key === areaKey;
+          const marker = L.marker([point.latitude, point.longitude], {
+            icon: createCustomerPinIcon(L, selected),
+            keyboard: true,
+            riseOnHover: true,
+            title: point.customer_name || point.customer_code || "",
           });
           marker.bindPopup(customerPopupHtml(point));
           marker.addTo(layer);
@@ -147,27 +186,23 @@ export default function CustomerMapCanvas({
         return;
       }
 
-      for (const area of areaRows) {
+      for (const area of areas) {
         if (area.latitude == null || area.longitude == null || !area.with_gps) continue;
-        const selected = selectedAreaKey && area.area_key === selectedAreaKey;
-        const marker = L.circleMarker([area.latitude, area.longitude], {
-          radius: areaRadius(area.customers),
-          color: selected ? "#9a3412" : "#0f4c5c",
-          weight: selected ? 3 : 2,
-          fillColor: selected ? "#e36414" : "#0f4c5c",
-          fillOpacity: 0.72,
+        const selected = Boolean(areaKey) && area.area_key === areaKey;
+        const marker = L.marker([area.latitude, area.longitude], {
+          icon: createAreaBubbleIcon(L, area.customers, selected),
+          keyboard: true,
+          riseOnHover: true,
+          title: `${area.city} / ${area.area}`,
         });
-        marker.bindTooltip(String(area.customers), {
-          permanent: true,
-          direction: "center",
-          className: "customerMapCountLabel",
-        });
-        marker.bindPopup(areaPopupHtml(area, language));
+        marker.bindPopup(areaPopupHtml(area, lang));
         marker.on("click", () => {
           onSelectAreaRef.current?.(area.area_key);
-          map.flyTo([area.latitude, area.longitude], Math.max(map.getZoom(), AREA_ZOOM_THRESHOLD + 1), {
-            duration: 0.6,
-          });
+          map.flyTo(
+            [area.latitude, area.longitude],
+            Math.max(map.getZoom(), AREA_ZOOM_THRESHOLD + 1),
+            { duration: 0.6 },
+          );
         });
         marker.addTo(layer);
       }
@@ -175,9 +210,11 @@ export default function CustomerMapCanvas({
 
     redraw();
     map.on("zoomend", redraw);
+    map.on("moveend", redraw);
     map.invalidateSize();
     return () => {
       map.off("zoomend", redraw);
+      map.off("moveend", redraw);
     };
   }, [mapReady, mapPoints, areaRows, selectedAreaKey, language, fitToken]);
 
@@ -191,17 +228,20 @@ export default function CustomerMapCanvas({
       : mapPoints;
 
     if (!points.length) {
-      map.setView(SAUDI_CENTER, SAUDI_ZOOM);
+      if (!selectedAreaKey) map.setView(SAUDI_CENTER, SAUDI_ZOOM);
       return;
     }
 
     if (points.length === 1) {
-      map.flyTo([points[0].latitude, points[0].longitude], 15, { duration: 0.5 });
+      map.flyTo([points[0].latitude, points[0].longitude], 16, { duration: 0.5 });
       return;
     }
 
     const bounds = L.latLngBounds(points.map((point) => [point.latitude, point.longitude]));
-    map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: selectedAreaKey ? 16 : 12 });
+    map.fitBounds(bounds.pad(0.2), {
+      animate: true,
+      maxZoom: selectedAreaKey ? 17 : 12,
+    });
   }, [mapReady, fitToken, mapPoints, selectedAreaKey]);
 
   return <div ref={containerRef} className="customerMapCanvas" role="presentation" />;

@@ -15,6 +15,7 @@ import {
   hydrateFoundationFromCache,
 } from "../../lib/mobileDataCache";
 import { dedupeCustomerMasterRows } from "../../lib/customerMasterQuery";
+import { isProspectCustomerCode } from "../../lib/customerCode";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
@@ -1596,11 +1597,15 @@ export default function NewOrderPage() {
     const customerName = String(params.get("customer_name") || "").trim();
     const salesmanCode = String(params.get("salesman_code") || "").trim();
     const orderId = String(params.get("order_id") || "").trim();
+    const source = String(params.get("source") || "").trim().toLowerCase();
     const nextPrefilled = customerCode && customerName
       ? {
           customer_code: customerCode,
           customer_name: customerName,
           current_salesman_code: salesmanCode,
+          is_prospect: source === "prospect"
+            || isProspectCustomerCode(customerCode)
+            || /^PROSPECT-/i.test(customerCode),
         }
       : null;
 

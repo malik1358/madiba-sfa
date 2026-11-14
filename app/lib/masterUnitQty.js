@@ -217,6 +217,70 @@ export function formatMasterStockQty(qty, unit = "") {
 }
 
 /**
+ * Format any item qty for UI in master units when conversion is known.
+ * Used for sales/history qty columns (not order entry). Preserves sign.
+ */
+export function formatItemQtyMasterDisplay(rawQty, itemCode, masterUnits, {
+  stockUnit = "",
+  empty = "—",
+} = {}) {
+  if (rawQty == null || rawQty === "") return empty;
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return empty;
+  if (raw === 0) return "0";
+
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) {
+    return Math.round(raw).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+
+  const sign = raw < 0 ? -1 : 1;
+  const converted = toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  });
+  return formatMasterStockQty(sign * converted.qty, converted.unit);
+}
+
+/** Numeric master qty for totals (0 when unknown/blank). */
+export function itemQtyMasterNumber(rawQty, itemCode, masterUnits, { stockUnit = "" } = {}) {
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return 0;
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return Math.round(raw);
+  const sign = raw < 0 ? -1 : 1;
+  return sign * toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  }).qty;
+}
+
+/**
+ * Convert named qty fields on a report row to master units.
+ * Sets qtyUnit when conversion applies. Leaves row unchanged when no map entry.
+ */
+export function applyMasterUnitQtyFields(row = {}, masterUnits = {}, {
+  itemCodeKey = "itemCode",
+  fields = ["quantity"],
+  stockUnit = "",
+} = {}) {
+  const code = row?.[itemCodeKey] || row?.item_code || row?.itemCode;
+  const master = lookupMasterUnitConv(masterUnits, code);
+  if (!master || !(master.conv > 1)) return row;
+  const next = { ...row };
+  for (const field of fields) {
+    if (next[field] == null || next[field] === "") continue;
+    next[field] = itemQtyMasterNumber(next[field], code, masterUnits, { stockUnit });
+  }
+  if (master.masterUom) next.qtyUnit = master.masterUom;
+  return next;
+}
+
+/**
  * Apply master-unit conversion to an EOD availability snapshot for one item.
  */
 export function resolveEodStockMasterDisplay(availability, itemCode, rawQty) {

@@ -2,6 +2,7 @@ import {
   EXPECTED_STOCKED_SALES_SELECT,
   buildExpectedStockedSalesReport,
 } from "./expectedStockedSales.js";
+import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
 
 const PAGE_SIZE = 1000;
 
@@ -29,8 +30,11 @@ async function fetchActiveSalesPages(admin) {
 
 export async function loadExpectedStockedSalesReport(admin, { now = new Date() } = {}) {
   try {
-    const sourceRows = await fetchActiveSalesPages(admin);
-    return buildExpectedStockedSalesReport(sourceRows, { now });
+    const [sourceRows, masterUnits] = await Promise.all([
+      fetchActiveSalesPages(admin),
+      loadMasterUnitConvMap(admin),
+    ]);
+    return buildExpectedStockedSalesReport(sourceRows, { now, masterUnits });
   } catch (error) {
     if (isMissingRelation(error)) {
       throw new Error("Active sales are not available.");

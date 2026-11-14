@@ -7,8 +7,10 @@ import { ITEMS_SOLD_AT_LOSS_FILTER_KEYS } from "../../lib/itemsSoldAtLoss";
 import { getSupabaseClient } from "../../lib/supabase";
 import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
 
-function formatQty(value) {
-  return Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 3 });
+function formatQty(value, unit = "") {
+  const qtyText = Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 0 });
+  const u = String(unit || "").trim();
+  return u ? `${qtyText} ${u}` : qtyText;
 }
 
 function formatAmount(value) {
@@ -39,7 +41,7 @@ function cellValue(row, key) {
   if (key === "category") return row.category || "";
   if (key === "localImport") return row.localImport || "";
   if (key === "abcClass") return row.abcClass || "";
-  if (key === "quantity") return formatQty(row.quantity);
+  if (key === "quantity") return formatQty(row.quantity, row.qtyUnit);
   if (key === "rate") return formatAmount(row.rate);
   if (key === "salesAmount") return formatAmount(row.salesAmount);
   if (key === "profitAmount") return formatAmount(row.profitAmount);
@@ -202,7 +204,7 @@ export default function ItemsSoldAtLossReport({
                       <td>{row.category || "—"}</td>
                       <td>{row.localImport || "—"}</td>
                       <td>{row.abcClass || "—"}</td>
-                      <td>{formatQty(row.quantity)}</td>
+                      <td>{formatQty(row.quantity, row.qtyUnit)}</td>
                       <td>{formatAmount(row.rate)}</td>
                       <td className="moduleBiTotalCol">{formatAmount(row.salesAmount)}</td>
                       <td className="moduleBiTotalCol moduleBiMonthCell--down">{formatAmount(row.profitAmount)}</td>

@@ -1,4 +1,3 @@
-import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from '../../../lib/regionalPricing';
@@ -8,6 +7,7 @@ import {
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from '../../../lib/eodStock.js';
+import { formatItemQtyMasterDisplay } from '../../../lib/masterUnitQty.js';
 
 export default function QuickOrder({
   quickOrderSuggestions,
@@ -112,19 +112,19 @@ export default function QuickOrder({
                               {group.key === 'buyingLess' && (
                                 <div className="auditQuickHistory">
                                   <span>Avg Qty / Month</span>
-                                  <strong>{qtyFormat(item.avgQty)}</strong>
+                                  <strong>{formatItemQtyMasterDisplay(item.avgQty, item.item_code, eodStock?.masterUnits)}</strong>
                                   <span>Months Bought</span>
                                   <strong>{item.activeMonths}</strong>
                                   <span>Latest Qty</span>
-                                  <strong className="auditQuickDecline">{qtyFormat(item.latestQty)}</strong>
+                                  <strong className="auditQuickDecline">{formatItemQtyMasterDisplay(item.latestQty, item.item_code, eodStock?.masterUnits)}</strong>
                                 </div>
                               )}
                               {group.key === 'buyingLess' && (
                                 <div className="auditQuickHistory">
                                   <span>Previous 3 months</span>
-                                  <strong>{qtyFormat(item.previousQty)}</strong>
+                                  <strong>{formatItemQtyMasterDisplay(item.previousQty, item.item_code, eodStock?.masterUnits)}</strong>
                                   <span>Recent 3 months</span>
-                                  <strong className="auditQuickDecline">{qtyFormat(item.recentQty)}</strong>
+                                  <strong className="auditQuickDecline">{formatItemQtyMasterDisplay(item.recentQty, item.item_code, eodStock?.masterUnits)}</strong>
                                 </div>
                               )}
                             </td>

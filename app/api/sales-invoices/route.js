@@ -3,11 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
 import { mergeSalesSnapshots } from "../../lib/salesHistory.js";
 import {
+  applyMasterUnitsToSalesInvoices,
   groupSalesRowsIntoInvoices,
   resolveInvoiceSalesmanCodes,
   resolveSalesInvoiceDateRange,
   summarizeSalesInvoices,
 } from "../../lib/salesInvoices.js";
+import { loadMasterUnitConvMap } from "../../lib/masterUnitQtyServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
@@ -139,11 +141,18 @@ export async function GET(request) {
       });
     }
 
-    const invoices = groupSalesRowsIntoInvoices(await fetchSalesRows(admin, {
-      from: range.from,
-      to: range.to,
-      salesmanCodes,
-    }));
+    const [salesRows, masterUnits] = await Promise.all([
+      fetchSalesRows(admin, {
+        from: range.from,
+        to: range.to,
+        salesmanCodes,
+      }),
+      loadMasterUnitConvMap(admin),
+    ]);
+    const invoices = applyMasterUnitsToSalesInvoices(
+      groupSalesRowsIntoInvoices(salesRows),
+      masterUnits,
+    );
 
     return NextResponse.json({
       success: true,

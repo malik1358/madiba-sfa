@@ -859,6 +859,7 @@ function CustomerAuditPageContent() {
               valueDiscountMap={valueDiscountMap}
               paymentType={paymentType}
               schemeApplications={schemeApplications}
+              eodStock={eodStock}
             />
 
             <QuickOrder
@@ -947,6 +948,7 @@ function CustomerAuditPageContent() {
             <TransactionHistory
               transactions={transactions}
               analytics={analytics}
+              eodStock={eodStock}
             />
           </>
         ) : null}

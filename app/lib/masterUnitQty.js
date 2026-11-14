@@ -39,6 +39,29 @@ export function parseMasterConv(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function considerMasterUnitEntry(byCode, code, row) {
+  const key = String(code || "").trim().toUpperCase();
+  if (!key) return;
+  const masterUom = String(row?.tally_alt_uom || row?.masterUom || "").trim();
+  const baseUom = String(row?.tally_base_uom || row?.baseUom || "").trim();
+  const conv = parseMasterConv(row?.tally_master_unit_conv ?? row?.conv);
+  if (!masterUom || conv == null || !(conv > 0)) return;
+
+  const next = { masterUom, baseUom, conv };
+  const prev = byCode.get(key);
+  if (!prev) {
+    byCode.set(key, next);
+    return;
+  }
+  // Prefer a real multi-unit conversion over identity (1).
+  if (prev.conv <= 1 && next.conv > 1) {
+    byCode.set(key, next);
+    return;
+  }
+  if (prev.conv > 1 && next.conv <= 1) return;
+  if (next.conv > prev.conv) byCode.set(key, next);
+}
+
 /**
  * Build compact itemCode → { masterUom, baseUom, conv } from item_master_analysis rows.
  * Prefers rows with a Master UOM (tally_alt_uom) and conv > 1.
@@ -46,34 +69,84 @@ export function parseMasterConv(value) {
 export function buildMasterUnitConvMap(rows = []) {
   const byCode = new Map();
 
-  function consider(code, row) {
-    const key = String(code || "").trim().toUpperCase();
-    if (!key) return;
-    const masterUom = String(row?.tally_alt_uom || row?.masterUom || "").trim();
-    const baseUom = String(row?.tally_base_uom || row?.baseUom || "").trim();
-    const conv = parseMasterConv(row?.tally_master_unit_conv ?? row?.conv);
-    if (!masterUom || conv == null || !(conv > 0)) return;
-
-    const next = { masterUom, baseUom, conv };
-    const prev = byCode.get(key);
-    if (!prev) {
-      byCode.set(key, next);
-      return;
-    }
-    // Prefer a real multi-unit conversion over identity (1).
-    if (prev.conv <= 1 && next.conv > 1) {
-      byCode.set(key, next);
-      return;
-    }
-    if (prev.conv > 1 && next.conv <= 1) return;
-    if (next.conv > prev.conv) byCode.set(key, next);
-  }
-
   for (const row of Array.isArray(rows) ? rows : []) {
-    consider(row?.tally_item_code || row?.itemCode, row);
-    consider(row?.google_article_no || row?.articleNo, row);
+    considerMasterUnitEntry(byCode, row?.tally_item_code || row?.itemCode, row);
+    considerMasterUnitEntry(byCode, row?.google_article_no || row?.articleNo, row);
   }
 
+  return Object.fromEntries(byCode);
+}
+
+/**
+ * Parse catalogue packing text such as "CTN OF 12 Pack OF 6 PC" → 72 PC / Ctn.
+ */
+export function parsePackingMasterConv(packingText) {
+  const text = String(packingText || "").replace(/\u00a0/g, " ").trim();
+  if (!text) return null;
+
+  const ctnPackPcs = text.match(
+    /\bctn\s*of\s*(\d+)\s*pack\s*of\s*(\d+)\s*(?:pc|pcs|pieces?)?\b/i,
+  );
+  if (ctnPackPcs) {
+    const packs = Number(ctnPackPcs[1]);
+    const pcs = Number(ctnPackPcs[2]);
+    if (packs > 0 && pcs > 0) {
+      return { masterUom: "Ctn", baseUom: "Pcs", conv: packs * pcs };
+    }
+  }
+
+  const pcsPerCtn = text.match(
+    /\b(\d+)\s*(?:pc|pcs|pieces?)\s*(?:per|\/)\s*(?:ctn|carton)\b/i,
+  );
+  if (pcsPerCtn) {
+    const conv = Number(pcsPerCtn[1]);
+    if (conv > 1) return { masterUom: "Ctn", baseUom: "Pcs", conv };
+  }
+
+  const ctnOf = text.match(/\bctn\s*of\s*(\d+)\b/i);
+  if (ctnOf) {
+    const conv = Number(ctnOf[1]);
+    if (conv > 1) return { masterUom: "Ctn", baseUom: "", conv };
+  }
+
+  const slashMaster = text.match(
+    /\b(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s*\/\s*([A-Za-z]+)\b/,
+  );
+  if (slashMaster) {
+    const conv = Number(slashMaster[1]);
+    const baseUom = String(slashMaster[2] || "").trim();
+    const masterUom = String(slashMaster[3] || "").trim();
+    if (conv > 1 && masterUom) return { masterUom, baseUom, conv };
+  }
+
+  return null;
+}
+
+/** Fill missing codes from packing descriptions (does not override existing entries). */
+export function mergePackingMasterUnitConvMap(existing = {}, packingByCode = {}) {
+  const byCode = new Map(Object.entries(existing || {}));
+  for (const [rawCode, packing] of Object.entries(packingByCode || {})) {
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code || byCode.has(code)) continue;
+    const parsed = parsePackingMasterConv(packing);
+    if (!parsed) continue;
+    considerMasterUnitEntry(byCode, code, parsed);
+  }
+  return Object.fromEntries(byCode);
+}
+
+/** Fill missing codes from stock_take_items pack sizes (does not override existing). */
+export function mergeStockTakeMasterUnitConvMap(existing = {}, stockRows = []) {
+  const byCode = new Map(Object.entries(existing || {}));
+  for (const row of Array.isArray(stockRows) ? stockRows : []) {
+    const code = String(row?.item_code || row?.itemCode || "").trim().toUpperCase();
+    if (!code || byCode.has(code)) continue;
+    const masterUom = String(row?.master_uom || "").trim();
+    const baseUom = String(row?.base_uom || "").trim();
+    const conv = parseMasterConv(row?.base_uom_pack_size);
+    if (!masterUom || conv == null || !(conv > 1)) continue;
+    considerMasterUnitEntry(byCode, code, { masterUom, baseUom, conv });
+  }
   return Object.fromEntries(byCode);
 }
 

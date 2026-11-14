@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  aggregateSalesForCover,
   assignCoverBucket,
   bucketAmountsFromCover,
   buildInventoryCoverModel,
@@ -96,6 +97,28 @@ test("stock value prefers sales unit rate over catalogue pack rate", () => {
   assert.equal(items[0].amount, Math.round(195225 * 0.629));
   assert.ok(items[0].amount < 200000);
   assert.ok(items[0].amount < 195225 * 132);
+});
+
+test("aggregateSalesForCover uses lookback rate when cover window has no sales", () => {
+  const { sales30dByItem, salesRateByItem, sales30d } = aggregateSalesForCover([
+    { item_code: "A004456", sales_amount: 5374, quantity: 100, transaction_date: "2026-10-13" },
+    { item_code: "A1", sales_amount: 3000, quantity: 30, transaction_date: "2026-11-10" },
+  ], { coverFrom: "2026-10-16", coverTo: "2026-11-14" });
+  assert.equal(sales30d, 3000);
+  assert.equal(sales30dByItem.get("A004456"), undefined);
+  assert.equal(sales30dByItem.get("A1"), 3000);
+  assert.ok(Math.abs(salesRateByItem.get("A004456") - 53.74) < 0.01);
+  assert.equal(salesRateByItem.get("A1"), 100);
+
+  const items = buildItemCoverRows([
+    { itemCode: "A004456", qty: 1130, uploadedValue: 0, category: "Building Material" },
+  ], {
+    sales30dByItem,
+    salesRateByItem,
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].bucket, ">120");
+  assert.equal(items[0].amount, Math.round(1130 * 53.74));
 });
 
 test("without sales rate, catalogue pack rate is not required for cover rows from server path", () => {

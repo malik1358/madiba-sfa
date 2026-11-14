@@ -18,20 +18,24 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Expected Stocked Sales", ar: "المبيعات المتوقعة مع توفر المخزون" },
   subtitle: {
-    en: "Expected monthly sales if every qualifying item is in stock: each item’s second-highest completed month after company seasonal peaks are removed. Items need lifetime GP above 10%. Local products (LP*) are excluded.",
-    ar: "المبيعات الشهرية المتوقعة إذا توفرت كل الأصناف المؤهلة: ثاني أعلى شهر مكتمل لكل صنف بعد استبعاد أشهر الذروة الموسمية للشركة. يشترط هامش ربح إجمالي أكثر من 10%. أصناف LP* مستثناة.",
+    en: "Expected monthly sales if every qualifying item is in stock: each item’s second-highest completed month after company seasonal peaks are removed. Main view uses lifetime GP above 10%; a second view includes every item sold at a profit (GP above 0%). Local products (LP*) are excluded.",
+    ar: "المبيعات الشهرية المتوقعة إذا توفرت كل الأصناف المؤهلة: ثاني أعلى شهر مكتمل لكل صنف بعد استبعاد أشهر الذروة الموسمية. العرض الرئيسي لهامش أعلى من 10%، وعرض ثانٍ لكل صنف بُيع بربح (هامش أعلى من 0%). أصناف LP* مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
   refresh: { en: "Refresh", ar: "تحديث" },
-  categorySummary: { en: "Category summary", ar: "ملخص الفئات" },
-  itemDetail: { en: "Item detail", ar: "تفاصيل الأصناف" },
+  categorySummary: { en: "Category summary (GP > 10%)", ar: "ملخص الفئات (هامش > 10%)" },
+  profitableSummary: { en: "All profitable items (GP > 0%)", ar: "كل الأصناف الرابحة (هامش > 0%)" },
+  itemDetail: { en: "Item detail (GP > 10%)", ar: "تفاصيل الأصناف (هامش > 10%)" },
+  profitableItems: { en: "Item detail (GP > 0%)", ar: "تفاصيل الأصناف (هامش > 0%)" },
   category: { en: "Category", ar: "الفئة" },
   items: { en: "Items", ar: "الأصناف" },
   item: { en: "Item", ar: "الصنف" },
   itemCode: { en: "Item code", ar: "رمز الصنف" },
   mergedFrom: { en: "Merged codes", ar: "رموز مدمجة" },
-  gpPercent: { en: "GP %", ar: "هامش %" },
+  gpPercent: { en: "Lifetime GP %", ar: "هامش العمر %" },
+  expectedGpPercent: { en: "Expected margin %", ar: "الهامش المتوقع %" },
+  expectedProfit: { en: "Expected GP SAR", ar: "الربح المتوقع" },
   eligibleMonths: { en: "Eligible months", ar: "الأشهر المؤهلة" },
   peakMonth: { en: "Highest month", ar: "أعلى شهر" },
   peakSales: { en: "Highest SAR", ar: "أعلى قيمة" },
@@ -45,8 +49,8 @@ const TEXT = {
   incomplete: { en: "Current month excluded", ar: "الشهر الحالي مستبعد" },
   minGp: { en: "Min GP", ar: "أدنى هامش" },
   noRows: {
-    en: "No qualifying items with GP above 10% and non-seasonal monthly sales.",
-    ar: "لا توجد أصناف مؤهلة بهامش أعلى من 10% ومبيعات شهرية غير موسمية.",
+    en: "No qualifying items with non-seasonal monthly sales for this GP cut.",
+    ar: "لا توجد أصناف مؤهلة بمبيعات شهرية غير موسمية لهذا حد الهامش.",
   },
   accessDenied: {
     en: "Only admin, manager, or invoice maker can open this report.",
@@ -55,8 +59,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Company seasonal peaks are the top completed months at least 25% above the median monthly sales (up to three). Those calendar months are dropped for every item. Replacement item codes (for example old 100-pc gloves → current 70-pc gloves) are merged so history is not double-counted. Expected SAR is the second-highest remaining month (or the only month when history is thin). Amounts are ex-VAT net sales.",
-    ar: "ذروة الشركة الموسمية هي أعلى الأشهر المكتملة التي تزيد 25% على الأقل عن وسيط المبيعات الشهرية (حتى ثلاثة أشهر). تُستبعد تلك الأشهر التقويمية لكل صنف. رموز الأصناف البديلة (مثل قفازات 100 قطعة القديمة ← 70 قطعة الحالية) تُدمج حتى لا تُحسب مرتين. القيمة المتوقعة هي ثاني أعلى شهر متبقٍ (أو الشهر الوحيد عند قلة التاريخ). المبالغ صافي مبيعات بدون ضريبة.",
+    en: "Company seasonal peaks are the top completed months at least 25% above the median monthly sales (up to three). Those calendar months are dropped for every item. Replacement item codes are merged so history is not double-counted. Expected SAR / GP are from the second-highest remaining month. Lifetime GP % filters which items appear. Amounts are ex-VAT.",
+    ar: "ذروة الشركة الموسمية هي أعلى الأشهر المكتملة التي تزيد 25% على الأقل عن وسيط المبيعات الشهرية (حتى ثلاثة). تُستبعد تلك الأشهر التقويمية. رموز الأصناف البديلة تُدمج. القيمة/الربح المتوقعان من ثاني أعلى شهر متبقٍ. هامش العمر يحدد الأصناف. المبالغ بدون ضريبة.",
   },
 };
 
@@ -110,6 +114,8 @@ function itemCellValue(row, key) {
   if (key === "expectedMonth") return monthLabel(row.expectedMonth);
   if (key === "expectedQty") return formatQty(row.expectedQty);
   if (key === "expectedSales") return formatAmount(row.expectedSales);
+  if (key === "expectedProfit") return formatAmount(row.expectedProfit);
+  if (key === "expectedGpPercent") return formatPercent(row.expectedGpPercent);
   return "";
 }
 
@@ -117,8 +123,33 @@ function categoryCellValue(row, key) {
   if (key === "category") return row.category || "";
   if (key === "itemCount") return String(row.itemCount ?? "");
   if (key === "expectedSales") return formatAmount(row.expectedSales);
+  if (key === "expectedProfit") return formatAmount(row.expectedProfit);
+  if (key === "expectedGpPercent") return formatPercent(row.expectedGpPercent);
   if (key === "sharePercent") return formatPercent(row.sharePercent);
   return "";
+}
+
+function sumItemTotals(rows) {
+  return (rows || []).reduce((sum, row) => ({
+    expectedSales: sum.expectedSales + Number(row.expectedSales || 0),
+    expectedProfit: sum.expectedProfit + Number(row.expectedProfit || 0),
+    expectedQty: sum.expectedQty + Number(row.expectedQty || 0),
+  }), { expectedSales: 0, expectedProfit: 0, expectedQty: 0 });
+}
+
+function sumCategoryTotals(rows) {
+  return (rows || []).reduce((sum, row) => ({
+    itemCount: sum.itemCount + Number(row.itemCount || 0),
+    expectedSales: sum.expectedSales + Number(row.expectedSales || 0),
+    expectedProfit: sum.expectedProfit + Number(row.expectedProfit || 0),
+  }), { itemCount: 0, expectedSales: 0, expectedProfit: 0 });
+}
+
+function marginFromTotals(totals) {
+  const sales = Number(totals?.expectedSales || 0);
+  const profit = Number(totals?.expectedProfit || 0);
+  if (!sales) return null;
+  return (profit / sales) * 100;
 }
 
 export default function ExpectedStockedSalesPage() {
@@ -172,6 +203,15 @@ export default function ExpectedStockedSalesPage() {
     () => (Array.isArray(report?.categoryRows) ? report.categoryRows : []),
     [report],
   );
+  const profitableItemRows = useMemo(
+    () => (Array.isArray(report?.profitableRows) ? report.profitableRows : []),
+    [report],
+  );
+  const profitableCategoryRows = useMemo(
+    () => (Array.isArray(report?.profitableCategoryRows) ? report.profitableCategoryRows : []),
+    [report],
+  );
+
   const itemFilterValueOf = useCallback((row, key) => itemCellValue(row, key), []);
   const categoryFilterValueOf = useCallback((row, key) => categoryCellValue(row, key), []);
   const {
@@ -186,16 +226,26 @@ export default function ExpectedStockedSalesPage() {
     visibleRows: visibleCategories,
     setFilter: setCategoryFilter,
   } = useBiExcelFilters(categoryRows, EXPECTED_STOCKED_SALES_CATEGORY_FILTER_KEYS, categoryFilterValueOf);
+  const {
+    filters: profitableItemFilters,
+    options: profitableItemOptions,
+    visibleRows: visibleProfitableItems,
+    setFilter: setProfitableItemFilter,
+  } = useBiExcelFilters(profitableItemRows, EXPECTED_STOCKED_SALES_ITEM_FILTER_KEYS, itemFilterValueOf);
+  const {
+    filters: profitableCategoryFilters,
+    options: profitableCategoryOptions,
+    visibleRows: visibleProfitableCategories,
+    setFilter: setProfitableCategoryFilter,
+  } = useBiExcelFilters(profitableCategoryRows, EXPECTED_STOCKED_SALES_CATEGORY_FILTER_KEYS, categoryFilterValueOf);
 
-  const itemTotals = useMemo(() => visibleItems.reduce((sum, row) => ({
-    expectedSales: sum.expectedSales + Number(row.expectedSales || 0),
-    expectedQty: sum.expectedQty + Number(row.expectedQty || 0),
-  }), { expectedSales: 0, expectedQty: 0 }), [visibleItems]);
-
-  const categoryTotals = useMemo(() => visibleCategories.reduce((sum, row) => ({
-    itemCount: sum.itemCount + Number(row.itemCount || 0),
-    expectedSales: sum.expectedSales + Number(row.expectedSales || 0),
-  }), { itemCount: 0, expectedSales: 0 }), [visibleCategories]);
+  const itemTotals = useMemo(() => sumItemTotals(visibleItems), [visibleItems]);
+  const categoryTotals = useMemo(() => sumCategoryTotals(visibleCategories), [visibleCategories]);
+  const profitableItemTotals = useMemo(() => sumItemTotals(visibleProfitableItems), [visibleProfitableItems]);
+  const profitableCategoryTotals = useMemo(
+    () => sumCategoryTotals(visibleProfitableCategories),
+    [visibleProfitableCategories],
+  );
 
   if (!supabaseClient) {
     return (
@@ -223,6 +273,129 @@ export default function ExpectedStockedSalesPage() {
     .map(calendarMonthLabel)
     .filter(Boolean)
     .join(", ") || "—";
+
+  function renderCategoryTable({
+    filename,
+    sheetName,
+    rows,
+    visibleRows,
+    options,
+    filters,
+    setFilter,
+    totals,
+  }) {
+    if (!rows.length) return <div className="moduleHint">{t("noRows")}</div>;
+    return (
+      <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label={t("category")} filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("items")} filterKey="itemCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("share")} filterKey="sharePercent" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedSales")} filterKey="expectedSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedProfit")} filterKey="expectedProfit" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedGpPercent")} filterKey="expectedGpPercent" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={row.category}>
+                <td>{row.category}</td>
+                <td>{row.itemCount}</td>
+                <td>{formatPercent(row.sharePercent)}</td>
+                <td>{formatAmount(row.expectedSales)}</td>
+                <td>{formatAmount(row.expectedProfit)}</td>
+                <td className="moduleBiTotalCol">{formatPercent(row.expectedGpPercent)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>{t("total")}</td>
+              <td>{totals.itemCount}</td>
+              <td>{formatPercent(100)}</td>
+              <td>{formatAmount(totals.expectedSales)}</td>
+              <td>{formatAmount(totals.expectedProfit)}</td>
+              <td className="moduleBiTotalCol">{formatPercent(marginFromTotals(totals))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </ExportableTable>
+    );
+  }
+
+  function renderItemTable({
+    filename,
+    sheetName,
+    rows,
+    visibleRows,
+    options,
+    filters,
+    setFilter,
+    totals,
+  }) {
+    if (!rows.length) return <div className="moduleHint">{t("noRows")}</div>;
+    return (
+      <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label={t("itemCode")} filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("item")} filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("category")} filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("mergedFrom")} filterKey="mergedFrom" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("gpPercent")} filterKey="gpPercent" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("eligibleMonths")} filterKey="eligibleMonthCount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("peakMonth")} filterKey="peakMonth" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("peakSales")} filterKey="peakSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedMonth")} filterKey="expectedMonth" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedQty")} filterKey="expectedQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedSales")} filterKey="expectedSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedProfit")} filterKey="expectedProfit" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={t("expectedGpPercent")} filterKey="expectedGpPercent" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={row.itemCode}>
+                <td>{row.itemCode}</td>
+                <td>{row.itemName}</td>
+                <td>{row.category}</td>
+                <td>{row.mergedFrom || "—"}</td>
+                <td>{formatPercent(row.gpPercent)}</td>
+                <td>{row.eligibleMonthCount}</td>
+                <td>{monthLabel(row.peakMonth)}</td>
+                <td>{formatAmount(row.peakSales)}</td>
+                <td>{monthLabel(row.expectedMonth)}</td>
+                <td>{formatQty(row.expectedQty)}</td>
+                <td>{formatAmount(row.expectedSales)}</td>
+                <td>{formatAmount(row.expectedProfit)}</td>
+                <td className="moduleBiTotalCol">{formatPercent(row.expectedGpPercent)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>{t("total")}</td>
+              <td>{visibleRows.length}</td>
+              <td />
+              <td />
+              <td />
+              <td />
+              <td />
+              <td />
+              <td />
+              <td>{formatQty(totals.expectedQty)}</td>
+              <td>{formatAmount(totals.expectedSales)}</td>
+              <td>{formatAmount(totals.expectedProfit)}</td>
+              <td className="moduleBiTotalCol">{formatPercent(marginFromTotals(totals))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </ExportableTable>
+    );
+  }
 
   return (
     <MorningAttendanceGate requireMorningAttendance={false}>
@@ -252,6 +425,10 @@ export default function ExpectedStockedSalesPage() {
               {" · "}
               {t("expectedSales")}: {formatAmount(report?.summary?.expectedSales || 0)}
               {" · "}
+              {t("expectedProfit")}: {formatAmount(report?.summary?.expectedProfit || 0)}
+              {" · "}
+              {t("expectedGpPercent")}: {formatPercent(report?.summary?.expectedGpPercent)}
+              {" · "}
               {t("seasonal")}: {seasonalLabel}
               {report?.incompleteMonth ? ` · ${t("incomplete")}: ${monthLabel(report.incompleteMonth)}` : ""}
               {" · "}
@@ -261,40 +438,46 @@ export default function ExpectedStockedSalesPage() {
             {error ? <p className="moduleHint">{error}</p> : null}
             {loading ? (
               <div className="moduleLoading">{t("loading")}</div>
-            ) : categoryRows.length === 0 ? (
-              <div className="moduleHint">{t("noRows")}</div>
-            ) : (
-              <ExportableTable filename="expected-stocked-sales-categories" sheetName="Categories" className="moduleTableWrap moduleBiTableWrap">
-                <table className="moduleTable moduleBiTable">
-                  <thead>
-                    <tr>
-                      <BiExcelHead label={t("category")} filterKey="category" options={categoryOptions} filters={categoryFilters} onChange={setCategoryFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("items")} filterKey="itemCount" options={categoryOptions} filters={categoryFilters} onChange={setCategoryFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("share")} filterKey="sharePercent" options={categoryOptions} filters={categoryFilters} onChange={setCategoryFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("expectedSales")} filterKey="expectedSales" options={categoryOptions} filters={categoryFilters} onChange={setCategoryFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleCategories.map((row) => (
-                      <tr key={row.category}>
-                        <td>{row.category}</td>
-                        <td>{row.itemCount}</td>
-                        <td>{formatPercent(row.sharePercent)}</td>
-                        <td className="moduleBiTotalCol">{formatAmount(row.expectedSales)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>{t("total")}</td>
-                      <td>{categoryTotals.itemCount}</td>
-                      <td>{formatPercent(100)}</td>
-                      <td className="moduleBiTotalCol">{formatAmount(categoryTotals.expectedSales)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </ExportableTable>
-            )}
+            ) : renderCategoryTable({
+              filename: "expected-stocked-sales-categories-gp10",
+              sheetName: "GP gt 10",
+              rows: categoryRows,
+              visibleRows: visibleCategories,
+              options: categoryOptions,
+              filters: categoryFilters,
+              setFilter: setCategoryFilter,
+              totals: categoryTotals,
+            })}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("profitableSummary")}</h2>
+              <span>{formatAmount(report?.profitableSummary?.expectedSales || 0)}</span>
+            </div>
+            <p className="moduleHint">
+              {t("items")}: {report?.profitableSummary?.itemCount ?? 0}
+              {" · "}
+              {t("expectedSales")}: {formatAmount(report?.profitableSummary?.expectedSales || 0)}
+              {" · "}
+              {t("expectedProfit")}: {formatAmount(report?.profitableSummary?.expectedProfit || 0)}
+              {" · "}
+              {t("expectedGpPercent")}: {formatPercent(report?.profitableSummary?.expectedGpPercent)}
+              {" · "}
+              {t("minGp")}: {formatPercent(report?.profitableMinGpPercent ?? 0)}
+            </p>
+            {loading ? (
+              <div className="moduleLoading">{t("loading")}</div>
+            ) : renderCategoryTable({
+              filename: "expected-stocked-sales-categories-gp0",
+              sheetName: "GP gt 0",
+              rows: profitableCategoryRows,
+              visibleRows: visibleProfitableCategories,
+              options: profitableCategoryOptions,
+              filters: profitableCategoryFilters,
+              setFilter: setProfitableCategoryFilter,
+              totals: profitableCategoryTotals,
+            })}
           </section>
 
           <section className="moduleSection">
@@ -304,61 +487,35 @@ export default function ExpectedStockedSalesPage() {
             </div>
             {loading ? (
               <div className="moduleLoading">{t("loading")}</div>
-            ) : itemRows.length === 0 ? (
-              <div className="moduleHint">{t("noRows")}</div>
-            ) : (
-              <ExportableTable filename="expected-stocked-sales-items" sheetName="Items" className="moduleTableWrap moduleBiTableWrap">
-                <table className="moduleTable moduleBiTable">
-                  <thead>
-                    <tr>
-                      <BiExcelHead label={t("itemCode")} filterKey="itemCode" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("item")} filterKey="itemName" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("category")} filterKey="category" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("mergedFrom")} filterKey="mergedFrom" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("gpPercent")} filterKey="gpPercent" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("eligibleMonths")} filterKey="eligibleMonthCount" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("peakMonth")} filterKey="peakMonth" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("peakSales")} filterKey="peakSales" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("expectedMonth")} filterKey="expectedMonth" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("expectedQty")} filterKey="expectedQty" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("expectedSales")} filterKey="expectedSales" options={itemOptions} filters={itemFilters} onChange={setItemFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleItems.map((row) => (
-                      <tr key={row.itemCode}>
-                        <td>{row.itemCode}</td>
-                        <td>{row.itemName}</td>
-                        <td>{row.category}</td>
-                        <td>{row.mergedFrom || "—"}</td>
-                        <td>{formatPercent(row.gpPercent)}</td>
-                        <td>{row.eligibleMonthCount}</td>
-                        <td>{monthLabel(row.peakMonth)}</td>
-                        <td>{formatAmount(row.peakSales)}</td>
-                        <td>{monthLabel(row.expectedMonth)}</td>
-                        <td>{formatQty(row.expectedQty)}</td>
-                        <td className="moduleBiTotalCol">{formatAmount(row.expectedSales)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>{t("total")}</td>
-                      <td>{visibleItems.length}</td>
-                      <td />
-                      <td />
-                      <td />
-                      <td />
-                      <td />
-                      <td />
-                      <td />
-                      <td>{formatQty(itemTotals.expectedQty)}</td>
-                      <td className="moduleBiTotalCol">{formatAmount(itemTotals.expectedSales)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </ExportableTable>
-            )}
+            ) : renderItemTable({
+              filename: "expected-stocked-sales-items-gp10",
+              sheetName: "Items GP10",
+              rows: itemRows,
+              visibleRows: visibleItems,
+              options: itemOptions,
+              filters: itemFilters,
+              setFilter: setItemFilter,
+              totals: itemTotals,
+            })}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("profitableItems")}</h2>
+              <span>{visibleProfitableItems.length}</span>
+            </div>
+            {loading ? (
+              <div className="moduleLoading">{t("loading")}</div>
+            ) : renderItemTable({
+              filename: "expected-stocked-sales-items-gp0",
+              sheetName: "Items GP0",
+              rows: profitableItemRows,
+              visibleRows: visibleProfitableItems,
+              options: profitableItemOptions,
+              filters: profitableItemFilters,
+              setFilter: setProfitableItemFilter,
+              totals: profitableItemTotals,
+            })}
           </section>
         </div>
       </main>

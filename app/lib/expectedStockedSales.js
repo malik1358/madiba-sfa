@@ -23,6 +23,7 @@ export const EXPECTED_STOCKED_SALES_SELECT = [
 ].join(",");
 
 export const EXPECTED_STOCKED_SALES_MIN_GP_PERCENT = 10;
+export const EXPECTED_STOCKED_SALES_PROFITABLE_GP_PERCENT = 0;
 export const EXPECTED_STOCKED_SALES_MAX_SEASON_MONTHS = 3;
 export const EXPECTED_STOCKED_SALES_SEASON_LIFT = 1.25;
 
@@ -38,12 +39,16 @@ export const EXPECTED_STOCKED_SALES_ITEM_FILTER_KEYS = [
   "expectedMonth",
   "expectedQty",
   "expectedSales",
+  "expectedProfit",
+  "expectedGpPercent",
 ];
 
 export const EXPECTED_STOCKED_SALES_CATEGORY_FILTER_KEYS = [
   "category",
   "itemCount",
   "expectedSales",
+  "expectedProfit",
+  "expectedGpPercent",
   "sharePercent",
 ];
 
@@ -192,26 +197,30 @@ export function pickSecondHighestMonth(monthlyRows = []) {
     .map((row) => ({
       month: String(row?.month || "").slice(0, 7),
       sales: roundMoney(row?.sales),
+      profit: roundMoney(row?.profit),
       qty: roundQty(row?.qty),
     }))
     .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.sales))
     .sort((a, b) => b.sales - a.sales || b.month.localeCompare(a.month));
 
   if (!rows.length) return null;
+  const pick = (row) => ({
+    expectedMonth: row.month,
+    expectedSales: row.sales,
+    expectedProfit: row.profit,
+    expectedQty: row.qty,
+    expectedGpPercent: roundPercent(grossProfitPercent(row.sales, row.profit)),
+  });
   if (rows.length === 1) {
     return {
-      expectedMonth: rows[0].month,
-      expectedSales: rows[0].sales,
-      expectedQty: rows[0].qty,
+      ...pick(rows[0]),
       peakMonth: rows[0].month,
       peakSales: rows[0].sales,
       eligibleMonthCount: 1,
     };
   }
   return {
-    expectedMonth: rows[1].month,
-    expectedSales: rows[1].sales,
-    expectedQty: rows[1].qty,
+    ...pick(rows[1]),
     peakMonth: rows[0].month,
     peakSales: rows[0].sales,
     eligibleMonthCount: rows.length,
@@ -246,8 +255,9 @@ function mergeItemBucketInto(target, source) {
   }
   (source.sourceCodes || []).forEach((code) => target.sourceCodes.add(code));
   source.months.forEach((monthRow, month) => {
-    const existing = target.months.get(month) || { month, sales: 0, qty: 0 };
+    const existing = target.months.get(month) || { month, sales: 0, profit: 0, qty: 0 };
     existing.sales += Number(monthRow.sales || 0);
+    existing.profit += Number(monthRow.profit || 0);
     existing.qty += Number(monthRow.qty || 0);
     target.months.set(month, existing);
   });
@@ -390,14 +400,111 @@ export function aggregateExpectedStockedSalesLines(rows = [], { incompleteMonth 
     bucket.lifeSales += safeSales;
     bucket.lifeProfit += safeProfit;
 
-    const monthRow = bucket.months.get(month) || { month, sales: 0, qty: 0 };
+    const monthRow = bucket.months.get(month) || { month, sales: 0, profit: 0, qty: 0 };
     monthRow.sales += safeSales;
+    monthRow.profit += safeProfit;
     monthRow.qty += safeQty;
     bucket.months.set(month, monthRow);
   });
 
   const collapsed = collapseExpectedStockedItemBuckets(byItem);
   return { byItem: collapsed, firstDate, lastDate, sourceRowCount };
+}
+
+function buildCohortFromBuckets(byItem, {
+  seasonCalendarMonths = [],
+  minGpPercent = EXPECTED_STOCKED_SALES_MIN_GP_PERCENT,
+} = {}) {
+  const itemRows = [];
+  byItem.forEach((bucket) => {
+    const gpPercent = grossProfitPercent(bucket.lifeSales, bucket.lifeProfit);
+    if (gpPercent == null || gpPercent <= Number(minGpPercent)) return;
+
+    const eligibleMonths = [...bucket.months.values()]
+      .filter((monthRow) => !isSeasonalMonthKey(monthRow.month, seasonCalendarMonths))
+      .map((monthRow) => ({
+        month: monthRow.month,
+        sales: roundMoney(monthRow.sales),
+        profit: roundMoney(monthRow.profit),
+        qty: roundQty(monthRow.qty),
+      }));
+    const picked = pickSecondHighestMonth(eligibleMonths);
+    if (!picked || !(picked.expectedSales > 0)) return;
+
+    const mergedFrom = [...(bucket.sourceCodes || [])]
+      .map((code) => normalizeExpectedStockedItemCode(code))
+      .filter((code) => code && code !== bucket.itemCode)
+      .sort((a, b) => a.localeCompare(b));
+
+    itemRows.push({
+      itemCode: bucket.itemCode,
+      itemName: bucket.itemName || bucket.itemCode,
+      category: bucket.category || UNCLASSIFIED_CATEGORY,
+      mergedFrom: mergedFrom.join(", "),
+      gpPercent: roundPercent(gpPercent),
+      lifeSales: roundMoney(bucket.lifeSales),
+      lifeProfit: roundMoney(bucket.lifeProfit),
+      eligibleMonthCount: picked.eligibleMonthCount,
+      peakMonth: picked.peakMonth,
+      peakSales: picked.peakSales,
+      expectedMonth: picked.expectedMonth,
+      expectedQty: picked.expectedQty,
+      expectedSales: picked.expectedSales,
+      expectedProfit: picked.expectedProfit,
+      expectedGpPercent: picked.expectedGpPercent,
+    });
+  });
+
+  itemRows.sort((a, b) => b.expectedSales - a.expectedSales
+    || a.itemCode.localeCompare(b.itemCode));
+
+  const totalExpectedSales = roundMoney(
+    itemRows.reduce((sum, row) => sum + Number(row.expectedSales || 0), 0),
+  );
+  const totalExpectedProfit = roundMoney(
+    itemRows.reduce((sum, row) => sum + Number(row.expectedProfit || 0), 0),
+  );
+
+  const categoryMap = new Map();
+  itemRows.forEach((row) => {
+    const key = row.category || UNCLASSIFIED_CATEGORY;
+    const existing = categoryMap.get(key) || {
+      category: key,
+      itemCount: 0,
+      expectedSales: 0,
+      expectedProfit: 0,
+    };
+    existing.itemCount += 1;
+    existing.expectedSales += Number(row.expectedSales || 0);
+    existing.expectedProfit += Number(row.expectedProfit || 0);
+    categoryMap.set(key, existing);
+  });
+
+  const categoryRows = [...categoryMap.values()]
+    .map((row) => ({
+      category: row.category,
+      itemCount: row.itemCount,
+      expectedSales: roundMoney(row.expectedSales),
+      expectedProfit: roundMoney(row.expectedProfit),
+      expectedGpPercent: roundPercent(grossProfitPercent(row.expectedSales, row.expectedProfit)),
+      sharePercent: totalExpectedSales > 0
+        ? roundPercent((row.expectedSales / totalExpectedSales) * 100)
+        : 0,
+    }))
+    .sort((a, b) => b.expectedSales - a.expectedSales || a.category.localeCompare(b.category));
+
+  return {
+    minGpPercent: Number(minGpPercent),
+    rows: itemRows,
+    categoryRows,
+    summary: {
+      itemCount: itemRows.length,
+      categoryCount: categoryRows.length,
+      expectedSales: totalExpectedSales,
+      expectedProfit: totalExpectedProfit,
+      expectedGpPercent: roundPercent(grossProfitPercent(totalExpectedSales, totalExpectedProfit)),
+    },
+  };
 }
 
 export function buildExpectedStockedSalesReport(rows = [], {
@@ -430,73 +537,14 @@ export function buildExpectedStockedSalesReport(rows = [], {
     incompleteMonth,
   });
 
-  const itemRows = [];
-  byItem.forEach((bucket) => {
-    const gpPercent = grossProfitPercent(bucket.lifeSales, bucket.lifeProfit);
-    if (gpPercent == null || gpPercent <= Number(minGpPercent)) return;
-
-    const eligibleMonths = [...bucket.months.values()]
-      .filter((monthRow) => !isSeasonalMonthKey(monthRow.month, season.calendarMonths))
-      .map((monthRow) => ({
-        month: monthRow.month,
-        sales: roundMoney(monthRow.sales),
-        qty: roundQty(monthRow.qty),
-      }));
-    const picked = pickSecondHighestMonth(eligibleMonths);
-    if (!picked || !(picked.expectedSales > 0)) return;
-
-    const mergedFrom = [...(bucket.sourceCodes || [])]
-      .map((code) => normalizeExpectedStockedItemCode(code))
-      .filter((code) => code && code !== bucket.itemCode)
-      .sort((a, b) => a.localeCompare(b));
-
-    itemRows.push({
-      itemCode: bucket.itemCode,
-      itemName: bucket.itemName || bucket.itemCode,
-      category: bucket.category || UNCLASSIFIED_CATEGORY,
-      mergedFrom: mergedFrom.join(", "),
-      gpPercent: roundPercent(gpPercent),
-      lifeSales: roundMoney(bucket.lifeSales),
-      lifeProfit: roundMoney(bucket.lifeProfit),
-      eligibleMonthCount: picked.eligibleMonthCount,
-      peakMonth: picked.peakMonth,
-      peakSales: picked.peakSales,
-      expectedMonth: picked.expectedMonth,
-      expectedQty: picked.expectedQty,
-      expectedSales: picked.expectedSales,
-    });
+  const primary = buildCohortFromBuckets(byItem, {
+    seasonCalendarMonths: season.calendarMonths,
+    minGpPercent,
   });
-
-  itemRows.sort((a, b) => b.expectedSales - a.expectedSales
-    || a.itemCode.localeCompare(b.itemCode));
-
-  const totalExpectedSales = roundMoney(
-    itemRows.reduce((sum, row) => sum + Number(row.expectedSales || 0), 0),
-  );
-
-  const categoryMap = new Map();
-  itemRows.forEach((row) => {
-    const key = row.category || UNCLASSIFIED_CATEGORY;
-    const existing = categoryMap.get(key) || {
-      category: key,
-      itemCount: 0,
-      expectedSales: 0,
-    };
-    existing.itemCount += 1;
-    existing.expectedSales += Number(row.expectedSales || 0);
-    categoryMap.set(key, existing);
+  const profitable = buildCohortFromBuckets(byItem, {
+    seasonCalendarMonths: season.calendarMonths,
+    minGpPercent: EXPECTED_STOCKED_SALES_PROFITABLE_GP_PERCENT,
   });
-
-  const categoryRows = [...categoryMap.values()]
-    .map((row) => ({
-      category: row.category,
-      itemCount: row.itemCount,
-      expectedSales: roundMoney(row.expectedSales),
-      sharePercent: totalExpectedSales > 0
-        ? roundPercent((row.expectedSales / totalExpectedSales) * 100)
-        : 0,
-    }))
-    .sort((a, b) => b.expectedSales - a.expectedSales || a.category.localeCompare(b.category));
 
   return {
     asOfDate: getKsaDateString(now),
@@ -509,13 +557,13 @@ export function buildExpectedStockedSalesReport(rows = [], {
       medianSales: season.medianSales,
       lift: Number(seasonLift),
     },
-    minGpPercent: Number(minGpPercent),
-    rows: itemRows,
-    categoryRows,
-    summary: {
-      itemCount: itemRows.length,
-      categoryCount: categoryRows.length,
-      expectedSales: totalExpectedSales,
-    },
+    minGpPercent: primary.minGpPercent,
+    rows: primary.rows,
+    categoryRows: primary.categoryRows,
+    summary: primary.summary,
+    profitableMinGpPercent: profitable.minGpPercent,
+    profitableRows: profitable.rows,
+    profitableCategoryRows: profitable.categoryRows,
+    profitableSummary: profitable.summary,
   };
 }

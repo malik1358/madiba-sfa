@@ -111,11 +111,17 @@ test("buildExpectedStockedSalesReport applies GP, LP, and seasonal filters", () 
   assert.equal(soap.peakMonth, "2026-06");
 
   assert.equal(report.summary.expectedSales, 260);
+  assert.ok(Number.isFinite(report.summary.expectedProfit));
+  assert.ok(Number.isFinite(report.summary.expectedGpPercent));
+  assert.ok(Array.isArray(report.profitableRows));
+  assert.ok(report.profitableSummary.itemCount >= report.summary.itemCount);
   const stationery = report.categoryRows.find((row) => row.category === "Stationery");
   const personal = report.categoryRows.find((row) => row.category === "Personal Care");
   assert.equal(stationery.expectedSales, 200);
   assert.equal(personal.expectedSales, 60);
   assert.equal(stationery.sharePercent, 76.92);
+  assert.ok(Number.isFinite(stationery.expectedProfit));
+  assert.ok(Number.isFinite(stationery.expectedGpPercent));
 });
 
 test("old and new glove codes are merged so history is not double-counted", () => {
@@ -149,4 +155,31 @@ test("old and new glove codes are merged so history is not double-counted", () =
   assert.equal(gloves[0].peakSales, 1800);
   assert.equal(gloves[0].expectedSales, 1500);
   assert.equal(gloves[0].expectedMonth, "2026-07");
+  assert.equal(gloves[0].expectedProfit, 300);
+  assert.equal(gloves[0].expectedGpPercent, 20);
+});
+
+test("profitable cohort includes GP between 0 and 10 and reports margin totals", () => {
+  const now = new Date("2026-11-14T08:00:00+03:00");
+  const rows = [
+    { transaction_date: "2026-05-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 100, profit_amount: 20 },
+    { transaction_date: "2026-06-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 110, profit_amount: 22 },
+    { transaction_date: "2026-07-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 120, profit_amount: 24 },
+    { transaction_date: "2026-08-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 5000, profit_amount: 1000 },
+    { transaction_date: "2026-09-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 6000, profit_amount: 1200 },
+    { transaction_date: "2026-10-01", item_code: "A900", item_name: "Filler", category: "Sundry", quantity: 1, sales_amount: 5500, profit_amount: 1100 },
+
+    // Thin margin item: lifetime GP = 5% — excluded from GP>10, included in GP>0
+    { transaction_date: "2026-05-10", item_code: "A500", item_name: "Thin", category: "Sundry", quantity: 10, sales_amount: 1000, profit_amount: 50 },
+    { transaction_date: "2026-06-10", item_code: "A500", item_name: "Thin", category: "Sundry", quantity: 12, sales_amount: 1200, profit_amount: 60 },
+    { transaction_date: "2026-07-10", item_code: "A500", item_name: "Thin", category: "Sundry", quantity: 8, sales_amount: 800, profit_amount: 40 },
+  ];
+  const report = buildExpectedStockedSalesReport(rows, { now });
+  assert.equal(report.rows.some((row) => row.itemCode === "A500"), false);
+  const thin = report.profitableRows.find((row) => row.itemCode === "A500");
+  assert.ok(thin);
+  assert.equal(thin.expectedSales, 1000);
+  assert.equal(thin.expectedProfit, 50);
+  assert.equal(thin.expectedGpPercent, 5);
+  assert.ok(report.profitableSummary.expectedSales > report.summary.expectedSales);
 });

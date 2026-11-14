@@ -7,12 +7,14 @@ import {
   buildModuleAccess,
   canViewManagementReports,
   canManageOrderInvoice,
+  filterAccessibleModulesByQuery,
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
   listAccessibleModules,
   listAccessibleNavGroups,
   localizedModuleLabel,
   localizedNavGroupLabel,
+  localizedNavSubgroupLabel,
   matrixRoleKey,
   moduleLabelForPath,
   normalizeRoleModuleMatrix,
@@ -536,4 +538,49 @@ test("potential sales targets is available to salesmen and report viewers, not c
   assert.equal(buildModuleAccess({ role: "product-promoter" }).canAccess("potentialSalesTargets"), false);
   assert.equal(moduleLabelForPath("/management/potential-sales-targets", "en"), "Potential Sales Targets");
   assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
+});
+
+test("reports nav is subdivided into labeled subgroups", () => {
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" }))
+    .find((group) => group.key === "reports");
+  assert.ok(reports);
+  assert.ok(Array.isArray(reports.subgroups));
+  assert.equal(reports.subgroups.length >= 5, true);
+  const keys = reports.subgroups.map((entry) => entry.key);
+  assert.deepEqual(keys, [
+    "salesBi",
+    "fieldAttendance",
+    "creditCollections",
+    "catalogueItems",
+    "mapsGps",
+  ]);
+  assert.equal(localizedNavSubgroupLabel("salesBi", "en"), "Sales & BI");
+  assert.equal(localizedNavSubgroupLabel("mapsGps", "ar"), "\u0627\u0644\u062e\u0631\u0627\u0626\u0637 \u0648GPS");
+  const salesBi = reports.subgroups.find((entry) => entry.key === "salesBi");
+  assert.equal(salesBi.items.some((item) => item.moduleKey === "businessDashboard"), true);
+  assert.equal(salesBi.items.some((item) => item.moduleKey === "mis"), true);
+  const maps = reports.subgroups.find((entry) => entry.key === "mapsGps");
+  assert.equal(maps.items.some((item) => item.moduleKey === "customerMap"), true);
+  const flatKeys = new Set(reports.items.map((item) => item.moduleKey));
+  const subgroupKeys = new Set(
+    reports.subgroups.flatMap((subgroup) => subgroup.items.map((item) => item.moduleKey)),
+  );
+  assert.deepEqual([...subgroupKeys].sort(), [...flatKeys].sort());
+});
+
+test("screen search matches accessible module labels only", () => {
+  const admin = buildModuleAccess({ role: "admin" });
+  const salesman = buildModuleAccess({ role: "salesman", salesmanCode: "SM001" });
+
+  const misHits = filterAccessibleModulesByQuery(admin, "management mis", "en");
+  assert.equal(misHits.some((item) => item.moduleKey === "mis"), true);
+
+  const mapHits = filterAccessibleModulesByQuery(admin, "customer map", "en");
+  assert.equal(mapHits.some((item) => item.moduleKey === "customerMap"), true);
+
+  const salesmanMapHits = filterAccessibleModulesByQuery(salesman, "customer map", "en");
+  assert.equal(salesmanMapHits.some((item) => item.moduleKey === "customerMap"), false);
+
+  assert.deepEqual(filterAccessibleModulesByQuery(admin, "   ", "en"), []);
+  assert.equal(filterAccessibleModulesByQuery(admin, "zzzz-not-a-screen", "en").length, 0);
 });

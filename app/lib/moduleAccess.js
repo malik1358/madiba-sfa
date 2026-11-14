@@ -126,6 +126,61 @@ export const NAV_GROUPS = [
       "customerMap",
       "gpsMap",
     ],
+    subgroups: [
+      {
+        key: "salesBi",
+        label: "Sales & BI",
+        modules: [
+          "businessDashboard",
+          "mis",
+          "returnsAboveSales",
+          "expectedStockedSales",
+          "activeCustomers",
+          "myPerformance",
+          "salesmanIncentive",
+          "potentialSalesTargets",
+          "promoterCoverage",
+        ],
+      },
+      {
+        key: "fieldAttendance",
+        label: "Field & Attendance",
+        modules: [
+          "dailyVisitReport",
+          "userActivity",
+          "workingHours",
+          "monthlyAttendance",
+        ],
+      },
+      {
+        key: "creditCollections",
+        label: "Credit & Collections",
+        modules: [
+          "expectedCollection",
+          "outstandingNoGps",
+          "collectionStaleOverdue",
+          "potentialBadDebts",
+          "legalTransfers",
+        ],
+      },
+      {
+        key: "catalogueItems",
+        label: "Catalogue & Items",
+        modules: [
+          "missingCataloguePhotos",
+          "itemMasterAnalysis",
+        ],
+      },
+      {
+        key: "mapsGps",
+        label: "Maps & GPS",
+        modules: [
+          "customerMap",
+          "customerGpsHistory",
+          "gpsMap",
+        ],
+      },
+    ],
   },
   {
     key: "warehouse",
@@ -454,11 +509,46 @@ export function listAccessibleModules(access, moduleKeys) {
 
 export function listAccessibleNavGroups(access) {
   return NAV_GROUPS
-    .map((group) => ({
-      ...group,
-      items: listAccessibleModules(access, group.modules),
-    }))
+    .map((group) => {
+      const items = listAccessibleModules(access, group.modules);
+      const subgroups = (group.subgroups || [])
+        .map((subgroup) => ({
+          ...subgroup,
+          items: listAccessibleModules(access, subgroup.modules),
+        }))
+        .filter((subgroup) => subgroup.items.length > 0);
+      return {
+        ...group,
+        items,
+        subgroups,
+      };
+    })
     .filter((group) => group.items.length > 0);
+}
+
+/** Case-insensitive screen search across accessible modules (EN + AR labels). */
+export function filterAccessibleModulesByQuery(access, query = "", language = "en") {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return [];
+
+  return listAccessibleModules(access)
+    .map((item) => {
+      const label = localizedModuleLabel(item.moduleKey, language)
+        || localizedModuleLabel(item.moduleKey, "en")
+        || item.label
+        || item.moduleKey;
+      const en = localizedModuleLabel(item.moduleKey, "en").toLowerCase();
+      const ar = localizedModuleLabel(item.moduleKey, "ar").toLowerCase();
+      const key = String(item.moduleKey || "").toLowerCase();
+      const href = String(item.href || "").toLowerCase();
+      const haystack = `${en} ${ar} ${key} ${href}`;
+      if (!haystack.includes(needle)) return null;
+      return {
+        ...item,
+        label,
+      };
+    })
+    .filter(Boolean);
 }
 
 export function moduleLabelForPath(href, language = "en") {
@@ -534,6 +624,14 @@ export const NAV_GROUP_LABELS = {
   admin: { en: "Setup & Admin", ar: "الإعداد والإدارة" },
 };
 
+export const NAV_SUBGROUP_LABELS = {
+  salesBi: { en: "Sales & BI", ar: "المبيعات وذكاء الأعمال" },
+  fieldAttendance: { en: "Field & Attendance", ar: "الميدان والحضور" },
+  creditCollections: { en: "Credit & Collections", ar: "الائتمان والتحصيلات" },
+  catalogueItems: { en: "Catalogue & Items", ar: "الكتالوج والأصناف" },
+  mapsGps: { en: "Maps & GPS", ar: "الخرائط وGPS" },
+};
+
 export const ROLE_LABELS = {
   admin: { en: "admin", ar: "مدير النظام" },
   "report-user": { en: "report-user", ar: "مستخدم تقارير" },
@@ -584,6 +682,16 @@ export function localizedNavGroupLabel(groupKey, language = "en") {
   if (labels) return labels[language] || labels.en || "";
   const group = NAV_GROUPS.find((entry) => entry.key === groupKey);
   return group?.label || "";
+}
+
+export function localizedNavSubgroupLabel(subgroupKey, language = "en") {
+  const labels = NAV_SUBGROUP_LABELS[subgroupKey];
+  if (labels) return labels[language] || labels.en || "";
+  for (const group of NAV_GROUPS) {
+    const subgroup = (group.subgroups || []).find((entry) => entry.key === subgroupKey);
+    if (subgroup?.label) return subgroup.label;
+  }
+  return "";
 }
 
 export function localizedRoleLabel(role, language = "en") {

@@ -43,7 +43,7 @@ The service role is server-only. Losing the scope checks in an API route would e
 
 The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/hooks/useLogoutWithDaySummary.js`). Its dialog lets users stay logged in; a missing session token must not trigger sign-out without an explicit logout choice.
 
-Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
+Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`). The Reports dropdown is subdivided into Sales & BI, Field & Attendance, Credit & Collections, Catalogue & Items, and Maps & GPS (`subgroups` on the reports group; labels in `NAV_SUBGROUP_LABELS`). The sticky main nav also has a screen search box that filters accessible modules by English/Arabic label (`filterAccessibleModulesByQuery` / `AppMainNav`).
 
 Missing Catalogue Photos (`/management/missing-catalogue-photos`, module `missingCataloguePhotos` in Reports) is a read-only management report. `GET /api/missing-catalogue-photos` checks the caller JWT and management-report access, then compares `items_master`, `price_catalog_cache` (`cache_key=default`), and `attachments.category = product_catalogue_photo`. Only items with a positive price in that cache and a one-letter-plus-digits product code are listed. Summary also counts attachments (and distinct `entity_id`s) with `created_at` in the last 24 hours. The same report is emailed by `POST /api/cron/missing-catalogue-photos-email` at 08:30 KSA, Saturday–Thursday, To Malik/Swami with Jigar on CC. No migration.
 

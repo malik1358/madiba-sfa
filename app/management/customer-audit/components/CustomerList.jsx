@@ -1,14 +1,17 @@
 import { shortDate } from '../lib/format';
 import { customerMasterDedupeKey } from '../../../lib/customerMasterQuery';
 import { resolveCustomerMasterExportFields } from '../../../lib/customerCode';
+import { resolveCustomerAuditSalesmanFilter } from '../lib/helpers';
 
 export default function CustomerList({ customers, selectedSalesman, setSelectedSalesman, search, setSearch, salesmen, openCustomer, searching = false }) {
+  const salesmanValue = resolveCustomerAuditSalesmanFilter(selectedSalesman, salesmen);
+
   return (
     <>
       <div className="auditFilters">
         <div className="auditFilterField">
           <label>Salesman</label>
-          <select value={selectedSalesman} onChange={(e) => setSelectedSalesman(e.target.value)}>
+          <select value={salesmanValue} onChange={(e) => setSelectedSalesman(e.target.value)}>
             <option value="ALL">All Salesmen</option>
             {salesmen.map((salesman) => (
               <option key={salesman} value={salesman}>

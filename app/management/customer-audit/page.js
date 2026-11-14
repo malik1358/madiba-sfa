@@ -58,6 +58,7 @@ import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
+import { resolveCustomerAuditSalesmanFilter } from "./lib/helpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import { isAdminRole } from "../../lib/moduleAccess.js";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient.js";
@@ -449,11 +450,12 @@ function CustomerAuditPageContent() {
 
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const salesmanFilter = resolveCustomerAuditSalesmanFilter(selectedSalesman, salesmen);
 
     return customers.filter((customer) => {
-      const salesmanOK = selectedSalesman === "ALL"
-        || customer.current_salesman_code === selectedSalesman
-        || customer.previous_salesman_code === selectedSalesman;
+      const salesmanOK = salesmanFilter === "ALL"
+        || customer.current_salesman_code === salesmanFilter
+        || customer.previous_salesman_code === salesmanFilter;
       if (!salesmanOK) return false;
       if (!q) return true;
 
@@ -462,7 +464,7 @@ function CustomerAuditPageContent() {
         String(customer.customer_name || "").toLowerCase().includes(q)
       );
     });
-  }, [customers, selectedSalesman, search]);
+  }, [customers, selectedSalesman, salesmen, search]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

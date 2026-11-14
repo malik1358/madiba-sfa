@@ -6,6 +6,13 @@ export function normalizeCode(code) {
     .toUpperCase();
 }
 
+/** Coerce a stale Salesman <select> value back to ALL when it is not in the current result options. */
+export function resolveCustomerAuditSalesmanFilter(selectedSalesman, salesmen) {
+  if (selectedSalesman === "ALL") return "ALL";
+  if ((salesmen || []).includes(selectedSalesman)) return selectedSalesman;
+  return "ALL";
+}
+
 export function getPrice(priceList, itemCode) {
   return lookupPositiveRate(priceList, itemCode, 0);
 }

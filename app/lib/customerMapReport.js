@@ -37,14 +37,13 @@ export function parseCustomerMapAreaKey(key) {
   };
 }
 
-export function normalizeCustomerMapPoint(row) {
-  if (!row || !customerHasSavedGps(row)) return null;
-  const latitude = toFiniteNumber(row.latitude);
-  const longitude = toFiniteNumber(row.longitude);
-  if (latitude == null || longitude == null) return null;
-
+export function normalizeCustomerMapListRow(row) {
+  if (!row) return null;
   const city = customerMapCityLabel(row.city);
   const area = customerMapAreaLabel(row.area);
+  const hasGps = customerHasSavedGps(row);
+  const latitude = hasGps ? toFiniteNumber(row.latitude) : null;
+  const longitude = hasGps ? toFiniteNumber(row.longitude) : null;
   return {
     customer_code: String(row.customer_code || "").trim(),
     customer_name: String(row.customer_name || "").trim(),
@@ -52,10 +51,17 @@ export function normalizeCustomerMapPoint(row) {
     city,
     area,
     area_key: customerMapAreaKey(city, area),
+    has_gps: hasGps,
     latitude,
     longitude,
     is_active: row.is_active !== false,
   };
+}
+
+export function normalizeCustomerMapPoint(row) {
+  const listRow = normalizeCustomerMapListRow(row);
+  if (!listRow?.has_gps || listRow.latitude == null || listRow.longitude == null) return null;
+  return listRow;
 }
 
 export function filterCustomerMapRows(rows, {
@@ -164,17 +170,32 @@ export function buildCustomerMapCityRows(areaRows) {
   });
 }
 
+export function buildCustomerMapListRows(rows) {
+  return (rows || [])
+    .map((row) => normalizeCustomerMapListRow(row))
+    .filter((row) => row?.customer_code)
+    .sort((left, right) => {
+      const nameCompare = String(left.customer_name).localeCompare(String(right.customer_name));
+      if (nameCompare) return nameCompare;
+      return String(left.customer_code).localeCompare(String(right.customer_code));
+    });
+}
+
+export function customersForAreaKey(listRows, areaKey) {
+  const key = String(areaKey || "").trim();
+  if (!key) return [];
+  return (listRows || []).filter((row) => row.area_key === key);
+}
+
 export function buildCustomerMapReport(rows, filters = {}) {
   const filtered = filterCustomerMapRows(rows, filters);
   const areaRows = buildCustomerMapAreaRows(filtered);
   const cityRows = buildCustomerMapCityRows(areaRows);
-  const mapPoints = filtered
-    .map((row) => normalizeCustomerMapPoint(row))
-    .filter(Boolean)
-    .sort((left, right) => String(left.customer_name).localeCompare(String(right.customer_name)));
+  const customers = buildCustomerMapListRows(filtered);
+  const mapPoints = customers.filter((row) => row.has_gps && row.latitude != null && row.longitude != null);
 
   const withGps = mapPoints.length;
-  const total = filtered.length;
+  const total = customers.length;
 
   return {
     summary: {
@@ -186,9 +207,10 @@ export function buildCustomerMapReport(rows, filters = {}) {
     },
     cityRows,
     areaRows,
+    customers,
     mapPoints,
     salesmen: [...new Set(
-      filtered
+      customers
         .map((row) => String(row?.current_salesman_code || "").trim())
         .filter(Boolean),
     )].sort((left, right) => left.localeCompare(right)),
@@ -203,5 +225,18 @@ export function customerMapExportRows(areaRows) {
     Customers: Number(row.customers || 0),
     "With GPS": Number(row.with_gps || 0),
     "Without GPS": Number(row.without_gps || 0),
+  }));
+}
+
+export function customerMapCustomerExportRows(listRows) {
+  return (listRows || []).map((row) => ({
+    Code: row.customer_code,
+    Customer: row.customer_name,
+    Salesman: row.current_salesman_code || "",
+    City: row.city,
+    Area: row.area,
+    GPS: row.has_gps ? "Yes" : "No",
+    Latitude: row.has_gps ? row.latitude : "",
+    Longitude: row.has_gps ? row.longitude : "",
   }));
 }

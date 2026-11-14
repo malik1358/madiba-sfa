@@ -4,6 +4,8 @@
  */
 
 export const COVER_WINDOW_DAYS = 30;
+/** Longer lookback for unit rate when an item has EOD stock but no sales in the cover window. */
+export const COVER_RATE_LOOKBACK_DAYS = 180;
 export const COVER_BUCKET_KEYS = ["0-30", "31-60", "61-90", "91-120", ">120"];
 export const MAX_INVENTORY_COVER_ITEMS = 8000;
 
@@ -42,6 +44,71 @@ export function forwardCoverDays(stock, windowSales, windowDays = COVER_WINDOW_D
 
 export function emptyBucketAmounts() {
   return Object.fromEntries(COVER_BUCKET_KEYS.map((key) => [key, 0]));
+}
+
+/**
+ * Split cover-window sales (for DOH) from a longer lookback used only for unit rate.
+ * Rate prefers the cover window; falls back to lookback so slow movers still get SAR value.
+ */
+export function aggregateSalesForCover(saleRows = [], { coverFrom = "", coverTo = "" } = {}) {
+  const sales30dByItem = new Map();
+  const qtyCoverByItem = new Map();
+  const amountCoverByItem = new Map();
+  const amountLookbackByItem = new Map();
+  const qtyLookbackByItem = new Map();
+  let sales30d = 0;
+  const from = String(coverFrom || "").slice(0, 10);
+  const to = String(coverTo || "").slice(0, 10);
+
+  for (const row of saleRows || []) {
+    const code = String(row.item_code || row.itemCode || "").trim().toUpperCase();
+    const amount = Number(row.sales_amount);
+    const qty = Number(row.quantity);
+    const date = String(row.transaction_date || row.date || "").slice(0, 10);
+    if (!code || !Number.isFinite(amount)) continue;
+
+    const inCover = (!from || !date || date >= from) && (!to || !date || date <= to);
+    if (inCover) {
+      sales30d += amount;
+      sales30dByItem.set(code, (sales30dByItem.get(code) || 0) + amount);
+      if (Number.isFinite(qty) && qty > 0 && amount > 0) {
+        amountCoverByItem.set(code, (amountCoverByItem.get(code) || 0) + amount);
+        qtyCoverByItem.set(code, (qtyCoverByItem.get(code) || 0) + qty);
+      }
+    }
+    if (Number.isFinite(qty) && qty > 0 && amount > 0) {
+      amountLookbackByItem.set(code, (amountLookbackByItem.get(code) || 0) + amount);
+      qtyLookbackByItem.set(code, (qtyLookbackByItem.get(code) || 0) + qty);
+    }
+  }
+
+  const salesRateByItem = new Map();
+  const codes = new Set([
+    ...sales30dByItem.keys(),
+    ...amountLookbackByItem.keys(),
+  ]);
+  for (const code of codes) {
+    if (sales30dByItem.has(code)) {
+      sales30dByItem.set(code, Math.round(sales30dByItem.get(code)));
+    }
+    const coverQty = qtyCoverByItem.get(code) || 0;
+    const coverAmt = amountCoverByItem.get(code) || 0;
+    if (coverQty > 0 && coverAmt > 0) {
+      salesRateByItem.set(code, coverAmt / coverQty);
+      continue;
+    }
+    const lookQty = qtyLookbackByItem.get(code) || 0;
+    const lookAmt = amountLookbackByItem.get(code) || 0;
+    if (lookQty > 0 && lookAmt > 0) {
+      salesRateByItem.set(code, lookAmt / lookQty);
+    }
+  }
+
+  return {
+    sales30dByItem,
+    salesRateByItem,
+    sales30d: Math.round(sales30d),
+  };
 }
 
 /** Assign a cover-day value to AR-style bands: 0-30, 31-60, 61-90, 91-120, >120. */

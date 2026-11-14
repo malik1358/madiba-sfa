@@ -154,7 +154,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
 - `/api/bad-debt-reports` — Potential Bad Debts and Customers Transferred to Legal. Management-report roles only. Outstanding comes from the collection book; Funds Received is read from `collection_visits` for the last 10 KSA days. Last payment date/amount come from the latest positive Tally receipt in `receipt_register_dataset_v1` (same-day positive amounts summed). Last visit is the later of that customer's latest collection visit and `visit_report_latest`. Oldest invoice days uses the open invoice age. No migration.
-- `/api/collection-stale-overdue` — Stale Overdue Collections screen (`/management/collection-stale-overdue`). Same filters as `collection-stale-overdue-email` / `loadCollectionStaleOverdueReport`. Management-report roles only. No migration.
+- `/api/collection-stale-overdue` — Stale Overdue Collections screen (`/management/collection-stale-overdue`). Same filters as `collection-stale-overdue-email` / `loadCollectionStaleOverdueReport` (excludes legal-queue and Zia / Asrar Ahmed / Ahmed Hadia books). Management-report roles only. No migration.
 - `/api/admin/push-notifications`, `/api/tally-item-units`, `/api/stock-take`
 
 **Mobile / config / activity**

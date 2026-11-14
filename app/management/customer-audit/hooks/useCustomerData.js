@@ -8,6 +8,7 @@ import {
   fetchSalesScopeCached,
   subscribeCustomerHistoryCacheCleared,
 } from '../../../lib/mobileDataCache';
+import { resolveCustomerAuditSalesmanFilter } from '../lib/helpers';
 
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
@@ -44,6 +45,7 @@ export function useCustomerData({ setError, setMessage }) {
     if (queryText.length < 2) {
       setCustomers([]);
       setSalesmen([]);
+      setSelectedSalesman("ALL");
       setSearching(false);
       return undefined;
     }
@@ -72,8 +74,13 @@ export function useCustomerData({ setError, setMessage }) {
         if (cancelled) return;
 
         const rows = Array.isArray(payload.customers) ? payload.customers : [];
+        const nextSalesmen = [...new Set(rows.map((row) => row.current_salesman_code).filter(Boolean))].sort();
         setCustomers(rows);
-        setSalesmen([...new Set(rows.map((row) => row.current_salesman_code).filter(Boolean))].sort());
+        setSalesmen(nextSalesmen);
+        // Drop a stale salesman pick when it is no longer in this result set. The <select>
+        // otherwise keeps the old value while the browser shows "All Salesmen", and the
+        // client filter then hides every match ("0 matches" / empty state).
+        setSelectedSalesman((current) => resolveCustomerAuditSalesmanFilter(current, nextSalesmen));
       } catch (err) {
         if (!cancelled) setError(err.message || 'Unable to search customers.');
       } finally {

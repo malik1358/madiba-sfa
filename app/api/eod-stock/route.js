@@ -12,6 +12,7 @@ import {
   summarizeEodStock,
 } from "../../lib/eodStock.js";
 import { repairEodStockDatasetFromCityFiles } from "../../lib/eodStockServer.js";
+import { loadMasterUnitConvMap } from "../../lib/masterUnitQtyServer.js";
 import { canViewManagementReports, isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
@@ -118,6 +119,7 @@ export async function GET(request) {
     const summary = summarizeEodStock(dataset);
     const url = new URL(request.url);
     const summaryOnly = ["1", "true", "yes"].includes(String(url.searchParams.get("summary") || "").trim().toLowerCase());
+    const masterUnits = summaryOnly ? {} : await loadMasterUnitConvMap(admin).catch(() => ({}));
 
     return NextResponse.json({
       success: true,
@@ -129,7 +131,7 @@ export async function GET(request) {
         jeddah: eodCityLabel("jeddah"),
       },
       hasPrevious: Boolean(summary.previousStockDate),
-      rows: summaryOnly ? undefined : buildEodStockReportRows(dataset),
+      rows: summaryOnly ? undefined : buildEodStockReportRows(dataset, { masterUnits }),
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "Unable to load end-of-day stock." }, { status: 500 });

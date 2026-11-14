@@ -27,6 +27,7 @@ import {
   VALUE_DISCOUNT_SLABS,
 } from "../lib/regionalPricing";
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   filterItemsWithPositiveCountryEodStock,
   formatEodStockAvailableLabel,
@@ -780,8 +781,9 @@ export default function ProductCatalogue({
           const discounted = priced.rate < price - 0.000001;
           const disabled = !selectedCustomer || !hasPrice;
           const availableStock = countryEodStockQty(eodStock, item.item_code);
+          const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
-          const overStock = isEodStockQtyOverAvailable(qty, availableStock);
+          const overStock = isEodStockQtyOverAvailable(qty, availableDisplay);
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment
             ? (ar ? " · نقداً فقط" : " · Cash only")

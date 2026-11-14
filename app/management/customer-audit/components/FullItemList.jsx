@@ -6,6 +6,7 @@ import { buildOrderCatalog } from "../lib/orderHelpers";
 import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from "../../../lib/regionalPricing";
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
@@ -140,8 +141,9 @@ export default function FullItemList({
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     const availableStock = countryEodStockQty(eodStock, code);
+                    const availableDisplay = countryEodStockDisplayQty(eodStock, code);
                     const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, code);
-                    const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
+                    const overStock = isEodStockQtyOverAvailable(orderQty, availableDisplay);
                     return (
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>

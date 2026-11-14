@@ -3,6 +3,9 @@ export function normalizeExcelFilterValue(value) {
 }
 
 export function selectedExcelFilterValues(selected) {
+  if (selected && typeof selected === "object" && !Array.isArray(selected)) {
+    return selectedExcelFilterValues(selected.selected ?? selected.values ?? []);
+  }
   if (Array.isArray(selected)) {
     return selected.map(normalizeExcelFilterValue).filter(Boolean);
   }
@@ -10,19 +13,51 @@ export function selectedExcelFilterValues(selected) {
   return text ? [text] : [];
 }
 
+export function excelFilterExcludeContains(selected) {
+  if (selected && typeof selected === "object" && !Array.isArray(selected)) {
+    return String(selected.excludeContains ?? selected.exclude ?? "").trim();
+  }
+  return "";
+}
+
+export function normalizeExcelFilterState(selected) {
+  return {
+    selected: selectedExcelFilterValues(selected),
+    excludeContains: excelFilterExcludeContains(selected),
+  };
+}
+
+export function buildExcelFilterState({ selected = [], excludeContains = "" } = {}) {
+  return {
+    selected: selectedExcelFilterValues(selected),
+    excludeContains: String(excludeContains || "").trim(),
+  };
+}
+
+export function excelFilterStateIsActive(selected) {
+  const state = normalizeExcelFilterState(selected);
+  return state.selected.length > 0 || Boolean(state.excludeContains);
+}
+
 export function matchesExcelColumnFilter(value, selected) {
-  const chosen = selectedExcelFilterValues(selected);
-  if (chosen.length === 0) return true;
+  const state = normalizeExcelFilterState(selected);
   const text = normalizeExcelFilterValue(value) || "-";
-  const keys = new Set(chosen.map((item) => item.toLowerCase()));
+  if (state.excludeContains) {
+    if (text.toLowerCase().includes(state.excludeContains.toLowerCase())) return false;
+  }
+  if (state.selected.length === 0) return true;
+  const keys = new Set(state.selected.map((item) => item.toLowerCase()));
   return keys.has(text.toLowerCase());
 }
 
 export function excelFilterButtonLabel(selected, allLabel = "All") {
-  const chosen = selectedExcelFilterValues(selected);
-  if (chosen.length === 0) return allLabel;
-  if (chosen.length === 1) return chosen[0];
-  return `${chosen.length} selected`;
+  const state = normalizeExcelFilterState(selected);
+  const parts = [];
+  if (state.selected.length === 1) parts.push(state.selected[0]);
+  else if (state.selected.length > 1) parts.push(`${state.selected.length} selected`);
+  if (state.excludeContains) parts.push(`≠ ${state.excludeContains}`);
+  if (!parts.length) return allLabel;
+  return parts.join(" · ");
 }
 
 export function filterExcelColumnOptions(options, query) {
@@ -34,23 +69,40 @@ export function filterExcelColumnOptions(options, query) {
 
 export function toggleExcelFilterValue(selected, value) {
   const text = normalizeExcelFilterValue(value);
-  if (!text) return selectedExcelFilterValues(selected);
-  const current = selectedExcelFilterValues(selected);
-  const exists = current.some((item) => item.toLowerCase() === text.toLowerCase());
-  return exists
-    ? current.filter((item) => item.toLowerCase() !== text.toLowerCase())
-    : [...current, text];
+  const state = normalizeExcelFilterState(selected);
+  if (!text) return buildExcelFilterState(state);
+  const exists = state.selected.some((item) => item.toLowerCase() === text.toLowerCase());
+  const nextSelected = exists
+    ? state.selected.filter((item) => item.toLowerCase() !== text.toLowerCase())
+    : [...state.selected, text];
+  return buildExcelFilterState({
+    selected: nextSelected,
+    excludeContains: state.excludeContains,
+  });
 }
 
 export function pruneExcelFilterSelection(selected, availableOptions) {
-  const chosen = selectedExcelFilterValues(selected);
-  if (chosen.length === 0) return [];
+  const state = normalizeExcelFilterState(selected);
+  if (!excelFilterStateIsActive(state)) {
+    return buildExcelFilterState();
+  }
   const availableKeys = new Set(
     (Array.isArray(availableOptions) ? availableOptions : [])
       .map((item) => normalizeExcelFilterValue(item).toLowerCase())
       .filter(Boolean),
   );
-  return chosen.filter((item) => availableKeys.has(item.toLowerCase()));
+  return buildExcelFilterState({
+    selected: state.selected.filter((item) => availableKeys.has(item.toLowerCase())),
+    excludeContains: state.excludeContains,
+  });
+}
+
+export function excelFilterStatesEqual(left, right) {
+  const a = normalizeExcelFilterState(left);
+  const b = normalizeExcelFilterState(right);
+  if (a.excludeContains.toLowerCase() !== b.excludeContains.toLowerCase()) return false;
+  if (a.selected.length !== b.selected.length) return false;
+  return a.selected.every((item, index) => item === b.selected[index]);
 }
 
 export function rowMatchesOtherExcelFilters(values, filters, currentKey, filterKeys, matches) {
@@ -60,22 +112,36 @@ export function rowMatchesOtherExcelFilters(values, filters, currentKey, filterK
 }
 
 export function toggleVisibleExcelFilterValues(selected, visibleOptions) {
-  const current = selectedExcelFilterValues(selected);
+  const state = normalizeExcelFilterState(selected);
   const visible = (Array.isArray(visibleOptions) ? visibleOptions : [])
     .map(normalizeExcelFilterValue)
     .filter(Boolean);
-  if (visible.length === 0) return current;
+  if (visible.length === 0) return buildExcelFilterState(state);
 
-  const currentKeys = new Set(current.map((item) => item.toLowerCase()));
+  const currentKeys = new Set(state.selected.map((item) => item.toLowerCase()));
   const allVisibleSelected = visible.every((item) => currentKeys.has(item.toLowerCase()));
   if (allVisibleSelected) {
     const visibleKeys = new Set(visible.map((item) => item.toLowerCase()));
-    return current.filter((item) => !visibleKeys.has(item.toLowerCase()));
+    return buildExcelFilterState({
+      selected: state.selected.filter((item) => !visibleKeys.has(item.toLowerCase())),
+      excludeContains: state.excludeContains,
+    });
   }
 
-  const next = [...current];
+  const next = [...state.selected];
   visible.forEach((item) => {
     if (!currentKeys.has(item.toLowerCase())) next.push(item);
   });
-  return next;
+  return buildExcelFilterState({
+    selected: next,
+    excludeContains: state.excludeContains,
+  });
+}
+
+export function setExcelFilterExcludeContains(selected, excludeContains) {
+  const state = normalizeExcelFilterState(selected);
+  return buildExcelFilterState({
+    selected: state.selected,
+    excludeContains,
+  });
 }

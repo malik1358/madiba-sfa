@@ -4587,6 +4587,41 @@ th:has(.moduleTableColumnFilterInput) {
   text-transform: none;
 }
 
+.moduleExcelColumnFilterExclude {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #d5e1e4;
+}
+
+.moduleExcelColumnFilterExcludeLabel {
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.moduleExcelColumnFilterExcludeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.moduleExcelColumnFilterExcludeInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: none;
+}
+
+.moduleExcelColumnFilterExcludeRow .moduleInlineButton {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .moduleExcelColumnFilterList {
   overflow: auto;
   min-height: 0;

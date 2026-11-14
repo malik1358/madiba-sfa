@@ -1,4 +1,5 @@
 import {
+  excelFilterStatesEqual,
   matchesExcelColumnFilter,
   normalizeExcelFilterValue,
   pruneExcelFilterSelection,
@@ -66,8 +67,7 @@ export function pruneExcelFilters(filters = {}, options = {}) {
   let changed = false;
   Object.keys(options || {}).forEach((key) => {
     const pruned = pruneExcelFilterSelection(next[key], options[key]);
-    const current = Array.isArray(next[key]) ? next[key] : [];
-    if (pruned.length !== current.length || pruned.some((item, index) => item !== current[index])) {
+    if (!excelFilterStatesEqual(next[key], pruned)) {
       next[key] = pruned;
       changed = true;
     }

@@ -50,6 +50,7 @@ export const MODULES = {
   missingCataloguePhotos: { href: "/management/missing-catalogue-photos", label: "Missing Catalogue Photos" },
   itemMasterAnalysis: { href: "/management/item-master-analysis", label: "Item Master Analysis" },
   customerGpsHistory: { href: "/management/customer-gps-history", label: "Customer GPS History" },
+  customerMap: { href: "/management/customer-map", label: "Customer Map" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
@@ -122,6 +123,7 @@ export const NAV_GROUPS = [
       "missingCataloguePhotos",
       "itemMasterAnalysis",
       "customerGpsHistory",
+      "customerMap",
       "gpsMap",
     ],
   },
@@ -280,6 +282,7 @@ export function buildModuleAccess(context = {}) {
       missingCataloguePhotos: hasManagementReportAccess,
       itemMasterAnalysis: hasManagementReportAccess,
       customerGpsHistory: isAdmin || isManager,
+      customerMap: hasManagementReportAccess,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
       salesmanVisitPlan: isAdmin || (
         isSalesmanVisitPlanSalesmanAccessApproved()
@@ -505,6 +508,7 @@ export const MODULE_LABELS = {
   missingCataloguePhotos: { en: "Missing Catalogue Photos", ar: "صور الكتالوج الناقصة" },
   itemMasterAnalysis: { en: "Item Master Analysis", ar: "تحليل أصناف المخزون" },
   customerGpsHistory: { en: "Customer GPS History", ar: "سجل مواقع العملاء" },
+  customerMap: { en: "Customer Map", ar: "خريطة العملاء" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },

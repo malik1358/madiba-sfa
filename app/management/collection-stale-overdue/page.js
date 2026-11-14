@@ -11,12 +11,13 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { excelFilterCellText } from "../../lib/biExcelFilters";
-import {
-  COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS,
-  COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
-  COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS,
-} from "../../lib/collectionStaleOverdueEmail.js";
 import { getSupabaseClient } from "../../lib/supabase";
+
+// Keep in sync with COLLECTION_STALE_OVERDUE_* in collectionStaleOverdueEmail.js
+// (do not import that module here — it pulls nodemailer into the client bundle).
+const RECEIPT_LOOKBACK_DAYS = 8;
+const RECENT_COLLECTION_WORKDAYS = 3;
+const MIN_VISIT_AGE_DAYS = 7;
 
 const TEXT = {
   title: { en: "Stale Overdue Collections", ar: "تحصيلات متأخرة راكدة" },
@@ -25,8 +26,8 @@ const TEXT = {
     ar: "عملاء مستحقون يحتاجون متابعة ائتمان: تقادم تجاوز الحد، بلا إيصال حديث، بلا زيارة تحصيل قريبة، وزيارة بدون طلب قديمة.",
   },
   hint: {
-    en: `Same rules as the daily email. Over 60 days (Parvez & Junaid: over 30), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, no near collection visit in the last ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} completed working days, last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown but do not count as fresh. Legal transfers stay listed and are marked.`,
-    ar: `نفس قواعد البريد اليومي. أكثر من 60 يوماً (بارفيز وجنيد: أكثر من 30)، بلا إيصال خلال آخر ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} أيام، بلا زيارة تحصيل قريبة خلال آخر ${COLLECTION_STALE_OVERDUE_RECENT_COLLECTION_WORKDAYS} أيام عمل مكتملة، وآخر زيارة قريبة بدون طلب أقدم من ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} أيام (أو لم تُزر). زيارات FAR تظهر ولا تُحسب جديدة. المحولون للقانوني يبقون ويُعلَّمون.`,
+    en: `Same rules as the daily email. Over 60 days (Parvez & Junaid: over 30), no receipt in the last ${RECEIPT_LOOKBACK_DAYS} days, no near collection visit in the last ${RECENT_COLLECTION_WORKDAYS} completed working days, last near visit without order older than ${MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown but do not count as fresh. Legal transfers stay listed and are marked.`,
+    ar: `نفس قواعد البريد اليومي. أكثر من 60 يوماً (بارفيز وجنيد: أكثر من 30)، بلا إيصال خلال آخر ${RECEIPT_LOOKBACK_DAYS} أيام، بلا زيارة تحصيل قريبة خلال آخر ${RECENT_COLLECTION_WORKDAYS} أيام عمل مكتملة، وآخر زيارة قريبة بدون طلب أقدم من ${MIN_VISIT_AGE_DAYS} أيام (أو لم تُزر). زيارات FAR تظهر ولا تُحسب جديدة. المحولون للقانوني يبقون ويُعلَّمون.`,
   },
   back: { en: "← Management", ar: "← الإدارة" },
   paymentCollections: { en: "Payment Collections", ar: "التحصيلات" },
@@ -42,8 +43,8 @@ const TEXT = {
   aging: { en: "Aging bucket", ar: "شريحة التقادم" },
   maxOverdue: { en: "Max overdue days", ar: "أقصى أيام تأخير" },
   received: {
-    en: `Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d`,
-    ar: `مستلم ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}ي`,
+    en: `Recv ${RECEIPT_LOOKBACK_DAYS}d`,
+    ar: `مستلم ${RECEIPT_LOOKBACK_DAYS}ي`,
   },
   lastCollection: { en: "Last collection", ar: "آخر تحصيل" },
   lastVisitWo: { en: "Last visit w/o order", ar: "آخر زيارة بدون طلب" },

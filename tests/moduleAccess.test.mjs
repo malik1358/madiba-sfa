@@ -286,6 +286,19 @@ test("potential bad debts and legal transfers are management reports", () => {
   assert.equal(reports.items.some((item) => item.moduleKey === "legalTransfers"), true);
 });
 
+test("stale overdue collections is a management report", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("collectionStaleOverdue"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("collectionStaleOverdue"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("collectionStaleOverdue"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("collectionStaleOverdue"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("collectionStaleOverdue"), false);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01", collectionOnlyMetadata: true }).canAccess("collectionStaleOverdue"), false);
+  assert.equal(moduleLabelForPath("/management/collection-stale-overdue", "en"), "Stale Overdue Collections");
+  assert.equal(localizedModuleLabel("collectionStaleOverdue", "ar"), "تحصيلات متأخرة راكدة");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "collectionStaleOverdue"), true);
+});
+
 test("missing catalogue photos is a management report", () => {
   assert.equal(buildModuleAccess({ role: "admin" }).canAccess("missingCataloguePhotos"), true);
   assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("missingCataloguePhotos"), true);
@@ -335,6 +348,7 @@ test("invoice makers can view every management report without setup access", () 
       "workingHours",
       "monthlyAttendance",
       "outstandingNoGps",
+      "collectionStaleOverdue",
       "potentialBadDebts",
       "legalTransfers",
       "missingCataloguePhotos",

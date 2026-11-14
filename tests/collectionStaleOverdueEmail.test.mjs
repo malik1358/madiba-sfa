@@ -11,8 +11,10 @@ import {
   groupCollectionStaleOverdueBySalesman,
   isCollectionStaleOverdueRow,
   isCollectionVisitWithinWorkingDays,
+  isExcludedStaleOverdueSalesman,
   isSoftAgingSalesman,
   selectCollectionRowsForStaleOverdueEmail,
+  shouldIncludeCollectionStaleOverdueCandidate,
   resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
@@ -723,40 +725,75 @@ test("resolveCollectionStaleOverdueRouteTrigger keeps manual reruns manual", () 
   assert.equal(resolveCollectionStaleOverdueRouteTrigger({ trigger: "cron", date: "2026-09-26" }), "cron");
 });
 
-test("selectCollectionRowsForStaleOverdueEmail keeps overdue legal customers", () => {
-  const due = { customer_code: "D1", due_invoice_count: 1, total_due_amount: 100 };
+test("selectCollectionRowsForStaleOverdueEmail drops legal queue and excluded salesmen", () => {
+  const due = { customer_code: "D1", due_invoice_count: 1, total_due_amount: 100, salesman_name: "Parvez" };
   const legalDue = {
     customer_code: "L1",
     customer_name: "Legal Shop",
     due_invoice_count: 2,
     total_due_amount: 400,
+    salesman_name: "Parvez",
     legal_transfer: { is_transferred: true },
   };
-  const legalNotDue = {
-    customer_code: "L2",
-    due_invoice_count: 0,
-    total_due_amount: 0,
-    legal_transfer: { is_transferred: true },
+  const ziaDue = {
+    customer_code: "Z1",
+    due_invoice_count: 1,
+    total_due_amount: 200,
+    salesman_name: "Zia",
+    salesman_code: "ZIA",
+  };
+  const asrarDue = {
+    customer_code: "A1",
+    due_invoice_count: 1,
+    total_due_amount: 300,
+    salesman_name: "Asrar Ahmed",
+  };
+  const hadiaDue = {
+    customer_code: "H1",
+    due_invoice_count: 1,
+    total_due_amount: 250,
+    salesman_name: "Ahmad Hadiya",
+    salesman_code: "AHMED HADIA",
   };
   const selected = selectCollectionRowsForStaleOverdueEmail({
-    dueCustomers: [due, { ...legalDue, customer_code: "L1" }],
-    legalCustomers: [legalDue, legalNotDue],
+    dueCustomers: [due, legalDue, ziaDue, asrarDue, hadiaDue],
+    legalCustomers: [legalDue],
   });
-  assert.deepEqual(selected.map((row) => row.customer_code), ["D1", "L1"]);
+  assert.deepEqual(selected.map((row) => row.customer_code), ["D1"]);
 
-  const emailRow = buildCollectionStaleOverdueEmailRow(legalDue);
-  assert.equal(emailRow.isLegal, true);
-  assert.match(emailRow.customer, /\(Legal\)$/);
-  assert.equal(emailRow.remarks, "-");
+  assert.equal(shouldIncludeCollectionStaleOverdueCandidate(legalDue), false);
+  assert.equal(isExcludedStaleOverdueSalesman(ziaDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman(asrarDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman(hadiaDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman({ salesman_name: "Ahmed Nabil" }), false);
 
-  const section = buildCollectionStaleOverdueSalesmanSection({
-    salesmanName: "Parvez",
-    sourceRows: [legalDue],
-    todayKey: "2026-09-26",
-    agingThresholdDays: 30,
+  const filtered = filterCollectionStaleOverdueRows([
+    {
+      ...due,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      ...ziaDue,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      ...legalDue,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+  ], { todayKey: "2026-09-26" });
+  assert.deepEqual(filtered.map((row) => row.customer_code), ["D1"]);
+
+  const email = buildCollectionStaleOverdueEmail({
+    date: "2026-09-26",
+    groups: [],
   });
-  assert.match(section.html, /Legal Shop \(Legal\)/);
-  assert.match(section.text, /Legal Shop \(Legal\)/);
+  assert.match(email.html, /Legal-queue customers and books of Zia, Asrar Ahmed, and Ahmed Hadia are excluded/);
 });
 
 test("stale overdue email row and table include latest collection remarks", () => {

@@ -4,6 +4,7 @@ import {
   buildItemsSoldAtLossReport,
   normalizeItemsSoldAtLossDate,
 } from "./itemsSoldAtLoss.js";
+import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
 
 const PAGE_SIZE = 1000;
 
@@ -43,12 +44,15 @@ export async function loadItemsSoldAtLossReport(admin, options = {}) {
   }
 
   try {
-    const sourceRows = await fetchLossPages(admin, {
-      dateFrom,
-      dateTo,
-      select: ITEMS_SOLD_AT_LOSS_SELECT,
-    });
-    return buildItemsSoldAtLossReport({ sourceRows, dateFrom, dateTo });
+    const [sourceRows, masterUnits] = await Promise.all([
+      fetchLossPages(admin, {
+        dateFrom,
+        dateTo,
+        select: ITEMS_SOLD_AT_LOSS_SELECT,
+      }),
+      loadMasterUnitConvMap(admin),
+    ]);
+    return buildItemsSoldAtLossReport({ sourceRows, dateFrom, dateTo, masterUnits });
   } catch (error) {
     if (isMissingSchemaColumn(error)) {
       return {

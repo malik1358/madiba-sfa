@@ -1,3 +1,5 @@
+import { applyMasterUnitQtyFields } from "./masterUnitQty.js";
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 366;
 
@@ -130,4 +132,16 @@ export function summarizeSalesInvoices(invoices) {
     totalAmount: rows.reduce((sum, row) => sum + Number(row?.total_amount || 0), 0),
     customerCount: customers.size,
   };
+}
+
+/** Convert invoice line quantities to master units for display. */
+export function applyMasterUnitsToSalesInvoices(invoices = [], masterUnits = null) {
+  if (!masterUnits || typeof masterUnits !== "object") return invoices || [];
+  return (invoices || []).map((invoice) => ({
+    ...invoice,
+    items: (invoice.items || []).map((item) => applyMasterUnitQtyFields(item, masterUnits, {
+      itemCodeKey: "item_code",
+      fields: ["quantity"],
+    })),
+  }));
 }

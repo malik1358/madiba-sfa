@@ -8,6 +8,7 @@ import {
   applySalesmanSpellingAliasesToUpper,
   canonicalizeSalesmanDisplayText,
 } from "./salesmanSpellingAliases.js";
+import { applyMasterUnitQtyFields } from "./masterUnitQty.js";
 
 export const ITEMS_SOLD_AT_LOSS_SELECT = [
   "transaction_date",
@@ -143,8 +144,14 @@ export function buildItemsSoldAtLossReport({
   sourceRows = [],
   dateFrom = "",
   dateTo = "",
+  masterUnits = null,
 } = {}) {
-  const rows = buildItemsSoldAtLossRows(sourceRows);
+  let rows = buildItemsSoldAtLossRows(sourceRows);
+  if (masterUnits && typeof masterUnits === "object") {
+    rows = rows.map((row) => applyMasterUnitQtyFields(row, masterUnits, {
+      fields: ["quantity"],
+    }));
+  }
   return {
     dateFrom: normalizeItemsSoldAtLossDate(dateFrom),
     dateTo: normalizeItemsSoldAtLossDate(dateTo),

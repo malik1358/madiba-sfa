@@ -9,6 +9,7 @@ import { monthKeyFromDateKey, salesDateKey } from "./categoryGrowth.js";
 import { normalizeCategoryName, UNCLASSIFIED_CATEGORY } from "./categoryIdentity.js";
 import { resolveCanonicalItemCode } from "./itemCodeAliases.js";
 import { preferItemDisplayName, normalizeReportItemCode, isDoNotUseItemName } from "./itemReportIdentity.js";
+import { applyMasterUnitQtyFields } from "./masterUnitQty.js";
 import { getKsaDateString } from "./workdayActivity.js";
 import { grossProfitPercent } from "./madibaBrandGp.js";
 
@@ -512,6 +513,7 @@ export function buildExpectedStockedSalesReport(rows = [], {
   minGpPercent = EXPECTED_STOCKED_SALES_MIN_GP_PERCENT,
   maxSeasonMonths = EXPECTED_STOCKED_SALES_MAX_SEASON_MONTHS,
   seasonLift = EXPECTED_STOCKED_SALES_SEASON_LIFT,
+  masterUnits = null,
 } = {}) {
   const incompleteMonth = currentIncompleteMonthKey(now);
   const { byItem, firstDate, lastDate, sourceRowCount } = aggregateExpectedStockedSalesLines(rows, {
@@ -546,7 +548,7 @@ export function buildExpectedStockedSalesReport(rows = [], {
     minGpPercent: EXPECTED_STOCKED_SALES_PROFITABLE_GP_PERCENT,
   });
 
-  return {
+  const report = {
     asOfDate: getKsaDateString(now),
     incompleteMonth,
     span: { firstDate, lastDate },
@@ -565,5 +567,20 @@ export function buildExpectedStockedSalesReport(rows = [], {
     profitableRows: profitable.rows,
     profitableCategoryRows: profitable.categoryRows,
     profitableSummary: profitable.summary,
+  };
+  return applyMasterUnitsToExpectedStockedSalesReport(report, masterUnits);
+}
+
+/** Convert expectedQty on item rows to master units when conversion map is provided. */
+export function applyMasterUnitsToExpectedStockedSalesReport(report, masterUnits = null) {
+  if (!report || typeof report !== "object") return report;
+  if (!masterUnits || typeof masterUnits !== "object") return report;
+  const convertRows = (rows = []) => (rows || []).map((row) => applyMasterUnitQtyFields(row, masterUnits, {
+    fields: ["expectedQty"],
+  }));
+  return {
+    ...report,
+    rows: convertRows(report.rows),
+    profitableRows: convertRows(report.profitableRows),
   };
 }

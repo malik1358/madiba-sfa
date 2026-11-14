@@ -71,11 +71,13 @@ function formatAmount(value) {
   });
 }
 
-function formatQty(value) {
+function formatQty(value, unit = "") {
   if (value == null || value === "") return "—";
-  return Number(value || 0).toLocaleString("en-SA", {
-    maximumFractionDigits: 3,
+  const qtyText = Number(value || 0).toLocaleString("en-SA", {
+    maximumFractionDigits: 0,
   });
+  const u = String(unit || "").trim();
+  return u ? `${qtyText} ${u}` : qtyText;
 }
 
 function formatPercent(value) {
@@ -112,7 +114,7 @@ function itemCellValue(row, key) {
   if (key === "peakMonth") return monthLabel(row.peakMonth);
   if (key === "peakSales") return formatAmount(row.peakSales);
   if (key === "expectedMonth") return monthLabel(row.expectedMonth);
-  if (key === "expectedQty") return formatQty(row.expectedQty);
+  if (key === "expectedQty") return formatQty(row.expectedQty, row.qtyUnit);
   if (key === "expectedSales") return formatAmount(row.expectedSales);
   if (key === "expectedProfit") return formatAmount(row.expectedProfit);
   if (key === "expectedGpPercent") return formatPercent(row.expectedGpPercent);
@@ -368,7 +370,7 @@ export default function ExpectedStockedSalesPage() {
                 <td>{monthLabel(row.peakMonth)}</td>
                 <td>{formatAmount(row.peakSales)}</td>
                 <td>{monthLabel(row.expectedMonth)}</td>
-                <td>{formatQty(row.expectedQty)}</td>
+                <td>{formatQty(row.expectedQty, row.qtyUnit)}</td>
                 <td>{formatAmount(row.expectedSales)}</td>
                 <td>{formatAmount(row.expectedProfit)}</td>
                 <td className="moduleBiTotalCol">{formatPercent(row.expectedGpPercent)}</td>

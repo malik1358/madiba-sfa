@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildMasterUnitConvMap,
+  formatItemQtyMasterDisplay,
   formatMasterStockQty,
+  itemQtyMasterNumber,
   mergePackingMasterUnitConvMap,
   parsePackingMasterConv,
   toMasterStockQty,
@@ -77,6 +79,27 @@ test("parsePackingMasterConv reads CTN OF N Pack OF M PC", () => {
   assert.equal(merged.A000057.conv, 5);
   assert.equal(merged.A006789.conv, 72);
   assert.equal(merged.A006789.masterUom, "Ctn");
+});
+
+test("formatItemQtyMasterDisplay converts sales qty and keeps sign", () => {
+  const map = { A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 } };
+  assert.equal(formatItemQtyMasterDisplay(3672, "A006789", map), "51 Ctn");
+  assert.equal(formatItemQtyMasterDisplay(-144, "A006789", map), "-2 Ctn");
+  assert.equal(itemQtyMasterNumber(3672, "A006789", map), 51);
+  assert.equal(formatItemQtyMasterDisplay(10, "MISSING", map), "10");
+});
+
+test("applyMasterUnitQtyFields converts named qty columns", async () => {
+  const { applyMasterUnitQtyFields } = await import("../app/lib/masterUnitQty.js");
+  const map = { A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 } };
+  const row = applyMasterUnitQtyFields(
+    { itemCode: "A006789", quantity: 720, expectedQty: 144 },
+    map,
+    { fields: ["quantity", "expectedQty"] },
+  );
+  assert.equal(row.quantity, 10);
+  assert.equal(row.expectedQty, 2);
+  assert.equal(row.qtyUnit, "Ctn");
 });
 
 test("Available label shows master unit when conversion map is present", () => {

@@ -351,7 +351,9 @@ export default function MySalesInvoicesPage() {
                                           <td>{item.item_code || "-"}</td>
                                           <td>{item.item_name || "-"}</td>
                                           <td>{item.category || "-"}</td>
-                                          <td>{Number(item.quantity || 0).toLocaleString("en-US")}</td>
+                                          <td>{item.qtyUnit
+                                            ? `${Number(item.quantity || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ${item.qtyUnit}`
+                                            : Number(item.quantity || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                                           <td>{formatAmount(item.rate)}</td>
                                           <td>{formatAmount(item.sales_amount)}</td>
                                         </tr>

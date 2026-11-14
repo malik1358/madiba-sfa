@@ -13,6 +13,7 @@ import {
 } from "../../lib/eodStock.js";
 import { repairEodStockDatasetFromCityFiles } from "../../lib/eodStockServer.js";
 import { loadMasterUnitConvMap } from "../../lib/masterUnitQtyServer.js";
+import { loadCatalogueSheetPacking } from "../../lib/productCatalogueServer.js";
 import { canViewManagementReports, isCollectionOnlyAccess } from "../../lib/moduleAccess.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
@@ -119,7 +120,9 @@ export async function GET(request) {
     const summary = summarizeEodStock(dataset);
     const url = new URL(request.url);
     const summaryOnly = ["1", "true", "yes"].includes(String(url.searchParams.get("summary") || "").trim().toLowerCase());
-    const masterUnits = summaryOnly ? {} : await loadMasterUnitConvMap(admin).catch(() => ({}));
+    const masterUnits = summaryOnly
+      ? {}
+      : await loadMasterUnitConvMap(admin, { loadSheetPacking: loadCatalogueSheetPacking }).catch(() => ({}));
 
     return NextResponse.json({
       success: true,

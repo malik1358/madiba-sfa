@@ -7,6 +7,7 @@ import {
   resolveInterCitySalesWindow,
 } from "./interCityStockTransfer.js";
 import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
+import { loadCatalogueSheetPacking } from "./productCatalogueServer.js";
 
 const PAGE_SIZE = 1000;
 const CODE_CHUNK = 200;
@@ -102,6 +103,8 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
     fileName: dataset?.fileName || "",
     citiesPresent: Array.isArray(dataset?.citiesPresent) ? dataset.citiesPresent : [],
   });
-  const masterUnits = await loadMasterUnitConvMap(admin).catch(() => ({}));
+  const masterUnits = await loadMasterUnitConvMap(admin, {
+    loadSheetPacking: loadCatalogueSheetPacking,
+  }).catch(() => ({}));
   return applyMasterUnitsToInterCityReport(report, masterUnits);
 }

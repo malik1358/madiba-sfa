@@ -1,4 +1,9 @@
 import { normalizeImportHeader, parseImportNumber } from "./salesImportHeaders.js";
+import {
+  formatMasterStockQty,
+  lookupMasterUnitConv,
+  resolveEodStockMasterDisplay,
+} from "./masterUnitQty.js";
 
 export const EOD_STOCK_DATASET_KEY = "eod_stock_citywise_v1";
 export const EOD_STOCK_CITIES = ["riyadh", "dammam", "jeddah"];
@@ -825,27 +830,38 @@ export function summarizeEodStock(dataset) {
   };
 }
 
-export function buildEodStockReportRows(dataset) {
+export function buildEodStockReportRows(dataset, { masterUnits = null } = {}) {
   const source = dataset && typeof dataset === "object" ? dataset : {};
   const hasPrevious = Boolean(source.previousStockDate);
   const previous = new Map((hasPrevious ? source.previousRows || [] : []).map((row) => [row.itemCode, row]));
   const current = new Map((source.rows || []).map((row) => [row.itemCode, row]));
   const codes = new Set([...current.keys(), ...(hasPrevious ? previous.keys() : [])]);
+  const masterMap = masterUnits && typeof masterUnits === "object" ? masterUnits : {};
   const rows = [];
 
   codes.forEach((code) => {
     const row = current.get(code);
     const prior = previous.get(code);
+    const stockUnit = row?.unit || prior?.unit || "";
+    const master = masterMap[String(code || "").trim().toUpperCase()] || null;
+    const convert = (raw) => resolveEodStockMasterDisplay(
+      { units: { [code]: stockUnit }, masterUnits: masterMap },
+      code,
+      raw,
+    );
     const entry = {
       itemCode: code,
       itemName: row?.itemName || prior?.itemName || code,
-      unit: row?.unit || prior?.unit || "",
+      unit: master?.masterUom || stockUnit,
+      stockUnit,
       total: 0,
       totalPrev: 0,
     };
     EOD_STOCK_CITIES.forEach((city) => {
-      const qty = roundEodQty(row?.cities?.[city]?.qty || 0);
-      const prev = roundEodQty(prior?.cities?.[city]?.qty || 0);
+      const qtyRaw = roundEodQty(row?.cities?.[city]?.qty || 0);
+      const prevRaw = roundEodQty(prior?.cities?.[city]?.qty || 0);
+      const qty = convert(qtyRaw).qty;
+      const prev = convert(prevRaw).qty;
       entry[city] = qty;
       entry[`${city}Prev`] = prev;
       entry[`${city}Value`] = roundEodQty(row?.cities?.[city]?.value || 0);
@@ -875,8 +891,38 @@ function emptyCityQtyMaps() {
   };
 }
 
+function normalizeMasterUnitsMap(value) {
+  if (!value || typeof value !== "object") return {};
+  const out = {};
+  Object.entries(value).forEach(([rawCode, entry]) => {
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code || !entry || typeof entry !== "object") return;
+    const masterUom = String(entry.masterUom || entry.tally_alt_uom || "").trim();
+    const conv = Number(entry.conv ?? entry.tally_master_unit_conv);
+    if (!masterUom || !Number.isFinite(conv) || !(conv > 0)) return;
+    out[code] = {
+      masterUom,
+      baseUom: String(entry.baseUom || entry.tally_base_uom || "").trim(),
+      conv,
+    };
+  });
+  return out;
+}
+
+function normalizeUnitsMap(value) {
+  if (!value || typeof value !== "object") return {};
+  const out = {};
+  Object.entries(value).forEach(([rawCode, rawUnit]) => {
+    const code = String(rawCode || "").trim().toUpperCase();
+    const unit = String(rawUnit || "").trim();
+    if (!code || !unit) return;
+    out[code] = unit;
+  });
+  return out;
+}
+
 /** Compact city→item→qty map for pricing cache / offline order hints. Keeps the last upload until a newer file replaces it. */
-export function buildEodStockAvailability(dataset) {
+export function buildEodStockAvailability(dataset, { masterUnits = null } = {}) {
   const source = dataset && typeof dataset === "object" ? dataset : null;
   const stockDate = String(source?.stockDate || "").trim();
   const uploadedAt = String(source?.uploadedAt || "").trim();
@@ -885,14 +931,19 @@ export function buildEodStockAvailability(dataset) {
       stockDate: "",
       uploadedAt: "",
       byCity: emptyCityQtyMaps(),
+      units: {},
+      masterUnits: normalizeMasterUnitsMap(masterUnits),
       active: false,
     };
   }
 
   const byCity = emptyCityQtyMaps();
+  const units = {};
   source.rows.forEach((row) => {
     const code = String(row?.itemCode || row?.item_code || "").trim().toUpperCase();
     if (!code) return;
+    const unit = String(row?.unit || "").trim();
+    if (unit && !units[code]) units[code] = unit;
     EOD_STOCK_CITIES.forEach((city) => {
       const qty = Math.max(0, roundEodQty(row?.cities?.[city]?.qty || 0));
       if (!qty) return;
@@ -904,20 +955,43 @@ export function buildEodStockAvailability(dataset) {
     stockDate,
     uploadedAt,
     byCity,
+    units,
+    masterUnits: normalizeMasterUnitsMap(masterUnits),
     active: true,
   };
 }
 
 export function normalizeEodStockAvailability(value) {
   if (!value || typeof value !== "object") {
-    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
+    return {
+      stockDate: "",
+      uploadedAt: "",
+      byCity: emptyCityQtyMaps(),
+      units: {},
+      masterUnits: {},
+      active: false,
+    };
   }
   if (value.active === false) {
-    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
+    return {
+      stockDate: "",
+      uploadedAt: "",
+      byCity: emptyCityQtyMaps(),
+      units: {},
+      masterUnits: normalizeMasterUnitsMap(value.masterUnits),
+      active: false,
+    };
   }
   const stockDate = String(value.stockDate || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate)) {
-    return { stockDate: "", uploadedAt: "", byCity: emptyCityQtyMaps(), active: false };
+    return {
+      stockDate: "",
+      uploadedAt: "",
+      byCity: emptyCityQtyMaps(),
+      units: {},
+      masterUnits: {},
+      active: false,
+    };
   }
   const byCity = emptyCityQtyMaps();
   EOD_STOCK_CITIES.forEach((city) => {
@@ -933,8 +1007,20 @@ export function normalizeEodStockAvailability(value) {
     stockDate,
     uploadedAt: String(value.uploadedAt || "").trim(),
     byCity,
+    units: normalizeUnitsMap(value.units),
+    masterUnits: normalizeMasterUnitsMap(value.masterUnits),
     active: true,
   };
+}
+
+/**
+ * Countrywide available qty for display / over-stock checks.
+ * Converts to master units when Master UOM + conversion are available and stock is not already master.
+ */
+export function countryEodStockDisplayQty(availability, itemCode) {
+  const raw = countryEodStockQty(availability, itemCode);
+  if (raw == null) return null;
+  return resolveEodStockMasterDisplay(availability, itemCode, raw).qty;
 }
 
 /** Prefer upload time; otherwise start of the stock date in Asia/Riyadh. */
@@ -1028,7 +1114,7 @@ const EOD_CITY_SHORT = {
 };
 
 /**
- * Compact city stock fragments, e.g. "R:30 D:6 J:0".
+ * Compact city stock fragments, e.g. "R:30 D:6 J:0" (master units when conversion applies).
  * Empty when no EOD snapshot is loaded or the item code is blank.
  */
 export function formatEodStockCityBreakdown(availability, itemCode) {
@@ -1037,8 +1123,9 @@ export function formatEodStockCityBreakdown(availability, itemCode) {
   const code = String(itemCode || "").trim().toUpperCase();
   if (!code) return "";
   return EOD_STOCK_CITIES.map((city) => {
-    const qty = Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
-    return `${EOD_CITY_SHORT[city]}:${formatEodQty(qty)}`;
+    const raw = Math.max(0, roundEodQty(stock.byCity?.[city]?.[code] || 0));
+    const shown = resolveEodStockMasterDisplay(stock, code, raw).qty;
+    return `${EOD_CITY_SHORT[city]}:${formatEodQty(shown)}`;
   }).join(" ");
 }
 
@@ -1046,6 +1133,7 @@ export function formatEodStockCityBreakdown(availability, itemCode) {
  * Label beside order qty. Keeps the last uploaded stock qty until a newer import replaces it.
  * Shows country total plus city breakdown (R:/D:/J:), stock date when older than 24 hours,
  * and warns when ordered qty exceeds available.
+ * When Master UOM conversion is available, qty is shown in master units (0 decimals) with unit suffix.
  */
 export function formatEodStockAvailableLabel(
   available,
@@ -1056,12 +1144,16 @@ export function formatEodStockAvailableLabel(
   nowMs = Date.now(),
 ) {
   if (available == null) return "";
-  const qtyText = formatEodQty(available);
   const stock = normalizeEodStockAvailability(availability);
+  const display = resolveEodStockMasterDisplay(stock, itemCode, available);
+  const showMasterUnit = Boolean(lookupMasterUnitConv(stock.masterUnits, itemCode) && display.unit);
+  const qtyText = showMasterUnit
+    ? formatMasterStockQty(display.qty, display.unit)
+    : formatEodQty(display.qty);
   const stale = isEodStockOlderThanHours(stock, 24, nowMs);
   const asOf = stale ? formatEodStockAsOfDate(stock.stockDate, language) : "";
-  const cities = formatEodStockCityBreakdown(availability, itemCode);
-  const over = isEodStockQtyOverAvailable(orderedQty, available);
+  const cities = formatEodStockCityBreakdown(stock, itemCode);
+  const over = isEodStockQtyOverAvailable(orderedQty, display.qty);
 
   if (language === "ar") {
     let label = `المتاح: ${qtyText}`;

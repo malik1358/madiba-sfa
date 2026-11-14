@@ -81,6 +81,7 @@ import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClien
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
@@ -2319,8 +2320,9 @@ export default function NewOrderPage() {
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
                               const availableStock = countryEodStockQty(eodStock, item.item_code);
+                              const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                               const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
-                              const overStock = isEodStockQtyOverAvailable(qty, availableStock);
+                              const overStock = isEodStockQtyOverAvailable(qty, availableDisplay);
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">

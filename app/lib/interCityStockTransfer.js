@@ -1,4 +1,5 @@
 import { isEodStockSectionLabel, normalizeEodCity, roundEodQty } from "./eodStock.js";
+import { lookupMasterUnitConv, toMasterStockQty } from "./masterUnitQty.js";
 import { isBuildingMaterialItem } from "./pricePayload.js";
 import { isCatalogueProductCode } from "./productCatalogue.js";
 import { isReturnsAboveSalesReturn } from "./returnsAboveSales.js";
@@ -336,6 +337,77 @@ export function buildInterCityStockTransferReport({
       riyadhStockItems: coverage.riyadhItems,
       dammamStockItems: coverage.dammamItems,
       bothCityStockItems: coverage.bothItems,
+    },
+  };
+}
+
+function convertInterCityQty(raw, stockUnit, master) {
+  if (!master) return roundEodQty(raw);
+  return toMasterStockQty(raw, {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  }).qty;
+}
+
+function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
+  return (rows || []).map((row) => {
+    const master = lookupMasterUnitConv(masterUnits, row.itemCode);
+    if (!master) return row;
+    const unit = row.unit || "";
+    return {
+      ...row,
+      unit: master.masterUom || unit,
+      sourceQty: convertInterCityQty(row.sourceQty, unit, master),
+      destinationQty: convertInterCityQty(row.destinationQty, unit, master),
+      riyadhQty: convertInterCityQty(row.riyadhQty, unit, master),
+      dammamQty: convertInterCityQty(row.dammamQty, unit, master),
+      peakWeeklyQty: convertInterCityQty(row.peakWeeklyQty, unit, master),
+      destinationSalesQty6m: convertInterCityQty(row.destinationSalesQty6m, unit, master),
+      dailyDemand: convertInterCityQty(row.dailyDemand, unit, master),
+      targetCoverQty: convertInterCityQty(row.targetCoverQty, unit, master),
+      suggestedQty: convertInterCityQty(row.suggestedQty, unit, master),
+      remainingAtSource: convertInterCityQty(row.remainingAtSource, unit, master),
+      afterAtDestination: convertInterCityQty(row.afterAtDestination, unit, master),
+    };
+  });
+}
+
+/** Convert stock/sales qty columns to master units for display (math already done in raw units). */
+export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
+  if (!report || typeof report !== "object") return report;
+  const map = masterUnits && typeof masterUnits === "object" ? masterUnits : {};
+  const riyadhToDammam = applyMasterUnitsToInterCityRows(
+    report.directions?.riyadhToDammam?.rows || [],
+    map,
+  );
+  const dammamToRiyadh = applyMasterUnitsToInterCityRows(
+    report.directions?.dammamToRiyadh?.rows || [],
+    map,
+  );
+  const sumSuggested = (rows) => roundEodQty(
+    rows.reduce((total, row) => total + Number(row.suggestedQty || 0), 0),
+  );
+  return {
+    ...report,
+    directions: {
+      ...report.directions,
+      riyadhToDammam: {
+        ...report.directions?.riyadhToDammam,
+        rows: riyadhToDammam,
+        suggestedTotalQty: sumSuggested(riyadhToDammam),
+      },
+      dammamToRiyadh: {
+        ...report.directions?.dammamToRiyadh,
+        rows: dammamToRiyadh,
+        suggestedTotalQty: sumSuggested(dammamToRiyadh),
+      },
+    },
+    summary: {
+      ...report.summary,
+      riyadhToDammamSuggestedQty: sumSuggested(riyadhToDammam),
+      dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
     },
   };
 }

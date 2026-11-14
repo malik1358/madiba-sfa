@@ -3,6 +3,7 @@ import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from '../../../lib/regionalPricing';
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
@@ -96,8 +97,9 @@ export default function QuickOrder({
                           excludeCashDiscount: scheme.excludeCashDiscount === true,
                         });
                         const availableStock = countryEodStockQty(eodStock, item.item_code);
+                        const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                         const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, item.item_code);
-                        const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
+                        const overStock = isEodStockQtyOverAvailable(orderQty, availableDisplay);
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
                             <td>

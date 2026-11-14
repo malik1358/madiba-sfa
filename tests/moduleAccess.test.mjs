@@ -307,6 +307,18 @@ test("item master analysis is a management report", () => {
   assert.equal(reports.items.some((item) => item.moduleKey === "itemMasterAnalysis"), true);
 });
 
+test("expected stocked sales is a management report", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("expectedStockedSales"), true);
+  assert.equal(buildModuleAccess({ role: "report-user" }).canAccess("expectedStockedSales"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("expectedStockedSales"), true);
+  assert.equal(buildModuleAccess({ role: "invoice-maker" }).canAccess("expectedStockedSales"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("expectedStockedSales"), false);
+  assert.equal(moduleLabelForPath("/management/expected-stocked-sales", "en"), "Expected Stocked Sales");
+  assert.equal(localizedModuleLabel("expectedStockedSales", "ar"), "المبيعات المتوقعة مع توفر المخزون");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  assert.equal(reports.items.some((item) => item.moduleKey === "expectedStockedSales"), true);
+});
+
 test("invoice makers can view every management report without setup access", () => {
   for (const role of ["invoice-maker", "invoice_maker"]) {
     const access = buildModuleAccess({ role });
@@ -314,6 +326,7 @@ test("invoice makers can view every management report without setup access", () 
       "businessDashboard",
       "returnsAboveSales",
       "expectedCollection",
+      "expectedStockedSales",
       "activeCustomers",
       "myPerformance",
       "salesmanIncentive",

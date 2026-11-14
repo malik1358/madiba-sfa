@@ -144,6 +144,8 @@ function parseGpsCoordinates(rawValue) {
   return { lat, lng };
 }
 
+const PROSPECT_ORDER_PATH = "/management/product-catalogue";
+
 function buildProspectOrderParams({ id, offlineId, customerName, salesmanCode }) {
   const customerCode = resolveProspectCustomerCode({ id, offline_id: offlineId }) || `PROSPECT-${id}`;
   const resolvedName = String(customerName || "").trim() || `Prospect ${id || offlineId}`;
@@ -154,6 +156,11 @@ function buildProspectOrderParams({ id, offlineId, customerName, salesmanCode })
     source: "prospect",
   });
   return params.toString();
+}
+
+function buildProspectOrderPath(query) {
+  const q = String(query || "").trim();
+  return q ? `${PROSPECT_ORDER_PATH}?${q}` : PROSPECT_ORDER_PATH;
 }
 
 function prospectRowHasGps(row) {
@@ -171,7 +178,7 @@ function buildProspectOrderHref(order, row) {
     salesman_code: String(row.salesman_code || "").trim(),
     source: "prospect",
   });
-  return `/management/new-order?${params.toString()}`;
+  return buildProspectOrderPath(params.toString());
 }
 
 function prospectMatchesSearch(row, searchText) {
@@ -1143,7 +1150,7 @@ export default function NewCustomerPage() {
               </div>
               <p className="moduleHint">{t("orderReceivedHint")}</p>
               <div className="moduleOrderActions">
-                <button type="button" autoFocus onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
+                <button type="button" autoFocus onClick={() => router.push(buildProspectOrderPath(savedProspect.query))}>
                   {t("yesCreateOrder")}
                 </button>
                 <button type="button" onClick={() => setShowFollowUpDate(true)}>
@@ -1253,11 +1260,11 @@ export default function NewCustomerPage() {
                 ) : null}
                 <Link
                   className="moduleBackLink"
-                  href={`/management/new-order?${new URLSearchParams({
+                  href={buildProspectOrderPath(new URLSearchParams({
                     customer_code: String(existingCustomerMatch.customer_code || ""),
                     customer_name: String(existingCustomerMatch.customer_name || ""),
                     salesman_code: String(existingCustomerMatch.current_salesman_code || form.salesman_code || ""),
-                  }).toString()}`}
+                  }).toString())}
                 >
                   {t("openExistingCustomer")}
                 </Link>
@@ -1480,7 +1487,7 @@ export default function NewCustomerPage() {
                                   customerName: row.company_name || row.customer_name || row.shop_name,
                                   salesmanCode: row.salesman_code || form.salesman_code,
                                 });
-                                router.push(`/management/new-order?${query}`);
+                                router.push(buildProspectOrderPath(query));
                               }}
                             >
                               Create Order

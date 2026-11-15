@@ -1,8 +1,10 @@
 import {
   OUTSTANDING_DATASET_KEY,
   customerMatchesOutstandingCodeSet,
+  findOutstandingForCustomer,
   resolveOutstandingCustomerOwnership,
 } from "./outstanding.js";
+import { resolveCustomerMasterExportFields } from "./customerCode.js";
 import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
 
 /** Shape `ensureCustomerVisibleToScope` needs from payment-collections `getSalesScope`. */
@@ -65,8 +67,7 @@ export async function customerHasHistoricalSalesAccess(admin, customerCode, scop
   return false;
 }
 
-export async function customerHasOutstandingAccess(admin, customerCode, scope) {
-  const matchedScope = withSalesScopeMatchers(scope);
+async function readOutstandingDataset(admin) {
   const { data, error } = await admin
     .from("system_settings")
     .select("setting_value")
@@ -76,7 +77,16 @@ export async function customerHasOutstandingAccess(admin, customerCode, scope) {
   if (error) throw error;
 
   try {
-    const dataset = JSON.parse(data?.setting_value || "null");
+    return JSON.parse(data?.setting_value || "null");
+  } catch {
+    return null;
+  }
+}
+
+function outstandingDatasetGrantsAccess(dataset, customerCode, matchedScope) {
+  if (!dataset) return false;
+
+  try {
     const ownership = resolveOutstandingCustomerOwnership(
       dataset,
       matchedScope.visibleSalesmanCodes,
@@ -86,6 +96,57 @@ export async function customerHasOutstandingAccess(admin, customerCode, scope) {
   } catch {
     return false;
   }
+}
+
+export async function customerHasOutstandingAccess(admin, customerCode, scope) {
+  const matchedScope = withSalesScopeMatchers(scope);
+  const dataset = await readOutstandingDataset(admin);
+  return outstandingDatasetGrantsAccess(dataset, customerCode, matchedScope);
+}
+
+/**
+ * Outstanding uploads often list customers that are missing from the customers
+ * table (new Tally parties with no sales yet, so the sales_raw backfill cannot
+ * create them). Backfill a master row for them so phone and GPS updates during
+ * collection visits can persist instead of failing with "Customer not found."
+ * and re-prompting the salesman on every save attempt.
+ */
+async function ensureOutstandingOnlyCustomerVisible(admin, customerCode, matchedScope) {
+  let dataset = null;
+  try {
+    dataset = await readOutstandingDataset(admin);
+  } catch {
+    return null;
+  }
+  if (!dataset) return null;
+
+  const matched = findOutstandingForCustomer(dataset, customerCode, "");
+  if (!matched) return null;
+
+  if (!matchedScope.hasAllAccess && !outstandingDatasetGrantsAccess(dataset, customerCode, matchedScope)) {
+    return null;
+  }
+
+  const display = resolveCustomerMasterExportFields({
+    customer_code: matched.customer_code || customerCode,
+    customer_name: matched.customer_name || "",
+  });
+  const payload = {
+    customer_code: display.customer_code || normalizeCode(customerCode),
+    customer_name: display.customer_name
+      || String(matched.customer_name || "").trim()
+      || normalizeCode(customerCode),
+    is_active: true,
+  };
+  if (!payload.customer_code) return null;
+
+  const { error: upsertError } = await admin
+    .from("customers")
+    .upsert(payload, { onConflict: "customer_code" });
+  if (upsertError) return null;
+
+  const created = await findCustomerByCode(admin, payload.customer_code);
+  return created || payload;
 }
 
 async function ensureProspectVisibleToScope(admin, customerCode, scope) {
@@ -108,7 +169,17 @@ export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
 
   const customer = await findCustomerByCode(admin, normalizedCode || customerCode);
   if (!customer) {
-    return ensureProspectVisibleToScope(admin, normalizedCode || customerCode, matchedScope);
+    try {
+      return await ensureProspectVisibleToScope(admin, normalizedCode || customerCode, matchedScope);
+    } catch (prospectError) {
+      const outstandingCustomer = await ensureOutstandingOnlyCustomerVisible(
+        admin,
+        normalizedCode || customerCode,
+        matchedScope,
+      );
+      if (outstandingCustomer) return outstandingCustomer;
+      throw prospectError;
+    }
   }
 
   if (matchedScope.hasAllAccess) return customer;

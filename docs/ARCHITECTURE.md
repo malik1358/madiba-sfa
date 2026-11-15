@@ -43,7 +43,7 @@ The service role is server-only. Losing the scope checks in an API route would e
 
 The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/hooks/useLogoutWithDaySummary.js`). Its dialog lets users stay logged in; a missing session token must not trigger sign-out without an explicit logout choice.
 
-Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
+Navigation groups are Home, Field Sales, Collections, Sales Reports, Receivables & Debt, Visits & Attendance, GPS & Maps, Item Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`). The sticky main nav (`AppMainNav.jsx`) also includes a screen search box that filters all modules accessible to the signed-in role, matching English and Arabic labels.
 
 Missing Catalogue Photos (`/management/missing-catalogue-photos`, module `missingCataloguePhotos` in Reports) is a read-only management report. `GET /api/missing-catalogue-photos` checks the caller JWT and management-report access, then compares `items_master`, `price_catalog_cache` (`cache_key=default`), and `attachments.category = product_catalogue_photo`. Only items with a positive price in that cache and a one-letter-plus-digits product code are listed. Summary also counts attachments (and distinct `entity_id`s) with `created_at` in the last 24 hours. The same report is emailed by `POST /api/cron/missing-catalogue-photos-email` at 08:30 KSA, Saturday–Thursday, To Malik/Swami with Jigar on CC. No migration.
 
@@ -203,6 +203,8 @@ Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` ma
 - The customer appears on `active_sales` for a visible salesman.
 - The customer appears on the outstanding dataset for a visible salesman.
 - The code is a prospect owned by a visible salesman.
+
+When the code has no `customers` row and no prospect but **does** appear on the outstanding dataset for a visible salesman (or the caller has all-access), `ensureCustomerVisibleToScope` backfills a minimal `customers` row (code + name, `is_active`) from the dataset and returns it. Outstanding uploads often list new Tally parties with no sales yet; without the backfill, customer phone (`/api/customers/contact`) and GPS (`/api/customers/location`) updates failed with “Customer not found.” and the Payment Collections save loop re-prompted for the mobile on every attempt.
 
 Do not replace this with a single `.eq("current_salesman_code", code)` filter.
 

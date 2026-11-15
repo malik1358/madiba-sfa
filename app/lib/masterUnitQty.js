@@ -281,6 +281,56 @@ export function applyMasterUnitQtyFields(row = {}, masterUnits = {}, {
 }
 
 /**
+ * Order-entry unit choices for New Order rows. The price list and the stored
+ * order qty are both per master unit (carton / biggest unit); the base unit is
+ * an entry convenience only. `perMaster` = how many of this unit equal 1 master.
+ */
+export function buildOrderUnitOptions(masterUnits, itemCode) {
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return [];
+  return [
+    { key: "master", label: master.masterUom, perMaster: 1 },
+    { key: "base", label: master.baseUom || "Pcs", perMaster: master.conv },
+  ];
+}
+
+/** Selected unit option; defaults to the master (price-list) unit. */
+export function pickOrderUnit(options, chosenKey = "") {
+  if (!Array.isArray(options) || options.length === 0) return null;
+  return options.find((option) => option.key === chosenKey) || options[0];
+}
+
+/** Master-unit order qty → qty displayed in the selected unit (3 dp). */
+export function orderQtyInUnit(masterQty, perMaster) {
+  const qty = Number(masterQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return Math.round(qty * factor * 1000) / 1000;
+}
+
+/** Qty entered in the selected unit → stored master-unit qty. */
+export function orderQtyToMaster(enteredQty, perMaster) {
+  const qty = Number(enteredQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(factor) || factor <= 0) return 0;
+  return qty / factor;
+}
+
+/** Step the master-unit qty by ±1 of the selected unit (never below 0). */
+export function stepOrderQtyInUnit(masterQty, perMaster, delta) {
+  const units = orderQtyInUnit(masterQty, perMaster);
+  return orderQtyToMaster(Math.max(0, units + (Number(delta) || 0)), perMaster);
+}
+
+/** Price per selected unit from the per-master-unit price-list rate. */
+export function orderRateInUnit(masterRate, perMaster) {
+  const rate = Number(masterRate);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(rate) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return rate / factor;
+}
+
+/**
  * Apply master-unit conversion to an EOD availability snapshot for one item.
  */
 export function resolveEodStockMasterDisplay(availability, itemCode, rawQty) {

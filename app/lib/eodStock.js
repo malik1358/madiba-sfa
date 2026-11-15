@@ -366,7 +366,28 @@ export function splitEodItemLabel(value) {
       name: match[2].trim(),
     };
   }
+  // Space-joined "CODE NAME" exports (e.g. "A006566 GLASS JAR 1750ML ..."). The code
+  // must be letters followed by 3+ digits so product names like "A4 PAPER" stay names.
+  const spaceMatch = text.match(/^([A-Za-z]{1,4}\d{3,10})\s+(.+)$/);
+  if (spaceMatch) {
+    return {
+      code: spaceMatch[1].toUpperCase(),
+      name: spaceMatch[2].trim(),
+    };
+  }
   return { code: "", name: text };
+}
+
+/**
+ * Clean lookup code from a stored item key. Keys saved before the space-joined
+ * "CODE NAME" split ("A006566 GLASS JAR ...") resolve to the embedded code;
+ * name-only keys stay unchanged so name-keyed items keep matching.
+ */
+export function extractEodStockItemCode(value) {
+  const text = String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return "";
+  const split = splitEodItemLabel(text);
+  return split.code || text;
 }
 
 export function parseEodQtyCell(value) {
@@ -969,10 +990,10 @@ function normalizeUnitsMap(value) {
   if (!value || typeof value !== "object") return {};
   const out = {};
   Object.entries(value).forEach(([rawCode, rawUnit]) => {
-    const code = String(rawCode || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(rawCode);
     const unit = String(rawUnit || "").trim();
     if (!code || !unit) return;
-    out[code] = unit;
+    if (!out[code]) out[code] = unit;
   });
   return out;
 }
@@ -996,7 +1017,7 @@ export function buildEodStockAvailability(dataset, { masterUnits = null } = {}) 
   const byCity = emptyCityQtyMaps();
   const units = {};
   source.rows.forEach((row) => {
-    const code = String(row?.itemCode || row?.item_code || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(row?.itemCode || row?.item_code);
     if (!code) return;
     const unit = String(row?.unit || "").trim();
     if (unit && !units[code]) units[code] = unit;
@@ -1058,10 +1079,10 @@ export function normalizeEodStockAvailability(value) {
   EOD_STOCK_CITIES.forEach((city) => {
     const source = value.byCity?.[city] && typeof value.byCity[city] === "object" ? value.byCity[city] : {};
     Object.entries(source).forEach(([rawCode, rawQty]) => {
-      const code = String(rawCode || "").trim().toUpperCase();
+      const code = extractEodStockItemCode(rawCode);
       const qty = Math.max(0, roundEodQty(rawQty));
       if (!code || !qty) return;
-      byCity[city][code] = qty;
+      byCity[city][code] = roundEodQty((byCity[city][code] || 0) + qty);
     });
   });
   return {

@@ -256,7 +256,7 @@ export default function ProductCatalogue({
     };
   }, [hydratePhotoUrls, publishMeta, refresh, rememberPhotoUrl]);
 
-  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
+  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code, eodStock]);
 
   async function upload(itemCode, file) {
     if (!file || !canManagePhotos || writeInFlight.current) return;

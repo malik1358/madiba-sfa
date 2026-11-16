@@ -578,6 +578,12 @@ body {
   color: #5b7a81;
 }
 
+/* Mobile-only hamburger menu; hidden on desktop where groups show inline. */
+.appMainNavMenuButton,
+.appMainNavMobilePanel {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .workdayTimesBar {
     top: 56px;
@@ -608,8 +614,75 @@ body {
 
   .appMainNav {
     top: 56px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     overflow: visible;
+  }
+
+  .appMainNav > .appMainNavGroup,
+  .appMainNav > .appMainNavPinned {
+    display: none;
+  }
+
+  .appMainNavMenuButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid #b9ccd0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #073f4c;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .appMainNavMenuButton[aria-expanded="true"] {
+    background: #073f4c;
+    border-color: #073f4c;
+    color: #ffffff;
+  }
+
+  .appMainNavMobilePanel {
+    display: grid;
+    gap: 12px;
+    position: absolute;
+    top: 100%;
+    inset-inline: 8px;
+    margin-top: 4px;
+    padding: 10px;
+    border: 1px solid #c8d8db;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(7, 63, 76, 0.18);
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    z-index: 10003;
+  }
+
+  .appMainNavMobilePinned {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .appMainNavMobileGroupTitle {
+    padding: 2px 4px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #0b6173;
+    border-bottom: 1px solid #e0ebed;
+    margin-bottom: 4px;
+  }
+
+  .appMainNavMobileLinks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 8px;
   }
 
   .appMainNavPinned {
@@ -618,7 +691,13 @@ body {
   }
 
   .appMainNavSearch {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .appMainNavSearchResults {
+    min-width: 0;
+    width: 100%;
   }
 
   .appMainNavGroup--open {

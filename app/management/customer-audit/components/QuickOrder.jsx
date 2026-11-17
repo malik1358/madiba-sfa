@@ -140,8 +140,8 @@ export default function QuickOrder({
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                <button type="button" className="auditQtyButton" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(item.item_code)}>+</button>
                               </div>
                               {availableLabel ? (
                                 <div className={`moduleCode moduleStockAvailable${overStock ? ' moduleStockAvailable--over' : ''}`}>

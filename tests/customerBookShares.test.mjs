@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDefaultSharePairs,
+  preferCanonicalShareSalesmen,
   resolveSharedBookProfilesFromRows,
 } from "../app/lib/customerBookShares.js";
 import {
@@ -33,6 +34,39 @@ test("inactive share rows are ignored", () => {
   const viewer = { id: "v1", salesman_code: "B", salesman_name: "B" };
   const rows = [{ source_salesman_id: "s1", viewer_salesman_id: "v1", is_active: false }];
   assert.deepEqual(resolveSharedBookProfilesFromRows([source, viewer], viewer, rows), []);
+});
+
+test("preferCanonicalShareSalesmen drops inactive and name-as-code duplicates", () => {
+  const live = {
+    id: "live-sabry",
+    salesman_code: "SM003",
+    salesman_name: "mohomed sabry",
+    is_active: true,
+  };
+  const ghost = {
+    id: "ghost-sabry",
+    salesman_code: "MOHOMED SABRY",
+    salesman_name: "MOHOMED SABRY",
+    is_active: true,
+  };
+  const inactive = {
+    id: "old",
+    salesman_code: "SM099",
+    salesman_name: "Old User",
+    is_active: false,
+  };
+  const other = {
+    id: "nabil",
+    salesman_code: "AHMED NABIL",
+    salesman_name: "AHMED NABIL",
+    is_active: true,
+  };
+
+  const filtered = preferCanonicalShareSalesmen([live, ghost, inactive, other]);
+  assert.deepEqual(
+    filtered.map((row) => row.id).sort(),
+    ["live-sabry", "nabil"],
+  );
 });
 
 test("buildDefaultSharePairs materializes hardcoded books when profiles exist", () => {

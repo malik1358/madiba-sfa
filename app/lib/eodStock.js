@@ -366,7 +366,28 @@ export function splitEodItemLabel(value) {
       name: match[2].trim(),
     };
   }
+  // Space-joined "CODE NAME" exports (e.g. "A006566 GLASS JAR 1750ML ..."). The code
+  // must be letters followed by 3+ digits so product names like "A4 PAPER" stay names.
+  const spaceMatch = text.match(/^([A-Za-z]{1,4}\d{3,10})\s+(.+)$/);
+  if (spaceMatch) {
+    return {
+      code: spaceMatch[1].toUpperCase(),
+      name: spaceMatch[2].trim(),
+    };
+  }
   return { code: "", name: text };
+}
+
+/**
+ * Clean lookup code from a stored item key. Keys saved before the space-joined
+ * "CODE NAME" split ("A006566 GLASS JAR ...") resolve to the embedded code;
+ * name-only keys stay unchanged so name-keyed items keep matching.
+ */
+export function extractEodStockItemCode(value) {
+  const text = String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return "";
+  const split = splitEodItemLabel(text);
+  return split.code || text;
 }
 
 export function parseEodQtyCell(value) {
@@ -969,10 +990,10 @@ function normalizeUnitsMap(value) {
   if (!value || typeof value !== "object") return {};
   const out = {};
   Object.entries(value).forEach(([rawCode, rawUnit]) => {
-    const code = String(rawCode || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(rawCode);
     const unit = String(rawUnit || "").trim();
     if (!code || !unit) return;
-    out[code] = unit;
+    if (!out[code]) out[code] = unit;
   });
   return out;
 }
@@ -996,7 +1017,7 @@ export function buildEodStockAvailability(dataset, { masterUnits = null } = {}) 
   const byCity = emptyCityQtyMaps();
   const units = {};
   source.rows.forEach((row) => {
-    const code = String(row?.itemCode || row?.item_code || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(row?.itemCode || row?.item_code);
     if (!code) return;
     const unit = String(row?.unit || "").trim();
     if (unit && !units[code]) units[code] = unit;
@@ -1058,10 +1079,10 @@ export function normalizeEodStockAvailability(value) {
   EOD_STOCK_CITIES.forEach((city) => {
     const source = value.byCity?.[city] && typeof value.byCity[city] === "object" ? value.byCity[city] : {};
     Object.entries(source).forEach(([rawCode, rawQty]) => {
-      const code = String(rawCode || "").trim().toUpperCase();
+      const code = extractEodStockItemCode(rawCode);
       const qty = Math.max(0, roundEodQty(rawQty));
       if (!code || !qty) return;
-      byCity[city][code] = qty;
+      byCity[city][code] = roundEodQty((byCity[city][code] || 0) + qty);
     });
   });
   return {
@@ -1166,6 +1187,67 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   if (available == null) return false;
   const qty = Number(orderedQty || 0);
   return Number.isFinite(qty) && qty > available;
+}
+
+/**
+ * Max order qty for an item from countrywide EOD stock (master/display units).
+ * Returns null when no EOD snapshot is loaded (no cap).
+ */
+export function maxOrderQtyForEodStock(availability, itemCode) {
+  return countryEodStockDisplayQty(availability, itemCode);
+}
+
+/**
+ * Clamp an order qty to countrywide available stock when a snapshot is loaded.
+ * Leaves qty unchanged when availability is inactive / missing.
+ */
+export function clampOrderQtyToEodStock(orderedQty, availability, itemCode) {
+  const max = maxOrderQtyForEodStock(availability, itemCode);
+  let qty = Number(orderedQty || 0);
+  if (!Number.isFinite(qty) || qty < 0) qty = 0;
+  if (max == null) return qty;
+  const cap = Math.max(0, Number(max) || 0);
+  return Math.min(qty, cap);
+}
+
+/**
+ * Find order lines whose qty exceeds countrywide EOD available.
+ * Lines with quantity ≤ 0 are ignored. No snapshot → no violations.
+ */
+export function findOrderLinesOverEodStock(lines = [], availability = null) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return [];
+  const violations = [];
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
+    const qty = Number(line?.quantity ?? line?.order_quantity ?? 0);
+    if (!code || !Number.isFinite(qty) || qty <= 0) return;
+    const available = countryEodStockDisplayQty(stock, code);
+    if (available == null) return;
+    if (qty > available) {
+      violations.push({
+        itemCode: code,
+        itemName: String(line?.item_name || line?.itemName || code).trim() || code,
+        quantity: qty,
+        available,
+      });
+    }
+  });
+  return violations;
+}
+
+export function assertOrderLinesWithinEodStock(lines = [], availability = null, language = "en") {
+  const violations = findOrderLinesOverEodStock(lines, availability);
+  if (violations.length === 0) {
+    return { ok: true, violations: [] };
+  }
+  const ar = language === "ar";
+  const error = violations.map((row) => (
+    ar
+      ? `${row.itemCode}: الكمية ${row.quantity} تتجاوز المتاح ${row.available}`
+      : `${row.itemCode}: qty ${row.quantity} exceeds available ${row.available}`
+  )).join(" ");
+  return { ok: false, violations, error };
 }
 
 const EOD_CITY_SHORT = {

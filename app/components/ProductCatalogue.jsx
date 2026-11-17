@@ -33,6 +33,14 @@ import {
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../lib/eodStock.js";
+import {
+  buildOrderUnitOptions,
+  orderQtyInUnit,
+  orderQtyToMaster,
+  orderRateInUnit,
+  pickOrderUnit,
+  stepOrderQtyInUnit,
+} from "../lib/masterUnitQty.js";
 import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
 
@@ -138,6 +146,7 @@ export default function ProductCatalogue({
   const [driveSyncing, setDriveSyncing] = useState(false);
   const [driveNotice, setDriveNotice] = useState("");
   const [sharingCode, setSharingCode] = useState("");
+  const [orderUnitChoice, setOrderUnitChoice] = useState({});
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
   const [page, setPage] = useState(0);
@@ -256,7 +265,7 @@ export default function ProductCatalogue({
     };
   }, [hydratePhotoUrls, publishMeta, refresh, rememberPhotoUrl]);
 
-  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code]);
+  useEffect(() => { setPage(0); }, [search, category, pricingRegion, pricingType, selectedCustomer?.customer_code, eodStock]);
 
   async function upload(itemCode, file) {
     if (!file || !canManagePhotos || writeInFlight.current) return;
@@ -784,6 +793,10 @@ export default function ProductCatalogue({
           const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
           const overStock = isEodStockQtyOverAvailable(qty, availableDisplay);
+          const unitOptions = buildOrderUnitOptions(eodStock?.masterUnits, item.item_code);
+          const unit = pickOrderUnit(unitOptions, orderUnitChoice[item.item_code]);
+          const perMaster = unit?.perMaster || 1;
+          const shownQty = unit ? orderQtyInUnit(qty, perMaster) : qty;
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment
             ? (ar ? " · نقداً فقط" : " · Cash only")
@@ -803,8 +816,8 @@ export default function ProductCatalogue({
                   {detail.sellingUnit && <span><strong>{ar ? "وحدة البيع" : "Selling unit"}:</strong> {detail.sellingUnit}</span>}
                 </p>
                 <div className={styles.priceRow}>
-                  {discounted && <del className={styles.originalPrice}>{formatMoneyAmount(price)} ﷼</del>}
-                  <strong className={styles.price}>{hasPrice ? `${formatMoneyAmount(priced.rate)} ﷼` : (ar ? "السعر غير متوفر" : "Price unavailable")}</strong>
+                  {discounted && <del className={styles.originalPrice}>{formatMoneyAmount(orderRateInUnit(price, perMaster))} ﷼</del>}
+                  <strong className={styles.price}>{hasPrice ? `${formatMoneyAmount(orderRateInUnit(priced.rate, perMaster))} ﷼` : (ar ? "السعر غير متوفر" : "Price unavailable")}</strong>
                 </div>
                 {discounted && <span className={styles.discountLabel}>
                   {[
@@ -853,7 +866,11 @@ export default function ProductCatalogue({
                     )}
                   </div>
                 )}
-                {hasPrice && detail.sellingUnit && <span className="moduleCode">{ar ? "لكل" : "per"} {detail.sellingUnit}</span>}
+                {hasPrice && unit ? (
+                  <span className="moduleCode">{ar ? "لكل" : "per"} {unit.label}</span>
+                ) : hasPrice && detail.sellingUnit ? (
+                  <span className="moduleCode">{ar ? "لكل" : "per"} {detail.sellingUnit}</span>
+                ) : null}
                 <button
                   type="button"
                   className={styles.share}
@@ -865,18 +882,39 @@ export default function ProductCatalogue({
                     : (ar ? "مشاركة واتساب" : "Share on WhatsApp")}
                 </button>
                 <div className={styles.qty}>
-                  <button type="button" disabled={disabled || qty <= 0} aria-label={`${ar ? "تقليل" : "Decrease"} ${item.item_name}`} onClick={() => onDecrease(item.item_code)}>-</button>
+                  <button type="button" disabled={disabled || qty <= 0} aria-label={`${ar ? "تقليل" : "Decrease"} ${item.item_name}`} onClick={() => (unit ? onQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, -1)) : onDecrease(item.item_code))}>-</button>
                   <input
                     type="number"
                     min="0"
+                    max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
                     step="1"
                     disabled={disabled}
                     aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`}
-                    value={qty || ""}
-                    onChange={(event) => onQty(item.item_code, event.target.value)}
+                    value={shownQty || ""}
+                    onChange={(event) => onQty(item.item_code, unit ? orderQtyToMaster(event.target.value, perMaster) : event.target.value)}
                   />
-                  <button type="button" disabled={disabled} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => onIncrease(item.item_code)}>+</button>
+                  <button
+                    type="button"
+                    disabled={disabled || (availableDisplay != null && qty >= availableDisplay)}
+                    aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`}
+                    onClick={() => (unit ? onQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : onIncrease(item.item_code))}
+                  >
+                    +
+                  </button>
                 </div>
+                {unit ? (
+                  <select
+                    className="moduleCode"
+                    disabled={disabled}
+                    aria-label={`${ar ? "الوحدة" : "Unit"} ${item.item_name}`}
+                    value={unit.key}
+                    onChange={(event) => setOrderUnitChoice((current) => ({ ...current, [item.item_code]: event.target.value }))}
+                  >
+                    {unitOptions.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                ) : null}
                 {availableLabel ? (
                   <div className={`${styles.stockAvailable}${overStock ? ` ${styles.stockOver}` : ""}`}>{availableLabel}</div>
                 ) : null}

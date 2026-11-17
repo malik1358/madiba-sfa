@@ -36,6 +36,10 @@ import {
   recordConfirmedOrderQuantityUsage,
   releaseConfirmedOrderQuantityUsage,
 } from '../../../lib/orderQuantityControlsClient';
+import {
+  assertOrderLinesWithinEodStock,
+  maxOrderQtyForEodStock,
+} from '../../../lib/eodStock.js';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -137,6 +141,7 @@ export function useOrder({
   valueDiscountMap = {},
   schemes = [],
   quantityControls = null,
+  eodStock = null,
   pricingRegion = 'riyadh',
   setPricingRegion = null,
   pricingType = 'wholesale',
@@ -338,12 +343,14 @@ export function useOrder({
   }, [accessScope, editOrderId, selectedCustomer?.customer_code, setError]);
 
   const updateQty = useCallback((itemCode, value) => {
-    setOrderQuantities((current) => changeOrderQty(current, itemCode, value));
-  }, []);
+    const maxQty = maxOrderQtyForEodStock(eodStock, itemCode);
+    setOrderQuantities((current) => changeOrderQty(current, itemCode, value, maxQty));
+  }, [eodStock]);
 
   const increaseQty = useCallback((itemCode) => {
-    setOrderQuantities((current) => increaseOrderQty(current, itemCode));
-  }, []);
+    const maxQty = maxOrderQtyForEodStock(eodStock, itemCode);
+    setOrderQuantities((current) => increaseOrderQty(current, itemCode, maxQty));
+  }, [eodStock]);
 
   const decreaseQty = useCallback((itemCode) => {
     setOrderQuantities((current) => decreaseOrderQty(current, itemCode));
@@ -456,6 +463,11 @@ export function useOrder({
         throw new Error(quantityControlCheck.error || 'Order quantity limit exceeded.');
       }
 
+      const stockCheck = assertOrderLinesWithinEodStock(orderItems, eodStock, language);
+      if (!stockCheck.ok) {
+        throw new Error(stockCheck.error || 'Order quantity exceeds available stock.');
+      }
+
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
@@ -565,7 +577,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, eodStock, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (submitInFlight.current) return null;
@@ -694,6 +706,11 @@ export function useOrder({
         throw new Error(quantityControlCheck.error || 'Order quantity limit exceeded.');
       }
 
+      const stockCheck = assertOrderLinesWithinEodStock(orderItems, eodStock, language);
+      if (!stockCheck.ok) {
+        throw new Error(stockCheck.error || 'Order quantity exceeds available stock.');
+      }
+
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
@@ -813,7 +830,7 @@ export function useOrder({
       submitInFlight.current = false;
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, clearSubmittedOrder, creditApprovalRequired, draftContextKey, draftOrderId, draftOrderNumber, editOrderId, eodStock, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, pricingType, quantityControls, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const deleteDraft = useCallback(async (options = {}) => {
     const requestContextKey = orderContextKey(selectedCustomer, editOrderId);

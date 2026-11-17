@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   applyEodStockUpload,
+  assertOrderLinesWithinEodStock,
   availableEodStockQty,
+  clampOrderQtyToEodStock,
   countryEodStockQty,
   filterItemsWithPositiveCountryEodStock,
   hasPositiveCountryEodStockQty,
@@ -18,6 +20,7 @@ import {
   inferEodCityFromFileName,
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
+  maxOrderQtyForEodStock,
   mergeEodCityUploads,
   parseEodQtyCell,
   parseEodStockDate,
@@ -177,6 +180,75 @@ test("Tally Location Summary reads Quantity from column B for one city", () => {
   assert.equal(wideTally.rows.find((row) => row.itemCode === "16-INCH PORTABLE VENTILATION FAN").cities.riyadh.qty, 6);
 });
 
+test("space-joined CODE NAME labels split into clean codes", () => {
+  assert.deepEqual(splitEodItemLabel("A006566 GLASS JAR 1750ML X 24PCS PER CTN (XT-2)"), {
+    code: "A006566",
+    name: "GLASS JAR 1750ML X 24PCS PER CTN (XT-2)",
+  });
+  // Product names must stay names: no digits, too few digits, digit-leading tokens.
+  assert.deepEqual(splitEodItemLabel("LATEX GLOVES"), { code: "", name: "LATEX GLOVES" });
+  assert.deepEqual(splitEodItemLabel("A4 PAPER COPY"), { code: "", name: "A4 PAPER COPY" });
+  assert.deepEqual(splitEodItemLabel("16-INCH PORTABLE VENTILATION FAN"), {
+    code: "",
+    name: "16-INCH PORTABLE VENTILATION FAN",
+  });
+
+  const parsed = parseEodStockSheets([{
+    name: "Riyadh-Region",
+    matrix: [
+      ["ABC LTD"],
+      ["Riyadh-Region"],
+      ["Location Summary"],
+      ["1-Jan-26 to 13-Nov-26"],
+      ["Particulars", "1-Jan-26 to 13-Nov-26"],
+      ["", "Closing Balance"],
+      ["", "Quantity", "(Alt. Units)"],
+      ["A006566 GLASS JAR 1750ML X 24PCS PER CTN (XT-2)", 1440, 60],
+    ],
+  }]);
+  assert.equal(parsed.ok, true);
+  const row = parsed.rows.find((entry) => entry.itemCode === "A006566");
+  assert.ok(row);
+  assert.equal(row.itemName, "GLASS JAR 1750ML X 24PCS PER CTN (XT-2)");
+  assert.equal(row.cities.riyadh.qty, 1440);
+});
+
+test("stored space-joined keys from older uploads still resolve to the clean code", () => {
+  const availability = buildEodStockAvailability({
+    stockDate: "2026-11-13",
+    rows: [{
+      itemCode: "A006566 GLASS JAR 1750ML X 24PCS PER CTN (XT-2)",
+      itemName: "A006566 GLASS JAR 1750ML X 24PCS PER CTN (XT-2)",
+      unit: "PCS",
+      cities: {
+        riyadh: { qty: 1440, value: 0 },
+        dammam: { qty: 0, value: 0 },
+        jeddah: { qty: 0, value: 0 },
+      },
+    }],
+  });
+  assert.equal(availability.byCity.riyadh.A006566, 1440);
+  assert.equal(availability.units.A006566, "PCS");
+  assert.equal(countryEodStockQty(availability, "A006566"), 1440);
+  assert.equal(availableEodStockQty(availability, "riyadh", "A006566"), 1440);
+  assert.equal(hasPositiveCountryEodStockQty(availability, "A006566"), true);
+
+  // Cached pricing payloads whose byCity keys were saved before the fix.
+  const cached = {
+    stockDate: "2026-11-13",
+    byCity: {
+      riyadh: { "A006566 GLASS JAR 1750ML X 24PCS PER CTN (XT-2)": 1440 },
+      dammam: {},
+      jeddah: {},
+    },
+  };
+  assert.equal(countryEodStockQty(cached, "A006566"), 1440);
+  assert.equal(
+    filterItemsWithPositiveCountryEodStock([{ item_code: "A006566" }], cached).length,
+    1,
+  );
+});
+
 test("Location Summary switches between Riyadh warehouse and Store/Dukan", () => {
   const parsed = parseEodStockSheets([{
     name: "Riyadh-Region",
@@ -259,6 +331,33 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);
+  assert.equal(maxOrderQtyForEodStock(availability, "A004426"), 36);
+  assert.equal(maxOrderQtyForEodStock(null, "A004426"), null);
+  assert.equal(clampOrderQtyToEodStock(40, availability, "A004426"), 36);
+  assert.equal(clampOrderQtyToEodStock(10, availability, "A004426"), 10);
+  assert.equal(clampOrderQtyToEodStock(40, null, "A004426"), 40);
+  assert.equal(clampOrderQtyToEodStock(5, availability, "MISSING"), 0);
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 40 }],
+      availability,
+    ).ok,
+    false,
+  );
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 36 }],
+      availability,
+    ).ok,
+    true,
+  );
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 999 }],
+      null,
+    ).ok,
+    true,
+  );
 
   const freshNow = Date.parse("2026-10-27T20:00:00.000Z");
   const staleNow = Date.parse("2026-10-28T11:00:00.000Z");

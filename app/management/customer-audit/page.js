@@ -241,6 +241,7 @@ function CustomerAuditPageContent() {
     valueDiscountMap,
     schemes,
     quantityControls,
+    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,

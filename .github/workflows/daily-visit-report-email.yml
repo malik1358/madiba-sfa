@@ -2,9 +2,9 @@ name: Daily Visit Report Email
 
 on:
   schedule:
-    # 05:30 UTC = 08:30 KSA, Saturday–Thursday.
+    # 05:45 UTC = 08:45 KSA, Saturday–Thursday (staggered past the 08:30 morning pile-up).
     # Thursday's report still goes Saturday morning because Friday is the holiday.
-    - cron: "30 5 * * 0-4,6"
+    - cron: "45 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       date:
@@ -74,9 +74,16 @@ jobs:
             status_code="$(post_report "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE")"
           fi
 
+          # One delayed retry on gateway / function timeout (common under the morning pile-up).
+          if [[ "$status_code" == "504" || "$status_code" == "502" || "$status_code" == "503" ]]; then
+            echo "Daily visit report email returned HTTP $status_code; waiting 90s then retrying once."
+            sleep 90
+            status_code="$(post_report "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE")"
+          fi
+
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
             echo "Daily visit report email failed with HTTP $status_code"
-            cat response.json
+            cat response.json || true
             exit 1
           fi
 

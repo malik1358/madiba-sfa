@@ -53,6 +53,17 @@ test("positive qty excludes sales returns", () => {
   assert.equal(isPositiveSaleQuantity("x"), false);
 });
 
+test("report converts qty to master units when map is provided", () => {
+  const report = buildItemsSoldAtLossReport({
+    sourceRows: [lossRow({ item_code: "A006789", quantity: 720 })],
+    masterUnits: { A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 } },
+  });
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].quantity, 10);
+  assert.equal(report.rows[0].qtyUnit, "Ctn");
+  assert.equal(report.totals.quantity, 10);
+});
+
 test("report keeps only negative GP positive-qty sales and totals loss", () => {
   const report = buildItemsSoldAtLossReport({
     sourceRows: [

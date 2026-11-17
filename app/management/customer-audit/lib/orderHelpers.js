@@ -125,12 +125,15 @@ export function calculateGrandTotal(orderItems, priceList) {
   return orderItems.reduce((sum, item) => sum + getOrderLineValue(priceList, item.item_code, item.order_quantity), 0);
 }
 
-export function changeOrderQty(orderQuantities, itemCode, value) {
+export function changeOrderQty(orderQuantities, itemCode, value, maxQty = null) {
   if (!itemCode) return orderQuantities;
 
   let newValue = Number(value || 0);
   if (!Number.isFinite(newValue)) newValue = 0;
   if (newValue < 0) newValue = 0;
+  if (maxQty != null && Number.isFinite(Number(maxQty))) {
+    newValue = Math.min(newValue, Math.max(0, Number(maxQty)));
+  }
 
   const next = { ...orderQuantities };
   if (newValue <= 0) {
@@ -142,9 +145,9 @@ export function changeOrderQty(orderQuantities, itemCode, value) {
   return next;
 }
 
-export function increaseOrderQty(orderQuantities, itemCode) {
+export function increaseOrderQty(orderQuantities, itemCode, maxQty = null) {
   const current = Number(orderQuantities[itemCode] || 0);
-  return changeOrderQty(orderQuantities, itemCode, current + 1);
+  return changeOrderQty(orderQuantities, itemCode, current + 1, maxQty);
 }
 
 export function decreaseOrderQty(orderQuantities, itemCode) {

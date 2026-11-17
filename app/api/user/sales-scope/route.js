@@ -14,6 +14,7 @@ import {
 import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
 import { loadSharedCustomerCodesForViewer } from "../../../lib/customerShares.js";
 import { pricingRegionsFromMetadata } from "../../../lib/regionalPricing.js";
+import { profileHasCompanyWideSalesScope } from "../../../lib/salesScopeAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -72,11 +73,6 @@ function fuzzyMatchedProfileCodes(allProfiles, authUser) {
       );
     })
     .flatMap((profile) => profileCodeCandidates(profile));
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 export async function resolveSalesScopeForUserId(admin, userId) {
@@ -182,7 +178,11 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     ? [...new Set([currentProfile.id].filter(Boolean))]
     : [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
-  const hasAllAccess = ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
+  const hasAllAccess = profileHasCompanyWideSalesScope({
+    role: currentProfile.role,
+    salesmanCode: currentProfile.salesman_code,
+    collectionOnlyMetadata: Boolean(currentMetadata.collection_only),
+  }) || isSoyebProfile(currentProfile);
 
   return {
     success: true,

@@ -99,87 +99,56 @@ export const NAV_GROUPS = [
     ],
   },
   {
-    key: "reports",
-    label: "Reports",
+    key: "salesReports",
+    label: "Sales Reports",
     modules: [
       "businessDashboard",
-      "returnsAboveSales",
-      "expectedCollection",
-      "expectedStockedSales",
-      "activeCustomers",
       "mis",
       "myPerformance",
       "salesmanIncentive",
       "promoterCoverage",
       "potentialSalesTargets",
+      "returnsAboveSales",
+      "expectedStockedSales",
+      "activeCustomers",
+    ],
+  },
+  {
+    key: "receivablesReports",
+    label: "Receivables & Debt",
+    modules: [
+      "expectedCollection",
+      "collectionStaleOverdue",
+      "potentialBadDebts",
+      "legalTransfers",
+    ],
+  },
+  {
+    key: "activityReports",
+    label: "Visits & Attendance",
+    modules: [
       "dailyVisitReport",
       "userActivity",
       "workingHours",
       "monthlyAttendance",
+    ],
+  },
+  {
+    key: "gpsReports",
+    label: "GPS & Maps",
+    modules: [
       "outstandingNoGps",
-      "collectionStaleOverdue",
-      "potentialBadDebts",
-      "legalTransfers",
-      "missingCataloguePhotos",
-      "itemMasterAnalysis",
       "customerGpsHistory",
       "customerMap",
       "gpsMap",
     ],
-    subgroups: [
-      {
-        key: "salesBi",
-        label: "Sales & BI",
-        modules: [
-          "businessDashboard",
-          "mis",
-          "returnsAboveSales",
-          "expectedStockedSales",
-          "activeCustomers",
-          "myPerformance",
-          "salesmanIncentive",
-          "potentialSalesTargets",
-          "promoterCoverage",
-        ],
-      },
-      {
-        key: "fieldAttendance",
-        label: "Field & Attendance",
-        modules: [
-          "dailyVisitReport",
-          "userActivity",
-          "workingHours",
-          "monthlyAttendance",
-        ],
-      },
-      {
-        key: "creditCollections",
-        label: "Credit & Collections",
-        modules: [
-          "expectedCollection",
-          "outstandingNoGps",
-          "collectionStaleOverdue",
-          "potentialBadDebts",
-          "legalTransfers",
-        ],
-      },
-      {
-        key: "catalogueItems",
-        label: "Catalogue & Items",
-        modules: [
-          "missingCataloguePhotos",
-          "itemMasterAnalysis",
-        ],
-      },
-      {
-        key: "mapsGps",
-        label: "Maps & GPS",
-        modules: [
-          "customerMap",
-          "customerGpsHistory",
-          "gpsMap",
-        ],
-      },
+  },
+  {
+    key: "itemReports",
+    label: "Item Reports",
+    modules: [
+      "itemMasterAnalysis",
+      "missingCataloguePhotos",
     ],
   },
   {
@@ -509,20 +478,10 @@ export function listAccessibleModules(access, moduleKeys) {
 
 export function listAccessibleNavGroups(access) {
   return NAV_GROUPS
-    .map((group) => {
-      const items = listAccessibleModules(access, group.modules);
-      const subgroups = (group.subgroups || [])
-        .map((subgroup) => ({
-          ...subgroup,
-          items: listAccessibleModules(access, subgroup.modules),
-        }))
-        .filter((subgroup) => subgroup.items.length > 0);
-      return {
-        ...group,
-        items,
-        subgroups,
-      };
-    })
+    .map((group) => ({
+      ...group,
+      items: listAccessibleModules(access, group.modules),
+    }))
     .filter((group) => group.items.length > 0);
 }
 
@@ -619,17 +578,13 @@ export const NAV_GROUP_LABELS = {
   home: { en: "Home", ar: "الرئيسية" },
   field: { en: "Field Sales", ar: "المبيعات الميدانية" },
   collections: { en: "Collections", ar: "التحصيلات" },
-  reports: { en: "Reports", ar: "التقارير" },
+  salesReports: { en: "Sales Reports", ar: "تقارير المبيعات" },
+  receivablesReports: { en: "Receivables & Debt", ar: "المستحقات والديون" },
+  activityReports: { en: "Visits & Attendance", ar: "الزيارات والحضور" },
+  gpsReports: { en: "GPS & Maps", ar: "الخرائط و GPS" },
+  itemReports: { en: "Item Reports", ar: "تقارير الأصناف" },
   warehouse: { en: "Warehouse", ar: "المستودع" },
   admin: { en: "Setup & Admin", ar: "الإعداد والإدارة" },
-};
-
-export const NAV_SUBGROUP_LABELS = {
-  salesBi: { en: "Sales & BI", ar: "المبيعات وذكاء الأعمال" },
-  fieldAttendance: { en: "Field & Attendance", ar: "الميدان والحضور" },
-  creditCollections: { en: "Credit & Collections", ar: "الائتمان والتحصيلات" },
-  catalogueItems: { en: "Catalogue & Items", ar: "الكتالوج والأصناف" },
-  mapsGps: { en: "Maps & GPS", ar: "الخرائط وGPS" },
 };
 
 export const ROLE_LABELS = {
@@ -682,16 +637,6 @@ export function localizedNavGroupLabel(groupKey, language = "en") {
   if (labels) return labels[language] || labels.en || "";
   const group = NAV_GROUPS.find((entry) => entry.key === groupKey);
   return group?.label || "";
-}
-
-export function localizedNavSubgroupLabel(subgroupKey, language = "en") {
-  const labels = NAV_SUBGROUP_LABELS[subgroupKey];
-  if (labels) return labels[language] || labels.en || "";
-  for (const group of NAV_GROUPS) {
-    const subgroup = (group.subgroups || []).find((entry) => entry.key === subgroupKey);
-    if (subgroup?.label) return subgroup.label;
-  }
-  return "";
 }
 
 export function localizedRoleLabel(role, language = "en") {

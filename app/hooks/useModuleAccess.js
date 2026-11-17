@@ -14,7 +14,7 @@ let sharedAccessLoad = null;
 let sharedAccessMemory = { userId: "", context: null, at: 0 };
 
 function accessCacheKey(userId) {
-  return `moduleAccess:v2:${String(userId || "").trim()}`;
+  return `moduleAccess:v3:${String(userId || "").trim()}`;
 }
 
 function readFreshStamp(userId) {

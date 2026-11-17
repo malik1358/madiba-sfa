@@ -7,11 +7,15 @@ import {
 
 export const EOD_STOCK_DATASET_KEY = "eod_stock_citywise_v1";
 export const EOD_STOCK_CITIES = ["riyadh", "dammam", "jeddah"];
+/** MADIBA retail shop / Dukan — separate from city warehouses. */
+export const EOD_STOCK_STORE = "store";
+export const EOD_STOCK_LOCATIONS = [...EOD_STOCK_CITIES, EOD_STOCK_STORE];
 
 const CITY_LABELS = {
   riyadh: "Riyadh",
   dammam: "Dammam",
   jeddah: "Jeddah",
+  store: "Store",
 };
 
 const ITEM_CODE_HEADERS = ["item code", "product code", "stock code", "sku", "code", "itemcode"];
@@ -119,6 +123,17 @@ export function normalizeEodCity(value) {
   return "";
 }
 
+/**
+ * City warehouse or MADIBA Store/Dukan. Store wins over city when both appear
+ * (e.g. "RIYADH STORE" → store, not riyadh).
+ */
+export function normalizeEodLocation(value) {
+  const text = normalizeImportHeader(value);
+  if (!text) return "";
+  if (/\b(dukan|dukaan|dukkan|stores?|shops?)\b/.test(text)) return EOD_STOCK_STORE;
+  return normalizeEodCity(value);
+}
+
 export function eodCityLabel(city) {
   return CITY_LABELS[city] || "";
 }
@@ -155,6 +170,7 @@ function emptyCities() {
     riyadh: { qty: 0, value: 0 },
     dammam: { qty: 0, value: 0 },
     jeddah: { qty: 0, value: 0 },
+    store: { qty: 0, value: 0 },
   };
 }
 
@@ -171,7 +187,7 @@ function headerIndex(headers, names) {
 function classifyCityHeader(header) {
   const norm = normalizeImportHeader(header);
   if (!norm || /\brate\b/.test(norm)) return null;
-  const city = normalizeEodCity(norm);
+  const city = normalizeEodLocation(norm);
   if (!city) return null;
   const measure = /\b(value|amount|amt)\b/.test(norm) && !/\b(qty|quantity)\b/.test(norm)
     ? "value"
@@ -200,7 +216,7 @@ function selectCityColumns(headers) {
 }
 
 function findEodHeaderRow(matrix, sheetName = "") {
-  const sheetCity = normalizeEodCity(sheetName);
+  const sheetCity = normalizeEodLocation(sheetName);
   let best = { index: -1, score: 0 };
   const limit = Math.min(matrix.length, 25);
   for (let index = 0; index < limit; index += 1) {
@@ -223,10 +239,33 @@ function findTitleCity(matrix, beforeIndex) {
   const limit = Math.min(Math.max(beforeIndex, 0), matrix.length);
   for (let index = 0; index < limit; index += 1) {
     for (const cell of matrix[index] || []) {
-      const city = normalizeEodCity(cell);
+      const city = normalizeEodLocation(cell);
       if (city) return city;
     }
   }
+  return "";
+}
+
+/**
+ * Resolve a Tally "Location : …" line or a bare godown-only title row to a stock
+ * location key. Data rows that put a godown name beside an item code/qty must not
+ * be treated as location switches.
+ */
+export function extractEodLocationHint(row = []) {
+  const cells = (row || []).map((cell) => String(cell ?? "").trim());
+  for (const text of cells) {
+    if (!text) continue;
+    const match = text.match(/^location\s*:\s*(.+)$/i);
+    if (match) {
+      const location = normalizeEodLocation(match[1]);
+      if (location) return location;
+    }
+  }
+  const nonEmpty = cells.filter(Boolean);
+  if (nonEmpty.length !== 1) return "";
+  const text = nonEmpty[0];
+  const location = normalizeEodLocation(text);
+  if (location && isEodStockSectionLabel(text)) return location;
   return "";
 }
 
@@ -305,7 +344,7 @@ function findTallyLocationLayout(matrix, sheetName = "") {
   const chosen = underClosing[0]
     || (qtyCandidates.length > 1 ? qtyCandidates[qtyCandidates.length - 1] : qtyCandidates[0]);
 
-  const city = normalizeEodCity(sheetName) || findTitleCity(matrix, particularsRow);
+  const city = normalizeEodLocation(sheetName) || findTitleCity(matrix, particularsRow);
   if (!city) return null;
 
   return {
@@ -327,7 +366,28 @@ export function splitEodItemLabel(value) {
       name: match[2].trim(),
     };
   }
+  // Space-joined "CODE NAME" exports (e.g. "A006566 GLASS JAR 1750ML ..."). The code
+  // must be letters followed by 3+ digits so product names like "A4 PAPER" stay names.
+  const spaceMatch = text.match(/^([A-Za-z]{1,4}\d{3,10})\s+(.+)$/);
+  if (spaceMatch) {
+    return {
+      code: spaceMatch[1].toUpperCase(),
+      name: spaceMatch[2].trim(),
+    };
+  }
   return { code: "", name: text };
+}
+
+/**
+ * Clean lookup code from a stored item key. Keys saved before the space-joined
+ * "CODE NAME" split ("A006566 GLASS JAR ...") resolve to the embedded code;
+ * name-only keys stay unchanged so name-keyed items keep matching.
+ */
+export function extractEodStockItemCode(value) {
+  const text = String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return "";
+  const split = splitEodItemLabel(text);
+  return split.code || text;
 }
 
 export function parseEodQtyCell(value) {
@@ -381,11 +441,12 @@ export function isEodStockSectionLabel(value) {
     return true;
   }
   if (/^location\b/.test(text)) return true;
-  // Whole label is a city or godown title (RIYADH, RIYADH W/H 1). Product names that
-  // merely mention a city (e.g. "Only Riyadh") must stay as items.
-  if (!normalizeEodCity(raw)) return false;
+  // Whole label is a city, store, or godown title (RIYADH, RIYADH W/H 1, DUKAN STORE).
+  // Product names that merely mention a city (e.g. "Only Riyadh") must stay as items.
+  if (!normalizeEodLocation(raw)) return false;
   const remainder = text
     .replace(/\b(riyadh|riyad|ruh|dammam|damman|dmm|jeddah|jedda|jiddah|jed)\b/g, " ")
+    .replace(/\b(dukan|dukaan|dukkan|stores?|shops?|madiba)\b/g, " ")
     .replace(/\b(w\s*h|wh|warehouse|godown|region)\b/g, " ")
     .replace(/\d+/g, " ")
     .replace(/\s+/g, " ")
@@ -416,7 +477,7 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
   const dateIndex = tallyLayout ? -1 : headerIndex(headers, DATE_HEADERS);
   const sheetCity = tallyLayout
     ? tallyLayout.city
-    : (cityColumns.some((column) => column.measure === "qty") ? "" : normalizeEodCity(sheetName));
+    : (cityColumns.some((column) => column.measure === "qty") ? "" : normalizeEodLocation(sheetName));
   const wide = cityColumns.some((column) => column.measure === "qty");
   const long = !wide && (
     Boolean(tallyLayout)
@@ -438,6 +499,7 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
     if (rowDate && (!maxDate || rowDate > maxDate)) maxDate = rowDate;
   });
   const stockDate = maxDate || titleDate(rows, Math.max(headerRow, tallyLayout?.particularsRow || 0));
+  let currentLocation = sheetCity;
 
   function ensureItem(code, name, unit) {
     const key = String(code || "").trim().toUpperCase() || String(name || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -457,6 +519,13 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
   }
 
   body.forEach((row) => {
+    const locationHint = extractEodLocationHint(row);
+    if (locationHint) {
+      currentLocation = locationHint;
+      citiesPresent.add(locationHint);
+      return;
+    }
+
     let code = codeIndex >= 0 ? row[codeIndex] : "";
     let name = nameIndex >= 0 ? row[nameIndex] : "";
     let unit = unitIndex >= 0 ? row[unitIndex] : "";
@@ -476,13 +545,14 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
       const item = ensureItem(code, name, unit);
       if (!item) return;
       cityColumns.forEach((column) => {
+        if (!item.cities[column.city]) item.cities[column.city] = { qty: 0, value: 0 };
         addMeasure(item.cities[column.city], column.measure, parseImportNumber(row[column.index]));
       });
       return;
     }
 
-    const city = normalizeEodCity(cityIndex >= 0 ? row[cityIndex] : "") || sheetCity;
-    if (!city) {
+    const city = normalizeEodLocation(cityIndex >= 0 ? row[cityIndex] : "") || currentLocation;
+    if (!city || !EOD_STOCK_LOCATIONS.includes(city)) {
       if (String(code || name || "").trim()) skippedUnknownCity += 1;
       return;
     }
@@ -491,13 +561,14 @@ function parseEodStockMatrix(matrix, { sheetName = "" } = {}) {
     if (!unit && qtyCell.unit) unit = qtyCell.unit;
     const item = ensureItem(code, name, unit);
     if (!item) return;
+    if (!item.cities[city]) item.cities[city] = { qty: 0, value: 0 };
     if (qtyIndex >= 0) addMeasure(item.cities[city], "qty", qtyCell.qty);
     if (valueIndex >= 0) addMeasure(item.cities[city], "value", parseImportNumber(row[valueIndex]));
   });
 
   const kept = [];
   items.forEach((item) => {
-    const hasAmount = EOD_STOCK_CITIES.some((city) => item.cities[city].qty || item.cities[city].value);
+    const hasAmount = EOD_STOCK_LOCATIONS.some((city) => item.cities[city]?.qty || item.cities[city]?.value);
     if (!hasAmount) {
       skippedZero += 1;
       return;
@@ -544,7 +615,7 @@ function mergeParsedSheets(parsedSheets, fallbackDate) {
       const target = items.get(row.itemCode);
       if (!target.itemName) target.itemName = row.itemName;
       if (!target.unit) target.unit = row.unit;
-      EOD_STOCK_CITIES.forEach((city) => {
+      EOD_STOCK_LOCATIONS.forEach((city) => {
         target.cities[city].qty = roundEodQty(target.cities[city].qty + (row.cities[city]?.qty || 0));
         target.cities[city].value = roundEodQty(target.cities[city].value + (row.cities[city]?.value || 0));
       });
@@ -552,13 +623,13 @@ function mergeParsedSheets(parsedSheets, fallbackDate) {
   });
 
   const rows = [...items.values()]
-    .filter((row) => EOD_STOCK_CITIES.some((city) => row.cities[city].qty || row.cities[city].value))
+    .filter((row) => EOD_STOCK_LOCATIONS.some((city) => row.cities[city].qty || row.cities[city].value))
     .sort((a, b) => a.itemCode.localeCompare(b.itemCode));
 
   return {
     ok: rows.length > 0 && citiesPresent.size > 0 && Boolean(stockDate),
     rows,
-    citiesPresent: EOD_STOCK_CITIES.filter((city) => citiesPresent.has(city)),
+    citiesPresent: EOD_STOCK_LOCATIONS.filter((city) => citiesPresent.has(city)),
     stockDate,
     skippedZero,
     skippedUnknownCity,
@@ -588,7 +659,7 @@ export function parseEodStockSheets(sheets, { fallbackDate = "" } = {}) {
 
 function copyCities(cities = {}) {
   const next = emptyCities();
-  EOD_STOCK_CITIES.forEach((city) => {
+  EOD_STOCK_LOCATIONS.forEach((city) => {
     next[city] = {
       qty: roundEodQty(cities?.[city]?.qty || 0),
       value: roundEodQty(cities?.[city]?.value || 0),
@@ -607,14 +678,14 @@ function mergeStockRows(baseRows, incomingRows, citiesPresent) {
     const fromBase = base.get(code);
     const fromIncoming = incoming.get(code);
     const cities = emptyCities();
-    EOD_STOCK_CITIES.forEach((city) => {
+    EOD_STOCK_LOCATIONS.forEach((city) => {
       const source = present.has(city) ? fromIncoming : fromBase;
       cities[city] = {
         qty: roundEodQty(source?.cities?.[city]?.qty || 0),
         value: roundEodQty(source?.cities?.[city]?.value || 0),
       };
     });
-    if (!EOD_STOCK_CITIES.some((city) => cities[city].qty || cities[city].value)) continue;
+    if (!EOD_STOCK_LOCATIONS.some((city) => cities[city].qty || cities[city].value)) continue;
     rows.push({
       itemCode: code,
       itemName: fromIncoming?.itemName || fromBase?.itemName || code,
@@ -631,8 +702,8 @@ function uniqueCities(values) {
   const seen = new Set();
   const out = [];
   (values || []).forEach((city) => {
-    const normalized = normalizeEodCity(city) || String(city || "").trim().toLowerCase();
-    if (!EOD_STOCK_CITIES.includes(normalized) || seen.has(normalized)) return;
+    const normalized = normalizeEodLocation(city) || String(city || "").trim().toLowerCase();
+    if (!EOD_STOCK_LOCATIONS.includes(normalized) || seen.has(normalized)) return;
     seen.add(normalized);
     out.push(normalized);
   });
@@ -645,7 +716,7 @@ function countPositiveCityItems(rows, city) {
   ), 0);
 }
 
-/** Infer Riyadh/Dammam/Jeddah from an uploaded Excel file name (dammam1, Riyadh.xlsx, …). */
+/** Infer Riyadh/Dammam/Jeddah/Store from an uploaded Excel file name (dammam1, Riyadh.xlsx, …). */
 export function inferEodCityFromFileName(fileName) {
   const base = String(fileName || "")
     .trim()
@@ -653,10 +724,13 @@ export function inferEodCityFromFileName(fileName) {
     .replace(/\.(xlsx|xls)$/i, "");
   const text = normalizeImportHeader(base);
   if (!text) return "";
+  if (/(?:^|[^a-z])(?:dukan|dukaan|dukkan|store|stores|shop|shops)(?:[^a-z]|$)/.test(` ${text} `)) {
+    return EOD_STOCK_STORE;
+  }
   if (/(?:^|[^a-z])(?:riyadh|riyad|ruh)(?:[^a-z]|$)/.test(` ${text} `)) return "riyadh";
   if (/(?:^|[^a-z])(?:dammam|damman|damma|damm|dmm)(?:[^a-z]|$)/.test(` ${text} `)) return "dammam";
   if (/(?:^|[^a-z])(?:jeddah|jedda|jiddah|jed)(?:[^a-z]|$)/.test(` ${text} `)) return "jeddah";
-  return normalizeEodCity(base);
+  return normalizeEodLocation(base);
 }
 
 export function emptyEodCityUploads() {
@@ -664,13 +738,14 @@ export function emptyEodCityUploads() {
     riyadh: null,
     dammam: null,
     jeddah: null,
+    store: null,
   };
 }
 
 export function readEodCityUploads(value) {
   const source = value && typeof value === "object" ? value : {};
   const out = emptyEodCityUploads();
-  EOD_STOCK_CITIES.forEach((city) => {
+  EOD_STOCK_LOCATIONS.forEach((city) => {
     const entry = source[city];
     if (!entry || typeof entry !== "object") return;
     const filePath = String(entry.filePath || "").trim();
@@ -718,7 +793,7 @@ export function summarizeEodCityUploads(dataset) {
   const source = dataset && typeof dataset === "object" ? dataset : {};
   const uploads = readEodCityUploads(source.cityUploads);
   // Legacy datasets only kept the latest file pointer — still show it on matching cities.
-  if (!EOD_STOCK_CITIES.some((city) => uploads[city])) {
+  if (!EOD_STOCK_LOCATIONS.some((city) => uploads[city])) {
     const legacyPath = String(source.filePath || "").trim();
     const legacyName = String(source.fileName || "").trim();
     const inferred = inferEodCityFromFileName(legacyName) || uniqueCities(source.citiesPresent)[0] || "";
@@ -765,7 +840,7 @@ export function applyEodStockUpload(previousDataset, parsed) {
   const citiesPresent = canCarryCities
     ? uniqueCities([
       ...(previous.citiesPresent || []),
-      ...EOD_STOCK_CITIES.filter((city) => countPositiveCityItems(rows, city) > 0),
+      ...EOD_STOCK_LOCATIONS.filter((city) => countPositiveCityItems(rows, city) > 0),
       ...(parsed.citiesPresent || []),
     ])
     : uniqueCities(parsed.citiesPresent);
@@ -796,14 +871,16 @@ export function summarizeEodStock(dataset) {
     riyadh: { qty: 0, value: 0 },
     dammam: { qty: 0, value: 0 },
     jeddah: { qty: 0, value: 0 },
+    store: { qty: 0, value: 0 },
   };
   const itemCounts = {
     riyadh: 0,
     dammam: 0,
     jeddah: 0,
+    store: 0,
   };
   (source.rows || []).forEach((row) => {
-    EOD_STOCK_CITIES.forEach((city) => {
+    EOD_STOCK_LOCATIONS.forEach((city) => {
       const qty = roundEodQty(row.cities?.[city]?.qty || 0);
       totals[city].qty = roundEodQty(totals[city].qty + qty);
       totals[city].value = roundEodQty(totals[city].value + (row.cities?.[city]?.value || 0));
@@ -811,7 +888,7 @@ export function summarizeEodStock(dataset) {
     });
   });
   const cityUploads = summarizeEodCityUploads(source);
-  EOD_STOCK_CITIES.forEach((city) => {
+  EOD_STOCK_LOCATIONS.forEach((city) => {
     if (cityUploads[city] && !cityUploads[city].itemCount) {
       cityUploads[city] = { ...cityUploads[city], itemCount: itemCounts[city] };
     }
@@ -822,7 +899,7 @@ export function summarizeEodStock(dataset) {
     uploadedAt: source.uploadedAt || "",
     fileName: source.fileName || "",
     canDownload: Boolean(String(source.filePath || "").trim())
-      || EOD_STOCK_CITIES.some((city) => cityUploads[city]?.canDownload),
+      || EOD_STOCK_LOCATIONS.some((city) => cityUploads[city]?.canDownload),
     itemCount: Array.isArray(source.rows) ? source.rows.length : 0,
     cities: totals,
     cityItemCounts: itemCounts,
@@ -913,10 +990,10 @@ function normalizeUnitsMap(value) {
   if (!value || typeof value !== "object") return {};
   const out = {};
   Object.entries(value).forEach(([rawCode, rawUnit]) => {
-    const code = String(rawCode || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(rawCode);
     const unit = String(rawUnit || "").trim();
     if (!code || !unit) return;
-    out[code] = unit;
+    if (!out[code]) out[code] = unit;
   });
   return out;
 }
@@ -940,7 +1017,7 @@ export function buildEodStockAvailability(dataset, { masterUnits = null } = {}) 
   const byCity = emptyCityQtyMaps();
   const units = {};
   source.rows.forEach((row) => {
-    const code = String(row?.itemCode || row?.item_code || "").trim().toUpperCase();
+    const code = extractEodStockItemCode(row?.itemCode || row?.item_code);
     if (!code) return;
     const unit = String(row?.unit || "").trim();
     if (unit && !units[code]) units[code] = unit;
@@ -949,6 +1026,11 @@ export function buildEodStockAvailability(dataset, { masterUnits = null } = {}) 
       if (!qty) return;
       byCity[city][code] = roundEodQty((byCity[city][code] || 0) + qty);
     });
+    // Store (Dukan) sits in Riyadh region for catalogue / Available qty.
+    const storeQty = Math.max(0, roundEodQty(row?.cities?.store?.qty || 0));
+    if (storeQty) {
+      byCity.riyadh[code] = roundEodQty((byCity.riyadh[code] || 0) + storeQty);
+    }
   });
 
   return {
@@ -997,10 +1079,10 @@ export function normalizeEodStockAvailability(value) {
   EOD_STOCK_CITIES.forEach((city) => {
     const source = value.byCity?.[city] && typeof value.byCity[city] === "object" ? value.byCity[city] : {};
     Object.entries(source).forEach(([rawCode, rawQty]) => {
-      const code = String(rawCode || "").trim().toUpperCase();
+      const code = extractEodStockItemCode(rawCode);
       const qty = Math.max(0, roundEodQty(rawQty));
       if (!code || !qty) return;
-      byCity[city][code] = qty;
+      byCity[city][code] = roundEodQty((byCity[city][code] || 0) + qty);
     });
   });
   return {
@@ -1105,6 +1187,67 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   if (available == null) return false;
   const qty = Number(orderedQty || 0);
   return Number.isFinite(qty) && qty > available;
+}
+
+/**
+ * Max order qty for an item from countrywide EOD stock (master/display units).
+ * Returns null when no EOD snapshot is loaded (no cap).
+ */
+export function maxOrderQtyForEodStock(availability, itemCode) {
+  return countryEodStockDisplayQty(availability, itemCode);
+}
+
+/**
+ * Clamp an order qty to countrywide available stock when a snapshot is loaded.
+ * Leaves qty unchanged when availability is inactive / missing.
+ */
+export function clampOrderQtyToEodStock(orderedQty, availability, itemCode) {
+  const max = maxOrderQtyForEodStock(availability, itemCode);
+  let qty = Number(orderedQty || 0);
+  if (!Number.isFinite(qty) || qty < 0) qty = 0;
+  if (max == null) return qty;
+  const cap = Math.max(0, Number(max) || 0);
+  return Math.min(qty, cap);
+}
+
+/**
+ * Find order lines whose qty exceeds countrywide EOD available.
+ * Lines with quantity ≤ 0 are ignored. No snapshot → no violations.
+ */
+export function findOrderLinesOverEodStock(lines = [], availability = null) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return [];
+  const violations = [];
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
+    const qty = Number(line?.quantity ?? line?.order_quantity ?? 0);
+    if (!code || !Number.isFinite(qty) || qty <= 0) return;
+    const available = countryEodStockDisplayQty(stock, code);
+    if (available == null) return;
+    if (qty > available) {
+      violations.push({
+        itemCode: code,
+        itemName: String(line?.item_name || line?.itemName || code).trim() || code,
+        quantity: qty,
+        available,
+      });
+    }
+  });
+  return violations;
+}
+
+export function assertOrderLinesWithinEodStock(lines = [], availability = null, language = "en") {
+  const violations = findOrderLinesOverEodStock(lines, availability);
+  if (violations.length === 0) {
+    return { ok: true, violations: [] };
+  }
+  const ar = language === "ar";
+  const error = violations.map((row) => (
+    ar
+      ? `${row.itemCode}: الكمية ${row.quantity} تتجاوز المتاح ${row.available}`
+      : `${row.itemCode}: qty ${row.quantity} exceeds available ${row.available}`
+  )).join(" ");
+  return { ok: false, violations, error };
 }
 
 const EOD_CITY_SHORT = {

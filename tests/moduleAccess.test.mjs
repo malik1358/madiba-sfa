@@ -14,9 +14,9 @@ import {
   listAccessibleNavGroups,
   localizedModuleLabel,
   localizedNavGroupLabel,
-  localizedNavSubgroupLabel,
   matrixRoleKey,
   moduleLabelForPath,
+  NAV_GROUPS,
   normalizeRoleModuleMatrix,
   pathMatchesModuleHref,
   pinnedModuleKeysForAccess,
@@ -128,7 +128,7 @@ test("active customers is a management report in Reports", () => {
   assert.equal(moduleLabelForPath("/management/active-customers", "en"), "Active Customers");
   assert.equal(localizedModuleLabel("activeCustomers", "ar"), "العملاء النشطون");
   const reports = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
-    .find((group) => group.key === "reports");
+    .find((group) => group.key === "salesReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "activeCustomers"), true);
 });
 
@@ -141,7 +141,7 @@ test("customer map is a management report in Reports", () => {
   assert.equal(moduleLabelForPath("/management/customer-map", "en"), "Customer Map");
   assert.equal(localizedModuleLabel("customerMap", "ar"), "خريطة العملاء");
   const reports = listAccessibleNavGroups(buildModuleAccess({ role: "invoice-maker" }))
-    .find((group) => group.key === "reports");
+    .find((group) => group.key === "gpsReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "customerMap"), true);
 });
 
@@ -296,7 +296,7 @@ test("potential bad debts and legal transfers are management reports", () => {
   }
   assert.equal(moduleLabelForPath("/management/potential-bad-debts", "en"), "Potential Bad Debts");
   assert.equal(moduleLabelForPath("/management/legal-transfers", "ar"), "عملاء محولون للقانوني");
-  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "receivablesReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "potentialBadDebts"), true);
   assert.equal(reports.items.some((item) => item.moduleKey === "legalTransfers"), true);
 });
@@ -310,7 +310,7 @@ test("stale overdue collections is a management report", () => {
   assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01", collectionOnlyMetadata: true }).canAccess("collectionStaleOverdue"), false);
   assert.equal(moduleLabelForPath("/management/collection-stale-overdue", "en"), "Stale Overdue Collections");
   assert.equal(localizedModuleLabel("collectionStaleOverdue", "ar"), "تحصيلات متأخرة راكدة");
-  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "receivablesReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "collectionStaleOverdue"), true);
 });
 
@@ -331,7 +331,7 @@ test("item master analysis is a management report", () => {
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("itemMasterAnalysis"), false);
   assert.equal(moduleLabelForPath("/management/item-master-analysis", "en"), "Item Master Analysis");
   assert.equal(localizedModuleLabel("itemMasterAnalysis", "ar"), "تحليل أصناف المخزون");
-  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "itemReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "itemMasterAnalysis"), true);
 });
 
@@ -343,7 +343,7 @@ test("expected stocked sales is a management report", () => {
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("expectedStockedSales"), false);
   assert.equal(moduleLabelForPath("/management/expected-stocked-sales", "en"), "Expected Stocked Sales");
   assert.equal(localizedModuleLabel("expectedStockedSales", "ar"), "المبيعات المتوقعة مع توفر المخزون");
-  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "reports");
+  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" })).find((group) => group.key === "salesReports");
   assert.equal(reports.items.some((item) => item.moduleKey === "expectedStockedSales"), true);
 });
 
@@ -455,6 +455,49 @@ test("localized module and nav labels return Arabic text", () => {
   assert.equal(moduleLabelForPath("/management/new-order", "ar"), "طلب جديد");
 });
 
+test("reports nav group is subdivided into themed report groups", () => {
+  const groupModules = Object.fromEntries(NAV_GROUPS.map((group) => [group.key, group.modules]));
+  assert.equal(groupModules.reports, undefined);
+  assert.deepEqual(groupModules.salesReports, [
+    "businessDashboard",
+    "mis",
+    "myPerformance",
+    "salesmanIncentive",
+    "promoterCoverage",
+    "potentialSalesTargets",
+    "returnsAboveSales",
+    "expectedStockedSales",
+    "activeCustomers",
+  ]);
+  assert.deepEqual(groupModules.receivablesReports, [
+    "expectedCollection",
+    "collectionStaleOverdue",
+    "potentialBadDebts",
+    "legalTransfers",
+  ]);
+  assert.deepEqual(groupModules.activityReports, [
+    "dailyVisitReport",
+    "userActivity",
+    "workingHours",
+    "monthlyAttendance",
+  ]);
+  assert.deepEqual(groupModules.gpsReports, [
+    "outstandingNoGps",
+    "customerGpsHistory",
+    "customerMap",
+    "gpsMap",
+  ]);
+  assert.deepEqual(groupModules.itemReports, [
+    "itemMasterAnalysis",
+    "missingCataloguePhotos",
+  ]);
+  assert.equal(localizedNavGroupLabel("salesReports", "en"), "Sales Reports");
+  assert.equal(localizedNavGroupLabel("receivablesReports", "ar"), "المستحقات والديون");
+  assert.equal(localizedNavGroupLabel("activityReports", "ar"), "الزيارات والحضور");
+  assert.equal(localizedNavGroupLabel("gpsReports", "en"), "GPS & Maps");
+  assert.equal(localizedNavGroupLabel("itemReports", "ar"), "تقارير الأصناف");
+});
+
 test("role access matrix defaults match built-in module flags", () => {
   const matrix = buildDefaultRoleModuleMatrix();
   assert.deepEqual(Object.keys(matrix).sort(), [...ACCESS_MATRIX_ROLES].sort());
@@ -470,6 +513,7 @@ test("role access matrix defaults match built-in module flags", () => {
 test("role module matrix overrides grant and revoke page access", () => {
   const matrix = normalizeRoleModuleMatrix(buildDefaultRoleModuleMatrix());
   matrix.manager.upload = false;
+  matrix.collector.collectionStaleOverdue = true;
 
   const salesman = buildModuleAccess({
     role: "salesman",
@@ -483,6 +527,18 @@ test("role module matrix overrides grant and revoke page access", () => {
     roleModuleMatrix: matrix,
   });
   assert.equal(manager.canAccess("upload"), false);
+
+  assert.equal(buildModuleAccess({
+    role: "collector",
+    salesmanCode: "CL01",
+    collectionOnlyMetadata: true,
+  }).canAccess("collectionStaleOverdue"), false);
+  assert.equal(buildModuleAccess({
+    role: "collector",
+    salesmanCode: "CL01",
+    collectionOnlyMetadata: true,
+    roleModuleMatrix: matrix,
+  }).canAccess("collectionStaleOverdue"), true);
 });
 
 test("stored role matrix cannot hide Business Intelligence from salesmen", () => {
@@ -540,32 +596,15 @@ test("potential sales targets is available to salesmen and report viewers, not c
   assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
 });
 
-test("reports nav is subdivided into labeled subgroups", () => {
-  const reports = listAccessibleNavGroups(buildModuleAccess({ role: "admin" }))
-    .find((group) => group.key === "reports");
-  assert.ok(reports);
-  assert.ok(Array.isArray(reports.subgroups));
-  assert.equal(reports.subgroups.length >= 5, true);
-  const keys = reports.subgroups.map((entry) => entry.key);
-  assert.deepEqual(keys, [
-    "salesBi",
-    "fieldAttendance",
-    "creditCollections",
-    "catalogueItems",
-    "mapsGps",
-  ]);
-  assert.equal(localizedNavSubgroupLabel("salesBi", "en"), "Sales & BI");
-  assert.equal(localizedNavSubgroupLabel("mapsGps", "ar"), "\u0627\u0644\u062e\u0631\u0627\u0626\u0637 \u0648GPS");
-  const salesBi = reports.subgroups.find((entry) => entry.key === "salesBi");
-  assert.equal(salesBi.items.some((item) => item.moduleKey === "businessDashboard"), true);
-  assert.equal(salesBi.items.some((item) => item.moduleKey === "mis"), true);
-  const maps = reports.subgroups.find((entry) => entry.key === "mapsGps");
-  assert.equal(maps.items.some((item) => item.moduleKey === "customerMap"), true);
-  const flatKeys = new Set(reports.items.map((item) => item.moduleKey));
-  const subgroupKeys = new Set(
-    reports.subgroups.flatMap((subgroup) => subgroup.items.map((item) => item.moduleKey)),
-  );
-  assert.deepEqual([...subgroupKeys].sort(), [...flatKeys].sort());
+test("themed report menus only include screens accessible to the role", () => {
+  for (const role of ["admin", "salesman", "collector"]) {
+    const access = buildModuleAccess({ role, salesmanCode: "SM001" });
+    const groups = listAccessibleNavGroups(access);
+    for (const group of groups) {
+      assert.ok(group.items.length > 0);
+      assert.deepEqual(group.items, listAccessibleModules(access, group.modules));
+    }
+  }
 });
 
 test("screen search matches accessible module labels only", () => {
@@ -577,6 +616,8 @@ test("screen search matches accessible module labels only", () => {
 
   const mapHits = filterAccessibleModulesByQuery(admin, "customer map", "en");
   assert.equal(mapHits.some((item) => item.moduleKey === "customerMap"), true);
+  const arabicMapHits = filterAccessibleModulesByQuery(admin, "خريطة العملاء", "ar");
+  assert.equal(arabicMapHits.some((item) => item.moduleKey === "customerMap"), true);
 
   const salesmanMapHits = filterAccessibleModulesByQuery(salesman, "customer map", "en");
   assert.equal(salesmanMapHits.some((item) => item.moduleKey === "customerMap"), false);

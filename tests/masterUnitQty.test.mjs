@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildMasterUnitConvMap,
+  buildOrderUnitOptions,
+  formatItemQtyMasterDisplay,
   formatMasterStockQty,
+  itemQtyMasterNumber,
   mergePackingMasterUnitConvMap,
+  orderQtyInUnit,
+  orderQtyToMaster,
+  orderRateInUnit,
   parsePackingMasterConv,
+  pickOrderUnit,
+  stepOrderQtyInUnit,
   toMasterStockQty,
   unitsMatch,
 } from "../app/lib/masterUnitQty.js";
@@ -79,6 +87,27 @@ test("parsePackingMasterConv reads CTN OF N Pack OF M PC", () => {
   assert.equal(merged.A006789.masterUom, "Ctn");
 });
 
+test("formatItemQtyMasterDisplay converts sales qty and keeps sign", () => {
+  const map = { A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 } };
+  assert.equal(formatItemQtyMasterDisplay(3672, "A006789", map), "51 Ctn");
+  assert.equal(formatItemQtyMasterDisplay(-144, "A006789", map), "-2 Ctn");
+  assert.equal(itemQtyMasterNumber(3672, "A006789", map), 51);
+  assert.equal(formatItemQtyMasterDisplay(10, "MISSING", map), "10");
+});
+
+test("applyMasterUnitQtyFields converts named qty columns", async () => {
+  const { applyMasterUnitQtyFields } = await import("../app/lib/masterUnitQty.js");
+  const map = { A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 } };
+  const row = applyMasterUnitQtyFields(
+    { itemCode: "A006789", quantity: 720, expectedQty: 144 },
+    map,
+    { fields: ["quantity", "expectedQty"] },
+  );
+  assert.equal(row.quantity, 10);
+  assert.equal(row.expectedQty, 2);
+  assert.equal(row.qtyUnit, "Ctn");
+});
+
 test("Available label shows master unit when conversion map is present", () => {
   const availability = buildEodStockAvailability({
     stockDate: "2026-11-13",
@@ -104,4 +133,42 @@ test("Available label shows master unit when conversion map is present", () => {
     formatEodStockAvailableLabel(1000, "en", null, availability, "A000057", Date.parse("2026-11-13T12:00:00.000Z")),
     "Available: 200 Ctn · R:160 D:40 J:0",
   );
+});
+
+test("buildOrderUnitOptions lists master unit first, base unit second", () => {
+  const units = { A000057: { masterUom: "Ctn", baseUom: "Pcs", conv: 12 } };
+  const options = buildOrderUnitOptions(units, "a000057");
+  assert.deepEqual(options, [
+    { key: "master", label: "Ctn", perMaster: 1 },
+    { key: "base", label: "Pcs", perMaster: 12 },
+  ]);
+  assert.deepEqual(buildOrderUnitOptions(units, "ZZ999"), []);
+  assert.deepEqual(buildOrderUnitOptions({ X: { masterUom: "Ctn", baseUom: "Pcs", conv: 1 } }, "X"), []);
+});
+
+test("pickOrderUnit defaults to master and honours the chosen key", () => {
+  const options = buildOrderUnitOptions({ A1: { masterUom: "Ctn", baseUom: "Pcs", conv: 12 } }, "A1");
+  assert.equal(pickOrderUnit(options).key, "master");
+  assert.equal(pickOrderUnit(options, "base").key, "base");
+  assert.equal(pickOrderUnit(options, "bogus").key, "master");
+  assert.equal(pickOrderUnit([], "base"), null);
+});
+
+test("pcs entry round-trips through master-unit storage and keeps pricing exact", () => {
+  const stored = orderQtyToMaster(5, 12);
+  assert.equal(orderQtyInUnit(stored, 12), 5);
+  assert.equal(Math.round(stored * 60 * 100) / 100, 25);
+  assert.equal(orderRateInUnit(60, 12), 5);
+  assert.equal(orderRateInUnit(60, 1), 60);
+  assert.equal(orderQtyToMaster("", 12), 0);
+  assert.equal(orderQtyToMaster(-3, 12), 0);
+});
+
+test("stepOrderQtyInUnit steps by one selected unit and floors at zero", () => {
+  const onePc = stepOrderQtyInUnit(0, 12, 1);
+  assert.equal(orderQtyInUnit(onePc, 12), 1);
+  assert.equal(stepOrderQtyInUnit(onePc, 12, -1), 0);
+  assert.equal(stepOrderQtyInUnit(0, 12, -1), 0);
+  assert.equal(stepOrderQtyInUnit(2, 1, 1), 3);
+  assert.equal(stepOrderQtyInUnit(2, 1, -1), 1);
 });

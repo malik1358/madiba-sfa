@@ -4,6 +4,7 @@ import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
 import {
   ensureDefaultCustomerBookShares,
   loadAllCustomerBookShareRows,
+  preferCanonicalShareSalesmen,
   salesmanLabel,
 } from "../../../lib/customerBookShares.js";
 import {
@@ -63,7 +64,7 @@ async function listSalesmen(admin) {
 
   if (error) throw error;
 
-  return (data || []).filter((row) => {
+  return preferCanonicalShareSalesmen(data || []).filter((row) => {
     const code = String(row.salesman_code || "").trim();
     if (!code) return false;
     return !isCollectionOnlyAccess({ role: row.role, salesmanCode: code });

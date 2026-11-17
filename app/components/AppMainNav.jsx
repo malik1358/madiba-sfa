@@ -9,7 +9,6 @@ import {
   listAccessibleNavGroups,
   localizedModuleLabel,
   localizedNavGroupLabel,
-  localizedNavSubgroupLabel,
   pathMatchesModuleHref,
   pinnedModuleKeysForAccess,
 } from "../lib/moduleAccess";
@@ -19,9 +18,10 @@ import { getSupabaseClient } from "../lib/supabase";
 
 const NAV_TEXT = {
   mainNavigation: { en: "Main navigation", ar: "التنقل الرئيسي" },
-  searchScreens: { en: "Search screens…", ar: "البحث في الشاشات…" },
   searchScreensAria: { en: "Search screens", ar: "البحث في الشاشات" },
-  noScreensFound: { en: "No screens found", ar: "لا توجد شاشات" },
+  searchScreens: { en: "Search screens…", ar: "ابحث عن شاشة…" },
+  noScreensFound: { en: "No screens found", ar: "لا توجد شاشات مطابقة" },
+  menu: { en: "Menu", ar: "القائمة" },
 };
 
 export default function AppMainNav() {
@@ -32,6 +32,7 @@ export default function AppMainNav() {
   const { access, loading } = useModuleAccess();
   const [signedIn, setSignedIn] = useState(false);
   const [openGroup, setOpenGroup] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [hoverCapable, setHoverCapable] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -66,23 +67,27 @@ export default function AppMainNav() {
   }, []);
 
   useEffect(() => {
-    if (!openGroup && !searchOpen) return undefined;
+    if (!openGroup && !searchOpen && !menuOpen) return undefined;
 
     function handlePointerDown(event) {
       if (!navRef.current?.contains(event.target)) {
         setOpenGroup("");
+        setMenuOpen(false);
+      }
+      if (!searchRef.current?.contains(event.target)) {
         setSearchOpen(false);
       }
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [openGroup, searchOpen]);
+  }, [openGroup, searchOpen, menuOpen]);
 
   useEffect(() => {
     setSearchQuery("");
     setSearchOpen(false);
     setOpenGroup("");
+    setMenuOpen(false);
   }, [pathname]);
 
   const groups = useMemo(
@@ -107,7 +112,7 @@ export default function AppMainNav() {
     [access, language, loading, signedIn],
   );
   const searchResults = useMemo(
-    () => (signedIn && !loading ? filterAccessibleModulesByQuery(access, searchQuery, language) : []),
+    () => (signedIn && !loading ? filterAccessibleModulesByQuery(access, searchQuery, language).slice(0, 12) : []),
     [access, language, loading, searchQuery, signedIn],
   );
 
@@ -125,6 +130,7 @@ export default function AppMainNav() {
     if (!href) return;
     closeSearch();
     setOpenGroup("");
+    setMenuOpen(false);
     router.push(href);
   }
 
@@ -132,7 +138,7 @@ export default function AppMainNav() {
     if (event.key === "Escape") {
       event.preventDefault();
       closeSearch();
-      searchRef.current?.blur();
+      event.currentTarget.blur();
       return;
     }
 
@@ -165,9 +171,56 @@ export default function AppMainNav() {
 
   return (
     <nav className="appMainNav" aria-label={t("mainNavigation")} dir={dir} ref={navRef}>
-      <div className={`appMainNavSearch${searchOpen ? " appMainNavSearch--open" : ""}`}>
+      <button
+        type="button"
+        className="appMainNavMenuButton"
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+        onClick={() => {
+          setMenuOpen((current) => !current);
+          setOpenGroup("");
+          setSearchOpen(false);
+        }}
+      >
+        <span aria-hidden="true">☰</span> {t("menu")}
+      </button>
+      {menuOpen ? (
+        <div className="appMainNavMobilePanel">
+          {pinnedItems.length > 0 ? (
+            <div className="appMainNavMobilePinned">
+              {pinnedItems.map((item) => (
+                <Link
+                  key={item.moduleKey}
+                  href={item.href}
+                  className={`appMainNavPinnedLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavPinnedLink--active" : ""}`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.key} className="appMainNavMobileGroup">
+              <div className="appMainNavMobileGroupTitle">{localizedNavGroupLabel(group.key, language)}</div>
+              <div className="appMainNavMobileLinks">
+                {group.items.map((item) => (
+                  <Link
+                    key={item.moduleKey}
+                    href={item.href}
+                    className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {localizedModuleLabel(item.moduleKey, language)}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="appMainNavSearch" ref={searchRef}>
         <input
-          ref={searchRef}
           type="search"
           className="appMainNavSearchInput"
           value={searchQuery}
@@ -181,6 +234,7 @@ export default function AppMainNav() {
             setSearchQuery(event.target.value);
             setSearchOpen(true);
             setOpenGroup("");
+            setMenuOpen(false);
           }}
           onKeyDown={handleSearchKeyDown}
         />
@@ -199,11 +253,14 @@ export default function AppMainNav() {
                   href={item.href}
                   role="option"
                   aria-selected={index === activeSearchIndex}
-                  className={`appMainNavSearchResult${index === activeSearchIndex ? " appMainNavSearchResult--active" : ""}`}
+                  className={`appMainNavSearchLink${index === activeSearchIndex ? " appMainNavSearchLink--active" : ""}`}
                   onMouseEnter={() => setActiveSearchIndex(index)}
                   onClick={() => closeSearch()}
                 >
-                  <span className="appMainNavSearchResultLabel">{item.label}</span>
+                  <span>{item.label}</span>
+                  <span className="appMainNavSearchGroupTag">
+                    {localizedNavGroupLabel(groups.find((group) => group.items.some((entry) => entry.moduleKey === item.moduleKey))?.key, language)}
+                  </span>
                 </Link>
               ))
             )}
@@ -213,7 +270,6 @@ export default function AppMainNav() {
       {groups.map((group) => {
         const isOpen = openGroup === group.key;
         const hasActiveItem = group.items.some((item) => pathMatchesModuleHref(pathname, item.href));
-        const useSubgroups = Array.isArray(group.subgroups) && group.subgroups.length > 0;
 
         return (
           <div
@@ -235,35 +291,17 @@ export default function AppMainNav() {
             >
               {localizedNavGroupLabel(group.key, language)}
             </button>
-            <div className={`appMainNavDropdown${isOpen ? " appMainNavDropdown--open" : ""}${useSubgroups ? " appMainNavDropdown--grouped" : ""}`}>
-              {useSubgroups
-                ? group.subgroups.map((subgroup) => (
-                  <div key={subgroup.key} className="appMainNavSubgroup">
-                    <div className="appMainNavSubgroupLabel">
-                      {localizedNavSubgroupLabel(subgroup.key, language) || subgroup.label}
-                    </div>
-                    {subgroup.items.map((item) => (
-                      <Link
-                        key={item.moduleKey}
-                        href={item.href}
-                        className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
-                        onClick={() => setOpenGroup("")}
-                      >
-                        {localizedModuleLabel(item.moduleKey, language)}
-                      </Link>
-                    ))}
-                  </div>
-                ))
-                : group.items.map((item) => (
-                  <Link
-                    key={item.moduleKey}
-                    href={item.href}
-                    className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
-                    onClick={() => setOpenGroup("")}
-                  >
-                    {localizedModuleLabel(item.moduleKey, language)}
-                  </Link>
-                ))}
+            <div className={`appMainNavDropdown${isOpen ? " appMainNavDropdown--open" : ""}`}>
+              {group.items.map((item) => (
+                <Link
+                  key={item.moduleKey}
+                  href={item.href}
+                  className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
+                  onClick={() => setOpenGroup("")}
+                >
+                  {localizedModuleLabel(item.moduleKey, language)}
+                </Link>
+              ))}
             </div>
           </div>
         );

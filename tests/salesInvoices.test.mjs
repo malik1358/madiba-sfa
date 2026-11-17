@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyMasterUnitsToSalesInvoices,
   currentMonthDateRange,
   groupSalesRowsIntoInvoices,
   resolveInvoiceSalesmanCodes,
@@ -79,6 +80,29 @@ test("sales invoices group line items by date, voucher, and customer", () => {
     totalAmount: 55,
     customerCount: 2,
   });
+});
+
+test("sales invoice line qty converts to master units when map is provided", () => {
+  const invoices = groupSalesRowsIntoInvoices([
+    {
+      id: 1,
+      transaction_date: "2026-09-02",
+      voucher_number: "INV-100",
+      customer_code: "C1",
+      customer_name: "Alpha",
+      salesman_code: "S1",
+      item_code: "A006789",
+      item_name: "Gloves",
+      quantity: 720,
+      rate: 1,
+      sales_amount: 720,
+    },
+  ]);
+  const converted = applyMasterUnitsToSalesInvoices(invoices, {
+    A006789: { masterUom: "Ctn", baseUom: "Pcs", conv: 72 },
+  });
+  assert.equal(converted[0].items[0].quantity, 10);
+  assert.equal(converted[0].items[0].qtyUnit, "Ctn");
 });
 
 test("salesman invoice scope uses requested code when allowed and all codes when unrestricted", () => {

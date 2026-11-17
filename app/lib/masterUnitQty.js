@@ -217,6 +217,120 @@ export function formatMasterStockQty(qty, unit = "") {
 }
 
 /**
+ * Format any item qty for UI in master units when conversion is known.
+ * Used for sales/history qty columns (not order entry). Preserves sign.
+ */
+export function formatItemQtyMasterDisplay(rawQty, itemCode, masterUnits, {
+  stockUnit = "",
+  empty = "—",
+} = {}) {
+  if (rawQty == null || rawQty === "") return empty;
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return empty;
+  if (raw === 0) return "0";
+
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) {
+    return Math.round(raw).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+
+  const sign = raw < 0 ? -1 : 1;
+  const converted = toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  });
+  return formatMasterStockQty(sign * converted.qty, converted.unit);
+}
+
+/** Numeric master qty for totals (0 when unknown/blank). */
+export function itemQtyMasterNumber(rawQty, itemCode, masterUnits, { stockUnit = "" } = {}) {
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return 0;
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return Math.round(raw);
+  const sign = raw < 0 ? -1 : 1;
+  return sign * toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  }).qty;
+}
+
+/**
+ * Convert named qty fields on a report row to master units.
+ * Sets qtyUnit when conversion applies. Leaves row unchanged when no map entry.
+ */
+export function applyMasterUnitQtyFields(row = {}, masterUnits = {}, {
+  itemCodeKey = "itemCode",
+  fields = ["quantity"],
+  stockUnit = "",
+} = {}) {
+  const code = row?.[itemCodeKey] || row?.item_code || row?.itemCode;
+  const master = lookupMasterUnitConv(masterUnits, code);
+  if (!master || !(master.conv > 1)) return row;
+  const next = { ...row };
+  for (const field of fields) {
+    if (next[field] == null || next[field] === "") continue;
+    next[field] = itemQtyMasterNumber(next[field], code, masterUnits, { stockUnit });
+  }
+  if (master.masterUom) next.qtyUnit = master.masterUom;
+  return next;
+}
+
+/**
+ * Order-entry unit choices for New Order rows. The price list and the stored
+ * order qty are both per master unit (carton / biggest unit); the base unit is
+ * an entry convenience only. `perMaster` = how many of this unit equal 1 master.
+ */
+export function buildOrderUnitOptions(masterUnits, itemCode) {
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return [];
+  return [
+    { key: "master", label: master.masterUom, perMaster: 1 },
+    { key: "base", label: master.baseUom || "Pcs", perMaster: master.conv },
+  ];
+}
+
+/** Selected unit option; defaults to the master (price-list) unit. */
+export function pickOrderUnit(options, chosenKey = "") {
+  if (!Array.isArray(options) || options.length === 0) return null;
+  return options.find((option) => option.key === chosenKey) || options[0];
+}
+
+/** Master-unit order qty → qty displayed in the selected unit (3 dp). */
+export function orderQtyInUnit(masterQty, perMaster) {
+  const qty = Number(masterQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return Math.round(qty * factor * 1000) / 1000;
+}
+
+/** Qty entered in the selected unit → stored master-unit qty. */
+export function orderQtyToMaster(enteredQty, perMaster) {
+  const qty = Number(enteredQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(factor) || factor <= 0) return 0;
+  return qty / factor;
+}
+
+/** Step the master-unit qty by ±1 of the selected unit (never below 0). */
+export function stepOrderQtyInUnit(masterQty, perMaster, delta) {
+  const units = orderQtyInUnit(masterQty, perMaster);
+  return orderQtyToMaster(Math.max(0, units + (Number(delta) || 0)), perMaster);
+}
+
+/** Price per selected unit from the per-master-unit price-list rate. */
+export function orderRateInUnit(masterRate, perMaster) {
+  const rate = Number(masterRate);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(rate) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return rate / factor;
+}
+
+/**
  * Apply master-unit conversion to an EOD availability snapshot for one item.
  */
 export function resolveEodStockMasterDisplay(availability, itemCode, rawQty) {

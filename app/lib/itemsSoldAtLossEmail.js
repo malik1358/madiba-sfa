@@ -25,10 +25,12 @@ function formatMoney(value) {
   });
 }
 
-function formatQty(value) {
-  return Number(value || 0).toLocaleString("en-US", {
-    maximumFractionDigits: 3,
+function formatQty(value, unit = "") {
+  const qtyText = Number(value || 0).toLocaleString("en-US", {
+    maximumFractionDigits: 0,
   });
+  const u = String(unit || "").trim();
+  return u ? `${qtyText} ${u}` : qtyText;
 }
 
 function formatDate(value) {
@@ -57,7 +59,7 @@ function lossTable(rows = []) {
       <td style="padding:6px 8px;border:1px solid #d7e3ea;">${escapeHtml(`${row.salesmanCode || ""} ${row.salesmanName || ""}`.trim() || "-")}</td>
       <td style="padding:6px 8px;border:1px solid #d7e3ea;">${escapeHtml(`${row.customerCode || ""} ${row.customerName || ""}`.trim() || "-")}</td>
       <td style="padding:6px 8px;border:1px solid #d7e3ea;">${escapeHtml(`${row.itemCode || ""} ${row.itemName || ""}`.trim() || "-")}</td>
-      <td style="padding:6px 8px;border:1px solid #d7e3ea;text-align:right;">${escapeHtml(formatQty(row.quantity))}</td>
+      <td style="padding:6px 8px;border:1px solid #d7e3ea;text-align:right;">${escapeHtml(formatQty(row.quantity, row.qtyUnit))}</td>
       <td style="padding:6px 8px;border:1px solid #d7e3ea;text-align:right;">${escapeHtml(formatMoney(row.rate))}</td>
       <td style="padding:6px 8px;border:1px solid #d7e3ea;text-align:right;">${escapeHtml(formatMoney(row.salesAmount))}</td>
       <td style="padding:6px 8px;border:1px solid #d7e3ea;text-align:right;color:#b91c1c;font-weight:600;">${escapeHtml(formatMoney(row.profitAmount))}</td>
@@ -138,7 +140,7 @@ export function buildItemsSoldAtLossEmail({
       `${row.salesmanCode || ""} ${row.salesmanName || ""}`.trim() || "-",
       `${row.customerCode || ""} ${row.customerName || ""}`.trim() || "-",
       `${row.itemCode || ""} ${row.itemName || ""}`.trim() || "-",
-      formatQty(row.quantity),
+      formatQty(row.quantity, row.qtyUnit),
       formatMoney(row.rate),
       formatMoney(row.salesAmount),
       formatMoney(row.profitAmount),

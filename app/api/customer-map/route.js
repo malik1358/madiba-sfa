@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { canViewManagementReports } from "../../lib/moduleAccess.js";
+import { normalizeCustomerMapScope } from "../../lib/customerMapReport.js";
 import { loadCustomerMapReport } from "../../lib/customerMapReportServer.js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,12 +50,16 @@ export async function GET(request) {
     }
 
     const requestUrl = new URL(request.url);
+    const activeOnlyParam = requestUrl.searchParams.get("activeOnly");
+    const scope = normalizeCustomerMapScope(requestUrl.searchParams.get("scope"), {
+      activeOnly: activeOnlyParam == null ? undefined : activeOnlyParam !== "0",
+    });
     const filters = {
       city: String(requestUrl.searchParams.get("city") || "").trim(),
       areaKey: String(requestUrl.searchParams.get("areaKey") || "").trim(),
       salesman: String(requestUrl.searchParams.get("salesman") || "").trim(),
       search: String(requestUrl.searchParams.get("search") || "").trim(),
-      activeOnly: requestUrl.searchParams.get("activeOnly") !== "0",
+      scope,
     };
 
     const report = await loadCustomerMapReport(admin, filters);

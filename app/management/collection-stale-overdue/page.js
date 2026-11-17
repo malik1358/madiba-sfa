@@ -58,8 +58,8 @@ const TEXT = {
   noRows: { en: "No customers match the stale overdue filters today.", ar: "لا يوجد عملاء مطابقون لفلاتر التحصيل الراكد اليوم." },
   legalBadge: { en: "Legal", ar: "قانوني" },
   accessDenied: {
-    en: "Only admin, manager, or invoice maker can open this report.",
-    ar: "هذا التقرير للمدير أو الأدمن أو معد الفواتير.",
+    en: "You do not have access to this report. Ask an admin to enable Stale Overdue Collections for your role on Role Access.",
+    ar: "ليس لديك صلاحية لهذا التقرير. اطلب من المدير تفعيل تحصيلات متأخرة راكدة لدورك في صلاحيات الأدوار.",
   },
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
 };

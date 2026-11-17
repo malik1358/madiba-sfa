@@ -397,73 +397,6 @@ body {
   border-bottom: 1px solid #c8d8db;
 }
 
-.appMainNavSearch {
-  position: relative;
-  flex: 1 1 180px;
-  min-width: 160px;
-  max-width: 280px;
-}
-
-.appMainNavSearchInput {
-  width: 100%;
-  min-height: 34px;
-  padding: 6px 12px;
-  border: 1px solid #b9ccd0;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #073f4c;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.appMainNavSearchInput:focus {
-  outline: 2px solid #0b6173;
-  outline-offset: 1px;
-  border-color: #0b6173;
-}
-
-.appMainNavSearchResults {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  min-width: 220px;
-  max-height: min(60vh, 360px);
-  overflow: auto;
-  padding: 6px;
-  border: 1px solid #c8d8db;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
-  z-index: 10004;
-  display: grid;
-  gap: 2px;
-}
-
-.appMainNavSearchEmpty {
-  padding: 10px;
-  color: #5a7379;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.appMainNavSearchResult {
-  display: block;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: #073f4c;
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.appMainNavSearchResult:hover,
-.appMainNavSearchResult:focus-visible,
-.appMainNavSearchResult--active {
-  background: #edf4f5;
-  color: #0b6173;
-}
-
 .appMainNavPinned {
   display: flex;
   flex-wrap: wrap;
@@ -531,30 +464,6 @@ body {
   gap: 2px;
 }
 
-.appMainNavDropdown--grouped {
-  min-width: 240px;
-  gap: 8px;
-}
-
-.appMainNavSubgroup {
-  display: grid;
-  gap: 2px;
-}
-
-.appMainNavSubgroup + .appMainNavSubgroup {
-  padding-top: 6px;
-  border-top: 1px solid #d9e5e8;
-}
-
-.appMainNavSubgroupLabel {
-  padding: 4px 10px 2px;
-  color: #5a7379;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .appMainNavLink {
   display: block;
   padding: 8px 10px;
@@ -593,6 +502,91 @@ body {
   border-color: #0b6173;
 }
 
+.appMainNavSearch {
+  position: relative;
+  flex: 0 1 220px;
+  min-width: 150px;
+}
+
+.appMainNavSearchInput {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #b9ccd0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.appMainNavSearchInput::placeholder {
+  color: #5b7a81;
+  font-weight: 600;
+}
+
+.appMainNavSearchInput:focus-visible {
+  outline: 2px solid #0b6173;
+  outline-offset: 1px;
+}
+
+.appMainNavSearchResults {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  margin-top: 4px;
+  min-width: 250px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #c8d8db;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
+  z-index: 10002;
+  display: grid;
+  gap: 2px;
+}
+
+.appMainNavSearchLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.appMainNavSearchLink:hover,
+.appMainNavSearchLink:focus-visible,
+.appMainNavSearchLink--active {
+  background: #edf4f5;
+  color: #0b6173;
+}
+
+.appMainNavSearchGroupTag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5b7a81;
+}
+
+.appMainNavSearchEmpty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #5b7a81;
+}
+
+/* Mobile-only hamburger menu; hidden on desktop where groups show inline. */
+.appMainNavMenuButton,
+.appMainNavMobilePanel {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .workdayTimesBar {
     top: 56px;
@@ -623,19 +617,90 @@ body {
 
   .appMainNav {
     top: 56px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     overflow: visible;
   }
 
-  .appMainNavSearch {
-    flex: 1 1 100%;
-    max-width: none;
-    order: -1;
+  .appMainNav > .appMainNavGroup,
+  .appMainNav > .appMainNavPinned {
+    display: none;
+  }
+
+  .appMainNavMenuButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid #b9ccd0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #073f4c;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .appMainNavMenuButton[aria-expanded="true"] {
+    background: #073f4c;
+    border-color: #073f4c;
+    color: #ffffff;
+  }
+
+  .appMainNavMobilePanel {
+    display: grid;
+    gap: 12px;
+    position: absolute;
+    top: 100%;
+    inset-inline: 8px;
+    margin-top: 4px;
+    padding: 10px;
+    border: 1px solid #c8d8db;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(7, 63, 76, 0.18);
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    z-index: 10003;
+  }
+
+  .appMainNavMobilePinned {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .appMainNavMobileGroupTitle {
+    padding: 2px 4px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #0b6173;
+    border-bottom: 1px solid #e0ebed;
+    margin-bottom: 4px;
+  }
+
+  .appMainNavMobileLinks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 8px;
   }
 
   .appMainNavPinned {
     width: 100%;
     margin-inline-start: 0;
+  }
+
+  .appMainNavSearch {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .appMainNavSearchResults {
+    min-width: 0;
+    width: 100%;
   }
 
   .appMainNavGroup--open {
@@ -9416,6 +9481,66 @@ tr.paymentSettleStatementLead td {
   margin-top: 8px;
   color: #0f4c5c;
   font-weight: 700;
+}
+
+.customerMapPin {
+  background: transparent;
+  border: none;
+}
+
+.customerMapPinDot {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50% 50% 50% 0;
+  background: #0f4c5c;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(7, 63, 76, 0.45);
+  transform: rotate(-45deg);
+}
+
+.customerMapPinDot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.customerMapPin--selected .customerMapPinDot {
+  background: #e36414;
+  box-shadow: 0 1px 5px rgba(154, 52, 18, 0.5);
+}
+
+.customerMapAreaBubble {
+  background: transparent;
+  border: none;
+}
+
+.customerMapAreaBubbleInner {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #0f4c5c;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(7, 63, 76, 0.4);
+}
+
+.customerMapAreaBubble--selected .customerMapAreaBubbleInner {
+  background: #e36414;
+  box-shadow: 0 1px 5px rgba(154, 52, 18, 0.5);
 }
 
 @media (max-width: 700px) {

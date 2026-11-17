@@ -1,7 +1,8 @@
-import { numberFormat, qtyFormat, shortDate } from '../lib/format';
+import { numberFormat, shortDate } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
+import { formatItemQtyMasterDisplay } from '../../../lib/masterUnitQty.js';
 
-export default function TransactionHistory({ transactions, analytics }) {
+export default function TransactionHistory({ transactions, analytics, eodStock = null }) {
   return (
     <section className="auditSection">
       <div className="auditTransactionHeader">
@@ -33,7 +34,7 @@ export default function TransactionHistory({ transactions, analytics }) {
                 <td>{row.item_code || '—'}</td>
                 <td>{row.item_name || '—'}</td>
                 <td>{row.category || 'Unclassified'}</td>
-                <td className={`auditNumberCell ${Number(row.quantity) < 0 ? 'auditNegativeValue' : ''}`}>{qtyFormat(row.quantity)}</td>
+                <td className={`auditNumberCell ${Number(row.quantity) < 0 ? 'auditNegativeValue' : ''}`}>{formatItemQtyMasterDisplay(row.quantity, row.item_code, eodStock?.masterUnits)}</td>
                 <td className={`auditNumberCell ${Number(row.sales_amount) < 0 ? 'auditNegativeValue' : ''}`}>{numberFormat(row.sales_amount)}</td>
               </tr>
             ))}

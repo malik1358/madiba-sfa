@@ -1,11 +1,13 @@
 import { Fragment } from 'react';
-import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
+import { monthName, numberFormat, trendClass } from '../lib/format';
 import { isDoNotUseItem } from '../lib/helpers';
 import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from '../../../lib/regionalPricing';
+import { formatItemQtyMasterDisplay } from '../../../lib/masterUnitQty.js';
+import { countryEodStockDisplayQty } from '../../../lib/eodStock.js';
 
-export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit', schemeApplications = {} }) {
+export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit', schemeApplications = {}, eodStock = null }) {
   const catalogByCode = new Map(
     itemCatalog.map((item) => [String(item.item_code || '').trim().toUpperCase(), item])
   );
@@ -137,6 +139,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                     const hasCurrentReplacement = Boolean(currentName) && !isDoNotUseItem(currentName);
                                     const displayName = hasCurrentReplacement ? currentName : item.item_name;
                                     const isNotOrderable = isDoNotUseItem(displayName);
+                                    const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                                     return (
                                       <Fragment key={item.item_key}>
                                         <tr className="auditItemValueRow">
@@ -176,8 +179,8 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                             ) : (
                                               <div className="auditQtyControl">
                                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                                <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                                <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                                <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                                <button type="button" className="auditQtyButton" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(item.item_code)}>+</button>
                                               </div>
                                             )}
                                           </td>
@@ -189,11 +192,11 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                             const previous = index > 0 ? item.months[analytics.months[index - 1]]?.quantity || 0 : 0;
                                             return (
                                               <td key={month} className={trendClass(current, previous, index > 0)}>
-                                                {current ? qtyFormat(current) : '—'}
+                                                {current ? formatItemQtyMasterDisplay(current, item.item_code, eodStock?.masterUnits) : '—'}
                                               </td>
                                             );
                                           })}
-                                          <td className="auditItemTotal">{qtyFormat(item.total_quantity)}</td>
+                                          <td className="auditItemTotal">{formatItemQtyMasterDisplay(item.total_quantity, item.item_code, eodStock?.masterUnits)}</td>
                                         </tr>
                                       </Fragment>
                                     );

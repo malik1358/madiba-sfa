@@ -35,34 +35,42 @@ test("Tally section titles are not treated as stock items", () => {
 });
 
 test("finds stock available in one city and not the other", () => {
-  const { riyadhToDammam, dammamToRiyadh } = findInterCityStockImbalances([
+  const { riyadhToDammam, dammamToRiyadh, riyadhToStore } = findInterCityStockImbalances([
     {
       itemCode: "A004101",
       itemName: "Only Riyadh",
       unit: "PCS",
-      cities: { riyadh: { qty: 40 }, dammam: { qty: 0 }, jeddah: { qty: 5 } },
+      cities: { riyadh: { qty: 40 }, dammam: { qty: 0 }, jeddah: { qty: 5 }, store: { qty: 0 } },
     },
     {
       itemCode: "A004102",
       itemName: "Only Dammam",
-      cities: { riyadh: { qty: 0 }, dammam: { qty: 12 }, jeddah: { qty: 0 } },
+      cities: { riyadh: { qty: 0 }, dammam: { qty: 12 }, jeddah: { qty: 0 }, store: { qty: 0 } },
     },
     {
       itemCode: "A004103",
       itemName: "Both",
-      cities: { riyadh: { qty: 8 }, dammam: { qty: 3 }, jeddah: { qty: 0 } },
+      cities: { riyadh: { qty: 8 }, dammam: { qty: 3 }, jeddah: { qty: 0 }, store: { qty: 2 } },
+    },
+    {
+      itemCode: "A004104",
+      itemName: "Warehouse only",
+      cities: { riyadh: { qty: 15 }, dammam: { qty: 4 }, jeddah: { qty: 0 }, store: { qty: 0 } },
     },
     {
       itemCode: "NON FOOD DIVISION",
       itemName: "NON FOOD DIVISION",
-      cities: { riyadh: { qty: 99 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      cities: { riyadh: { qty: 99 }, dammam: { qty: 0 }, jeddah: { qty: 0 }, store: { qty: 0 } },
     },
   ]);
 
   assert.deepEqual(riyadhToDammam.map((row) => row.itemCode), ["A004101"]);
   assert.deepEqual(dammamToRiyadh.map((row) => row.itemCode), ["A004102"]);
+  assert.deepEqual(riyadhToStore.map((row) => row.itemCode), ["A004101", "A004104"]);
   assert.equal(riyadhToDammam[0].sourceQty, 40);
   assert.equal(riyadhToDammam[0].destinationQty, 0);
+  assert.equal(riyadhToStore[0].sourceQty, 40);
+  assert.equal(riyadhToStore.find((row) => row.itemCode === "A004104").sourceQty, 15);
 });
 
 test("excludes building-material items by category, name, and LP code", () => {
@@ -222,4 +230,24 @@ test("builds both direction reports with suggested quantities", () => {
   assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 30);
   assert.equal(report.summary.riyadhToDammamSuggestedQty, 80);
   assert.equal(report.summary.dammamToRiyadhSuggestedQty, 30);
+  // Warehouse stock with no Store qty also lands on Riyadh → Store.
+  assert.ok(report.directions.riyadhToStore.itemCount >= 2);
+  assert.equal(
+    report.directions.riyadhToStore.rows.some((row) => row.itemCode === "A004400"),
+    true,
+  );
+});
+
+test("store-only Riyadh stock still counts as in Riyadh vs Dammam", () => {
+  const { riyadhToDammam, dammamToRiyadh, riyadhToStore } = findInterCityStockImbalances([
+    {
+      itemCode: "A004500",
+      itemName: "Shop only",
+      cities: { riyadh: { qty: 0 }, dammam: { qty: 0 }, jeddah: { qty: 0 }, store: { qty: 9 } },
+    },
+  ]);
+  assert.deepEqual(riyadhToDammam.map((row) => row.itemCode), ["A004500"]);
+  assert.equal(riyadhToDammam[0].sourceQty, 9);
+  assert.deepEqual(dammamToRiyadh, []);
+  assert.deepEqual(riyadhToStore, []);
 });

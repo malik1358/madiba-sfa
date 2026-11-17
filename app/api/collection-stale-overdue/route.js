@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { loadCollectionStaleOverdueReport } from "../../lib/collectionStaleOverdueEmailServer.js";
-import { canViewManagementReports } from "../../lib/moduleAccess.js";
+import { buildModuleAccess } from "../../lib/moduleAccess.js";
+import { loadRoleModuleMatrix } from "../../lib/roleModuleAccessServer.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,14 +27,30 @@ export async function GET(request) {
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
-      .select("role,is_active")
+      .select("role,is_active,salesman_code")
       .eq("id", user.id)
       .single();
     if (profileError) throw profileError;
-    if (profile?.is_active === false || !canViewManagementReports(profile?.role)) {
+    if (profile?.is_active === false) {
       return json({
         success: false,
-        error: "This report is available to admin, manager, and invoice maker.",
+        error: "You do not have access to this report.",
+      }, 403);
+    }
+
+    const { matrix } = await loadRoleModuleMatrix(admin);
+    const access = buildModuleAccess({
+      role: profile?.role,
+      salesmanCode: profile?.salesman_code,
+      collectionOnlyMetadata: Boolean(
+        user.user_metadata?.collection_only || user.app_metadata?.collection_only,
+      ),
+      roleModuleMatrix: matrix,
+    });
+    if (!access.canAccess("collectionStaleOverdue")) {
+      return json({
+        success: false,
+        error: "You do not have access to this report.",
       }, 403);
     }
 

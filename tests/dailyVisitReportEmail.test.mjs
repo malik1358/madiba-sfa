@@ -495,11 +495,19 @@ test("runDailyVisitReportEmailCycle sends personal emails plus one company diges
 
   assert.equal(result.sentCount, 3);
   assert.equal(sent.length, 3);
-  assert.equal(sent[0].subject.includes("Sales One") || sent[1].subject.includes("Sales One"), true);
+  assert.equal(sent.some((message) => message.subject.includes("Sales One")), true);
   assert.equal(sent.some((message) => message.subject.includes("Sales Two")), true);
   assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
   assert.deepEqual(sent.find((message) => message.subject.includes("Sales One")).to, ["one@company.com"]);
   assert.deepEqual(sent.find((message) => /Team digest — All teams/.test(message.subject)).to, ["manager@madiba.com"]);
+  // Digests must leave before personal salesman SMTP so a timeout still delivers team digests.
+  const firstDigestIndex = sent.findIndex((message) => /Team digest/.test(message.subject));
+  const firstPersonalIndex = sent.findIndex((message) => (
+    message.subject.includes("Sales One") || message.subject.includes("Sales Two")
+  ) && !/Team digest/.test(message.subject));
+  assert.ok(firstDigestIndex >= 0);
+  assert.ok(firstPersonalIndex >= 0);
+  assert.ok(firstDigestIndex < firstPersonalIndex);
 });
 
 test("resolveDailyVisitReportEmailSchedule sends Thursday Saturday morning and Saturday on Sunday", () => {
@@ -718,7 +726,7 @@ test("runDailyVisitReportEmailCycle skips Fazlur Rahman", async () => {
   assert.equal(result.sentCount, 2);
   assert.equal(result.skippedCount, 1);
   assert.equal(sent.length, 2);
-  assert.match(sent[0].subject, /Belal/);
+  assert.equal(sent.some((message) => /Belal/.test(message.subject) && !/Team digest/.test(message.subject)), true);
   assert.equal(sent.some((message) => /FAZLUR/i.test(message.subject)), false);
   assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
   assert.deepEqual(
@@ -1003,7 +1011,7 @@ test("runDailyVisitReportEmailCycle can send only selected users", async () => {
 
   assert.equal(result.sentCount, 2);
   assert.equal(sent.length, 2);
-  assert.match(sent[0].subject, /Sales Two/);
+  assert.equal(sent.some((message) => /Sales Two/.test(message.subject) && !/Team digest/.test(message.subject)), true);
   assert.equal(sent.some((message) => message.subject.includes("Sales One")), false);
   assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
 });

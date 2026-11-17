@@ -4,12 +4,16 @@ import assert from "node:assert/strict";
 import {
   buildCustomerMapAreaRows,
   buildCustomerMapReport,
+  customerBoughtInWindow,
   customerMapAreaKey,
   customerMapCustomerExportRows,
   customerMapExportRows,
+  customerMapTradingWindow,
   customersForAreaKey,
   filterCustomerMapRows,
+  isCustomerMapTradingActive,
   normalizeCustomerMapPoint,
+  normalizeCustomerMapScope,
 } from "../app/lib/customerMapReport.js";
 
 const SAMPLE_ROWS = [
@@ -22,6 +26,8 @@ const SAMPLE_ROWS = [
     latitude: 24.68,
     longitude: 46.72,
     is_active: true,
+    latest_transaction_date: "2026-10-01",
+    total_outstanding: 0,
   },
   {
     customer_code: "1002",
@@ -32,6 +38,8 @@ const SAMPLE_ROWS = [
     latitude: 24.681,
     longitude: 46.721,
     is_active: true,
+    latest_transaction_date: "2025-01-01",
+    total_outstanding: 1500,
   },
   {
     customer_code: "1003",
@@ -42,6 +50,8 @@ const SAMPLE_ROWS = [
     latitude: null,
     longitude: null,
     is_active: true,
+    latest_transaction_date: "2025-01-01",
+    total_outstanding: 0,
   },
   {
     customer_code: "1004",
@@ -52,6 +62,8 @@ const SAMPLE_ROWS = [
     latitude: 26.4,
     longitude: 50.1,
     is_active: false,
+    latest_transaction_date: "2025-01-01",
+    total_outstanding: 0,
   },
 ];
 
@@ -63,43 +75,69 @@ test("normalizeCustomerMapPoint keeps only saved GPS", () => {
   assert.equal(point.latitude, 24.68);
 });
 
-test("filterCustomerMapRows applies city salesman search and activeOnly", () => {
-  const active = filterCustomerMapRows(SAMPLE_ROWS, { activeOnly: true });
-  assert.equal(active.length, 3);
+test("trading scope keeps recent buyers and outstanding customers", () => {
+  const window = customerMapTradingWindow("2026-11-14");
+  assert.equal(customerBoughtInWindow(SAMPLE_ROWS[0], window), true);
+  assert.equal(customerBoughtInWindow(SAMPLE_ROWS[1], window), false);
+  assert.equal(isCustomerMapTradingActive(SAMPLE_ROWS[1], window), true);
+  assert.equal(isCustomerMapTradingActive(SAMPLE_ROWS[2], window), false);
 
-  const riyadh = filterCustomerMapRows(SAMPLE_ROWS, { city: "Riyadh", activeOnly: true });
+  const trading = filterCustomerMapRows(SAMPLE_ROWS, {
+    scope: "trading",
+    asOfDate: "2026-11-14",
+  });
+  assert.deepEqual(trading.map((row) => row.customer_code), ["1001", "1002"]);
+
+  const all = filterCustomerMapRows(SAMPLE_ROWS, { scope: "all" });
+  assert.equal(all.length, 4);
+});
+
+test("normalizeCustomerMapScope maps legacy activeOnly", () => {
+  assert.equal(normalizeCustomerMapScope("trading"), "trading");
+  assert.equal(normalizeCustomerMapScope("all"), "all");
+  assert.equal(normalizeCustomerMapScope("", { activeOnly: false }), "all");
+  assert.equal(normalizeCustomerMapScope(""), "trading");
+});
+
+test("filterCustomerMapRows applies city salesman search", () => {
+  const riyadh = filterCustomerMapRows(SAMPLE_ROWS, {
+    city: "Riyadh",
+    scope: "all",
+  });
   assert.equal(riyadh.length, 2);
 
-  const salesman = filterCustomerMapRows(SAMPLE_ROWS, { salesman: "SM02", activeOnly: false });
+  const salesman = filterCustomerMapRows(SAMPLE_ROWS, { salesman: "SM02", scope: "all" });
   assert.equal(salesman.length, 2);
 
-  const search = filterCustomerMapRows(SAMPLE_ROWS, { search: "beta", activeOnly: true });
+  const search = filterCustomerMapRows(SAMPLE_ROWS, { search: "beta", scope: "all" });
   assert.equal(search.length, 1);
   assert.equal(search[0].customer_code, "1002");
 });
 
 test("buildCustomerMapAreaRows counts GPS and area centroids", () => {
-  const areas = buildCustomerMapAreaRows(filterCustomerMapRows(SAMPLE_ROWS, { activeOnly: true }));
-  assert.equal(areas.length, 2);
+  const areas = buildCustomerMapAreaRows(filterCustomerMapRows(SAMPLE_ROWS, {
+    scope: "trading",
+    asOfDate: "2026-11-14",
+  }));
+  assert.equal(areas.length, 1);
   const malaz = areas.find((row) => row.area === "Al Malaz District");
   assert.equal(malaz.customers, 2);
   assert.equal(malaz.with_gps, 2);
   assert.ok(Math.abs(malaz.latitude - 24.6805) < 0.0001);
-  const dammam = areas.find((row) => row.city === "Dammam");
-  assert.equal(dammam.customers, 1);
-  assert.equal(dammam.with_gps, 0);
-  assert.equal(dammam.latitude, null);
 });
 
 test("buildCustomerMapReport returns summary points and export rows", () => {
-  const report = buildCustomerMapReport(SAMPLE_ROWS, { activeOnly: true });
-  assert.equal(report.summary.customers, 3);
+  const report = buildCustomerMapReport(SAMPLE_ROWS, {
+    scope: "trading",
+    asOfDate: "2026-11-14",
+  });
+  assert.equal(report.summary.customers, 2);
   assert.equal(report.summary.with_gps, 2);
-  assert.equal(report.summary.without_gps, 1);
-  assert.equal(report.summary.cities, 2);
+  assert.equal(report.summary.bought_in_window, 1);
+  assert.equal(report.summary.with_outstanding, 1);
   assert.equal(report.mapPoints.length, 2);
-  assert.equal(report.customers.length, 3);
-  assert.deepEqual(report.salesmen, ["SM01", "SM02"]);
+  assert.equal(report.customers.length, 2);
+  assert.deepEqual(report.salesmen, ["SM01"]);
 
   const exported = customerMapExportRows(report.areaRows);
   assert.equal(exported[0].City, "Riyadh");

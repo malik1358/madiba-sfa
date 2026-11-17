@@ -27,17 +27,24 @@ const TEXT = {
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading customer map...", ar: "جاري تحميل خريطة العملاء..." },
   refresh: { en: "Refresh", ar: "تحديث" },
-  showAll: { en: "Show all areas", ar: "عرض كل المناطق" },
+  clearArea: { en: "Clear area filter", ar: "إلغاء فلتر المنطقة" },
   city: { en: "City", ar: "المدينة" },
   area: { en: "Area", ar: "المنطقة" },
   salesman: { en: "Salesman", ar: "المندوب" },
   allCities: { en: "All cities", ar: "كل المدن" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   search: { en: "Search code or name", ar: "بحث بالكود أو الاسم" },
-  activeOnly: { en: "Active customers only", ar: "العملاء النشطون فقط" },
+  customerScope: { en: "Customer scope", ar: "نطاق العملاء" },
+  scopeTrading: {
+    en: "Trading active (bought in 120 days or has outstanding)",
+    ar: "نشط تجارياً (اشترى خلال 120 يوماً أو لديه مستحقات)",
+  },
+  scopeAll: { en: "All customers", ar: "كل العملاء" },
   customers: { en: "Customers", ar: "العملاء" },
   withGps: { en: "With GPS", ar: "مع GPS" },
   withoutGps: { en: "Without GPS", ar: "بدون GPS" },
+  bought120: { en: "Bought 120d", ar: "اشترى 120 يوماً" },
+  outstanding: { en: "Outstanding", ar: "مستحقات" },
   cities: { en: "Cities", ar: "المدن" },
   areas: { en: "Areas", ar: "المناطق" },
   areaSummary: { en: "Customers by area", ar: "العملاء حسب المنطقة" },
@@ -53,13 +60,17 @@ const TEXT = {
   audit: { en: "Audit", ar: "التدقيق" },
   actions: { en: "Actions", ar: "الإجراءات" },
   zoomHint: {
-    en: "Zoomed out: area bubbles show customer counts. Click a count/bubble or area row to open that area’s customer list and zoom to the pins.",
-    ar: "عند التصغير تظهر فقاعات المناطق بعدد العملاء. انقر العدد/الفقاعة أو صف المنطقة لفتح قائمة العملاء والتقريب إلى المواقع.",
+    en: "Zoomed out: area bubbles show customer counts. Click a count/bubble or area row to open that area’s customer list and zoom to the pins. Use Clear area filter to remove the orange selected-area pins.",
+    ar: "عند التصغير تظهر فقاعات المناطق بعدد العملاء. انقر العدد/الفقاعة أو صف المنطقة لفتح قائمة العملاء والتقريب إلى المواقع. استخدم إلغاء فلتر المنطقة لإزالة دبابيس المنطقة البرتقالية المحددة.",
   },
   selected: { en: "Selected area", ar: "المنطقة المحددة" },
   pickArea: {
     en: "Click an area count on the map or a row below to list those customers.",
     ar: "انقر عدد منطقة على الخريطة أو صفاً أدناه لعرض قائمة هؤلاء العملاء.",
+  },
+  tradingHint: {
+    en: "Trading active = last purchase within 120 KSA days, or any outstanding balance (even if no purchase in that window).",
+    ar: "النشاط التجاري = آخر شراء خلال 120 يوماً بتوقيت السعودية، أو أي رصيد مستحق (حتى بدون شراء في تلك الفترة).",
   },
   noRows: {
     en: "No customers match the current filters.",
@@ -78,7 +89,16 @@ const TEXT = {
 };
 
 const AREA_FILTER_KEYS = ["city", "area", "customers", "with_gps", "without_gps"];
-const CUSTOMER_FILTER_KEYS = ["customer_code", "customer_name", "current_salesman_code", "city", "area", "has_gps"];
+const CUSTOMER_FILTER_KEYS = [
+  "customer_code",
+  "customer_name",
+  "current_salesman_code",
+  "city",
+  "area",
+  "has_gps",
+  "bought_in_window",
+  "has_outstanding",
+];
 
 function formatCount(value) {
   return Number(value || 0).toLocaleString("en-SA");
@@ -100,6 +120,8 @@ function customerCellValue(row, key, t) {
   if (key === "city") return row.city || "";
   if (key === "area") return row.area || "";
   if (key === "has_gps") return row.has_gps ? t("yes") : t("no");
+  if (key === "bought_in_window") return row.bought_in_window ? t("yes") : t("no");
+  if (key === "has_outstanding") return row.has_outstanding ? t("yes") : t("no");
   return "";
 }
 
@@ -132,7 +154,8 @@ export default function CustomerMapPage() {
   const [salesmanFilter, setSalesmanFilter] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [activeOnly, setActiveOnly] = useState(true);
+  const [customerScope, setCustomerScope] = useState("trading");
+  const [tradingWindow, setTradingWindow] = useState({ start: "", end: "" });
   const [selectedAreaKey, setSelectedAreaKey] = useState("");
   const [fitToken, setFitToken] = useState(0);
 
@@ -159,7 +182,7 @@ export default function CustomerMapPage() {
       if (cityFilter) params.set("city", cityFilter);
       if (salesmanFilter) params.set("salesman", salesmanFilter);
       if (debouncedSearch) params.set("search", debouncedSearch);
-      params.set("activeOnly", activeOnly ? "1" : "0");
+      params.set("scope", customerScope);
 
       const response = await fetch(`/api/customer-map?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -184,7 +207,10 @@ export default function CustomerMapPage() {
         without_gps: 0,
         cities: 0,
         areas: 0,
+        bought_in_window: 0,
+        with_outstanding: 0,
       });
+      setTradingWindow(payload.tradingWindow || { start: "", end: "" });
       setAreaRows(Array.isArray(payload.areaRows) ? payload.areaRows : []);
       setCustomers(Array.isArray(payload.customers) ? payload.customers : []);
       setMapPoints(Array.isArray(payload.mapPoints) ? payload.mapPoints : []);
@@ -199,7 +225,7 @@ export default function CustomerMapPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeOnly, cityFilter, debouncedSearch, salesmanFilter, supabaseClient]);
+  }, [cityFilter, customerScope, debouncedSearch, salesmanFilter, supabaseClient]);
 
   useEffect(() => {
     loadReport();
@@ -320,31 +346,39 @@ export default function CustomerMapPage() {
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={t("search")}
                 />
-                <label className="moduleHint" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <input
-                    type="checkbox"
-                    checked={activeOnly}
-                    onChange={(event) => setActiveOnly(event.target.checked)}
-                  />
-                  {t("activeOnly")}
-                </label>
+                <select
+                  className="moduleInput"
+                  value={customerScope}
+                  onChange={(event) => {
+                    setCustomerScope(event.target.value);
+                    setSelectedAreaKey("");
+                  }}
+                  aria-label={t("customerScope")}
+                >
+                  <option value="trading">{t("scopeTrading")}</option>
+                  <option value="all">{t("scopeAll")}</option>
+                </select>
                 <button type="button" className="moduleInlineButton" onClick={loadReport} disabled={loading}>
                   {loading ? t("loading") : t("refresh")}
                 </button>
                 {selectedAreaKey ? (
                   <button type="button" className="moduleInlineButton" onClick={clearAreaSelection}>
-                    {t("showAll")}
+                    {t("clearArea")}
                   </button>
                 ) : null}
               </div>
               {error ? <div className="moduleHint">{error}</div> : null}
               <div className="customerMapSummary">
                 <div><strong>{formatCount(summary.customers)}</strong><span>{t("customers")}</span></div>
+                <div><strong>{formatCount(summary.bought_in_window)}</strong><span>{t("bought120")}</span></div>
+                <div><strong>{formatCount(summary.with_outstanding)}</strong><span>{t("outstanding")}</span></div>
                 <div><strong>{formatCount(summary.with_gps)}</strong><span>{t("withGps")}</span></div>
-                <div><strong>{formatCount(summary.without_gps)}</strong><span>{t("withoutGps")}</span></div>
-                <div><strong>{formatCount(summary.cities)}</strong><span>{t("cities")}</span></div>
                 <div><strong>{formatCount(summary.areas)}</strong><span>{t("areas")}</span></div>
               </div>
+              <p className="moduleHint">{t("tradingHint")}</p>
+              {tradingWindow?.start && tradingWindow?.end ? (
+                <p className="moduleHint">{t("bought120")}: {tradingWindow.start} → {tradingWindow.end}</p>
+              ) : null}
               <p className="moduleHint">{t("zoomHint")}</p>
               {selectedArea ? (
                 <p className="moduleHint">
@@ -399,6 +433,8 @@ export default function CustomerMapPage() {
                           <BiExcelHead label={t("city")} filterKey="city" options={customerOptions} filters={customerFilters} onChange={setCustomerFilter} allLabel={t("all")} />
                           <BiExcelHead label={t("area")} filterKey="area" options={customerOptions} filters={customerFilters} onChange={setCustomerFilter} allLabel={t("all")} />
                           <BiExcelHead label={t("gps")} filterKey="has_gps" options={customerOptions} filters={customerFilters} onChange={setCustomerFilter} allLabel={t("all")} />
+                          <BiExcelHead label={t("bought120")} filterKey="bought_in_window" options={customerOptions} filters={customerFilters} onChange={setCustomerFilter} allLabel={t("all")} />
+                          <BiExcelHead label={t("outstanding")} filterKey="has_outstanding" options={customerOptions} filters={customerFilters} onChange={setCustomerFilter} allLabel={t("all")} />
                           <th data-column-filter-label={t("actions")}>{t("actions")}</th>
                         </tr>
                       </thead>
@@ -413,6 +449,8 @@ export default function CustomerMapPage() {
                               <td data-label={t("city")}>{row.city}</td>
                               <td data-label={t("area")}>{row.area}</td>
                               <td data-label={t("gps")}>{row.has_gps ? t("yes") : t("no")}</td>
+                              <td data-label={t("bought120")}>{row.bought_in_window ? t("yes") : t("no")}</td>
+                              <td data-label={t("outstanding")}>{row.has_outstanding ? t("yes") : t("no")}</td>
                               <td data-label={t("actions")}>
                                 <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(2, auto)", gap: "6px" }}>
                                   <Link
@@ -436,6 +474,8 @@ export default function CustomerMapPage() {
                         <tr>
                           <td colSpan={5}><strong>{t("total")}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatCount(filteredCustomers.length)}</strong></td>
+                          <td />
+                          <td />
                           <td />
                         </tr>
                       </tfoot>

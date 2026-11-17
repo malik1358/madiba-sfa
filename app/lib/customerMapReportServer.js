@@ -1,6 +1,10 @@
+import {
+  enrichCustomerMasterOutstanding,
+  readOutstandingDataset,
+} from "./customerMasterQuery.js";
 import { buildCustomerMapReport } from "./customerMapReport.js";
 
-const CUSTOMER_MAP_SELECT = "customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active";
+const CUSTOMER_MAP_SELECT = "customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date";
 const PAGE_SIZE = 1000;
 
 export async function fetchCustomerMapRows(admin) {
@@ -25,6 +29,10 @@ export async function fetchCustomerMapRows(admin) {
 }
 
 export async function loadCustomerMapReport(admin, filters = {}) {
-  const rows = await fetchCustomerMapRows(admin);
-  return buildCustomerMapReport(rows, filters);
+  const [rows, outstandingDataset] = await Promise.all([
+    fetchCustomerMapRows(admin),
+    readOutstandingDataset(admin).catch(() => ({ rows: [], invoices: [] })),
+  ]);
+  const enriched = enrichCustomerMasterOutstanding(rows, outstandingDataset);
+  return buildCustomerMapReport(enriched, filters);
 }

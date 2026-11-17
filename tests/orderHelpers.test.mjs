@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isProspectCustomerCode } from "../app/lib/customerCode.js";
-import { buildOrderCatalog, buildOrderItems } from "../app/management/customer-audit/lib/orderHelpers.js";
+import {
+  buildOrderCatalog,
+  buildOrderItems,
+  changeOrderQty,
+  increaseOrderQty,
+} from "../app/management/customer-audit/lib/orderHelpers.js";
 
 test("isProspectCustomerCode matches prospect customer codes", () => {
   assert.equal(isProspectCustomerCode("PROSPECT-64"), true);
@@ -72,6 +77,15 @@ test("buildOrderCatalog prefers Google Sheet names over do-not-use sales names",
   assert.equal(catalog.length, 1);
   assert.equal(catalog[0].item_code, "A004187");
   assert.match(catalog[0].item_name, /JUMBO TISSUE ROLL/i);
+});
+
+test("changeOrderQty and increaseOrderQty clamp to maxQty when provided", () => {
+  assert.deepEqual(changeOrderQty({}, "A1", 50, 36), { A1: 36 });
+  assert.deepEqual(changeOrderQty({ A1: 10 }, "A1", 5, 36), { A1: 5 });
+  assert.deepEqual(changeOrderQty({ A1: 10 }, "A1", 0, 36), {});
+  assert.deepEqual(increaseOrderQty({ A1: 36 }, "A1", 36), { A1: 36 });
+  assert.deepEqual(increaseOrderQty({ A1: 35 }, "A1", 36), { A1: 36 });
+  assert.deepEqual(increaseOrderQty({}, "A1", null), { A1: 1 });
 });
 
 test("buildOrderCatalog keeps a usable replacement name over a do-not-use sheet name", () => {

@@ -1,12 +1,13 @@
-import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
 import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate, lookupValueDiscountSlabs, previewValueDiscountRate } from '../../../lib/regionalPricing';
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from '../../../lib/eodStock.js';
+import { formatItemQtyMasterDisplay } from '../../../lib/masterUnitQty.js';
 
 export default function QuickOrder({
   quickOrderSuggestions,
@@ -96,8 +97,9 @@ export default function QuickOrder({
                           excludeCashDiscount: scheme.excludeCashDiscount === true,
                         });
                         const availableStock = countryEodStockQty(eodStock, item.item_code);
+                        const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                         const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, item.item_code);
-                        const overStock = isEodStockQtyOverAvailable(orderQty, availableStock);
+                        const overStock = isEodStockQtyOverAvailable(orderQty, availableDisplay);
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
                             <td>
@@ -110,19 +112,19 @@ export default function QuickOrder({
                               {group.key === 'buyingLess' && (
                                 <div className="auditQuickHistory">
                                   <span>Avg Qty / Month</span>
-                                  <strong>{qtyFormat(item.avgQty)}</strong>
+                                  <strong>{formatItemQtyMasterDisplay(item.avgQty, item.item_code, eodStock?.masterUnits)}</strong>
                                   <span>Months Bought</span>
                                   <strong>{item.activeMonths}</strong>
                                   <span>Latest Qty</span>
-                                  <strong className="auditQuickDecline">{qtyFormat(item.latestQty)}</strong>
+                                  <strong className="auditQuickDecline">{formatItemQtyMasterDisplay(item.latestQty, item.item_code, eodStock?.masterUnits)}</strong>
                                 </div>
                               )}
                               {group.key === 'buyingLess' && (
                                 <div className="auditQuickHistory">
                                   <span>Previous 3 months</span>
-                                  <strong>{qtyFormat(item.previousQty)}</strong>
+                                  <strong>{formatItemQtyMasterDisplay(item.previousQty, item.item_code, eodStock?.masterUnits)}</strong>
                                   <span>Recent 3 months</span>
-                                  <strong className="auditQuickDecline">{qtyFormat(item.recentQty)}</strong>
+                                  <strong className="auditQuickDecline">{formatItemQtyMasterDisplay(item.recentQty, item.item_code, eodStock?.masterUnits)}</strong>
                                 </div>
                               )}
                             </td>
@@ -138,8 +140,8 @@ export default function QuickOrder({
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                <button type="button" className="auditQtyButton" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(item.item_code)}>+</button>
                               </div>
                               {availableLabel ? (
                                 <div className={`moduleCode moduleStockAvailable${overStock ? ' moduleStockAvailable--over' : ''}`}>

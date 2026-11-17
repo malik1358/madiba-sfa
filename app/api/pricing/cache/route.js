@@ -10,8 +10,10 @@ import {
   buildEodStockAvailability,
   readEodStockDataset,
 } from "../../../lib/eodStock.js";
+import { loadMasterUnitConvMap } from "../../../lib/masterUnitQtyServer.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { overlayGoogleSheetItemNames } from "../../../lib/pricePayload.js";
+import { loadCatalogueSheetPacking } from "../../../lib/productCatalogueServer.js";
 import { loadRetailPriceMaps } from "../../../lib/retailPricingServer.js";
 
 export const runtime = "nodejs";
@@ -145,11 +147,16 @@ export async function GET() {
       ? overlayGoogleSheetItemNames(cachedSheetItems, googleSheetItems)
       : cachedSheetItems;
 
-    let eodStock = buildEodStockAvailability(null);
+    const masterUnits = await loadMasterUnitConvMap(admin, {
+      loadSheetPacking: loadCatalogueSheetPacking,
+    }).catch(() => ({}));
+    let eodStock = buildEodStockAvailability(null, { masterUnits });
     try {
-      eodStock = buildEodStockAvailability(readEodStockDataset(eodStockRow?.setting_value));
+      eodStock = buildEodStockAvailability(readEodStockDataset(eodStockRow?.setting_value), {
+        masterUnits,
+      });
     } catch {
-      eodStock = buildEodStockAvailability(null);
+      eodStock = buildEodStockAvailability(null, { masterUnits });
     }
 
     return NextResponse.json({

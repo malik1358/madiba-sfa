@@ -12,7 +12,7 @@ import {
 } from "../lib/tableColumnFilter";
 
 const TEXT = {
-  filter: { en: "Filter", ar: "تصفية" },
+  filter: { en: "Filter (! = exclude)", ar: "تصفية (! = استبعاد)" },
   clearFilters: { en: "Clear filters", ar: "مسح التصفية" },
   shown: { en: "shown", ar: "ظاهر" },
 };

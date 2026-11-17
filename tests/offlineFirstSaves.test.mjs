@@ -42,3 +42,11 @@ test("new customer prospect link is offline-first", () => {
   assert.match(source, /queueFirst: true/);
   assert.match(source, /skipTimeline: true/);
 });
+
+test("new customer create-order prompts open Product Catalogue with the prospect selected", () => {
+  const source = fs.readFileSync(new URL("../app/management/new-customer/page.js", import.meta.url), "utf8");
+  assert.match(source, /const PROSPECT_ORDER_PATH = "\/management\/product-catalogue"/);
+  assert.match(source, /buildProspectOrderPath\(savedProspect\.query\)/);
+  assert.doesNotMatch(source, /router\.push\(`\/management\/new-order\?/);
+  assert.doesNotMatch(source, /href=\{`\/management\/new-order\?/);
+});

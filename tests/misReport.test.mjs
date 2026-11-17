@@ -55,6 +55,70 @@ test("buildMisReport computes month sales, GP, MoM and item-level repeat", () =>
   assert.equal(personal.salesMomPct, -100);
 });
 
+
+test("buildMisReport exposes category-wise repeat MoM", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-01", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 50000, profit_amount: 10000 },
+      { transaction_date: "2026-09-10", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 70000, profit_amount: 14000 },
+      { transaction_date: "2026-10-05", customer_code: "1001", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 40000, profit_amount: 8000 },
+      { transaction_date: "2026-09-02", customer_code: "2002", item_name: "Soap", category: "Personal Care", salesman_name: "OSAMA", sales_amount: 20000, profit_amount: 4000 },
+      { transaction_date: "2026-10-12", customer_code: "2002", item_name: "Soap", category: "Personal Care", salesman_name: "OSAMA", sales_amount: 60000, profit_amount: 12000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  const building = report.repeatCategories.find((row) => row.category === "Building Material");
+  const personal = report.repeatCategories.find((row) => row.category === "Personal Care");
+  assert.ok(building);
+  assert.equal(building.previousSales, 70000);
+  assert.equal(building.sales, 40000);
+  assert.equal(building.delta, -30000);
+  assert.ok(building.salesMomPct < 0);
+  assert.ok(Array.isArray(building.items));
+  assert.equal(building.items.length, 1);
+  assert.equal(building.items[0].itemName, "Hammer");
+  assert.equal(building.items[0].previousSales, 70000);
+  assert.equal(building.items[0].sales, 40000);
+  assert.equal(building.items[0].delta, -30000);
+  assert.ok(personal);
+  assert.equal(personal.previousSales, 0);
+  assert.equal(personal.sales, 60000);
+  assert.equal(personal.delta, 60000);
+  assert.ok(personal.salesMomPct > 0);
+  assert.ok(Array.isArray(personal.items));
+  assert.equal(personal.items.length, 1);
+  assert.equal(personal.items[0].itemName, "Soap");
+  assert.equal(personal.items[0].delta, 60000);
+});
+
+test("buildMisReport repeat category items sort worst delta first and keep prior labels", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-09-01", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 10000, profit_amount: 2000 },
+      { transaction_date: "2026-09-10", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 90000, profit_amount: 18000 },
+      { transaction_date: "2026-09-02", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 5000, profit_amount: 1000 },
+      { transaction_date: "2026-09-12", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 40000, profit_amount: 8000 },
+      { transaction_date: "2026-10-05", customer_code: "1001", item_code: "H1", item_name: "Hammer", category: "Building Material", salesman_name: "ZIA", sales_amount: 20000, profit_amount: 4000 },
+      { transaction_date: "2026-10-08", customer_code: "1001", item_code: "N1", item_name: "Nail", category: "Building Material", salesman_name: "ZIA", sales_amount: 50000, profit_amount: 10000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+  const building = report.repeatCategories.find((row) => row.category === "Building Material");
+  assert.ok(building);
+  assert.equal(building.items.length, 2);
+  assert.equal(building.items[0].itemCode, "H1");
+  assert.equal(building.items[0].itemName, "Hammer");
+  assert.equal(building.items[0].previousSales, 90000);
+  assert.equal(building.items[0].sales, 20000);
+  assert.equal(building.items[0].delta, -70000);
+  assert.equal(building.items[1].itemCode, "N1");
+  assert.equal(building.items[1].delta, 10000);
+});
+
 test("buildMisReport counts same-month repurchase after a one-day gap as repeat", () => {
   const report = buildMisReport({
     asOfDate: "2026-10-31",
@@ -124,6 +188,12 @@ test("buildMisReport inventory days use last-30-day forward cover", () => {
   assert.equal(report.inventory.coverTo, "2026-10-31");
   // 1_000_000 ÷ (450_000 / 30) = 66.67 → 67
   assert.equal(report.inventory.days, 67);
+  // Oct sales = 450000, 31 days → 1_000_000 ÷ (450000/31) ≈ 69
+  assert.equal(report.inventory.monthSales, 450000);
+  assert.equal(report.inventory.daysMonth, 69);
+  // Sep sales = 999999, 30 days → 900000 ÷ (999999/30) ≈ 27
+  assert.equal(report.inventory.previousDaysMonth, 27);
+  assert.ok(Number.isFinite(report.inventory.daysMonthMomPct));
   const sundry = report.inventory.categories.find((row) => row.category === "Sundry");
   const fragrance = report.inventory.categories.find((row) => row.category === "Fragrance");
   assert.equal(sundry.sales30d, 300000);
@@ -131,6 +201,8 @@ test("buildMisReport inventory days use last-30-day forward cover", () => {
   assert.equal(sundry.forwardCoverDays, 60);
   assert.equal(fragrance.days, 80); // 400000 ÷ (150000/30)
   assert.equal(fragrance.forwardCoverDays, 80);
+  assert.equal(sundry.bucketAmounts["31-60"], 600000);
+  assert.equal(fragrance.bucketAmounts["61-90"], 400000);
   // Prior cover ends 2026-09-30 → window 2026-09-01..2026-09-30 (only Sep 15 sale).
   assert.equal(report.inventory.previousSales30d, 999999);
   assert.equal(report.inventory.previousDays, 27); // 900000 ÷ (999999/30) ≈ 27
@@ -150,7 +222,36 @@ test("buildMisReport collection days uses YTD DSO not month/30", () => {
   });
   // (500000 / 1000000) × 304 = 152 — not 500000 / (100000 / 30) = 150.
   assert.equal(report.headline.collectionDays, 152);
-  assert.match(report.remarks.receivables, /collection days ~152/);
+});
+
+test("buildMisReport receivables remark uses rolling 3m collection days and change", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      { transaction_date: "2026-08-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+      { transaction_date: "2026-09-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+      { transaction_date: "2026-10-15", customer_code: "1", item_name: "A", category: "Sundry", salesman_name: "A", sales_amount: 200000, profit_amount: 20000 },
+    ],
+    receiptRows: [],
+    outstandingRows: [
+      { total_outstanding: 300000, buckets: { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 100000, ">120": 200000 } },
+    ],
+    priorOutstanding: {
+      totalAr: 360000,
+      gt90Ar: 250000,
+      arBuckets: { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 50000, ">120": 200000 },
+    },
+  });
+  // Trailing 3m sales Aug–Oct = 600000; days Aug 1–Oct 31 = 92.
+  // (300000 / 600000) × 92 = 46.
+  assert.equal(report.headline.collectionDays3m, 46);
+  // Prior: Sep end AR 360000; Jul–Sep sales only Aug+Sep = 400000 in this fixture; days Jul1–Sep30 = 92.
+  // Jul has 0 sales so sales3m = 400000; (360000/400000)*92 = 82.8.
+  assert.equal(report.headline.previousCollectionDays3m, 82.8);
+  assert.equal(report.headline.collectionDays3mChange, -36.8);
+  assert.match(report.remarks.receivables, /rolling 3m collection days ~46/);
+  assert.match(report.remarks.receivables, /improving vs prior month/);
+  assert.match(report.remarks.receivables, />90-day AR is SAR 300K/);
 });
 
 test("buildMisReport tracks MADIBA monthly sales for focus categories", () => {
@@ -264,9 +365,55 @@ test("buildMisReport portfolio category MoM and top loss items exclude electroni
   assert.equal(sundry.salesLoss, 0);
 
   assert.ok(report.portfolioTopLossItems.length >= 1);
+  assert.ok(report.portfolioTopLossItems.length <= 10);
   assert.equal(report.portfolioTopLossItems[0].itemCode, "P001");
   assert.equal(report.portfolioTopLossItems[0].salesLoss, 60000);
   assert.ok(!report.portfolioTopLossItems.some(
     (row) => String(row.category || "").trim().toLowerCase() === "electronics",
   ));
+
+  const personalCareLossItems = report.portfolioLossItems.filter(
+    (row) => row.category === "Personal Care",
+  );
+  assert.ok(personalCareLossItems.length >= 1);
+  assert.ok(personalCareLossItems.some((row) => row.itemCode === "P001"));
+  assert.ok(report.portfolioLossItems.length >= report.portfolioTopLossItems.length);
+});
+
+test("buildMisReport portfolio top loss keeps prior-month item name when current month has zero sales", () => {
+  const report = buildMisReport({
+    asOfDate: "2026-10-31",
+    salesRows: [
+      {
+        transaction_date: "2026-09-10",
+        customer_code: "1",
+        item_code: "A004077",
+        item_name: "Luxury Hand Cream 50ml",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 75000,
+        profit_amount: 15000,
+      },
+      {
+        transaction_date: "2026-10-10",
+        customer_code: "2",
+        item_code: "P002",
+        item_name: "Other Soap",
+        category: "Personal Care",
+        salesman_name: "A",
+        sales_amount: 10000,
+        profit_amount: 2000,
+      },
+    ],
+    receiptRows: [],
+    outstandingRows: [],
+  });
+
+  const row = report.portfolioTopLossItems.find((r) => r.itemCode === "A004077");
+  assert.ok(row, "expected A004077 in portfolio top loss");
+  assert.equal(row.itemName, "Luxury Hand Cream 50ml");
+  assert.notEqual(row.itemName, "A004077");
+  assert.equal(row.sales, 0);
+  assert.equal(row.previousSales, 75000);
+  assert.equal(row.salesLoss, 75000);
 });

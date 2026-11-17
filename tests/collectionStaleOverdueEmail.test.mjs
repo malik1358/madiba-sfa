@@ -5,19 +5,23 @@ import {
   buildCollectionStaleOverdueEmail,
   buildCollectionStaleOverdueSalesmanSection,
   buildCollectionStaleOverdueEmailRow,
+  buildCollectionStaleOverdueReportUrl,
   filterCollectionStaleOverdueRows,
   filterCollectionStaleOverdueRowsForProfile,
   groupCollectionStaleOverdueBySalesman,
   isCollectionStaleOverdueRow,
   isCollectionVisitWithinWorkingDays,
+  isExcludedStaleOverdueSalesman,
   isSoftAgingSalesman,
   selectCollectionRowsForStaleOverdueEmail,
+  shouldIncludeCollectionStaleOverdueCandidate,
   resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
 import {
   attachLastNearCollectionVisit,
   attachLastVisitWithoutOrder,
+  loadCollectionStaleOverdueReport,
   loadLastNearCollectionVisitByCustomer,
   resolveCollectionStaleOverdueEmailSchedule,
   resolveCollectionStaleOverdueRouteTrigger,
@@ -421,7 +425,7 @@ test("buildCollectionStaleOverdueEmail includes last visit without order column"
 test("buildCollectionStaleOverdueEmail renders one table section per salesman", () => {
   const message = buildCollectionStaleOverdueEmail({
     date: "2026-09-26",
-    reportUrl: "https://madiba-sfa.vercel.app/management/payment-collections",
+    reportUrl: "https://madiba-sfa.vercel.app/management/collection-stale-overdue",
     groups: [
       {
         salesmanName: "Parvez (S01)",
@@ -475,6 +479,55 @@ test("digest recipients default To malik and CC soyeb/fazlur", () => {
   const cc = resolveCollectionStaleOverdueDigestCc({}, ["malik@pinasz.com"]);
   assert.ok(cc.includes("soyeb@noorshukran.com"));
   assert.ok(cc.includes("fazlur.rahiman@noorshukran.com"));
+});
+
+test("buildCollectionStaleOverdueReportUrl points at the frontend report", () => {
+  assert.equal(
+    buildCollectionStaleOverdueReportUrl({ NEXT_PUBLIC_APP_URL: "https://madiba-sfa.vercel.app" }),
+    "https://madiba-sfa.vercel.app/management/collection-stale-overdue",
+  );
+});
+
+test("loadCollectionStaleOverdueReport returns filtered email rows for the UI", async () => {
+  const report = await loadCollectionStaleOverdueReport({}, {
+    now: new Date("2026-09-26T12:00:00+03:00"),
+    loadDueCustomers: async () => ([
+      {
+        customer_code: "C1",
+        customer_name: "Shop One",
+        city: "Riyadh",
+        area: "Olaya",
+        salesman_name: "Parvez",
+        salesman_code: "PARVEZ",
+        total_due_amount: 12500,
+        outstanding_30_60: 12500,
+        max_overdue_days: 45,
+        collection_history: [],
+        latest_collection: { saved_at: "2026-09-01T08:00:00Z", visit_outcome: "ASKED_COME_LATER" },
+        last_visit_without_order_at: "2026-09-10T09:00:00+03:00",
+      },
+      {
+        customer_code: "C2",
+        customer_name: "Fresh Shop",
+        salesman_name: "Sara",
+        salesman_code: "SARA",
+        total_due_amount: 800,
+        outstanding_above_120: 800,
+        max_overdue_days: 140,
+        collection_history: [{ saved_at: "2026-09-25T10:00:00Z", amount_received: 50 }],
+        latest_collection: { saved_at: "2026-09-25T10:00:00Z" },
+        last_visit_without_order_at: "2026-09-24T09:00:00+03:00",
+      },
+    ]),
+  });
+
+  assert.equal(report.date, "2026-09-26");
+  assert.equal(report.customerCount, 1);
+  assert.equal(report.groupCount, 1);
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].customerCode, "C1");
+  assert.equal(report.summary.customers, 1);
+  assert.ok(report.summary.dueAmount > 0);
 });
 
 test("runCollectionStaleOverdueEmailCycle CCs soyeb and fazlur on digest", async () => {
@@ -672,40 +725,75 @@ test("resolveCollectionStaleOverdueRouteTrigger keeps manual reruns manual", () 
   assert.equal(resolveCollectionStaleOverdueRouteTrigger({ trigger: "cron", date: "2026-09-26" }), "cron");
 });
 
-test("selectCollectionRowsForStaleOverdueEmail keeps overdue legal customers", () => {
-  const due = { customer_code: "D1", due_invoice_count: 1, total_due_amount: 100 };
+test("selectCollectionRowsForStaleOverdueEmail drops legal queue and excluded salesmen", () => {
+  const due = { customer_code: "D1", due_invoice_count: 1, total_due_amount: 100, salesman_name: "Parvez" };
   const legalDue = {
     customer_code: "L1",
     customer_name: "Legal Shop",
     due_invoice_count: 2,
     total_due_amount: 400,
+    salesman_name: "Parvez",
     legal_transfer: { is_transferred: true },
   };
-  const legalNotDue = {
-    customer_code: "L2",
-    due_invoice_count: 0,
-    total_due_amount: 0,
-    legal_transfer: { is_transferred: true },
+  const ziaDue = {
+    customer_code: "Z1",
+    due_invoice_count: 1,
+    total_due_amount: 200,
+    salesman_name: "Zia",
+    salesman_code: "ZIA",
+  };
+  const asrarDue = {
+    customer_code: "A1",
+    due_invoice_count: 1,
+    total_due_amount: 300,
+    salesman_name: "Asrar Ahmed",
+  };
+  const hadiaDue = {
+    customer_code: "H1",
+    due_invoice_count: 1,
+    total_due_amount: 250,
+    salesman_name: "Ahmad Hadiya",
+    salesman_code: "AHMED HADIA",
   };
   const selected = selectCollectionRowsForStaleOverdueEmail({
-    dueCustomers: [due, { ...legalDue, customer_code: "L1" }],
-    legalCustomers: [legalDue, legalNotDue],
+    dueCustomers: [due, legalDue, ziaDue, asrarDue, hadiaDue],
+    legalCustomers: [legalDue],
   });
-  assert.deepEqual(selected.map((row) => row.customer_code), ["D1", "L1"]);
+  assert.deepEqual(selected.map((row) => row.customer_code), ["D1"]);
 
-  const emailRow = buildCollectionStaleOverdueEmailRow(legalDue);
-  assert.equal(emailRow.isLegal, true);
-  assert.match(emailRow.customer, /\(Legal\)$/);
-  assert.equal(emailRow.remarks, "-");
+  assert.equal(shouldIncludeCollectionStaleOverdueCandidate(legalDue), false);
+  assert.equal(isExcludedStaleOverdueSalesman(ziaDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman(asrarDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman(hadiaDue), true);
+  assert.equal(isExcludedStaleOverdueSalesman({ salesman_name: "Ahmed Nabil" }), false);
 
-  const section = buildCollectionStaleOverdueSalesmanSection({
-    salesmanName: "Parvez",
-    sourceRows: [legalDue],
-    todayKey: "2026-09-26",
-    agingThresholdDays: 30,
+  const filtered = filterCollectionStaleOverdueRows([
+    {
+      ...due,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      ...ziaDue,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      ...legalDue,
+      outstanding_61_90: 100,
+      collection_history: [],
+      latest_collection: null,
+    },
+  ], { todayKey: "2026-09-26" });
+  assert.deepEqual(filtered.map((row) => row.customer_code), ["D1"]);
+
+  const email = buildCollectionStaleOverdueEmail({
+    date: "2026-09-26",
+    groups: [],
   });
-  assert.match(section.html, /Legal Shop \(Legal\)/);
-  assert.match(section.text, /Legal Shop \(Legal\)/);
+  assert.match(email.html, /Legal-queue customers and books of Zia, Asrar Ahmed, and Ahmed Hadia are excluded/);
 });
 
 test("stale overdue email row and table include latest collection remarks", () => {

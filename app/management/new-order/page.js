@@ -15,6 +15,7 @@ import {
   hydrateFoundationFromCache,
 } from "../../lib/mobileDataCache";
 import { dedupeCustomerMasterRows } from "../../lib/customerMasterQuery";
+import { isProspectCustomerCode } from "../../lib/customerCode";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
@@ -80,10 +81,19 @@ import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClien
 import ProductCatalogue from "../../components/ProductCatalogue";
 import { hasCataloguePrice, isVisibleCatalogueItem } from "../../lib/productCatalogue";
 import {
+  countryEodStockDisplayQty,
   countryEodStockQty,
   formatEodStockAvailableLabel,
   isEodStockQtyOverAvailable,
 } from "../../lib/eodStock.js";
+import {
+  buildOrderUnitOptions,
+  orderQtyInUnit,
+  orderQtyToMaster,
+  orderRateInUnit,
+  pickOrderUnit,
+  stepOrderQtyInUnit,
+} from "../../lib/masterUnitQty.js";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -662,6 +672,7 @@ export default function NewOrderPage() {
   const [schemes, setSchemes] = useState([]);
   const [quantityControls, setQuantityControls] = useState([]);
   const [eodStock, setEodStock] = useState(null);
+  const [orderUnitChoice, setOrderUnitChoice] = useState({});
   const [paymentType, setPaymentType] = useState("credit");
   const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
@@ -985,6 +996,7 @@ export default function NewOrderPage() {
     valueDiscountMap,
     schemes,
     quantityControls,
+    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -1596,11 +1608,15 @@ export default function NewOrderPage() {
     const customerName = String(params.get("customer_name") || "").trim();
     const salesmanCode = String(params.get("salesman_code") || "").trim();
     const orderId = String(params.get("order_id") || "").trim();
+    const source = String(params.get("source") || "").trim().toLowerCase();
     const nextPrefilled = customerCode && customerName
       ? {
           customer_code: customerCode,
           customer_name: customerName,
           current_salesman_code: salesmanCode,
+          is_prospect: source === "prospect"
+            || isProspectCustomerCode(customerCode)
+            || /^PROSPECT-/i.test(customerCode),
         }
       : null;
 
@@ -2314,8 +2330,13 @@ export default function NewOrderPage() {
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
                               const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
                               const availableStock = countryEodStockQty(eodStock, item.item_code);
+                              const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                               const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
-                              const overStock = isEodStockQtyOverAvailable(qty, availableStock);
+                              const overStock = isEodStockQtyOverAvailable(qty, availableDisplay);
+                              const unitOptions = buildOrderUnitOptions(eodStock?.masterUnits, item.item_code);
+                              const unit = pickOrderUnit(unitOptions, orderUnitChoice[item.item_code]);
+                              const perMaster = unit?.perMaster || 1;
+                              const shownQty = unit ? orderQtyInUnit(qty, perMaster) : qty;
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
@@ -2334,16 +2355,35 @@ export default function NewOrderPage() {
                                   </td>
                                   <td>
                                     <div className="moduleQtyControl">
-                                      <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
+                                      <button type="button" onClick={() => (unit ? updateQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, -1)) : decreaseQty(item.item_code))}>−</button>
                                       <input
                                         type="number"
                                         min="0"
+                                        max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
                                         step="1"
-                                        value={qty || ""}
-                                        onChange={(event) => updateQty(item.item_code, event.target.value)}
+                                        value={shownQty || ""}
+                                        onChange={(event) => updateQty(item.item_code, unit ? orderQtyToMaster(event.target.value, perMaster) : event.target.value)}
                                       />
-                                      <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
+                                      <button
+                                        type="button"
+                                        disabled={availableDisplay != null && qty >= availableDisplay}
+                                        onClick={() => (unit ? updateQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : increaseQty(item.item_code))}
+                                      >
+                                        +
+                                      </button>
                                     </div>
+                                    {unit ? (
+                                      <select
+                                        className="moduleCode"
+                                        aria-label={language === "ar" ? "الوحدة" : "Unit"}
+                                        value={unit.key}
+                                        onChange={(event) => setOrderUnitChoice((current) => ({ ...current, [item.item_code]: event.target.value }))}
+                                      >
+                                        {unitOptions.map((option) => (
+                                          <option key={option.key} value={option.key}>{option.label}</option>
+                                        ))}
+                                      </select>
+                                    ) : null}
                                     {availableLabel ? (
                                       <div className={`moduleCode moduleStockAvailable${overStock ? " moduleStockAvailable--over" : ""}`}>
                                         {availableLabel}
@@ -2352,9 +2392,12 @@ export default function NewOrderPage() {
                                   </td>
                                   <td>{formatMoney(priced.lineValue)}</td>
                                   <td>
-                                    {wholesale ? formatMoney(wholesale) : "NOT FOUND"}
+                                    {wholesale ? formatMoney(orderRateInUnit(wholesale, perMaster)) : "NOT FOUND"}
+                                    {wholesale && unit ? (
+                                      <div className="moduleCode">per {unit.label}</div>
+                                    ) : null}
                                     {wholesale && qty > 0 && priced.rate !== wholesale ? (
-                                      <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
+                                      <div className="moduleCode">Net {formatMoney(orderRateInUnit(priced.rate, perMaster))}</div>
                                     ) : null}
                                   </td>
                                   <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>

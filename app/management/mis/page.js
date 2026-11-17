@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -17,15 +17,21 @@ import { compactChartNumber } from "../../lib/growthCharts";
 import { MIS_PORTFOLIO_EXCLUDE } from "../../lib/misReport";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { GrowthTrendChart } from "../business-dashboard/GrowthCharts";
+import InventoryCoverPanel from "./InventoryCoverPanel";
 import CategoryGrowthFilters from "../business-dashboard/CategoryGrowthFilters";
 import {
   emptyGrowthFilters,
   hasActiveGrowthFilters,
+  normalizeGrowthFilters,
 } from "../../lib/categoryGrowth";
 
 const PORTFOLIO_EXCLUDE_SET = new Set(
   MIS_PORTFOLIO_EXCLUDE.map((value) => String(value || "").trim().toLowerCase()),
 );
+
+const MIS_FETCH_REBUILD_MS = 240_000;
+const MIS_FETCH_FILTER_MS = 240_000;
+const MIS_FETCH_PREPARED_MS = 25_000;
 
 const TEXT = {
   title: { en: "Management MIS", ar: "تقرير الإدارة" },
@@ -50,16 +56,42 @@ const TEXT = {
   next: { en: "Next", ar: "التالي" },
   slideOf: { en: "Slide", ar: "شريحة" },
   all: { en: "All", ar: "الكل" },
-  sliceDice: { en: "Slice and dice", ar: "تقطيع وتصفية" },
+  sliceDice: { en: "Slice and dice (all slides)", ar: "تقطيع وتصفية (كل الشرائح)" },
+  sliceDiceScope: {
+    en: "One filter set for the full Management MIS deck — every slide uses the same slice.",
+    ar: "مجموعة تصفية واحدة لعرض تقرير الإدارة بالكامل — كل الشريحات تستخدم نفس القطاع.",
+  },
   showFilters: { en: "Show", ar: "إظهار" },
   hideFilters: { en: "Hide", ar: "إخفاء" },
-  filtersActive: { en: "Active slice", ar: "الشريحة الحالية" },
-  filterHint: {
-    en: "Same BI salesman and field filters. Apply rebuilds this MIS pack live for the slice (does not overwrite the saved month-end pack). Collections and AR stay company-wide.",
-    ar: "نفس عوامل تصفية ذكاء الأعمال. التطبيق يعيد بناء التقرير لهذه الشريحة مباشرة دون الكتابة فوق حزمة نهاية الشهر. التحصيل والمستحقات تبقى على مستوى الشركة.",
+  filtersHint: {
+    en: "Same salesman and field filters as Business Intelligence. Apply recalculates the entire MIS pack for all slides at once (does not overwrite the prepared company snapshot). Clear returns to the company pack.",
+    ar: "نفس عوامل تصفية المندوب والحقول في ذكاء الأعمال. التطبيق يعيد حساب تقرير الإدارة بالكامل لكل الشرائح دفعة واحدة (دون استبدال الحزمة الجاهزة للشركة). المسح يعيد الحزمة الجاهزة للشركة.",
   },
-  filtering: { en: "Applying slice…", ar: "جاري تطبيق الشريحة…" },
-  liveSlice: { en: "Live slice", ar: "شريحة مباشرة" },
+  filtering: { en: "Applying filters to all slides…", ar: "جاري تطبيق التصفية على كل الشرائح…" },
+  filteredStamp: { en: "Filtered · all slides", ar: "مُصفّى · كل الشرائح" },
+  timeoutRebuild: {
+    en: "Refresh timed out on this device. The backend may still be preparing — wait a moment and open MIS again without Refresh, or try Refresh once more.",
+    ar: "انتهت مهلة التحديث على هذا الجهاز. قد يستمر التجهيز في الخلفية — انتظر ثم افتح التقرير دون تحديث، أو أعد المحاولة.",
+  },
+  timeoutRebuildRecovered: {
+    en: "Refresh took longer than expected, but a prepared pack is available — loaded the saved snapshot.",
+    ar: "استغرق التحديث وقتاً أطول من المتوقع، لكن الحزمة الجاهزة متوفرة — تم تحميل اللقطة المحفوظة.",
+  },
+  timeoutFilter: {
+    en: "Filter apply timed out. Your previous slide view is unchanged — try again or Clear to return to the company pack.",
+    ar: "انتهت مهلة تطبيق التصفية. العرض السابق كما هو — أعد المحاولة أو امسح للعودة إلى حزمة الشركة.",
+  },
+  close: { en: "Close", ar: "إغلاق" },
+  repeatItemDrill: { en: "Open items that drove this repeat change", ar: "فتح الأصناف التي حرّكت تغيّر التكرار" },
+  repeatItemDrillTitle: { en: "Repeat by item", ar: "التكرار حسب الصنف" },
+  repeatItemDrillHint: {
+    en: "Items in this category sorted by repeat Difference (worst loss first).",
+    ar: "أصناف هذه الفئة مرتبة حسب فرق التكرار (أكبر خسارة أولاً).",
+  },
+  repeatItemDrillEmpty: {
+    en: "No item breakdown in this pack. Tap Refresh to rebuild MIS.",
+    ar: "لا يوجد تفصيل أصناف في هذه الحزمة. اضغط تحديث لإعادة بناء التقرير.",
+  },
 };
 
 function money(value, { digits = 1 } = {}) {
@@ -141,35 +173,62 @@ function monthLabel(ym) {
   return `${names[Number(m) - 1] || m} ${String(y).slice(2)}`;
 }
 
-function Kpi({ label, value, note, tone = "teal" }) {
+/** AR / DSO / inventory-days MoM: lower is better → up=red, down=green. */
+function arMomNoteClass(momPct) {
+  if (momPct == null || !Number.isFinite(Number(momPct)) || Number(momPct) === 0) return "";
+  return Number(momPct) > 0 ? "misKpiNote--worse" : "misKpiNote--better";
+}
+
+function daysOnHandValue(days, momPct) {
+  if (days == null || !Number.isFinite(Number(days))) return "—";
+  if (momPct == null || !Number.isFinite(Number(momPct))) return String(days);
+  return `${days} (${pct(momPct)})`;
+}
+
+function Kpi({ label, value, note, noteClassName = "", tone = "teal" }) {
   return (
     <div className={`misKpi misKpi--${tone}`}>
       <div className="misKpiLabel">{label}</div>
       <div className="misKpiValue">{value}</div>
-      {note ? <div className="misKpiNote">{note}</div> : null}
+      {note ? <div className={`misKpiNote${noteClassName ? ` ${noteClassName}` : ""}`}>{note}</div> : null}
     </div>
   );
 }
 
-
-function MisFilterPanel({ language, open, onToggle, activeCount = 0, children }) {
+/** Collapsible BI-style slice/dice filters — closed by default so slides stay readable. */
+function MisFilterDrawer({ language, open, onToggle, activeCount, children }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
   return (
-    <div className={`misFilterPanel${open ? " misFilterPanel--open" : ""}`}>
+    <div className={`misFilterDrawer${open ? " misFilterDrawer--open" : ""}`}>
       <button
         type="button"
-        className="misFilterPanelToggle"
+        className="misFilterDrawerToggle"
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span className="misFilterPanelChevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
-        <span className="misFilterPanelTitle">{t("sliceDice")}</span>
-        {activeCount > 0 ? <span className="misFilterPanelCount">{activeCount}</span> : null}
-        <span className="misFilterPanelAction">{open ? t("hideFilters") : t("showFilters")}</span>
+        <span className="misFilterDrawerChevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span className="misFilterDrawerTitle">{t("sliceDice")}</span>
+        {activeCount > 0 ? <span className="misFilterDrawerCount">{activeCount}</span> : null}
+        <span className="misFilterDrawerAction">{open ? t("hideFilters") : t("showFilters")}</span>
       </button>
-      {open ? <div className="misFilterPanelBody">{children}</div> : null}
+      {open ? (
+        <div className="misFilterDrawerBody">
+          <p className="misFilterDrawerScope">{t("sliceDiceScope")}</p>
+          {children}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function resolveSlideIndexAfterReport(nextReport, slideIdBefore, language) {
+  if (!nextReport) return 0;
+  const nextSlides = buildSlides(nextReport, language);
+  if (slideIdBefore) {
+    const idx = nextSlides.findIndex((slide) => slide.id === slideIdBefore);
+    if (idx >= 0) return idx;
+  }
+  return 0;
 }
 
 function BarRow({ label, value, max, highlight }) {
@@ -197,69 +256,12 @@ function Slide({ eyebrow, title, children, variant = "" }) {
   );
 }
 
-function InventoryCategoryTable({ rows, language, totalDaysOnHand, coverWindowDays = 30 }) {
-  const t = useMemo(() => translate(language, TEXT), [language]);
-  const windowDays = Math.max(1, Number(coverWindowDays) || 30);
-  const keys = ["category", "amount", "sales30d", "forwardCoverDays"];
-  const valueOf = useCallback((row, key) => {
-    if (key === "forwardCoverDays") {
-      const days = row.forwardCoverDays ?? row.days;
-      return days != null ? String(days) : "—";
-    }
-    if (key === "sales30d") return row.sales30d ?? 0;
-    return row[key];
-  }, []);
-  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
-  const stockTotal = visibleRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const sales30dTotal = visibleRows.reduce((sum, row) => sum + Number(row.sales30d || 0), 0);
-  const daysTotal = sales30dTotal
-    ? Math.round(stockTotal / (sales30dTotal / windowDays))
-    : (totalDaysOnHand != null ? totalDaysOnHand : null);
-
-  return (
-    <ExportableTable filename="mis-inventory-categories" sheetName="Inventory" className="moduleTableWrap moduleBiTableWrap">
-      <div className="moduleTableScroll" style={{ marginTop: 12 }}>
-        <table className="moduleTable moduleBiTable">
-          <thead>
-            <tr>
-              <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Stock in hand" filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label={`Last ${windowDays}d sales`} filterKey="sales30d" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Days on hand" filterKey="forwardCoverDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.map((row, index) => {
-              const days = row.forwardCoverDays ?? row.days;
-              return (
-                <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
-                  <td>{row.category}</td>
-                  <td>{amountInt(row.amount)}</td>
-                  <td>{amountInt(row.sales30d)}</td>
-                  <td className={`moduleBiTotalCol${days != null && days > 90 ? " moduleBiMonthCell--down" : days != null ? " moduleBiMonthCell--up" : ""}`}>
-                    {days != null ? amountInt(days) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td><strong>Total</strong></td>
-              <td><strong>{amountInt(stockTotal)}</strong></td>
-              <td><strong>{amountInt(sales30dTotal)}</strong></td>
-              <td className={`moduleBiTotalCol${daysTotal != null && daysTotal > 90 ? " moduleBiMonthCell--down" : daysTotal != null ? " moduleBiMonthCell--up" : ""}`}>
-                <strong>{daysTotal != null ? amountInt(daysTotal) : "—"}</strong>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </ExportableTable>
-  );
-}
-
-function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
+function CategoryTable({
+  rows,
+  language,
+  asOfMonthLabel = "This month",
+  previousMonthLabel = "Last month",
+}) {
   const t = useMemo(() => translate(language, TEXT), [language]);
   const keys = ["category", "sales", "previousSales", "gp", "previousGp", "gpPct", "previousGpPct"];
   const valueOf = useCallback((row, key) => {
@@ -294,11 +296,11 @@ function CategoryTable({ rows, language, previousMonthLabel = "Last month" }) {
           <thead>
             <tr>
               <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="Sales" filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} sales`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} sales`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP" filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} GP`} filterKey="gp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} GP`} filterKey="previousGp" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-              <BiExcelHead label="GP%" filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label={`${asOfMonthLabel} GP%`} filterKey="gpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
               <BiExcelHead label={`${previousMonthLabel} GP%`} filterKey="previousGpPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             </tr>
           </thead>
@@ -385,8 +387,171 @@ function SalesmanTable({ rows, language }) {
   );
 }
 
-function PortfolioCategoryMomTable({ rows, language }) {
+function RepeatCategoryItemDrillTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
   const t = useMemo(() => translate(language, TEXT), [language]);
+  const keys = ["itemName", "itemCode", "previousSales", "sales", "delta", "salesMomPct"];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct") return row[key] != null ? `${row[key]}%` : "—";
+    if (["previousSales", "sales", "delta"].includes(key)) return amountInt(row[key]);
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const priorTotal = visibleRows.reduce((acc, row) => acc + Number(row.previousSales || 0), 0);
+  const salesTotal = visibleRows.reduce((acc, row) => acc + Number(row.sales || 0), 0);
+  const deltaTotal = Math.round(salesTotal - priorTotal);
+  const rowKey = (row) => `${row.itemCode || ""}||${row.itemName}`;
+
+  return (
+    <ExportableTable filename="mis-repeat-category-items" sheetName="Repeat items" className="moduleTableWrap moduleBiTableWrap">
+      <div className="moduleTableScroll" style={{ marginTop: 8 }}>
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <BiExcelHead label="Item" filterKey="itemName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="Code" filterKey="itemCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={`${previousLabel} repeat`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label={`${currentLabel} repeat`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+              <BiExcelHead label="Difference" filterKey="delta" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+              <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={rowKey(row)} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                <td>{row.itemName}</td>
+                <td>{row.itemCode || "—"}</td>
+                <td>{amountInt(row.previousSales)}</td>
+                <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                <td className={momTrendClass(row.delta)}>{amountInt(row.delta)}</td>
+                <td className={`moduleBiTotalCol ${momTrendClass(row.salesMomPct)}`}>{pct(row.salesMomPct)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={2}><strong>Total</strong></td>
+              <td><strong>{amountInt(priorTotal)}</strong></td>
+              <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
+              <td className={momTrendClass(deltaTotal)}><strong>{amountInt(deltaTotal)}</strong></td>
+              <td className={`moduleBiTotalCol ${momTrendClass(pctChangeSafe(salesTotal, priorTotal))}`}>
+                <strong>{pct(pctChangeSafe(salesTotal, priorTotal))}</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </ExportableTable>
+  );
+}
+
+function RepeatCategoryMomTable({ rows, language, currentLabel = "This month", previousLabel = "Last month" }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const [drillRow, setDrillRow] = useState(null);
+  const keys = ["category", "previousSales", "sales", "delta", "salesMomPct"];
+  const valueOf = useCallback((row, key) => {
+    if (key === "salesMomPct") return row[key] != null ? `${row[key]}%` : "—";
+    if (["previousSales", "sales", "delta"].includes(key)) return amountInt(row[key]);
+    return row[key];
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const priorTotal = visibleRows.reduce((acc, row) => acc + Number(row.previousSales || 0), 0);
+  const salesTotal = visibleRows.reduce((acc, row) => acc + Number(row.sales || 0), 0);
+  const deltaTotal = Math.round(salesTotal - priorTotal);
+  const drillItems = Array.isArray(drillRow?.items) ? drillRow.items : [];
+
+  return (
+    <>
+      <ExportableTable filename="mis-repeat-category-mom" sheetName="Repeat by category" className="moduleTableWrap moduleBiTableWrap">
+        <div className="moduleTableScroll" style={{ marginTop: 12 }}>
+          <table className="moduleTable moduleBiTable">
+            <thead>
+              <tr>
+                <BiExcelHead label="Category" filterKey="category" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label={`${previousLabel} repeat`} filterKey="previousSales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label={`${currentLabel} repeat`} filterKey="sales" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiMonthCell--current" />
+                <BiExcelHead label="Difference" filterKey="delta" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                <BiExcelHead label="MoM%" filterKey="salesMomPct" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row, index) => (
+                <tr key={row.category} className={index % 2 ? "moduleBiRowAlt" : undefined}>
+                  <td>{row.category}</td>
+                  <td>{amountInt(row.previousSales)}</td>
+                  <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
+                  <td className={momTrendClass(row.delta)}>
+                    <button
+                      type="button"
+                      className="misDrillLink"
+                      onClick={() => setDrillRow(row)}
+                      title={t("repeatItemDrill")}
+                    >
+                      {amountInt(row.delta)}
+                    </button>
+                  </td>
+                  <td className={`moduleBiTotalCol ${momTrendClass(row.salesMomPct)}`}>{pct(row.salesMomPct)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td><strong>Total</strong></td>
+                <td><strong>{amountInt(priorTotal)}</strong></td>
+                <td className="moduleBiMonthCell--current"><strong>{amountInt(salesTotal)}</strong></td>
+                <td className={momTrendClass(deltaTotal)}><strong>{amountInt(deltaTotal)}</strong></td>
+                <td className={`moduleBiTotalCol ${momTrendClass(pctChangeSafe(salesTotal, priorTotal))}`}>
+                  <strong>{pct(pctChangeSafe(salesTotal, priorTotal))}</strong>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </ExportableTable>
+
+      {drillRow ? (
+        <div
+          className="moduleModalOverlay"
+          role="presentation"
+          onClick={() => setDrillRow(null)}
+        >
+          <div
+            className="moduleModal misRepeatItemModal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("repeatItemDrillTitle")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="moduleSectionHeader">
+              <h2>{t("repeatItemDrillTitle")}: {drillRow.category}</h2>
+              <button type="button" className="moduleInlineButton" onClick={() => setDrillRow(null)}>
+                {t("close")}
+              </button>
+            </div>
+            <p className="moduleHint">{t("repeatItemDrillHint")}</p>
+            {drillItems.length ? (
+              <RepeatCategoryItemDrillTable
+                rows={drillItems}
+                language={language}
+                currentLabel={currentLabel}
+                previousLabel={previousLabel}
+              />
+            ) : (
+              <p className="moduleHint">{t("repeatItemDrillEmpty")}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function normPortfolioCategory(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function PortfolioCategoryMomTable({ rows, lossItems = [], language }) {
+  const t = useMemo(() => translate(language, TEXT), [language]);
+  const [drillCategory, setDrillCategory] = useState(null);
   const keys = [
     "category", "previousSales", "sales", "salesLoss", "salesMomPct",
     "previousGp", "gp", "previousGpPct", "gpPct",
@@ -408,7 +573,18 @@ function PortfolioCategoryMomTable({ rows, language }) {
   const priorGpTotal = sum("previousGp");
   const gpTotal = sum("gp");
 
+  const drillLossRows = useMemo(() => {
+    if (!drillCategory) return [];
+    const key = normPortfolioCategory(drillCategory);
+    return lossItems.filter((row) => normPortfolioCategory(row.category) === key);
+  }, [drillCategory, lossItems]);
+
+  const toggleDrill = useCallback((category) => {
+    setDrillCategory((current) => (current === category ? null : category));
+  }, []);
+
   return (
+    <>
     <ExportableTable filename="mis-portfolio-category-mom" sheetName="Portfolio MoM" className="moduleTableWrap moduleBiTableWrap">
       <div className="moduleTableScroll" style={{ marginTop: 12 }}>
         <table className="moduleTable moduleBiTable">
@@ -431,7 +607,21 @@ function PortfolioCategoryMomTable({ rows, language }) {
                 <td>{row.category}</td>
                 <td>{amountInt(row.previousSales)}</td>
                 <td className="moduleBiMonthCell--current">{amountInt(row.sales)}</td>
-                <td className={lossClass(row.salesLoss)}>{amountInt(row.salesLoss)}</td>
+                <td className={lossClass(row.salesLoss)}>
+                  {row.salesLoss > 0 ? (
+                    <button
+                      type="button"
+                      className="misSalesLossLink"
+                      title="Show items with sales loss"
+                      aria-label="Show items with sales loss"
+                      onClick={() => toggleDrill(row.category)}
+                    >
+                      {amountInt(row.salesLoss)}
+                    </button>
+                  ) : (
+                    amountInt(row.salesLoss)
+                  )}
+                </td>
                 <td className={momTrendClass(row.salesMomPct)}>{pct(row.salesMomPct)}</td>
                 <td>{amountInt(row.previousGp)}</td>
                 <td className="moduleBiMonthCell--current">{amountInt(row.gp)}</td>
@@ -460,6 +650,22 @@ function PortfolioCategoryMomTable({ rows, language }) {
         </table>
       </div>
     </ExportableTable>
+    {drillCategory ? (
+      <div className="misDrillPanel">
+        <div className="misDrillPanelHead">
+          <h3>{`Sales loss items · ${drillCategory}`}</h3>
+          <button type="button" className="misDrillPanelClose" onClick={() => setDrillCategory(null)}>
+            Close
+          </button>
+        </div>
+        {drillLossRows.length ? (
+          <PortfolioTopLossItemsTable rows={drillLossRows} language={language} />
+        ) : (
+          <p className="misMeta">No item-level sales losses in the prepared pack for this category.</p>
+        )}
+      </div>
+    ) : null}
+    </>
   );
 }
 
@@ -673,8 +879,9 @@ function buildSlides(report, language) {
               label=">90-day AR"
               value={money(report.headline.gt90Ar)}
               note={report.headline.gt90ArMomPct == null
-                ? `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`
-                : momNote(report.headline.gt90ArMomPct, `Total AR ${money(report.headline.totalAr)} · ~${report.headline.collectionDays ?? "—"} days`)}
+                ? `Total AR ${money(report.headline.totalAr)} · rolling 3m ~${report.headline.collectionDays3m ?? report.headline.collectionDays ?? "—"} days`
+                : momNote(report.headline.gt90ArMomPct, `Total AR ${money(report.headline.totalAr)} · rolling 3m ~${report.headline.collectionDays3m ?? report.headline.collectionDays ?? "—"} days`)}
+              noteClassName={arMomNoteClass(report.headline.gt90ArMomPct)}
               tone={report.headline.gt90ArMomPct == null || report.headline.gt90ArMomPct <= 0 ? "green" : "orange"}
             />
             <Kpi label="YTD sales" value={money(report.headline.ytdSales, { digits: 2 })} note={momNote(report.headline.ytdMomPct, `${report.headline.newCustomers} new customers`)} tone={Number(report.headline.ytdMomPct) >= 0 ? "green" : "orange"} />
@@ -719,13 +926,17 @@ function buildSlides(report, language) {
                 {Object.entries(report.headline.arBuckets || {}).map(([bucket, value]) => {
                   const mom = report.headline.arBucketMomPct?.[bucket];
                   const prior = report.headline.previousArBuckets?.[bucket];
+                  const noteTone = arMomNoteClass(mom);
                   return (
                     <Kpi
                       key={bucket}
                       label={bucket}
                       value={money(value)}
                       note={mom == null ? (prior == null ? "No prior snapshot" : money(prior)) : momNote(mom, prior != null ? `was ${money(prior)}` : "")}
-                      tone={bucket.includes("90") || bucket.includes(">") ? "orange" : "teal"}
+                      noteClassName={noteTone}
+                      tone={mom == null
+                        ? (bucket.includes("90") || bucket.includes(">") ? "orange" : "teal")
+                        : (Number(mom) > 0 ? "orange" : "green")}
                     />
                   );
                 })}
@@ -747,49 +958,53 @@ function buildSlides(report, language) {
                 <Kpi
                   label="Stock in hand"
                   value={money(report.inventory.physical, { digits: 2 })}
+                  note={report.inventory.physicalMomPct == null
+                    ? null
+                    : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : "")}
+                  tone="teal"
+                />
+                <Kpi
+                  label="Days on hand (month sales)"
+                  value={daysOnHandValue(report.inventory.daysMonth, report.inventory.daysMonthMomPct)}
                   note={[
-                    report.inventory.days != null ? `${report.inventory.days} days forward cover` : null,
+                    report.inventory.monthSales != null ? `month sales ${money(report.inventory.monthSales, { digits: 2 })}` : null,
+                    report.inventory.daysMonthMomPct == null
+                      ? "stock ÷ (month sales ÷ days in month)"
+                      : momNote(
+                        report.inventory.daysMonthMomPct,
+                        report.inventory.previousDaysMonth != null ? `was ${report.inventory.previousDaysMonth}` : "",
+                      ),
+                  ].filter(Boolean).join(" · ")}
+                  noteClassName={arMomNoteClass(report.inventory.daysMonthMomPct)}
+                  tone={report.inventory.daysMonth > 90 ? "orange" : "green"}
+                />
+                <Kpi
+                  label="Days on hand (forward cover)"
+                  value={daysOnHandValue(report.inventory.days, report.inventory.daysMomPct)}
+                  note={[
                     report.inventory.sales30d != null ? `last 30d sales ${money(report.inventory.sales30d, { digits: 2 })}` : null,
-                    report.inventory.physicalMomPct == null
-                      ? null
-                      : momNote(report.inventory.physicalMomPct, report.inventory.previousPhysical != null ? `was ${money(report.inventory.previousPhysical, { digits: 2 })}` : ""),
-                  ].filter(Boolean).join(" · ") || null}
-                  tone="teal"
-                />
-                <Kpi
-                  label="Last 30d sales"
-                  value={report.inventory.sales30d != null ? money(report.inventory.sales30d, { digits: 2 }) : "—"}
-                  note={report.inventory.coverFrom && report.inventory.coverTo
-                    ? `${report.inventory.coverFrom} → ${report.inventory.coverTo}`
-                    : "Pace for forward cover"}
-                  tone="teal"
-                />
-                <Kpi
-                  label="Days on hand"
-                  value={report.inventory.days != null ? String(report.inventory.days) : "—"}
-                  note={[
-                    report.inventory.physical != null ? `stock ${money(report.inventory.physical, { digits: 2 })}` : null,
                     report.inventory.daysMomPct == null
                       ? "stock ÷ (last 30d sales ÷ 30)"
-                      : momNote(report.inventory.daysMomPct, report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "last 30 days pace"),
+                      : momNote(
+                        report.inventory.daysMomPct,
+                        report.inventory.previousDays != null ? `was ${report.inventory.previousDays}` : "",
+                      ),
                   ].filter(Boolean).join(" · ")}
+                  noteClassName={arMomNoteClass(report.inventory.daysMomPct)}
                   tone={report.inventory.days > 90 ? "orange" : "green"}
                 />
               </div>
-              {report.inventory.categories?.length ? (
-                <InventoryCategoryTable
-                  rows={report.inventory.categories}
-                  language={language}
-                  totalDaysOnHand={report.inventory.days}
-                  coverWindowDays={report.inventory.coverWindowDays || 30}
-                />
-              ) : null}
             </>
           ) : (
             <p className="misRemark">
-              Physical inventory is not published for {monthLabel(asOfYm)} yet.
+              Physical inventory is not published for {monthLabel(asOfYm)} yet. Use Latest stock for EOD cover.
             </p>
           )}
+          <InventoryCoverPanel
+            preparedInventory={report.inventory}
+            language={language}
+            asOfDate={report.asOfDate || asOfYm}
+          />
         </Slide>
       ),
     },
@@ -804,6 +1019,18 @@ function buildSlides(report, language) {
             <Kpi label="New customers" value={String(report.headline.newCustomers)} note={momNote(report.headline.newCustomersMomPct, `prior ${report.headline.previousNewCustomers}`)} tone={Number(report.headline.newCustomersMomPct) >= 0 ? "green" : "orange"} />
             <Kpi label="Prior repeat mix" value={`${report.headline.previousRepeatPct}%`} note={money(report.headline.previousRepeatSales)} tone="orange" />
           </div>
+          <h3>Category repeat · {monthLabel(asOfYm)} vs {monthLabel(report.previousMonth)}</h3>
+          <p className="misMeta">Filter any column. Difference and MoM% are green when up, red when down.</p>
+          {(report.repeatCategories || []).length ? (
+            <RepeatCategoryMomTable
+              rows={report.repeatCategories}
+              language={language}
+              currentLabel={monthLabel(asOfYm)}
+              previousLabel={monthLabel(report.previousMonth)}
+            />
+          ) : (
+            <p className="misRemark">No category repeat sales for this as-of month yet.</p>
+          )}
           <h3>Historical month-on-month growth</h3>
           <GrowthTrendChart
             periods={months}
@@ -842,7 +1069,11 @@ function buildSlides(report, language) {
           {report.portfolioCategories?.length ? (
             <>
               <h3>Category MoM · where the dip is</h3>
-              <PortfolioCategoryMomTable rows={report.portfolioCategories} language={language} />
+              <PortfolioCategoryMomTable
+                rows={report.portfolioCategories}
+                lossItems={report.portfolioLossItems || []}
+                language={language}
+              />
             </>
           ) : null}
           {report.portfolioTopLossItems?.length ? (
@@ -863,6 +1094,7 @@ function buildSlides(report, language) {
           <CategoryTable
             rows={asOfCats}
             language={language}
+            asOfMonthLabel={monthLabel(asOfYm)}
             previousMonthLabel={report.previousMonth ? monthLabel(report.previousMonth) : "Last month"}
           />
         </Slide>
@@ -997,9 +1229,7 @@ export default function MisPage() {
   const [asOf, setAsOf] = useState(() => defaultMisAsOfDate(getKsaDateString()) || getKsaDateString());
   const [loading, setLoading] = useState(true);
   const [preparing, setPreparing] = useState(false);
-  const [filtering, setFiltering] = useState(false);
   const [report, setReport] = useState(null);
-  const [preparedReport, setPreparedReport] = useState(null);
   const [builtAt, setBuiltAt] = useState("");
   const [error, setError] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
@@ -1007,119 +1237,141 @@ export default function MisPage() {
   const [filterDraft, setFilterDraft] = useState(() => emptyGrowthFilters());
   const [filterApplied, setFilterApplied] = useState(() => emptyGrowthFilters());
   const [filterCatalogs, setFilterCatalogs] = useState({});
-  const [liveSlice, setLiveSlice] = useState(false);
+  const [filtering, setFiltering] = useState(false);
+  const [filteredView, setFilteredView] = useState(false);
+  const reportRef = useRef(null);
+  const slideIdRef = useRef(null);
   usePopupMessages({ error });
 
   const canOpen = access?.canAccess?.("mis");
   const activeFilterCount = useMemo(() => {
-    const values = filterApplied?.values || {};
+    const filters = normalizeGrowthFilters(filterApplied);
     let count = 0;
-    Object.values(values).forEach((list) => {
-      if (Array.isArray(list) && list.length) count += 1;
+    if (filters.dateFrom || filters.dateTo) count += 1;
+    if (filters.amountMin != null || filters.amountMax != null) count += 1;
+    if (filters.quantityMin != null || filters.quantityMax != null) count += 1;
+    Object.values(filters.values || {}).forEach((values) => {
+      if (Array.isArray(values) && values.length) count += 1;
     });
-    if (filterApplied?.dateFrom || filterApplied?.dateTo) count += 1;
-    if (filterApplied?.amountMin || filterApplied?.amountMax) count += 1;
-    if (filterApplied?.quantityMin || filterApplied?.quantityMax) count += 1;
     return count;
   }, [filterApplied]);
 
-  const load = useCallback(async (date, { rebuild = false } = {}) => {
+  const load = useCallback(async (date, { rebuild = false, filters = null } = {}) => {
+    const usingFilters = filters && hasActiveGrowthFilters(filters);
+    const slideIdBefore = slideIdRef.current;
+    const hadReport = Boolean(reportRef.current);
     setLoading(true);
-    setPreparing(Boolean(rebuild));
+    setPreparing(Boolean(rebuild) && !usingFilters);
+    setFiltering(Boolean(usingFilters));
     setError("");
     try {
       const supabase = getSupabaseClient();
       if (!supabase) throw new Error("Supabase is not configured.");
       const session = await resolveAuthSession(supabase, 12000);
       if (!session?.access_token) throw new Error("Please login again.");
-      const params = new URLSearchParams({ asOf: date, catalogs: "1" });
-      if (rebuild) params.set("rebuild", "1");
-      const { response, payload } = await fetchJsonWithTimeout(
-        `/api/business-dashboard/mis?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } },
-        rebuild ? 90000 : 45000,
-      );
+      let response;
+      let payload;
+      if (usingFilters) {
+        ({ response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/mis",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ asOf: date, filters }),
+          },
+          MIS_FETCH_FILTER_MS,
+        ));
+      } else {
+        const params = new URLSearchParams({ asOf: date });
+        if (rebuild) params.set("rebuild", "1");
+        ({ response, payload } = await fetchJsonWithTimeout(
+          `/api/business-dashboard/mis?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } },
+          rebuild ? MIS_FETCH_REBUILD_MS : MIS_FETCH_PREPARED_MS,
+        ));
+      }
       if (payload?.code === "MIS_NOT_PREPARED") {
         setReport(null);
-        setPreparedReport(null);
         setBuiltAt("");
-        setError(payload?.error || "Month-end MIS is not prepared yet.");
+        setFilteredView(false);
+        setError(payload?.error || t("notPrepared"));
         return;
       }
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.error || "Unable to load MIS");
       }
-      setPreparedReport(payload.report || null);
       setReport(payload.report || null);
-      setLiveSlice(false);
-      setFilterDraft(emptyGrowthFilters());
-      setFilterApplied(emptyGrowthFilters());
-      if (payload.catalogs) setFilterCatalogs(payload.catalogs);
       setBuiltAt(payload.builtAt || payload.report?.meta?.preparedAt || "");
+      if (payload.catalogs) setFilterCatalogs(payload.catalogs);
+      setFilteredView(Boolean(payload.filtered || usingFilters));
       if (payload.asOfDate) setAsOf(payload.asOfDate);
       if (payload.message) setError(payload.message);
-      setSlideIndex(0);
+      setSlideIndex(resolveSlideIndexAfterReport(payload.report, slideIdBefore, language));
     } catch (err) {
+      const timedOut = String(err?.message || "").toLowerCase().includes("timed out");
+      if (timedOut) {
+        try {
+          const supabase = getSupabaseClient();
+          const session = await resolveAuthSession(supabase, 12000);
+          if (session?.access_token) {
+            const params = new URLSearchParams({ asOf: date });
+            const recovered = await fetchJsonWithTimeout(
+              `/api/business-dashboard/mis?${params.toString()}`,
+              { headers: { Authorization: `Bearer ${session.access_token}` } },
+              MIS_FETCH_PREPARED_MS,
+            );
+            if (recovered.response?.ok && recovered.payload?.success && recovered.payload?.report) {
+              setReport(recovered.payload.report);
+              setBuiltAt(recovered.payload.builtAt || recovered.payload.report?.meta?.preparedAt || "");
+              if (recovered.payload.catalogs) setFilterCatalogs(recovered.payload.catalogs);
+              setFilteredView(Boolean(recovered.payload.filtered));
+              if (recovered.payload.asOfDate) setAsOf(recovered.payload.asOfDate);
+              setError(rebuild ? t("timeoutRebuildRecovered") : "");
+              setSlideIndex(resolveSlideIndexAfterReport(recovered.payload.report, slideIdBefore, language));
+              return;
+            }
+          }
+        } catch {
+          // fall through to timeout messaging below
+        }
+      }
+      if (timedOut && usingFilters && hadReport) {
+        setError(t("timeoutFilter"));
+        return;
+      }
+      if (timedOut && rebuild) {
+        if (hadReport) {
+          setError(t("timeoutRebuild"));
+        } else {
+          setReport(null);
+          setBuiltAt("");
+          setFilteredView(false);
+          setError(t("timeoutRebuild"));
+        }
+        return;
+      }
+      if (timedOut && usingFilters) {
+        setError(t("timeoutFilter"));
+        if (!hadReport) {
+          setReport(null);
+          setBuiltAt("");
+          setFilteredView(false);
+        }
+        return;
+      }
       setReport(null);
-      setPreparedReport(null);
       setBuiltAt("");
+      setFilteredView(false);
       setError(err?.message || "Unable to load MIS");
     } finally {
       setPreparing(false);
+      setFiltering(false);
       setLoading(false);
     }
-  }, []);
-
-  const applyFilters = useCallback(async () => {
-    setFiltering(true);
-    setError("");
-    try {
-      const supabase = getSupabaseClient();
-      if (!supabase) throw new Error("Supabase is not configured.");
-      const session = await resolveAuthSession(supabase, 12000);
-      if (!session?.access_token) throw new Error("Please login again.");
-      const nextApplied = { ...emptyGrowthFilters(), ...filterDraft };
-      if (!hasActiveGrowthFilters(nextApplied)) {
-        setFilterApplied(emptyGrowthFilters());
-        setReport(preparedReport);
-        setLiveSlice(false);
-        return;
-      }
-      const { response, payload } = await fetchJsonWithTimeout(
-        "/api/business-dashboard/mis",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ asOf, filters: nextApplied }),
-        },
-        90000,
-      );
-      if (!response.ok || !payload?.success) {
-        throw new Error(payload?.error || "Unable to apply MIS filters");
-      }
-      setFilterApplied(nextApplied);
-      setReport(payload.report || null);
-      setLiveSlice(true);
-      if (payload.catalogs) setFilterCatalogs(payload.catalogs);
-      setBuiltAt(payload.builtAt || "");
-      setSlideIndex(0);
-    } catch (err) {
-      setError(err?.message || "Unable to apply MIS filters");
-    } finally {
-      setFiltering(false);
-    }
-  }, [asOf, filterDraft, preparedReport]);
-
-  const clearFilters = useCallback(() => {
-    setFilterDraft(emptyGrowthFilters());
-    setFilterApplied(emptyGrowthFilters());
-    setReport(preparedReport);
-    setLiveSlice(false);
-    setError("");
-  }, [preparedReport]);
+  }, [language, t]);
 
   useEffect(() => {
     if (accessLoading) return;
@@ -1136,6 +1388,14 @@ export default function MisPage() {
     () => (report ? buildSlides(report, language) : []),
     [report, language],
   );
+
+  useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  useEffect(() => {
+    slideIdRef.current = slides[slideIndex]?.id ?? null;
+  }, [slides, slideIndex]);
 
   useEffect(() => {
     if (!slides.length) return undefined;
@@ -1210,7 +1470,12 @@ export default function MisPage() {
                 <button
                   type="button"
                   className="moduleButton moduleButtonPrimary"
-                  onClick={() => load(asOf, { rebuild: true })}
+                  onClick={() => {
+                    const empty = emptyGrowthFilters();
+                    setFilterDraft(empty);
+                    setFilterApplied(empty);
+                    load(asOf, { rebuild: true });
+                  }}
                   disabled={loading}
                 >
                   {t("refresh")}
@@ -1222,9 +1487,12 @@ export default function MisPage() {
                     {new Date(builtAt).toLocaleString()}
                   </span>
                 ) : null}
+                {filteredView ? (
+                  <span className="misPreparedStamp misPreparedStamp--filtered">{t("filteredStamp")}</span>
+                ) : null}
               </div>
 
-              <MisFilterPanel
+              <MisFilterDrawer
                 language={language}
                 open={filtersOpen}
                 onToggle={() => setFiltersOpen((value) => !value)}
@@ -1237,26 +1505,30 @@ export default function MisPage() {
                   applied={filterApplied}
                   onDraftChange={setFilterDraft}
                   onGroupByChange={() => {}}
-                  onApply={applyFilters}
-                  onClear={clearFilters}
+                  onApply={() => {
+                    const next = normalizeGrowthFilters(filterDraft);
+                    setFilterApplied(next);
+                    load(asOf, { filters: next });
+                  }}
+                  onClear={() => {
+                    const empty = emptyGrowthFilters();
+                    setFilterDraft(empty);
+                    setFilterApplied(empty);
+                    load(asOf, { rebuild: false });
+                  }}
                   lockGroupBy="category"
                   showSearch={false}
                   showStatusFilters={false}
+                  hint={t("filtersHint")}
                   embedded
-                  hint={t("filterHint")}
                 />
-              </MisFilterPanel>
-
-              {filtering ? <div className="moduleCard"><p>{t("filtering")}</p></div> : null}
-              {liveSlice ? (
-                <p className="misMeta">{t("liveSlice")} · {builtAt ? new Date(builtAt).toLocaleString() : "—"}</p>
-              ) : null}
+              </MisFilterDrawer>
 
               {loading ? (
-                <div className="moduleCard"><p>{preparing ? t("preparing") : t("loading")}</p></div>
+                <div className="moduleCard"><p>{preparing ? t("preparing") : (filtering ? t("filtering") : t("loading"))}</p></div>
               ) : !report || !active ? (
                 <div className="moduleCard">
-                  <p>{error ? t("notPrepared") : t("noData")}</p>
+                  <p>{error || (!report ? t("notPrepared") : t("noData"))}</p>
                 </div>
               ) : (
                 <div className="misDeck misDeck--presenter">

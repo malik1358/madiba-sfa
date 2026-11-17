@@ -1,10 +1,13 @@
 import { EOD_STOCK_DATASET_KEY, readEodStockDataset } from "./eodStock.js";
 import {
+  applyMasterUnitsToInterCityReport,
   buildInterCityStockTransferReport,
   findInterCityStockImbalances,
   normalizeInterCityItemCode,
   resolveInterCitySalesWindow,
 } from "./interCityStockTransfer.js";
+import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
+import { loadCatalogueSheetPacking } from "./productCatalogueServer.js";
 
 const PAGE_SIZE = 1000;
 const CODE_CHUNK = 200;
@@ -88,11 +91,12 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
     ...new Set([
       ...imbalances.riyadhToDammam.map((row) => normalizeInterCityItemCode(row.itemCode)),
       ...imbalances.dammamToRiyadh.map((row) => normalizeInterCityItemCode(row.itemCode)),
+      ...(imbalances.riyadhToStore || []).map((row) => normalizeInterCityItemCode(row.itemCode)),
     ].filter(Boolean)),
   ];
 
   const saleRows = await loadCitySalesForItems(admin, window, itemCodes);
-  return buildInterCityStockTransferReport({
+  const report = buildInterCityStockTransferReport({
     stockRows,
     saleRows,
     now,
@@ -100,4 +104,8 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
     fileName: dataset?.fileName || "",
     citiesPresent: Array.isArray(dataset?.citiesPresent) ? dataset.citiesPresent : [],
   });
+  const masterUnits = await loadMasterUnitConvMap(admin, {
+    loadSheetPacking: loadCatalogueSheetPacking,
+  }).catch(() => ({}));
+  return applyMasterUnitsToInterCityReport(report, masterUnits);
 }

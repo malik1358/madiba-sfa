@@ -30,7 +30,21 @@ test("column options stay complete so multi-select is always available", () => {
 
 test("stale selections are pruned when options shrink", () => {
   const pruned = pruneExcelFilters({ name: ["Electronics", "Gone"] }, { name: ["Electronics"] });
-  assert.deepEqual(pruned.name, ["Electronics"]);
+  assert.deepEqual(pruned.name, { selected: ["Electronics"], excludeContains: "" });
+});
+
+test("does-not-contain filter keeps rows without the excluded text", () => {
+  const withLegal = [
+    { name: "Alpha", code: "1054C Legal" },
+    { name: "Beta", code: "1136C" },
+  ];
+  const visible = filterRowsByExcelFilters(
+    withLegal,
+    ["code"],
+    (row, key) => row[key],
+    { code: { excludeContains: "Legal" } },
+  );
+  assert.deepEqual(visible.map((row) => row.name), ["Beta"]);
 });
 
 test("formatted amounts sort by value, not by the thousands separator", () => {

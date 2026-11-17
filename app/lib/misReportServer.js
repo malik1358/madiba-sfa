@@ -9,16 +9,11 @@ import {
 } from "./misPrepared.js";
 import { RECEIVABLE_DAYS_DATASET_KEY, mergePriorOutstanding } from "./receivableDays.js";
 import { loadMonthEndOutstandingSnapshot } from "./receivableDaysServer.js";
+import { applyMisGrowthFilters, buildMisFilterCatalogs, hasActiveGrowthFilters, normalizeGrowthFilters } from "./misFilters.js";
 import { salesBiFactToGrowthRow } from "./salesBiCube.js";
-import {
-  addRowToGrowthCatalogs,
-  createGrowthCatalogs,
-  finalizeGrowthCatalogs,
-  hasActiveGrowthFilters,
-  normalizeGrowthFilters,
-  rowMatchesGrowthFilters,
-} from "./categoryGrowth.js";
+import { MIS_ACTIVE_SALES_SCAN_MS, misSalesShouldUseCube } from "./misSalesLoad.js";
 import { loadSalesBiCube, pageActiveSales } from "./salesBiCubeServer.js";
+import { withTimeout } from "./authSession.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 const MIS_INVENTORY_SETTING_KEY = "mis_inventory_physical_v1";
@@ -130,24 +125,46 @@ export async function loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }
   throw lastError || new Error("Unable to load active_sales for MIS");
 }
 
-export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null }) {
+export async function loadMisSalesRows(admin, { asOfYm, toDateExclusive, cube = null, activeSalesBudgetMs = MIS_ACTIVE_SALES_SCAN_MS } = {}) {
   // Prefer active_sales so repeat sales can use real transaction dates (cube facts are month-dated).
+  let activeTimedOut = false;
+  let activeErrored = false;
+  let activeRows = [];
   try {
-    const rows = await loadMisSalesRowsFromActiveSales(admin, { toDateExclusive });
-    if (rows.length) {
-      return { rows, source: "active_sales", preparedAt: null };
-    }
+    activeRows = await withTimeout(
+      loadMisSalesRowsFromActiveSales(admin, { toDateExclusive }),
+      activeSalesBudgetMs,
+      "MIS_ACTIVE_SALES_TIMEOUT",
+    );
   } catch (error) {
-    console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+    const message = String(error?.message || "");
+    if (message === "MIS_ACTIVE_SALES_TIMEOUT") {
+      activeTimedOut = true;
+      console.warn(`MIS: active_sales scan exceeded ${activeSalesBudgetMs}ms, using sales BI cube`);
+    } else {
+      activeErrored = true;
+      console.error("MIS: active_sales unavailable, trying sales BI cube:", error);
+    }
   }
+
+  if (!misSalesShouldUseCube({ timedOut: activeTimedOut, errored: activeErrored, rowCount: activeRows.length })) {
+    return { rows: activeRows, source: "active_sales", preparedAt: null };
+  }
+
   try {
     const salesCube = cube || await loadSalesBiCube(admin, { allowStale: true });
     const rows = salesRowsFromCube(salesCube, { asOfYm });
     if (rows.length) {
-      return { rows, source: salesCube.source || "sales_bi_cube", preparedAt: salesCube.builtAt || null };
+      const source = activeTimedOut || activeErrored
+        ? `${salesCube.source || "sales_bi_cube"}_after_active_sales`
+        : (salesCube.source || "sales_bi_cube");
+      return { rows, source, preparedAt: salesCube.builtAt || null };
     }
   } catch (error) {
     console.error("MIS: sales BI cube also unavailable:", error);
+  }
+  if (activeRows.length) {
+    return { rows: activeRows, source: "active_sales_partial", preparedAt: null };
   }
   return { rows: [], source: "none", preparedAt: null };
 }
@@ -260,13 +277,15 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null, 
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const toDateExclusive = nextDay.toISOString().slice(0, 10);
   const ytdFromDate = `${year}-01-01`;
+  const normalizedFilters = normalizeGrowthFilters(filters || {});
+  const filtering = hasActiveGrowthFilters(normalizedFilters);
 
   const existingPrepared = await readPreparedMisReport(admin).catch(() => null);
   const [
     salesLoad,
-    receiptRows,
-    outstandingRows,
-    inventoryPhysical,
+    receiptRowsRaw,
+    outstandingRowsRaw,
+    inventoryPhysicalRaw,
     monthEndPrior,
     receivablePrior,
   ] = await Promise.all([
@@ -285,15 +304,18 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null, 
     receivablePrior,
   );
 
-  const allSalesRows = salesLoad.rows || [];
-  const catalogs = createGrowthCatalogs();
-  for (const row of allSalesRows) addRowToGrowthCatalogs(catalogs, row);
-  const normalized = filters && hasActiveGrowthFilters(filters)
-    ? normalizeGrowthFilters(filters)
-    : null;
-  const salesRows = normalized
-    ? allSalesRows.filter((row) => rowMatchesGrowthFilters(row, normalized))
-    : allSalesRows;
+  const catalogs = buildMisFilterCatalogs(salesLoad.rows || []);
+  const filtered = applyMisGrowthFilters({
+    salesRows: salesLoad.rows || [],
+    receiptRows: receiptRowsRaw,
+    outstandingRows: outstandingRowsRaw,
+    inventoryPhysical: inventoryPhysicalRaw,
+    filters: normalizedFilters,
+  });
+  const salesRows = filtered.salesRows;
+  const receiptRows = filtered.receiptRows;
+  const outstandingRows = filtered.outstandingRows;
+  const inventoryPhysical = filtered.inventoryPhysical;
   const report = buildMisReport({
     salesRows,
     receiptRows,
@@ -305,10 +327,9 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null, 
 
   return {
     ...report,
-    catalogs: finalizeGrowthCatalogs(catalogs),
+    catalogs,
     meta: {
       salesRowCount: salesRows.length,
-      salesRowCountUnfiltered: allSalesRows.length,
       receiptRowCount: receiptRows.length,
       outstandingRowCount: outstandingRows.length,
       inventorySource: inventoryPhysical == null ? null : MIS_INVENTORY_SETTING_KEY,
@@ -321,43 +342,41 @@ export async function buildMisReportFromSources(admin, { asOfDate, cube = null, 
           : (priorOutstanding?.totalAr != null ? "receivable_days_total" : null)),
       ytdFromDate,
       toDateExclusive,
-      source: normalized ? "live_filtered" : "prepared_build",
-      filtersActive: Boolean(normalized),
+      source: filtering ? "filtered_build" : "prepared_build",
+      filtered: filtering,
+      filters: filtering ? normalizedFilters : null,
     },
   };
 }
 
-/** Live filtered MIS for UI Apply — does not overwrite the prepared month-end pack. */
-export async function buildLiveFilteredMisReport(admin, { asOfDate = "", filters = null } = {}) {
+/** Ephemeral filtered MIS for the UI; never writes the prepared company pack. */
+export async function buildFilteredMisReport(admin, { asOfDate, filters, cube = null } = {}) {
+  return buildMisReportFromSources(admin, { asOfDate, filters, cube });
+}
+
+/** Slice-and-dice field catalogs embedded in a prepared or filtered MIS pack (no extra load). */
+export function resolveMisCatalogs(report) {
+  const catalogs = report?.catalogs;
+  if (catalogs && typeof catalogs === "object" && !Array.isArray(catalogs)) return catalogs;
+  return {};
+}
+
+/** Field-filter catalogs for MIS Slice and dice (same dimensions as BI). Prefer cube for speed. */
+export async function loadMisFilterCatalogs(admin, { asOfDate = "" } = {}) {
   const asOf = String(asOfDate || defaultMisAsOfDate(getKsaDateString())).slice(0, 10);
-  const report = await buildMisReportFromSources(admin, { asOfDate: asOf, filters });
-  return {
-    asOfDate: asOf,
-    builtAt: new Date().toISOString(),
-    report: {
-      ...report,
-      meta: {
-        ...report.meta,
-        source: report.meta?.filtersActive ? "mis_report_live_filtered" : "mis_report_live",
-        preparedAt: new Date().toISOString(),
-      },
-    },
-    catalogs: report.catalogs || finalizeGrowthCatalogs(createGrowthCatalogs()),
-  };
-}
-
-export async function loadMisFilterCatalogs(admin) {
+  const asOfYm = asOf.slice(0, 7);
   try {
     const cube = await loadSalesBiCube(admin, { allowStale: true });
-    const catalogs = createGrowthCatalogs();
-    for (const fact of cubeFactsList(cube)) {
-      addRowToGrowthCatalogs(catalogs, salesBiFactToGrowthRow(fact));
-    }
-    return finalizeGrowthCatalogs(catalogs);
+    const rows = salesRowsFromCube(cube, { asOfYm });
+    if (rows.length) return buildMisFilterCatalogs(rows);
   } catch (error) {
     console.error("MIS: filter catalogs from cube failed:", error);
-    return finalizeGrowthCatalogs(createGrowthCatalogs());
   }
+  const nextDay = new Date(`${asOf}T12:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const toDateExclusive = nextDay.toISOString().slice(0, 10);
+  const salesLoad = await loadMisSalesRows(admin, { asOfYm, toDateExclusive });
+  return buildMisFilterCatalogs(salesLoad.rows || []);
 }
 
 export async function readPreparedMisReport(admin) {

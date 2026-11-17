@@ -113,7 +113,7 @@ export async function loadExpectedCollectionReport(admin, {
 } = {}) {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
-  const cacheKey = `${monthEnd}|${asOf}`;
+  const cacheKey = `${monthEnd}|${asOf}|by-salesman-v1`;
   const cached = expectedCollectionReportCache;
   if (
     cached

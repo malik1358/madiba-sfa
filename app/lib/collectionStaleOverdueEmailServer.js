@@ -1,6 +1,7 @@
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
 import {
   buildCollectionStaleOverdueEmail,
+  buildCollectionStaleOverdueEmailRow,
   buildCollectionStaleOverdueReportUrl,
   COLLECTION_STALE_OVERDUE_EMAIL_LAST_SENT_KEY,
   filterCollectionStaleOverdueRows,
@@ -9,6 +10,7 @@ import {
   parseCollectionStaleOverdueLastSent,
   resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
+  summarizeCollectionStaleOverdueRows,
 } from "./collectionStaleOverdueEmail.js";
 import { isFarFromCustomer } from "./customerLocation.js";
 import { extractGpsFromVisitLocation } from "./outstandingNoGps.js";
@@ -478,6 +480,60 @@ async function loadDueCollectionCustomers(admin, {
   return enrichDueCustomersWithRecentCollectionVisits(admin, withVisitReports, todayKey);
 }
 
+async function resolveDueCustomerLoader({
+  loadDueCustomers = null,
+  fetchOutstandingAndCollectionRecords = null,
+} = {}) {
+  if (typeof loadDueCustomers === "function") return loadDueCustomers;
+
+  let fetchRecords = fetchOutstandingAndCollectionRecords;
+  if (!fetchRecords) {
+    ({ fetchOutstandingAndCollectionRecords: fetchRecords } = await import("../api/payment-collections/route.js"));
+  }
+
+  return (client, options = {}) => loadDueCollectionCustomers(client, {
+    fetchOutstandingAndCollectionRecords: fetchRecords,
+    todayKey: options.todayKey,
+  });
+}
+
+/** Same filters as the daily email, for the management report screen. */
+export async function loadCollectionStaleOverdueReport(admin, {
+  now = new Date(),
+  loadDueCustomers = null,
+  fetchOutstandingAndCollectionRecords = null,
+} = {}) {
+  const asOf = now instanceof Date ? now : new Date(now);
+  const reportDate = getKsaDateString(asOf);
+  const asOfIso = asOf.toISOString();
+  const loader = await resolveDueCustomerLoader({
+    loadDueCustomers,
+    fetchOutstandingAndCollectionRecords,
+  });
+  const dueCustomers = await loader(admin, { todayKey: reportDate });
+  const matched = filterCollectionStaleOverdueRows(dueCustomers, {
+    todayKey: reportDate,
+    todayIso: asOfIso,
+  });
+  const groups = groupCollectionStaleOverdueBySalesman(matched);
+  const rows = matched.map((row) => buildCollectionStaleOverdueEmailRow(row, {
+    todayKey: reportDate,
+    todayIso: asOfIso,
+  }));
+  const summary = summarizeCollectionStaleOverdueRows(rows);
+
+  return {
+    date: reportDate,
+    asOf: reportDate,
+    asOfIso,
+    rows,
+    groups,
+    summary,
+    customerCount: summary.customers,
+    groupCount: groups.length,
+  };
+}
+
 export async function runCollectionStaleOverdueEmailCycle(admin, {
   date,
   trigger = "manual",
@@ -524,17 +580,10 @@ export async function runCollectionStaleOverdueEmailCycle(admin, {
     return { date: reportDate, skipped: true, reason: "already_sent", sentCount: 0, customerCount: 0 };
   }
 
-  let loader = loadDueCustomers;
-  if (!loader) {
-    let fetchRecords = fetchOutstandingAndCollectionRecords;
-    if (!fetchRecords) {
-      ({ fetchOutstandingAndCollectionRecords: fetchRecords } = await import("../api/payment-collections/route.js"));
-    }
-    loader = (client, options = {}) => loadDueCollectionCustomers(client, {
-      fetchOutstandingAndCollectionRecords: fetchRecords,
-      todayKey: options.todayKey,
-    });
-  }
+  const loader = await resolveDueCustomerLoader({
+    loadDueCustomers,
+    fetchOutstandingAndCollectionRecords,
+  });
 
   const dueCustomers = await loader(admin, { todayKey: reportDate });
   const matched = filterCollectionStaleOverdueRows(dueCustomers, {

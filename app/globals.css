@@ -500,6 +500,90 @@ body {
   border-color: #0b6173;
 }
 
+.appMainNavSearch {
+  position: relative;
+  flex: 0 1 220px;
+  min-width: 150px;
+}
+
+.appMainNavSearchInput {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #b9ccd0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.appMainNavSearchInput::placeholder {
+  color: #5b7a81;
+  font-weight: 600;
+}
+
+.appMainNavSearchInput:focus-visible {
+  outline: 2px solid #0b6173;
+  outline-offset: 1px;
+}
+
+.appMainNavSearchResults {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  margin-top: 4px;
+  min-width: 250px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #c8d8db;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
+  z-index: 10002;
+  display: grid;
+  gap: 2px;
+}
+
+.appMainNavSearchLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.appMainNavSearchLink:hover,
+.appMainNavSearchLink:focus-visible {
+  background: #edf4f5;
+  color: #0b6173;
+}
+
+.appMainNavSearchGroupTag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5b7a81;
+}
+
+.appMainNavSearchEmpty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #5b7a81;
+}
+
+/* Mobile-only hamburger menu; hidden on desktop where groups show inline. */
+.appMainNavMenuButton,
+.appMainNavMobilePanel {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .workdayTimesBar {
     top: 56px;
@@ -530,13 +614,90 @@ body {
 
   .appMainNav {
     top: 56px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     overflow: visible;
+  }
+
+  .appMainNav > .appMainNavGroup,
+  .appMainNav > .appMainNavPinned {
+    display: none;
+  }
+
+  .appMainNavMenuButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid #b9ccd0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #073f4c;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .appMainNavMenuButton[aria-expanded="true"] {
+    background: #073f4c;
+    border-color: #073f4c;
+    color: #ffffff;
+  }
+
+  .appMainNavMobilePanel {
+    display: grid;
+    gap: 12px;
+    position: absolute;
+    top: 100%;
+    inset-inline: 8px;
+    margin-top: 4px;
+    padding: 10px;
+    border: 1px solid #c8d8db;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(7, 63, 76, 0.18);
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    z-index: 10003;
+  }
+
+  .appMainNavMobilePinned {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .appMainNavMobileGroupTitle {
+    padding: 2px 4px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #0b6173;
+    border-bottom: 1px solid #e0ebed;
+    margin-bottom: 4px;
+  }
+
+  .appMainNavMobileLinks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 8px;
   }
 
   .appMainNavPinned {
     width: 100%;
     margin-inline-start: 0;
+  }
+
+  .appMainNavSearch {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .appMainNavSearchResults {
+    min-width: 0;
+    width: 100%;
   }
 
   .appMainNavGroup--open {
@@ -4507,6 +4668,25 @@ th:has(.moduleTableColumnFilterInput) {
   line-height: 1.2;
 }
 
+.moduleTableHeadingFilter .moduleTableHeadingSummary {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #ecfeff;
+  background: #0b3c49;
+  border-radius: 4px;
+  padding: 4px 6px;
+  text-align: end;
+}
+
+.moduleBiTable th.moduleBiTotalCol .moduleTableHeadingSummary {
+  background: #0f4c5c;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #9ec4cc;
+}
+
 .moduleTableHeadingFilter select.moduleInput {
   width: 100%;
   min-width: 0;
@@ -4566,6 +4746,41 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleExcelColumnFilterSearch {
   margin-bottom: 6px;
   text-transform: none;
+}
+
+.moduleExcelColumnFilterExclude {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #d5e1e4;
+}
+
+.moduleExcelColumnFilterExcludeLabel {
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.moduleExcelColumnFilterExcludeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.moduleExcelColumnFilterExcludeInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: none;
+}
+
+.moduleExcelColumnFilterExcludeRow .moduleInlineButton {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .moduleExcelColumnFilterList {
@@ -7394,6 +7609,71 @@ th:has(.moduleTableColumnFilterInput) {
   padding-inline-start: 18px;
 }
 
+/* Beat zebra / sticky total-col light fills so white summary text stays readable. */
+.moduleTable tbody tr.expectedCollectionSalesmanRow td,
+.moduleTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionSalesmanRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:nth-child(even) td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow:hover td.moduleBiTotalCol {
+  background: #0f4c5c;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.moduleTable tbody tr.expectedCollectionSalesmanRow td .moduleCode,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow td .moduleCode {
+  color: #cfe8ec;
+  font-weight: 500;
+}
+
+.moduleTable tbody tr.expectedCollectionSalesmanRow .stockTakeReportExpandBtn,
+.moduleBiTable tbody tr.expectedCollectionSalesmanRow .stockTakeReportExpandBtn {
+  border-color: #9ec4cc;
+  background: #fff;
+  color: #0f4c5c;
+}
+
+.moduleTable tbody tr.expectedCollectionCustomerRow td,
+.moduleTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionCustomerRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:nth-child(even) td.moduleBiTotalCol,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow:hover td.moduleBiTotalCol {
+  background: #1a6b7a;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.moduleTable tbody tr.expectedCollectionCustomerRow td .moduleCode,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow td .moduleCode {
+  color: #d5eef2;
+  font-weight: 500;
+}
+
+.moduleTable tbody tr.expectedCollectionCustomerRow .stockTakeReportExpandBtn,
+.moduleBiTable tbody tr.expectedCollectionCustomerRow .stockTakeReportExpandBtn {
+  border-color: #9ec4cc;
+  background: #fff;
+  color: #0f4c5c;
+}
+
+.moduleTable tbody tr.expectedCollectionDetailRow td,
+.moduleTable tbody tr.expectedCollectionDetailRow:nth-child(even) td,
+.moduleTable tbody tr.expectedCollectionDetailRow:hover td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow:nth-child(even) td,
+.moduleBiTable tbody tr.expectedCollectionDetailRow:hover td {
+  background: #f4f8f9;
+  color: #35545c;
+}
+
 .stockTakeLineActions {
   display: flex;
   flex-direction: column;
@@ -7817,7 +8097,7 @@ button.moduleBiDashKpi:focus-visible {
   position: sticky;
   bottom: 0;
   font-weight: 800;
-  z-index: 2;
+  z-index: 4;
   background: #ecfeff;
   color: #0f4c5c;
 }
@@ -7826,6 +8106,7 @@ button.moduleBiDashKpi:focus-visible {
 .moduleBiTable tfoot td.moduleBiTotalCol {
   background: #0f4c5c;
   color: #ffffff;
+  z-index: 5;
 }
 
 .moduleBiTable tfoot td.moduleBiMonthCell--up {
@@ -8860,14 +9141,14 @@ tr.paymentSettleStatementLead td {
 }
 .misSlide h2 { margin: 0; color: #0b2545; font-size: 1.35rem; }
 .misSlide h3 { margin: 0 0 10px; color: #0f4c5c; font-size: 0.95rem; }
-.misFilterPanel {
-  margin-bottom: 12px;
+.misFilterDrawer {
+  margin: 0 0 12px;
   border: 1px solid #c5d6df;
   border-radius: 12px;
   background: #eef5f8;
   overflow: hidden;
 }
-.misFilterPanelToggle {
+.misFilterDrawerToggle {
   width: 100%;
   display: flex;
   align-items: center;
@@ -8880,20 +9161,20 @@ tr.paymentSettleStatementLead td {
   text-align: left;
   font: inherit;
 }
-.misFilterPanelToggle:hover { background: rgba(15, 76, 92, 0.06); }
-.misFilterPanelChevron {
+.misFilterDrawerToggle:hover { background: rgba(15, 76, 92, 0.06); }
+.misFilterDrawerChevron {
   width: 1rem;
   flex: 0 0 auto;
   font-size: 12px;
   line-height: 1;
 }
-.misFilterPanelTitle {
+.misFilterDrawerTitle {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.misFilterPanelCount {
+.misFilterDrawerCount {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8906,48 +9187,57 @@ tr.paymentSettleStatementLead td {
   font-size: 11px;
   font-weight: 800;
 }
-.misFilterPanelAction {
+.misFilterDrawerAction {
   margin-inline-start: auto;
   font-size: 12px;
   font-weight: 700;
   color: #5b6b76;
 }
-.misKpiChipRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 10px 10px;
+.misFilterDrawerBody {
+  padding: 0 12px 12px;
+  background: #f7fafb;
+  border-top: 1px solid #d7e2e8;
 }
-.misKpiChip {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 7.5rem;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #d7e2e8;
-  border-left: 4px solid #0f4c5c;
+.misFilterDrawerScope {
+  margin: 0;
+  padding: 10px 4px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #3d5664;
+  font-weight: 600;
 }
-.misKpiChip--green { border-left-color: #16a34a; }
-.misKpiChip--orange { border-left-color: #d97706; }
-.misKpiChip--teal { border-left-color: #0f4c5c; }
-.misKpiChipLabel {
+.misFilterDrawerBody .moduleSection {
+  margin: 0;
+  padding: 12px 0 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.misPreparedStamp--filtered {
   color: #0f4c5c;
-  font-size: 10px;
   font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
-.misKpiChipValue {
-  color: #0b2545;
-  font-size: 0.95rem;
+.misDrillLink {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-weight: 800;
-  line-height: 1.2;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
-.misFilterPanelBody { padding: 0 10px 12px; }
-.misFilterPanelBody .moduleSection { margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
-.misFilterPanelBody .moduleSectionHeader { display: none; }
+.misDrillLink:hover,
+.misDrillLink:focus-visible {
+  text-decoration-thickness: 2px;
+  outline: none;
+}
+.misRepeatItemModal.moduleModal {
+  width: min(960px, 100%);
+}
 .misKpiGrid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px;
 }
@@ -8962,6 +9252,8 @@ tr.paymentSettleStatementLead td {
 .misKpiLabel { color: #0f4c5c; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
 .misKpiValue { color: #0b2545; font-size: 1.35rem; font-weight: 800; margin-top: 4px; }
 .misKpiNote { color: #5b6b76; font-size: 12px; margin-top: 4px; }
+.misKpiNote--better { color: #166534; font-weight: 700; }
+.misKpiNote--worse { color: #b91c1c; font-weight: 700; }
 .misSplit { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .misBarRow { display: grid; grid-template-columns: 64px 1fr 90px; gap: 8px; align-items: center; margin-bottom: 8px; }
 .misBarLabel { font-size: 12px; color: #0f4c5c; font-weight: 700; }
@@ -8992,7 +9284,265 @@ tr.paymentSettleStatementLead td {
 .misInitiativeCard h3 { background: #0b2545; }
 .misInitiativeCard p { margin: 0; color: #243b4a; line-height: 1.45; }
 .misMeta { margin-top: 12px; color: #6b7c86; font-size: 12px; }
+
+.misSalesLossLink {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.misSalesLossLink:hover { text-decoration-thickness: 2px; }
+.misSalesLossLink:focus-visible {
+  outline: 2px solid #0f4c5c;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.misDrillPanel {
+  margin-top: 16px;
+  padding: 12px 14px 4px;
+  border: 1px solid rgba(15, 76, 92, 0.18);
+  border-radius: 8px;
+  background: #f6fafb;
+}
+.misDrillPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.misDrillPanelHead h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #0b2545;
+}
+.misDrillPanelClose {
+  appearance: none;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(15, 76, 92, 0.35);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f4c5c;
+  cursor: pointer;
+}
+.misDrillPanelClose:hover { background: rgba(15, 76, 92, 0.06); }
+
+/* MIS inventory cover: keep Category / Item code pinned; do not right-stick every band column. */
+.misInventoryCoverTable th.moduleBiTotalCol,
+.misInventoryCoverTable td.moduleBiTotalCol {
+  position: static;
+  right: auto;
+  left: auto;
+  box-shadow: none;
+}
+
+.misInventoryCoverTable th.misInventoryStickyCol,
+.misInventoryCoverTable td.misInventoryStickyCol,
+.misInventoryCoverTable th:first-child,
+.misInventoryCoverTable td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 10rem;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.12);
+}
+
+.misInventoryCoverTable thead th.misInventoryStickyCol,
+.misInventoryCoverTable thead th:first-child {
+  z-index: 9;
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.misInventoryCoverTable tbody td.misInventoryStickyCol,
+.misInventoryCoverTable tbody td:first-child {
+  background: #ffffff;
+}
+
+.misInventoryCoverTable tbody tr:nth-child(even) td.misInventoryStickyCol,
+.misInventoryCoverTable tbody tr:nth-child(even) td:first-child {
+  background: #f3fbfb;
+}
+
+.misInventoryCoverTable tbody tr:hover td.misInventoryStickyCol,
+.misInventoryCoverTable tbody tr:hover td:first-child {
+  background: #e5f4f4;
+}
+
+.misInventoryCoverTable tfoot td.misInventoryStickyCol,
+.misInventoryCoverTable tfoot td:first-child {
+  z-index: 5;
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
 @media (max-width: 900px) {
   .misKpiGrid, .misSplit, .misSummaryGrid, .misSwotGrid, .misInitiativeGrid { grid-template-columns: 1fr; }
   .misSlide, .misDeckStage { min-height: 0; }
+}
+
+.customerMapSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.customerMapSummary > div {
+  padding: 12px 14px;
+  border: 1px solid #d1dde0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f7fbfb 0%, #eef6f6 100%);
+}
+
+.customerMapSummary strong {
+  display: block;
+  color: #0f4c5c;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.customerMapSummary span {
+  color: #5f757c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.customerMapCanvas {
+  width: 100%;
+  height: min(70vh, 620px);
+  min-height: 360px;
+  border: 1px solid #c5d6da;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #e8f2f3;
+  z-index: 0;
+}
+
+.customerMapCanvas--loading {
+  display: grid;
+  place-items: center;
+  color: #5f757c;
+  font-weight: 700;
+}
+
+.customerMapAreaRow--selected td {
+  background: #ffe8d6 !important;
+}
+
+.customerMapCountLabel {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  font-size: 12px !important;
+}
+
+.customerMapPopup {
+  font-size: 13px;
+  line-height: 1.35;
+  min-width: 160px;
+}
+
+.customerMapPopup strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #0f4c5c;
+}
+
+.customerMapPopupLinks {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.customerMapPopupLinks a {
+  color: #0f4c5c;
+  font-weight: 700;
+}
+
+.customerMapPopupHint {
+  margin-top: 8px;
+  color: #0f4c5c;
+  font-weight: 700;
+}
+
+.customerMapPin {
+  background: transparent;
+  border: none;
+}
+
+.customerMapPinDot {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50% 50% 50% 0;
+  background: #0f4c5c;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(7, 63, 76, 0.45);
+  transform: rotate(-45deg);
+}
+
+.customerMapPinDot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.customerMapPin--selected .customerMapPinDot {
+  background: #e36414;
+  box-shadow: 0 1px 5px rgba(154, 52, 18, 0.5);
+}
+
+.customerMapAreaBubble {
+  background: transparent;
+  border: none;
+}
+
+.customerMapAreaBubbleInner {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #0f4c5c;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(7, 63, 76, 0.4);
+}
+
+.customerMapAreaBubble--selected .customerMapAreaBubbleInner {
+  background: #e36414;
+  box-shadow: 0 1px 5px rgba(154, 52, 18, 0.5);
+}
+
+@media (max-width: 700px) {
+  .customerMapCanvas {
+    height: 55vh;
+    min-height: 280px;
+  }
 }

@@ -16,6 +16,13 @@ test("column filters match case-insensitively and ignore extra spaces", () => {
   assert.equal(textMatchesColumnFilter("Anything", ""), true);
 });
 
+test("column filters support ! prefix for does-not-contain", () => {
+  assert.equal(textMatchesColumnFilter("1054C Legal", "!Legal"), false);
+  assert.equal(textMatchesColumnFilter("1136C", "!Legal"), true);
+  assert.equal(textMatchesColumnFilter("1054C Legal", "!  legal "), false);
+  assert.equal(textMatchesColumnFilter("Anything", "!"), true);
+});
+
 test("row texts honor each column filter independently", () => {
   const row = ["C-100", "Al Madina", "Parvez", "120.50"];
   assert.equal(rowTextsMatchColumnFilters(row, ["c-1", "madina", "", "120"]), true);

@@ -113,6 +113,7 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 ```
 
 - Local PC is development and staging. Validate and test locally before opening a PR.
+- Opening the folder in VS Code/Cursor auto-runs `scripts/sync-workspace.mjs` (`.vscode/tasks.json`, also `npm run sync`): it fast-forwards a clean `main` to `origin/main` and warns loudly on detached HEAD, dirty trees, or diverged `main` without touching them. Keep this guard working; never start editing a checkout it has flagged as stale.
 - Temporary feature / AI branches isolate changes. Open pull requests into `main`.
 - Production is `main` only (Vercel production + production Supabase). Vercel Preview deployments are disabled (`vercel.json` `git.deploymentEnabled`); PR validation is GitHub Actions `Build`.
 - Never point local/dev at production Supabase keys.

@@ -15,6 +15,7 @@ import {
   pickCustomerAvgDaysToPay,
   resolveLastPaidInvoiceDays,
   reconstructPriorOutstandingCategoryBuckets,
+  resolveExpectedCollectionMonthEndEstimate,
   resolveExpectedPayDate,
   scaleKpiUploadSummaryCategoryBuckets,
   sumExpectedCollectionCategoryBuckets,
@@ -171,7 +172,15 @@ test("category rows insert under Total sales and Collection in the upload summar
   );
   assert.match(
     summary.rows.find((row) => row.key === "collection_buildingMaterial").totalFiltered.statusLabel,
-    /expected this month/,
+    /Expected Collection/,
+  );
+  assert.equal(
+    summary.rows.find((row) => row.key === "collection").paceEstimate.estimate,
+    200 + 25 + 15,
+  );
+  assert.match(
+    summary.rows.find((row) => row.key === "collection").totalFiltered.statusLabel,
+    /Expected Collection/,
   );
   assert.ok(
     labels.indexOf("Avg collection days (Rolling 3m)")
@@ -354,6 +363,37 @@ test("estimate avg days uses max(lifetime, last paid invoice) and 120 when never
     avgDays: 120,
     monthEnd: "2026-11-30",
   }), true);
+});
+
+test("sumExpectedCollectionCategoryBuckets omits electronics like Expected Collection report", () => {
+  const mix = new Map([
+    ["1001", withKpiUploadSummaryNonBuilding({
+      buildingMaterial: 40,
+      electronics: 40,
+      rest: 20,
+    })],
+  ]);
+  const expected = sumExpectedCollectionCategoryBuckets([
+    {
+      customer_code: "1001",
+      invoice_date: "2026-10-01",
+      pending_amount: 1000,
+    },
+  ], {
+    avgDaysByCustomer: new Map([["1001", 30]]),
+    customerMix: mix,
+    monthEnd: "2026-11-30",
+  });
+  assert.equal(expected.buildingMaterial, 400);
+  assert.equal(expected.electronics, 0);
+  assert.equal(expected.rest, 200);
+  assert.equal(expected.nonBuilding, 200);
+  const monthEnd = resolveExpectedCollectionMonthEndEstimate({
+    collectionActual: 500,
+    expectedCollectionBuckets: expected,
+  });
+  assert.equal(monthEnd.expectedAddOn, 600);
+  assert.equal(monthEnd.estimate, 1100);
 });
 
 test("expected remaining excludes legal-queue customer codes", () => {

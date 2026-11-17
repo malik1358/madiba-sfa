@@ -6,7 +6,22 @@
  * New / repeat customers = first-ever purchase month vs prior buyers who purchased again.
  */
 
-import { receivableDays, receivableYtdDays } from "./receivableDays.js";
+import {
+  bucketAmountsFromCover,
+  COVER_WINDOW_DAYS,
+  forwardCoverDays,
+  trailingWindowStart,
+} from "./inventoryForwardCover.js";
+import {
+  normalizeReportItemCode,
+  preferItemDisplayName,
+} from "./itemReportIdentity.js";
+import {
+  creditSalesTrailingMonths,
+  receivableDays,
+  receivableTrailingDays,
+  receivableYtdDays,
+} from "./receivableDays.js";
 
 const PORTFOLIO_EXCLUDE = new Set([
   "electronics",
@@ -34,28 +49,47 @@ function lastDayOfMonth(ym) {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
-/** Inclusive window start for a trailing dayCount ending on endYmd. */
-function trailingWindowStart(endYmd, dayCount = 30) {
-  const [y, m, d] = String(endYmd || "").slice(0, 10).split("-").map(Number);
-  if (!y || !m || !d) return "";
-  const dt = new Date(Date.UTC(y, m - 1, d - (Math.max(1, dayCount) - 1)));
-  return dt.toISOString().slice(0, 10);
-}
-
-/**
- * Forward cover / days on hand from stock vs sales pace over a fixed window.
- * stock ÷ (windowSales ÷ windowDays)
- */
-function forwardCoverDays(stock, windowSales, windowDays = 30) {
-  const stockN = moneyRound(stock);
-  const salesN = moneyRound(windowSales);
-  const days = Math.max(1, Number(windowDays) || 30);
-  if (!Number.isFinite(stockN) || !salesN) return null;
-  return Math.round(stockN / (salesN / days));
+function daysInMonth(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  if (!y || !m) return 30;
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
 function normCat(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function looksLikePortfolioItemCode(value) {
+  const s = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9]{2,}$/.test(s) && /\d/.test(s);
+}
+
+function portfolioItemNameIsWeak(name, itemId, itemCode = "") {
+  const n = String(name || "").trim();
+  if (!n) return true;
+  const id = String(itemId || "").trim();
+  if (id && n.toUpperCase() === id.toUpperCase()) return true;
+  const code = normalizeReportItemCode(itemCode || id);
+  if (code && normalizeReportItemCode(n) === code) return true;
+  return false;
+}
+
+function resolvePortfolioItemLabel(cur = {}, prev = {}, itemId) {
+  let itemCode = String(cur.itemCode || "").trim() || String(prev.itemCode || "").trim();
+  if (!itemCode && looksLikePortfolioItemCode(itemId)) {
+    itemCode = normalizeReportItemCode(itemId);
+  }
+  const codeForName = itemCode || normalizeReportItemCode(itemId);
+  let itemName = String(cur.itemName || "").trim();
+  if (portfolioItemNameIsWeak(itemName, itemId, codeForName)) {
+    itemName = preferItemDisplayName(itemName, prev.itemName, codeForName);
+  }
+  if (portfolioItemNameIsWeak(itemName, itemId, codeForName)) {
+    itemName = String(prev.itemName || "").trim() || itemName;
+  }
+  if (!itemName) itemName = String(itemId || "").trim();
+  const category = String(cur.category || "").trim() || String(prev.category || "").trim();
+  return { itemCode, itemName, category };
 }
 
 function moneyRound(value) {
@@ -160,6 +194,10 @@ export function buildMisReport({
     customers: new Set(),
   }]));
   const portfolioCategoryMonthly = new Map();
+  /** Repeat sales by month+category (`ym||category`). */
+  const repeatCategoryMonthly = new Map();
+  /** Repeat sales by month+category+item (`ym||category||itemId`). */
+  const repeatItemMonthly = new Map();
   const portfolioItemMonthly = new Map();
 
   for (const row of salesRows) {
@@ -185,8 +223,42 @@ export function buildMisReport({
     // Same customer + item on a later calendar day (>=1 day gap) is repeat, including within the month.
     // Only positive lines count as repeat/new sales; credit notes stay in total sales only.
     if (amount > 0) {
-      if (itemFirst && day > itemFirst) bucket.repeatSales += amount;
-      else bucket.newSales += amount;
+      if (itemFirst && day > itemFirst) {
+        bucket.repeatSales += amount;
+        const catLabel = String(row.category || "").trim() || "(blank)";
+        const rKey = `${ym}||${catLabel}`;
+        const rRow = repeatCategoryMonthly.get(rKey) || { ym, category: catLabel, sales: 0 };
+        rRow.sales += amount;
+        repeatCategoryMonthly.set(rKey, rRow);
+
+        const itemCode = String(row.item_code || "").trim();
+        const itemNameRaw = String(row.item_name || "").trim();
+        const itemId = itemCode ? itemCode.toUpperCase() : itemNameRaw.toLowerCase();
+        if (itemId) {
+          const riKey = `${ym}||${catLabel}||${itemId}`;
+          const riRow = repeatItemMonthly.get(riKey) || {
+            ym,
+            category: catLabel,
+            itemCode,
+            itemName: itemNameRaw || itemId,
+            sales: 0,
+          };
+          riRow.sales += amount;
+          if (itemNameRaw) {
+            const codeForName = itemCode || riRow.itemCode || itemId;
+            if (portfolioItemNameIsWeak(riRow.itemName, itemId, codeForName)) {
+              riRow.itemName = itemNameRaw;
+            } else {
+              riRow.itemName = preferItemDisplayName(riRow.itemName, itemNameRaw, codeForName);
+            }
+          }
+          if (!riRow.itemCode && itemCode) riRow.itemCode = itemCode;
+          if (!riRow.category || riRow.category === "(blank)") riRow.category = catLabel;
+          repeatItemMonthly.set(riKey, riRow);
+        }
+      } else {
+        bucket.newSales += amount;
+      }
     }
 
     const cat = String(row.category || "").trim() || "(blank)";
@@ -239,7 +311,14 @@ export function buildMisReport({
         };
         itemMo.sales += amount;
         itemMo.gp += profit;
-        if (!itemMo.itemName && itemNameRaw) itemMo.itemName = itemNameRaw;
+        if (itemNameRaw) {
+          const codeForName = itemCode || itemMo.itemCode || itemId;
+          if (portfolioItemNameIsWeak(itemMo.itemName, itemId, codeForName)) {
+            itemMo.itemName = itemNameRaw;
+          } else {
+            itemMo.itemName = preferItemDisplayName(itemMo.itemName, itemNameRaw, codeForName);
+          }
+        }
         if (!itemMo.itemCode && itemCode) itemMo.itemCode = itemCode;
         if (!itemMo.category || itemMo.category === "(blank)") itemMo.category = cat;
         portfolioItemMonthly.set(itemMoKey, itemMo);
@@ -321,7 +400,7 @@ export function buildMisReport({
     months.filter((ym) => prevYm && ym <= prevYm).reduce((sum, ym) => sum + monthly[ym].gp, 0),
   );
 
-  // Match BI Net receivable days: (AR ÷ YTD sales) × days YTD — not AR ÷ (month sales / 30).
+  // Headline collection days stay YTD DSO (same shape as BI YTD).
   const collectionDays = receivableDays(totalAr, ytdSales, receivableYtdDays(asOfYm, asOf));
   const previousCollectionDays = prevYm && priorOutstanding?.totalAr != null
     ? receivableDays(
@@ -334,7 +413,26 @@ export function buildMisReport({
     ? pctChange(collectionDays, previousCollectionDays)
     : null;
 
-  const FORWARD_COVER_WINDOW_DAYS = 30;
+  // Cash-slide remark uses rolling 3-month DSO: (AR ÷ trailing 3m sales) × trailing 3m days.
+  const monthlySalesMap = Object.fromEntries(months.map((ym) => [ym, monthly[ym].sales]));
+  const sales3m = creditSalesTrailingMonths(monthlySalesMap, asOfYm, 3);
+  const previousSales3m = prevYm ? creditSalesTrailingMonths(monthlySalesMap, prevYm, 3) : 0;
+  const collectionDays3m = receivableDays(totalAr, sales3m, receivableTrailingDays(asOfYm, 3, asOf));
+  const previousCollectionDays3m = prevYm && priorOutstanding?.totalAr != null
+    ? receivableDays(
+      priorOutstanding.totalAr,
+      previousSales3m,
+      receivableTrailingDays(prevYm, 3),
+    )
+    : null;
+  const collectionDays3mChange = collectionDays3m != null && previousCollectionDays3m != null
+    ? Math.round((collectionDays3m - previousCollectionDays3m) * 10) / 10
+    : null;
+  const collectionDays3mMomPct = collectionDays3m != null && previousCollectionDays3m != null
+    ? pctChange(collectionDays3m, previousCollectionDays3m)
+    : null;
+
+  const FORWARD_COVER_WINDOW_DAYS = COVER_WINDOW_DAYS;
   const coverEnd = asOf;
   const coverStart = trailingWindowStart(coverEnd, FORWARD_COVER_WINDOW_DAYS);
   const prevCoverEnd = prevYm ? lastDayOfMonth(prevYm) : "";
@@ -374,7 +472,7 @@ export function buildMisReport({
     : inventoryInput?.previous?.physical != null
       ? Number(inventoryInput.previous.physical)
       : null;
-  // Days on hand / forward cover = stock ÷ (last-30-day sales ÷ 30).
+  // Forward cover = stock ÷ (last-30-day sales ÷ 30).
   const inventoryDays = forwardCoverDays(
     inventoryPhysicalAmount,
     sales30d,
@@ -385,6 +483,13 @@ export function buildMisReport({
     previousSales30d,
     FORWARD_COVER_WINDOW_DAYS,
   );
+  // Month-sales days on hand (receipt-month pace) = stock ÷ (as-of month sales ÷ days in month).
+  const monthDays = daysInMonth(asOfYm);
+  const prevMonthDays = prevYm ? daysInMonth(prevYm) : 30;
+  const inventoryDaysMonth = forwardCoverDays(inventoryPhysicalAmount, curSales, monthDays);
+  const previousInventoryDaysMonth = prevYm
+    ? forwardCoverDays(previousInventoryPhysical, prevSales, prevMonthDays)
+    : null;
   const inventoryCategories = inventoryInput?.byCategory && typeof inventoryInput.byCategory === "object"
     ? Object.entries(inventoryInput.byCategory)
       .map(([category, amount]) => {
@@ -398,6 +503,7 @@ export function buildMisReport({
           sales30d: catSales30d,
           days,
           forwardCoverDays: days,
+          bucketAmounts: bucketAmountsFromCover(stockAmount, days),
         };
       })
       .filter((row) => row.amount)
@@ -413,6 +519,8 @@ export function buildMisReport({
       : null,
     sales30d,
     previousSales30d: previousSales30d || null,
+    monthSales: curSales || null,
+    previousMonthSales: prevSales || null,
     coverWindowDays: FORWARD_COVER_WINDOW_DAYS,
     coverFrom: coverStart || null,
     coverTo: coverEnd || null,
@@ -420,6 +528,11 @@ export function buildMisReport({
     previousDays: previousInventoryDays,
     daysMomPct: inventoryDays != null && previousInventoryDays != null
       ? pctChange(inventoryDays, previousInventoryDays)
+      : null,
+    daysMonth: inventoryDaysMonth,
+    previousDaysMonth: previousInventoryDaysMonth,
+    daysMonthMomPct: inventoryDaysMonth != null && previousInventoryDaysMonth != null
+      ? pctChange(inventoryDaysMonth, previousInventoryDaysMonth)
       : null,
     categories: inventoryCategories,
   } : null;
@@ -464,30 +577,113 @@ export function buildMisReport({
     };
   }).sort((a, b) => b.salesLoss - a.salesLoss);
 
+  const repeatCategoryNames = new Set();
+  for (const key of repeatCategoryMonthly.keys()) {
+    const [ym, ...rest] = key.split("||");
+    const category = rest.join("||");
+    if (ym === asOfYm || (prevYm && ym === prevYm)) repeatCategoryNames.add(category);
+  }
+  const repeatItemIdsByCategory = new Map();
+  for (const key of repeatItemMonthly.keys()) {
+    const parts = String(key).split("||");
+    if (parts.length < 3) continue;
+    const ym = parts[0];
+    const itemId = parts[parts.length - 1];
+    const category = parts.slice(1, -1).join("||");
+    if (!(ym === asOfYm || (prevYm && ym === prevYm))) continue;
+    if (!repeatItemIdsByCategory.has(category)) repeatItemIdsByCategory.set(category, new Set());
+    repeatItemIdsByCategory.get(category).add(itemId);
+  }
+
+  const repeatCategories = [...repeatCategoryNames].map((category) => {
+    const cur = repeatCategoryMonthly.get(`${asOfYm}||${category}`) || { category, sales: 0 };
+    const prevRow = prevYm
+      ? (repeatCategoryMonthly.get(`${prevYm}||${category}`) || { sales: 0 })
+      : { sales: 0 };
+    const sales = moneyRound(cur.sales);
+    const previousSales = moneyRound(prevRow.sales);
+    const delta = moneyRound(sales - previousSales);
+    const itemIds = [...(repeatItemIdsByCategory.get(category) || [])];
+    const items = itemIds.map((itemId) => {
+      const curItem = repeatItemMonthly.get(`${asOfYm}||${category}||${itemId}`) || {
+        category,
+        itemCode: "",
+        itemName: "",
+        sales: 0,
+      };
+      const prevItem = prevYm
+        ? (repeatItemMonthly.get(`${prevYm}||${category}||${itemId}`) || {
+          category,
+          itemCode: "",
+          itemName: "",
+          sales: 0,
+        })
+        : {
+          category,
+          itemCode: "",
+          itemName: "",
+          sales: 0,
+        };
+      const { itemCode, itemName } = resolvePortfolioItemLabel(curItem, prevItem, itemId);
+      const itemSales = moneyRound(curItem.sales);
+      const itemPreviousSales = moneyRound(prevItem.sales);
+      const itemDelta = moneyRound(itemSales - itemPreviousSales);
+      return {
+        itemCode,
+        itemName,
+        sales: itemSales,
+        previousSales: itemPreviousSales,
+        delta: itemDelta,
+        salesMomPct: pctChange(itemSales, itemPreviousSales),
+      };
+    }).sort((a, b) => a.delta - b.delta || b.previousSales - a.previousSales);
+    return {
+      category: cur.category || prevRow.category || category,
+      sales,
+      previousSales,
+      delta,
+      salesMomPct: pctChange(sales, previousSales),
+      items,
+    };
+  }).sort((a, b) => b.sales - a.sales);
+
   const portfolioItemIds = new Set();
   for (const key of portfolioItemMonthly.keys()) {
     const [ym, itemId] = key.split("||");
     if (ym === asOfYm || (prevYm && ym === prevYm)) portfolioItemIds.add(itemId);
   }
-  const portfolioTopLossItems = [...portfolioItemIds].map((itemId) => {
+  const portfolioLossItems = [...portfolioItemIds].map((itemId) => {
     const cur = portfolioItemMonthly.get(`${asOfYm}||${itemId}`) || {
       itemCode: "",
-      itemName: itemId,
+      itemName: "",
       category: "",
       sales: 0,
       gp: 0,
     };
     const prevRow = prevYm
-      ? (portfolioItemMonthly.get(`${prevYm}||${itemId}`) || { sales: 0, gp: 0 })
-      : { sales: 0, gp: 0 };
+      ? (portfolioItemMonthly.get(`${prevYm}||${itemId}`) || {
+        itemCode: "",
+        itemName: "",
+        category: "",
+        sales: 0,
+        gp: 0,
+      })
+      : {
+        itemCode: "",
+        itemName: "",
+        category: "",
+        sales: 0,
+        gp: 0,
+      };
+    const { itemCode, itemName, category } = resolvePortfolioItemLabel(cur, prevRow, itemId);
     const sales = moneyRound(cur.sales);
     const previousSales = moneyRound(prevRow.sales);
     const gp = moneyRound(cur.gp);
     const previousGp = moneyRound(prevRow.gp);
     return {
-      itemCode: cur.itemCode || "",
-      itemName: cur.itemName || itemId,
-      category: cur.category || prevRow.category || "",
+      itemCode,
+      itemName,
+      category,
       sales,
       previousSales,
       salesLoss: moneyRound(previousSales - sales),
@@ -502,7 +698,9 @@ export function buildMisReport({
     .filter((row) => row.salesLoss > 0)
     .filter((row) => !PORTFOLIO_EXCLUDE.has(normCat(row.category)))
     .sort((a, b) => b.salesLoss - a.salesLoss)
-    .slice(0, 10);
+    .slice(0, 200);
+
+  const portfolioTopLossItems = portfolioLossItems.slice(0, 10);
 
   const findCategoryPeriod = (period, category) => {
     if (!period) return null;
@@ -617,6 +815,10 @@ export function buildMisReport({
       collectionDays,
       previousCollectionDays,
       collectionDaysMomPct,
+      collectionDays3m,
+      previousCollectionDays3m,
+      collectionDays3mChange,
+      collectionDays3mMomPct,
       totalAr: moneyRound(totalAr),
       previousTotalAr: priorOutstanding?.totalAr != null ? moneyRound(priorOutstanding.totalAr) : null,
       totalArMomPct: priorOutstanding?.totalAr != null
@@ -659,7 +861,9 @@ export function buildMisReport({
     inventory,
     portfolio,
     portfolioCategories,
+    portfolioLossItems,
     portfolioTopLossItems,
+    repeatCategories,
     categories: categoryRows,
     salesmen: salesmanRows,
     madiba: madibaRows,
@@ -676,9 +880,21 @@ export function buildMisReport({
       prevRepeatPct: prevYm ? monthlyRepeat[prevYm].pct : 0,
       gt90: moneyRound(gt90),
       collectionDays,
+      collectionDays3m,
+      previousCollectionDays3m,
+      collectionDays3mChange,
       portfolioGpPct: portfolio[asOfYm]?.gpPct || 0,
     }),
   };
+}
+
+function formatDaysChange(change) {
+  if (change == null || !Number.isFinite(Number(change))) return "";
+  const n = Number(change);
+  const signed = `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
+  if (n < 0) return `${signed} improving vs prior month`;
+  if (n > 0) return `${signed} worsening vs prior month`;
+  return "unchanged vs prior month";
 }
 
 function buildMisRemarks({
@@ -694,19 +910,28 @@ function buildMisRemarks({
   prevRepeatPct,
   gt90,
   collectionDays,
+  collectionDays3m,
+  previousCollectionDays3m,
+  collectionDays3mChange,
   portfolioGpPct,
 }) {
   const salesMom = pctChange(curSales, prevSales);
   const gpMom = pctChange(curGp, prevGp);
   const monthLabel = asOfYm;
   const prevLabel = prevYm || "prior month";
+  const days3mLabel = collectionDays3m ?? collectionDays ?? "—";
+  const daysChangeBit = collectionDays3mChange != null
+    ? `; ${formatDaysChange(collectionDays3mChange)}`
+    : (previousCollectionDays3m != null
+      ? `; was ${previousCollectionDays3m}`
+      : "");
   return {
     momentum: salesMom >= 0
       ? `${monthLabel} sales rose ${salesMom}% vs ${prevLabel} while GP moved ${gpMom >= 0 ? "up" : "down"} ${Math.abs(gpMom)}%.`
       : `${monthLabel} sales normalized ${salesMom}% vs ${prevLabel} while absolute GP ${gpMom >= 0 ? "improved" : "softened"} (${gpMom}%).`,
     margin: `GP% ${gpPctNow}% vs ${gpPctPrev}% in ${prevLabel}.`,
     repeat: `Repeat mix ${repeatPct}% (was ${prevRepeatPct}%); path to >50% by year-end remains the commercial priority.`,
-    receivables: `>90-day AR is SAR ${(gt90 / 1000).toFixed(0)}K; collection days ~${collectionDays ?? "—"}. Drive aged AR below SAR 1.0M.`,
+    receivables: `>90-day AR is SAR ${(gt90 / 1000).toFixed(0)}K; rolling 3m collection days ~${days3mLabel}${daysChangeBit}. Drive aged AR below SAR 1.0M.`,
     portfolio: `Selected high-margin portfolio GP% ${portfolioGpPct}% — protect and rebuild volume without diluting margin.`,
     bottomLine: salesMom >= 0
       ? "Preserve quality while converting growth into cash and repeat depth."

@@ -8,6 +8,10 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
+import {
+  groupExpectedCollectionRowsByCustomer,
+  groupExpectedCollectionRowsBySalesman,
+} from "../../lib/expectedCollectionReport.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 
@@ -23,6 +27,12 @@ const TEXT = {
     ar: "جاري بناء التحصيل المتوقع من المستحقات والإيصالات وسجل المبيعات…",
   },
   refresh: { en: "Refresh", ar: "تحديث" },
+  expand: { en: "Expand", ar: "توسيع" },
+  collapse: { en: "Collapse", ar: "طي" },
+  expandAll: { en: "Expand all", ar: "توسيع الكل" },
+  collapseAll: { en: "Collapse all", ar: "طي الكل" },
+  salesman: { en: "Salesman", ar: "المندوب" },
+  unassigned: { en: "Unassigned", ar: "غير معيّن" },
   customer: { en: "Customer", ar: "العميل" },
   customerCode: { en: "Customer code", ar: "رمز العميل" },
   avgDays: { en: "Avg days used", ar: "متوسط الأيام المستخدم" },
@@ -33,6 +43,7 @@ const TEXT = {
   invoiceDate: { en: "Invoice date", ar: "تاريخ الفاتورة" },
   pending: { en: "Pending SAR", ar: "المتبقي (ر.س)" },
   amount: { en: "Expected SAR", ar: "المتوقع (ر.س)" },
+  totalExpected: { en: "Total Expected SAR", ar: "إجمالي المتوقع (ر.س)" },
   daysToEnd: { en: "Days → month-end", ar: "أيام حتى نهاية الشهر" },
   approxPay: { en: "Approx pay", ar: "تقريبي للسداد" },
   bm: { en: "BM SAR", ar: "مواد بناء (ر.س)" },
@@ -53,12 +64,13 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Avg days used = max(lifetime avg, days on last paid invoice). Customers with no payment yet, avg days above 120, and legal-queue customers are excluded. Expected amount is the BM + Rest sales-mix share of each open invoice whose approx pay date is on or before month-end (overdue still open counts).",
-    ar: "متوسط الأيام = أعلى قيمة بين متوسط العمر وأيام آخر فاتورة مسددة. يُستبعد من لم يسدد بعد، ومن يتجاوز متوسطه 120 يوماً، وعملاء الطابور القانوني. المبلغ المتوقع هو حصة مواد البناء + الباقي من كل فاتورة مفتوحة تاريخ سدادها التقريبي في أو قبل نهاية الشهر (المتأخر المفتوح يُحتسب).",
+    en: "Grouped by salesman, then by customer, with Expected SAR totals. Expand a salesman for customers; expand a customer only when they have more than one invoice. Avg days = max(lifetime, last paid); no payment yet, avg >120, and legal-queue customers are excluded. Amount is BM + Rest share; approx pay on/before month-end.",
+    ar: "مجمّع حسب المندوب ثم العميل مع إجمالي المتوقع. وسّع المندوب للعملاء؛ وسّع العميل فقط عند وجود أكثر من فاتورة. متوسط الأيام = أعلى قيمة بين العمر وآخر سداد؛ يُستبعد من لم يسدد أو تجاوز 120 يوماً والطابور القانوني. المبلغ حصة مواد البناء + الباقي.",
   },
 };
 
 const FILTER_KEYS = [
+  "salesmanName",
   "customerName",
   "customerCode",
   "avgDays",
@@ -68,11 +80,11 @@ const FILTER_KEYS = [
   "refNo",
   "invoiceDate",
   "pendingAmount",
-  "amount",
   "daysToMonthEnd",
   "approxPayDate",
   "bmValue",
   "restValue",
+  "amount",
 ];
 
 function formatAmount(value) {
@@ -88,6 +100,7 @@ function formatMaybe(value) {
 }
 
 function cellValue(row, key) {
+  if (key === "salesmanName") return row.salesmanName || row.salesmanCode || "";
   if (key === "customerName") return row.customerName || "";
   if (key === "customerCode") return row.customerCode || "";
   if (key === "avgDays") return row.avgDays == null ? "" : String(row.avgDays);
@@ -114,6 +127,7 @@ export default function ExpectedCollectionPage() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [report, setReport] = useState(null);
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -150,6 +164,7 @@ export default function ExpectedCollectionPage() {
         throw new Error(payload?.error || "Unable to load the report.");
       }
       setReport(payload);
+      setExpandedKeys(new Set());
     } catch (err) {
       setError(err.message || "Unable to load the report.");
     } finally {
@@ -164,6 +179,14 @@ export default function ExpectedCollectionPage() {
   const rows = useMemo(() => (Array.isArray(report?.rows) ? report.rows : []), [report]);
   const filterValueOf = useCallback((row, key) => cellValue(row, key), []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, filterValueOf);
+  const salesmanGroups = useMemo(
+    () => groupExpectedCollectionRowsBySalesman(visibleRows).map((group) => ({
+      ...group,
+      salesmanName: group.key === "__UNASSIGNED__" ? t("unassigned") : group.salesmanName,
+      customers: groupExpectedCollectionRowsByCustomer(group.rows),
+    })),
+    [visibleRows, t],
+  );
   const totals = useMemo(() => visibleRows.reduce((sum, row) => ({
     pendingAmount: sum.pendingAmount + Number(row.pendingAmount || 0),
     amount: sum.amount + Number(row.amount || 0),
@@ -175,6 +198,32 @@ export default function ExpectedCollectionPage() {
     bmValue: 0,
     restValue: 0,
   }), [visibleRows]);
+
+  const toggleGroup = useCallback((key) => {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const expandAll = useCallback(() => {
+    const next = new Set();
+    salesmanGroups.forEach((group) => {
+      next.add(group.key);
+      (group.customers || []).forEach((customer) => {
+        if (customer.invoiceCount > 1) {
+          next.add(`c:${group.key}:${customer.key}`);
+        }
+      });
+    });
+    setExpandedKeys(next);
+  }, [salesmanGroups]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedKeys(new Set());
+  }, []);
 
   if (!supabaseClient) {
     return (
@@ -215,6 +264,8 @@ export default function ExpectedCollectionPage() {
             <div className="moduleSectionHeader">
               <h2>{t("title")}</h2>
               <span>{visibleRows.length}</span>
+              <button type="button" className="moduleInlineButton" onClick={expandAll}>{t("expandAll")}</button>
+              <button type="button" className="moduleInlineButton" onClick={collapseAll}>{t("collapseAll")}</button>
               <button type="button" className="moduleInlineButton" onClick={loadReport}>{t("refresh")}</button>
             </div>
             <p className="moduleHint">
@@ -226,11 +277,13 @@ export default function ExpectedCollectionPage() {
               {" · "}
               {t("invoices")}: {report?.invoiceCount ?? 0}
               {" · "}
-              BM: {formatAmount(report?.bmTotal || 0)}
+              {t("salesman")}: {salesmanGroups.length}
               {" · "}
-              Rest: {formatAmount(report?.restTotal || 0)}
+              BM: {formatAmount(totals.bmValue)}
               {" · "}
-              {t("total")}: {formatAmount(report?.total || 0)}
+              Rest: {formatAmount(totals.restValue)}
+              {" · "}
+              {t("totalExpected")}: {formatAmount(totals.amount)}
             </p>
             <p className="moduleHint">{t("hint")}</p>
             {error ? <p className="moduleHint">{error}</p> : null}
@@ -248,6 +301,8 @@ export default function ExpectedCollectionPage() {
                 <table className="moduleTable moduleBiTable">
                   <thead>
                     <tr>
+                      <th aria-label={t("expand")} />
+                      <BiExcelHead label={t("salesman")} filterKey="salesmanName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("customerCode")} filterKey="customerCode" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("customer")} filterKey="customerName" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("avgDays")} filterKey="avgDays" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
@@ -257,41 +312,139 @@ export default function ExpectedCollectionPage() {
                       <BiExcelHead label={t("invoice")} filterKey="refNo" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("invoiceDate")} filterKey="invoiceDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("pending")} filterKey="pendingAmount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-                      <BiExcelHead label={t("amount")} filterKey="amount" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
                       <BiExcelHead label={t("daysToEnd")} filterKey="daysToMonthEnd" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("approxPay")} filterKey="approxPayDate" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("bm")} filterKey="bmValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
                       <BiExcelHead label={t("rest")} filterKey="restValue" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+                      <BiExcelHead
+                        label={t("totalExpected")}
+                        filterKey="amount"
+                        options={options}
+                        filters={filters}
+                        onChange={setFilter}
+                        allLabel={t("all")}
+                        className="moduleBiTotalCol"
+                        summary={formatAmount(totals.amount)}
+                      />
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRows.map((row) => (
-                      <tr key={`${row.customerCode}:${row.refNo}:${row.invoiceDate}:${row.amount}`}>
-                        <td>{row.customerCode}</td>
-                        <td>{row.customerName || "—"}</td>
-                        <td>{formatMaybe(row.avgDays)}</td>
-                        <td>{formatMaybe(row.lifetimeAvg)}</td>
-                        <td>{formatMaybe(row.lastPaidInvoiceDays)}</td>
-                        <td>{formatMaybe(row.lastReceiptDate)}</td>
-                        <td>{row.refNo || "—"}</td>
-                        <td>{row.invoiceDate || "—"}</td>
-                        <td>{formatAmount(row.pendingAmount)}</td>
-                        <td className="moduleBiTotalCol">{formatAmount(row.amount)}</td>
-                        <td>{formatMaybe(row.daysToMonthEnd)}</td>
-                        <td>{formatMaybe(row.approxPayDate)}</td>
-                        <td>{formatAmount(row.bmValue)}</td>
-                        <td>{formatAmount(row.restValue)}</td>
-                      </tr>
-                    ))}
+                    {salesmanGroups.flatMap((group) => {
+                      const expanded = expandedKeys.has(group.key);
+                      const summary = (
+                        <tr key={`s:${group.key}`} className="expectedCollectionSalesmanRow">
+                          <td>
+                            <button
+                              type="button"
+                              className="stockTakeReportExpandBtn"
+                              aria-expanded={expanded}
+                              aria-label={expanded ? t("collapse") : t("expand")}
+                              onClick={() => toggleGroup(group.key)}
+                            >
+                              {expanded ? "−" : "+"}
+                            </button>
+                          </td>
+                          <td>
+                            <strong>{group.salesmanName}</strong>
+                            {group.salesmanCode ? <div className="moduleCode">{group.salesmanCode}</div> : null}
+                            <div className="moduleCode">
+                              {group.invoiceCount} {t("invoices").toLowerCase()}
+                              {" · "}
+                              {group.customerCount} {t("customers").toLowerCase()}
+                            </div>
+                          </td>
+                          <td colSpan={8} />
+                          <td><strong>{formatAmount(group.pendingAmount)}</strong></td>
+                          <td colSpan={2} />
+                          <td><strong>{formatAmount(group.bmValue)}</strong></td>
+                          <td><strong>{formatAmount(group.restValue)}</strong></td>
+                          <td className="moduleBiTotalCol"><strong>{formatAmount(group.amount)}</strong></td>
+                        </tr>
+                      );
+                      if (!expanded) return [summary];
+                      const customerRows = (group.customers || []).flatMap((customer) => {
+                        const customerKey = `c:${group.key}:${customer.key}`;
+                        const multi = customer.invoiceCount > 1;
+                        const customerExpanded = multi && expandedKeys.has(customerKey);
+                        const single = !multi ? customer.rows[0] : null;
+                        const customerSummary = (
+                          <tr key={customerKey} className="expectedCollectionCustomerRow">
+                            <td>
+                              {multi ? (
+                                <button
+                                  type="button"
+                                  className="stockTakeReportExpandBtn"
+                                  aria-expanded={customerExpanded}
+                                  aria-label={customerExpanded ? t("collapse") : t("expand")}
+                                  onClick={() => toggleGroup(customerKey)}
+                                >
+                                  {customerExpanded ? "−" : "+"}
+                                </button>
+                              ) : null}
+                            </td>
+                            <td>{customer.salesmanName || customer.salesmanCode || t("unassigned")}</td>
+                            <td>{customer.customerCode || "—"}</td>
+                            <td>
+                              <strong>{customer.customerName || "—"}</strong>
+                              {multi ? (
+                                <div className="moduleCode">
+                                  {customer.invoiceCount} {t("invoices").toLowerCase()}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td>{formatMaybe(customer.avgDays)}</td>
+                            <td>{formatMaybe(customer.lifetimeAvg)}</td>
+                            <td>{formatMaybe(customer.lastPaidInvoiceDays)}</td>
+                            <td>{formatMaybe(customer.lastReceiptDate)}</td>
+                            <td>{single ? (single.refNo || "—") : "—"}</td>
+                            <td>{single ? (single.invoiceDate || "—") : "—"}</td>
+                            <td><strong>{formatAmount(customer.pendingAmount)}</strong></td>
+                            <td>{single ? formatMaybe(single.daysToMonthEnd) : "—"}</td>
+                            <td>{single ? formatMaybe(single.approxPayDate) : "—"}</td>
+                            <td><strong>{formatAmount(customer.bmValue)}</strong></td>
+                            <td><strong>{formatAmount(customer.restValue)}</strong></td>
+                            <td className="moduleBiTotalCol"><strong>{formatAmount(customer.amount)}</strong></td>
+                          </tr>
+                        );
+                        if (!multi || !customerExpanded) return [customerSummary];
+                        return [
+                          customerSummary,
+                          ...customer.rows.map((row) => (
+                            <tr
+                              key={`${customerKey}:${row.refNo}:${row.invoiceDate}:${row.amount}`}
+                              className="expectedCollectionDetailRow"
+                            >
+                              <td />
+                              <td>{row.salesmanName || row.salesmanCode || t("unassigned")}</td>
+                              <td>{row.customerCode}</td>
+                              <td>{row.customerName || "—"}</td>
+                              <td>{formatMaybe(row.avgDays)}</td>
+                              <td>{formatMaybe(row.lifetimeAvg)}</td>
+                              <td>{formatMaybe(row.lastPaidInvoiceDays)}</td>
+                              <td>{formatMaybe(row.lastReceiptDate)}</td>
+                              <td>{row.refNo || "—"}</td>
+                              <td>{row.invoiceDate || "—"}</td>
+                              <td>{formatAmount(row.pendingAmount)}</td>
+                              <td>{formatMaybe(row.daysToMonthEnd)}</td>
+                              <td>{formatMaybe(row.approxPayDate)}</td>
+                              <td>{formatAmount(row.bmValue)}</td>
+                              <td>{formatAmount(row.restValue)}</td>
+                              <td className="moduleBiTotalCol">{formatAmount(row.amount)}</td>
+                            </tr>
+                          )),
+                        ];
+                      });
+                      return [summary, ...customerRows];
+                    })}
                   </tbody>
                   <tfoot>
                     <tr className="moduleBiTotalRow">
-                      <td colSpan={8}><strong>{t("total")}</strong></td>
+                      <td colSpan={10}><strong>{t("total")}</strong></td>
                       <td><strong>{formatAmount(totals.pendingAmount)}</strong></td>
-                      <td className="moduleBiTotalCol"><strong>{formatAmount(totals.amount)}</strong></td>
                       <td colSpan={2} />
                       <td><strong>{formatAmount(totals.bmValue)}</strong></td>
                       <td><strong>{formatAmount(totals.restValue)}</strong></td>
+                      <td className="moduleBiTotalCol"><strong>{formatAmount(totals.amount)}</strong></td>
                     </tr>
                   </tfoot>
                 </table>

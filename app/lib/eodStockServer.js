@@ -1,20 +1,26 @@
 import * as XLSX from "xlsx";
 import {
   EOD_STOCK_CITIES,
+  EOD_STOCK_DATASET_KEY,
+  EOD_STOCK_LOCATIONS,
   applyEodStockUpload,
+  assertOrderLinesWithinEodStock,
+  buildEodStockAvailability,
   emptyEodCityUploads,
   inferEodCityFromFileName,
   mergeEodCityUploads,
   parseEodStockSheets,
   readEodCityUploads,
+  readEodStockDataset,
   summarizeEodStock,
 } from "./eodStock.js";
+import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
 import { UPLOAD_FILES_BUCKET, downloadStoredUpload } from "./uploadFilesStorage.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function positiveCityItemCounts(rows) {
-  const counts = { riyadh: 0, dammam: 0, jeddah: 0 };
-  EOD_STOCK_CITIES.forEach((city) => {
+  const counts = { riyadh: 0, dammam: 0, jeddah: 0, store: 0 };
+  EOD_STOCK_LOCATIONS.forEach((city) => {
     counts[city] = (rows || []).reduce((total, row) => (
       Number(row?.cities?.[city]?.qty || 0) > 0 ? total + 1 : total
     ), 0);
@@ -65,7 +71,7 @@ export async function discoverEodCityUploadsFromStorage(admin, dataset = {}) {
   }
 
   const merged = emptyEodCityUploads();
-  EOD_STOCK_CITIES.forEach((city) => {
+  EOD_STOCK_LOCATIONS.forEach((city) => {
     merged[city] = existing[city] || discovered[city] || null;
   });
   return merged;
@@ -100,8 +106,10 @@ export async function repairEodStockDatasetFromCityFiles(admin, dataset) {
   // the real one-city Excel is still in storage — re-apply when the city looks thin.
   const thinCityThreshold = 25;
 
-  for (const city of EOD_STOCK_CITIES) {
-    if ((counts[city] || 0) >= thinCityThreshold) continue;
+  for (const city of EOD_STOCK_LOCATIONS) {
+    // Store can be sparse; still re-parse when missing. City warehouses use the thin threshold.
+    const threshold = city === "store" ? 1 : thinCityThreshold;
+    if ((counts[city] || 0) >= threshold) continue;
     const upload = cityUploads[city];
     if (!upload?.filePath) continue;
 
@@ -137,7 +145,7 @@ export async function repairEodStockDatasetFromCityFiles(admin, dataset) {
 
   // Persist discovered download pointers even when qty did not need repair.
   const summary = summarizeEodStock(next);
-  const pointersChanged = EOD_STOCK_CITIES.some((city) => {
+  const pointersChanged = EOD_STOCK_LOCATIONS.some((city) => {
     const before = readEodCityUploads(source.cityUploads)[city];
     const after = summary.cityUploads?.[city];
     return String(before?.filePath || "") !== String(after?.filePath || "");
@@ -152,4 +160,39 @@ export async function repairEodStockDatasetFromCityFiles(admin, dataset) {
     changed: repairedCities.length > 0 || pointersChanged,
     summary,
   };
+}
+
+/**
+ * Load countrywide EOD availability (with master-unit conversion) and reject
+ * order lines whose qty exceeds available. No snapshot → allow.
+ */
+export async function assertOrderLinesWithinEodStockServer({
+  admin,
+  lines = [],
+  language = "en",
+} = {}) {
+  if (!admin) {
+    return { ok: true, violations: [] };
+  }
+
+  const [{ data, error }, masterUnits] = await Promise.all([
+    admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", EOD_STOCK_DATASET_KEY)
+      .maybeSingle(),
+    loadMasterUnitConvMap(admin).catch(() => ({})),
+  ]);
+  if (error) throw error;
+
+  let availability;
+  try {
+    availability = buildEodStockAvailability(readEodStockDataset(data?.setting_value), {
+      masterUnits,
+    });
+  } catch {
+    availability = buildEodStockAvailability(null, { masterUnits });
+  }
+
+  return assertOrderLinesWithinEodStock(lines, availability, language);
 }

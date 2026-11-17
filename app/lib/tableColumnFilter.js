@@ -3,7 +3,15 @@ export function normalizeColumnFilterText(value) {
 }
 
 export function textMatchesColumnFilter(cellText, filterText) {
-  const filter = normalizeColumnFilterText(filterText);
+  const raw = String(filterText || "").trim();
+  if (!raw) return true;
+  // Prefix with ! to keep rows that do not contain the rest of the text.
+  if (raw.startsWith("!")) {
+    const exclude = normalizeColumnFilterText(raw.slice(1));
+    if (!exclude) return true;
+    return !normalizeColumnFilterText(cellText).includes(exclude);
+  }
+  const filter = normalizeColumnFilterText(raw);
   if (!filter) return true;
   return normalizeColumnFilterText(cellText).includes(filter);
 }

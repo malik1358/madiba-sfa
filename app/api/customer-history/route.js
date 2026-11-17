@@ -42,6 +42,7 @@ import {
   findReceiptsForCustomer,
   normalizeReceiptDataset,
 } from "../../lib/receiptRegister.js";
+import { profileHasCompanyWideSalesScope } from "../../lib/salesScopeAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -130,11 +131,6 @@ function fuzzyMatchedProfileCodes(allProfiles, authUser) {
       );
     })
     .flatMap((profile) => profileCodeCandidates(profile));
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 function cacheKeyFor(customerCode, scope, { fullHistory = false } = {}) {
@@ -481,7 +477,11 @@ async function resolveScope(admin, token) {
   )];
 
   return {
-    hasAllAccess: ["admin", "report-user", "report_user", "manager"].includes(role) || isInvoiceMakerRole(role),
+    hasAllAccess: profileHasCompanyWideSalesScope({
+      role: currentProfile.role,
+      salesmanCode: currentProfile.salesman_code,
+      collectionOnlyMetadata: Boolean(currentMetadata.collection_only),
+    }),
     visibleSalesmanCodes,
     mutualSalesmanCodes: mutualGroupCodes,
     identitySearchPatterns,

@@ -1,0 +1,355 @@
+/**
+ * Master-unit stock display: when an item has a Master UOM + conversion
+ * (Power BI T_Master Unit Converation / item_master_analysis.tally_master_unit_conv),
+ * stock qty in base units is shown as round(qty / conv) Master UOM.
+ *
+ * Order entry / saved order lines / Tally export stay in selling-unit qty.
+ */
+
+export function normalizeUnitKey(value) {
+  return String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+export function unitsMatch(a, b) {
+  const left = normalizeUnitKey(a);
+  const right = normalizeUnitKey(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const aliases = {
+    ctn: ["ctn", "carton", "cartons", "cx", "box", "boxes"],
+    pcs: ["pcs", "pc", "piece", "pieces"],
+    rm: ["rm", "rim", "ream", "reams"],
+  };
+  for (const group of Object.values(aliases)) {
+    if (group.includes(left) && group.includes(right)) return true;
+  }
+  return false;
+}
+
+export function parseMasterConv(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value).replace(/,/g, "").trim();
+  if (!text) return null;
+  const num = Number(text);
+  return Number.isFinite(num) ? num : null;
+}
+
+function considerMasterUnitEntry(byCode, code, row) {
+  const key = String(code || "").trim().toUpperCase();
+  if (!key) return;
+  const masterUom = String(row?.tally_alt_uom || row?.masterUom || "").trim();
+  const baseUom = String(row?.tally_base_uom || row?.baseUom || "").trim();
+  const conv = parseMasterConv(row?.tally_master_unit_conv ?? row?.conv);
+  if (!masterUom || conv == null || !(conv > 0)) return;
+
+  const next = { masterUom, baseUom, conv };
+  const prev = byCode.get(key);
+  if (!prev) {
+    byCode.set(key, next);
+    return;
+  }
+  // Prefer a real multi-unit conversion over identity (1).
+  if (prev.conv <= 1 && next.conv > 1) {
+    byCode.set(key, next);
+    return;
+  }
+  if (prev.conv > 1 && next.conv <= 1) return;
+  if (next.conv > prev.conv) byCode.set(key, next);
+}
+
+/**
+ * Build compact itemCode → { masterUom, baseUom, conv } from item_master_analysis rows.
+ * Prefers rows with a Master UOM (tally_alt_uom) and conv > 1.
+ */
+export function buildMasterUnitConvMap(rows = []) {
+  const byCode = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    considerMasterUnitEntry(byCode, row?.tally_item_code || row?.itemCode, row);
+    considerMasterUnitEntry(byCode, row?.google_article_no || row?.articleNo, row);
+  }
+
+  return Object.fromEntries(byCode);
+}
+
+/**
+ * Parse catalogue packing text such as "CTN OF 12 Pack OF 6 PC" → 72 PC / Ctn.
+ */
+export function parsePackingMasterConv(packingText) {
+  const text = String(packingText || "").replace(/\u00a0/g, " ").trim();
+  if (!text) return null;
+
+  const ctnPackPcs = text.match(
+    /\bctn\s*of\s*(\d+)\s*pack\s*of\s*(\d+)\s*(?:pc|pcs|pieces?)?\b/i,
+  );
+  if (ctnPackPcs) {
+    const packs = Number(ctnPackPcs[1]);
+    const pcs = Number(ctnPackPcs[2]);
+    if (packs > 0 && pcs > 0) {
+      return { masterUom: "Ctn", baseUom: "Pcs", conv: packs * pcs };
+    }
+  }
+
+  const pcsPerCtn = text.match(
+    /\b(\d+)\s*(?:pc|pcs|pieces?)\s*(?:per|\/)\s*(?:ctn|carton)\b/i,
+  );
+  if (pcsPerCtn) {
+    const conv = Number(pcsPerCtn[1]);
+    if (conv > 1) return { masterUom: "Ctn", baseUom: "Pcs", conv };
+  }
+
+  const ctnOf = text.match(/\bctn\s*of\s*(\d+)\b/i);
+  if (ctnOf) {
+    const conv = Number(ctnOf[1]);
+    if (conv > 1) return { masterUom: "Ctn", baseUom: "", conv };
+  }
+
+  const slashMaster = text.match(
+    /\b(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s*\/\s*([A-Za-z]+)\b/,
+  );
+  if (slashMaster) {
+    const conv = Number(slashMaster[1]);
+    const baseUom = String(slashMaster[2] || "").trim();
+    const masterUom = String(slashMaster[3] || "").trim();
+    if (conv > 1 && masterUom) return { masterUom, baseUom, conv };
+  }
+
+  return null;
+}
+
+/** Fill missing codes from packing descriptions (does not override existing entries). */
+export function mergePackingMasterUnitConvMap(existing = {}, packingByCode = {}) {
+  const byCode = new Map(Object.entries(existing || {}));
+  for (const [rawCode, packing] of Object.entries(packingByCode || {})) {
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code || byCode.has(code)) continue;
+    const parsed = parsePackingMasterConv(packing);
+    if (!parsed) continue;
+    considerMasterUnitEntry(byCode, code, parsed);
+  }
+  return Object.fromEntries(byCode);
+}
+
+/** Fill missing codes from stock_take_items pack sizes (does not override existing). */
+export function mergeStockTakeMasterUnitConvMap(existing = {}, stockRows = []) {
+  const byCode = new Map(Object.entries(existing || {}));
+  for (const row of Array.isArray(stockRows) ? stockRows : []) {
+    const code = String(row?.item_code || row?.itemCode || "").trim().toUpperCase();
+    if (!code || byCode.has(code)) continue;
+    const masterUom = String(row?.master_uom || "").trim();
+    const baseUom = String(row?.base_uom || "").trim();
+    const conv = parseMasterConv(row?.base_uom_pack_size);
+    if (!masterUom || conv == null || !(conv > 1)) continue;
+    considerMasterUnitEntry(byCode, code, { masterUom, baseUom, conv });
+  }
+  return Object.fromEntries(byCode);
+}
+
+export function lookupMasterUnitConv(map, itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code || !map || typeof map !== "object") return null;
+  const entry = map[code];
+  if (!entry || typeof entry !== "object") return null;
+  const conv = parseMasterConv(entry.conv ?? entry.tally_master_unit_conv);
+  const masterUom = String(entry.masterUom || entry.tally_alt_uom || "").trim();
+  if (!masterUom || conv == null || !(conv > 0)) return null;
+  return {
+    masterUom,
+    baseUom: String(entry.baseUom || entry.tally_base_uom || "").trim(),
+    conv,
+  };
+}
+
+/**
+ * Convert a stock qty to master units when appropriate.
+ * @returns {{ qty: number, unit: string, converted: boolean, rawQty: number }}
+ */
+export function toMasterStockQty(rawQty, {
+  stockUnit = "",
+  masterUom = "",
+  baseUom = "",
+  conv = null,
+} = {}) {
+  const qty = Number(rawQty);
+  const safeRaw = Number.isFinite(qty) ? qty : 0;
+  const factor = parseMasterConv(conv);
+  const master = String(masterUom || "").trim();
+  const base = String(baseUom || "").trim();
+  const stock = String(stockUnit || "").trim();
+
+  if (!master || factor == null || !(factor > 0)) {
+    return { qty: safeRaw, unit: stock || base || "", converted: false, rawQty: safeRaw };
+  }
+
+  // Already expressed in master UOM — do not divide again.
+  if (stock && unitsMatch(stock, master)) {
+    return { qty: Math.round(safeRaw), unit: master, converted: false, rawQty: safeRaw };
+  }
+
+  // Identity conversion (1 base = 1 master).
+  if (factor <= 1) {
+    return { qty: Math.round(safeRaw), unit: master, converted: false, rawQty: safeRaw };
+  }
+
+  // Convert when stock unit is blank, matches base, or is clearly not master.
+  if (!stock || (base && unitsMatch(stock, base)) || !unitsMatch(stock, master)) {
+    return {
+      qty: Math.round(safeRaw / factor),
+      unit: master,
+      converted: true,
+      rawQty: safeRaw,
+    };
+  }
+
+  return { qty: Math.round(safeRaw), unit: master, converted: false, rawQty: safeRaw };
+}
+
+export function formatMasterStockQty(qty, unit = "") {
+  const n = Math.round(Number(qty) || 0);
+  const qtyText = n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const u = String(unit || "").trim();
+  return u ? `${qtyText} ${u}` : qtyText;
+}
+
+/**
+ * Format any item qty for UI in master units when conversion is known.
+ * Used for sales/history qty columns (not order entry). Preserves sign.
+ */
+export function formatItemQtyMasterDisplay(rawQty, itemCode, masterUnits, {
+  stockUnit = "",
+  empty = "—",
+} = {}) {
+  if (rawQty == null || rawQty === "") return empty;
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return empty;
+  if (raw === 0) return "0";
+
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) {
+    return Math.round(raw).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+
+  const sign = raw < 0 ? -1 : 1;
+  const converted = toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  });
+  return formatMasterStockQty(sign * converted.qty, converted.unit);
+}
+
+/** Numeric master qty for totals (0 when unknown/blank). */
+export function itemQtyMasterNumber(rawQty, itemCode, masterUnits, { stockUnit = "" } = {}) {
+  const raw = Number(rawQty);
+  if (!Number.isFinite(raw)) return 0;
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return Math.round(raw);
+  const sign = raw < 0 ? -1 : 1;
+  return sign * toMasterStockQty(Math.abs(raw), {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  }).qty;
+}
+
+/**
+ * Convert named qty fields on a report row to master units.
+ * Sets qtyUnit when conversion applies. Leaves row unchanged when no map entry.
+ */
+export function applyMasterUnitQtyFields(row = {}, masterUnits = {}, {
+  itemCodeKey = "itemCode",
+  fields = ["quantity"],
+  stockUnit = "",
+} = {}) {
+  const code = row?.[itemCodeKey] || row?.item_code || row?.itemCode;
+  const master = lookupMasterUnitConv(masterUnits, code);
+  if (!master || !(master.conv > 1)) return row;
+  const next = { ...row };
+  for (const field of fields) {
+    if (next[field] == null || next[field] === "") continue;
+    next[field] = itemQtyMasterNumber(next[field], code, masterUnits, { stockUnit });
+  }
+  if (master.masterUom) next.qtyUnit = master.masterUom;
+  return next;
+}
+
+/**
+ * Order-entry unit choices for New Order rows. The price list and the stored
+ * order qty are both per master unit (carton / biggest unit); the base unit is
+ * an entry convenience only. `perMaster` = how many of this unit equal 1 master.
+ */
+export function buildOrderUnitOptions(masterUnits, itemCode) {
+  const master = lookupMasterUnitConv(masterUnits, itemCode);
+  if (!master || !(master.conv > 1)) return [];
+  return [
+    { key: "master", label: master.masterUom, perMaster: 1 },
+    { key: "base", label: master.baseUom || "Pcs", perMaster: master.conv },
+  ];
+}
+
+/** Selected unit option; defaults to the master (price-list) unit. */
+export function pickOrderUnit(options, chosenKey = "") {
+  if (!Array.isArray(options) || options.length === 0) return null;
+  return options.find((option) => option.key === chosenKey) || options[0];
+}
+
+/** Master-unit order qty → qty displayed in the selected unit (3 dp). */
+export function orderQtyInUnit(masterQty, perMaster) {
+  const qty = Number(masterQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return Math.round(qty * factor * 1000) / 1000;
+}
+
+/** Qty entered in the selected unit → stored master-unit qty. */
+export function orderQtyToMaster(enteredQty, perMaster) {
+  const qty = Number(enteredQty);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(factor) || factor <= 0) return 0;
+  return qty / factor;
+}
+
+/** Step the master-unit qty by ±1 of the selected unit (never below 0). */
+export function stepOrderQtyInUnit(masterQty, perMaster, delta) {
+  const units = orderQtyInUnit(masterQty, perMaster);
+  return orderQtyToMaster(Math.max(0, units + (Number(delta) || 0)), perMaster);
+}
+
+/** Price per selected unit from the per-master-unit price-list rate. */
+export function orderRateInUnit(masterRate, perMaster) {
+  const rate = Number(masterRate);
+  const factor = Number(perMaster);
+  if (!Number.isFinite(rate) || !Number.isFinite(factor) || factor <= 0) return 0;
+  return rate / factor;
+}
+
+/**
+ * Apply master-unit conversion to an EOD availability snapshot for one item.
+ */
+export function resolveEodStockMasterDisplay(availability, itemCode, rawQty) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  const stock = availability && typeof availability === "object" ? availability : {};
+  const stockUnit = code ? String(stock.units?.[code] || "").trim() : "";
+  const master = lookupMasterUnitConv(stock.masterUnits, code);
+  if (!master) {
+    return {
+      qty: Number.isFinite(Number(rawQty)) ? Number(rawQty) : 0,
+      unit: stockUnit,
+      converted: false,
+      rawQty: Number.isFinite(Number(rawQty)) ? Number(rawQty) : 0,
+    };
+  }
+  return toMasterStockQty(rawQty, {
+    stockUnit,
+    masterUom: master.masterUom,
+    baseUom: master.baseUom,
+    conv: master.conv,
+  });
+}

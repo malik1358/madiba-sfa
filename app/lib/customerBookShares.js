@@ -134,3 +134,40 @@ export function salesmanLabel(profile) {
   if (name && code && name !== code) return `${name} (${code})`;
   return name || code || "Unknown";
 }
+
+function hasStaffStyleSalesmanCode(code) {
+  return /^(SM|CL)\d+$/i.test(String(code || "").trim());
+}
+
+/**
+ * Active share-picker profiles only. When the same person exists twice
+ * (name-as-code ghost + live SM### / CL### login), keep the staff-code row.
+ */
+export function preferCanonicalShareSalesmen(profiles = []) {
+  const active = (profiles || []).filter((row) => {
+    if (!row || row.is_active === false) return false;
+    return Boolean(String(row.salesman_code || "").trim());
+  });
+
+  const byPerson = new Map();
+  for (const row of active) {
+    const key = normalizeSalesmanName(row.salesman_name)
+      || normalizeSalesmanCode(row.salesman_code);
+    if (!key) continue;
+    const list = byPerson.get(key) || [];
+    list.push(row);
+    byPerson.set(key, list);
+  }
+
+  const hideIds = new Set();
+  for (const list of byPerson.values()) {
+    if (list.length < 2) continue;
+    const staffCoded = list.filter((row) => hasStaffStyleSalesmanCode(row.salesman_code));
+    if (!staffCoded.length) continue;
+    for (const row of list) {
+      if (!hasStaffStyleSalesmanCode(row.salesman_code)) hideIds.add(row.id);
+    }
+  }
+
+  return active.filter((row) => !hideIds.has(row.id));
+}

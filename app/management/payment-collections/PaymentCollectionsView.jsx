@@ -27,6 +27,7 @@ import {
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
 import { postFormDataResilient, processOfflineQueue, sendJsonResilient } from "../../lib/offlineApi";
+import { GPS_REQUIRED_ERROR } from "../../lib/geo.js";
 import { shouldRequireGpsAccessGate } from "../../lib/moduleAccess";
 import {
   buildOptimisticLatestCollection,

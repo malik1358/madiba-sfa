@@ -58,6 +58,7 @@ const RECEIPT_DATASET_MEMORY_TTL_MS = 60_000;
 let receiptDatasetMemory = {
   loadedAt: 0,
   dataset: null,
+  stamp: "",
 };
 
 function normalizeCode(value) {
@@ -158,8 +159,11 @@ function parseJson(value) {
 
 async function loadReceiptDatasetCached(admin) {
   const now = Date.now();
+  const stamp = await loadReceiptDatasetStamp(admin);
   if (
     receiptDatasetMemory.dataset
+    && receiptDatasetMemory.stamp === stamp
+    && stamp
     && (now - receiptDatasetMemory.loadedAt) < RECEIPT_DATASET_MEMORY_TTL_MS
   ) {
     return receiptDatasetMemory.dataset;
@@ -173,7 +177,7 @@ async function loadReceiptDatasetCached(admin) {
   if (error) throw error;
 
   const dataset = normalizeReceiptDataset(parseJson(data?.setting_value));
-  receiptDatasetMemory = { loadedAt: now, dataset };
+  receiptDatasetMemory = { loadedAt: now, dataset, stamp: stamp || String(dataset?.uploadedAt || "") };
   return dataset;
 }
 

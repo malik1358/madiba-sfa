@@ -983,6 +983,44 @@ test("customerMatchesCollectionScope prefers outstanding invoice salesman over c
   }), true);
 });
 
+test("customerMatchesCollectionScope lets Belal keep ST107 Mr Belal outstanding rows", () => {
+  const belalScope = buildSalesmanScopeMatchers([
+    { salesman_code: "BELAL", salesman_name: "BELAL" },
+  ]);
+  const customer = { customer_code: "1583", current_salesman_code: "BELAL" };
+  const invoices = [{ salesman: "ST107 Mr Belal", pending_amount: 5192.67 }];
+
+  assert.equal(customerMatchesCollectionScope({
+    customer,
+    customerInvoices: invoices,
+    scopeMatchers: belalScope,
+    normalizedScopeCodes: ["BELAL"],
+    aggregateRowSalesman: "ST107 Mr Belal",
+    hasAllAccess: false,
+  }), true);
+
+  // Codes present but matchers empty (scopeProfiles missed) — master still owns the ST-prefix upload name.
+  assert.equal(customerMatchesCollectionScope({
+    customer,
+    customerInvoices: invoices,
+    scopeMatchers: buildSalesmanScopeMatchers([]),
+    normalizedScopeCodes: ["BELAL"],
+    aggregateRowSalesman: "ST107 Mr Belal",
+    hasAllAccess: false,
+  }), true);
+
+  assert.equal(customerMatchesCollectionScope({
+    customer,
+    customerInvoices: invoices,
+    scopeMatchers: buildSalesmanScopeMatchers([
+      { salesman_code: "BASHEER KARUVAL", salesman_name: "BASHEER KARUVAL" },
+    ]),
+    normalizedScopeCodes: ["BASHEER KARUVAL"],
+    aggregateRowSalesman: "ST107 Mr Belal",
+    hasAllAccess: false,
+  }), false);
+});
+
 test("customerMatchesCollectionScope falls back to customer master when invoice salesman is missing", () => {
   const abdulScope = buildSalesmanScopeMatchers([
     { salesman_code: "ABDUL REHMAN", salesman_name: "ABDUL REHMAN" },

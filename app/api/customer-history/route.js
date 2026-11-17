@@ -391,7 +391,11 @@ async function hasOutstandingCustomerAccess(admin, customerCode, scope) {
 
   try {
     const dataset = JSON.parse(data?.setting_value || "null");
-    const ownership = resolveOutstandingCustomerOwnership(dataset, scope.visibleSalesmanCodes);
+    const ownership = resolveOutstandingCustomerOwnership(
+      dataset,
+      scope.visibleSalesmanCodes,
+      scope.scopeMatchers || null,
+    );
     return customerMatchesOutstandingCodeSet(customerCode, ownership.ownedCustomerCodes);
   } catch {
     return false;

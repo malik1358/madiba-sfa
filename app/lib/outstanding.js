@@ -1,4 +1,7 @@
-import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
+import {
+  buildSalesmanScopeMatchersFromCodes,
+  salesmanValueMatchesScope,
+} from "./mutualSalesmanGroups.js";
 
 export const OUTSTANDING_DATASET_KEY = "outstanding_customerwise_dataset_v1";
 
@@ -139,10 +142,16 @@ export function mergeOutstandingInvoiceSources(primary, supplemental) {
   return merged;
 }
 
+function identityFallbackMatchers(identityNames) {
+  return buildSalesmanScopeMatchersFromCodes([...(identityNames || [])]);
+}
+
 function invoiceOwnedByScope(invoice, identityNames, scopeMatchers) {
   const salesman = invoice?.salesman;
   if (!String(salesman || "").trim()) return false;
   if (scopeMatchers) return salesmanValueMatchesScope(salesman, scopeMatchers);
+  // Codes-only callers (e.g. customer-history) still need "ST107 Mr Belal" → BELAL.
+  if (salesmanValueMatchesScope(salesman, identityFallbackMatchers(identityNames))) return true;
 
   const salesmanName = normalizeComparableName(salesman);
   return Boolean(salesmanName && identityNames.has(salesmanName));
@@ -151,6 +160,7 @@ function invoiceOwnedByScope(invoice, identityNames, scopeMatchers) {
 function rowSalesmanOwnedByScope(rowSalesman, identityNames, scopeMatchers) {
   if (!String(rowSalesman || "").trim() || isPlaceholderSalesmanValue(rowSalesman)) return false;
   if (scopeMatchers) return salesmanValueMatchesScope(rowSalesman, scopeMatchers);
+  if (salesmanValueMatchesScope(rowSalesman, identityFallbackMatchers(identityNames))) return true;
 
   const salesmanName = normalizeComparableName(rowSalesman);
   return Boolean(salesmanName && identityNames.has(salesmanName));
@@ -831,7 +841,10 @@ function salesmanValuesMatch(left, right) {
   const rightRaw = String(right || "").trim();
   if (!leftRaw || !rightRaw) return false;
   if (normalizeCode(leftRaw) === normalizeCode(rightRaw)) return true;
-  return normalizeComparableName(leftRaw) === normalizeComparableName(rightRaw);
+  if (normalizeComparableName(leftRaw) === normalizeComparableName(rightRaw)) return true;
+  // Outstanding uploads often prefix the person with a staff code (ST107 Mr Belal).
+  return salesmanValueMatchesScope(leftRaw, buildSalesmanScopeMatchersFromCodes([rightRaw]))
+    || salesmanValueMatchesScope(rightRaw, buildSalesmanScopeMatchersFromCodes([leftRaw]));
 }
 
 /**

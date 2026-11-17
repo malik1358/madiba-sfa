@@ -1189,6 +1189,67 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   return Number.isFinite(qty) && qty > available;
 }
 
+/**
+ * Max order qty for an item from countrywide EOD stock (master/display units).
+ * Returns null when no EOD snapshot is loaded (no cap).
+ */
+export function maxOrderQtyForEodStock(availability, itemCode) {
+  return countryEodStockDisplayQty(availability, itemCode);
+}
+
+/**
+ * Clamp an order qty to countrywide available stock when a snapshot is loaded.
+ * Leaves qty unchanged when availability is inactive / missing.
+ */
+export function clampOrderQtyToEodStock(orderedQty, availability, itemCode) {
+  const max = maxOrderQtyForEodStock(availability, itemCode);
+  let qty = Number(orderedQty || 0);
+  if (!Number.isFinite(qty) || qty < 0) qty = 0;
+  if (max == null) return qty;
+  const cap = Math.max(0, Number(max) || 0);
+  return Math.min(qty, cap);
+}
+
+/**
+ * Find order lines whose qty exceeds countrywide EOD available.
+ * Lines with quantity ≤ 0 are ignored. No snapshot → no violations.
+ */
+export function findOrderLinesOverEodStock(lines = [], availability = null) {
+  const stock = normalizeEodStockAvailability(availability);
+  if (!stock.active) return [];
+  const violations = [];
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
+    const qty = Number(line?.quantity ?? line?.order_quantity ?? 0);
+    if (!code || !Number.isFinite(qty) || qty <= 0) return;
+    const available = countryEodStockDisplayQty(stock, code);
+    if (available == null) return;
+    if (qty > available) {
+      violations.push({
+        itemCode: code,
+        itemName: String(line?.item_name || line?.itemName || code).trim() || code,
+        quantity: qty,
+        available,
+      });
+    }
+  });
+  return violations;
+}
+
+export function assertOrderLinesWithinEodStock(lines = [], availability = null, language = "en") {
+  const violations = findOrderLinesOverEodStock(lines, availability);
+  if (violations.length === 0) {
+    return { ok: true, violations: [] };
+  }
+  const ar = language === "ar";
+  const error = violations.map((row) => (
+    ar
+      ? `${row.itemCode}: الكمية ${row.quantity} تتجاوز المتاح ${row.available}`
+      : `${row.itemCode}: qty ${row.quantity} exceeds available ${row.available}`
+  )).join(" ");
+  return { ok: false, violations, error };
+}
+
 const EOD_CITY_SHORT = {
   riyadh: "R",
   dammam: "D",

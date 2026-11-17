@@ -996,6 +996,7 @@ export default function NewOrderPage() {
     valueDiscountMap,
     schemes,
     quantityControls,
+    eodStock,
     pricingRegion,
     setPricingRegion: setSelectedPricingRegion,
     pricingType,
@@ -2358,11 +2359,18 @@ export default function NewOrderPage() {
                                       <input
                                         type="number"
                                         min="0"
+                                        max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
                                         step="1"
                                         value={shownQty || ""}
                                         onChange={(event) => updateQty(item.item_code, unit ? orderQtyToMaster(event.target.value, perMaster) : event.target.value)}
                                       />
-                                      <button type="button" onClick={() => (unit ? updateQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : increaseQty(item.item_code))}>+</button>
+                                      <button
+                                        type="button"
+                                        disabled={availableDisplay != null && qty >= availableDisplay}
+                                        onClick={() => (unit ? updateQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : increaseQty(item.item_code))}
+                                      >
+                                        +
+                                      </button>
                                     </div>
                                     {unit ? (
                                       <select

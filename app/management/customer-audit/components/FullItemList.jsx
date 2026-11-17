@@ -151,8 +151,8 @@ export default function FullItemList({
                         <td>
                           <div className="moduleQtyControl">
                             <button type="button" onClick={() => decreaseOrderQty(code)}>−</button>
-                            <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
-                            <button type="button" onClick={() => increaseOrderQty(code)}>+</button>
+                            <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
+                            <button type="button" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(code)}>+</button>
                           </div>
                           {availableLabel ? (
                             <div className={`moduleCode moduleStockAvailable${overStock ? " moduleStockAvailable--over" : ""}`}>

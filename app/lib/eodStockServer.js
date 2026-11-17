@@ -1,15 +1,20 @@
 import * as XLSX from "xlsx";
 import {
   EOD_STOCK_CITIES,
+  EOD_STOCK_DATASET_KEY,
   EOD_STOCK_LOCATIONS,
   applyEodStockUpload,
+  assertOrderLinesWithinEodStock,
+  buildEodStockAvailability,
   emptyEodCityUploads,
   inferEodCityFromFileName,
   mergeEodCityUploads,
   parseEodStockSheets,
   readEodCityUploads,
+  readEodStockDataset,
   summarizeEodStock,
 } from "./eodStock.js";
+import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
 import { UPLOAD_FILES_BUCKET, downloadStoredUpload } from "./uploadFilesStorage.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
@@ -155,4 +160,39 @@ export async function repairEodStockDatasetFromCityFiles(admin, dataset) {
     changed: repairedCities.length > 0 || pointersChanged,
     summary,
   };
+}
+
+/**
+ * Load countrywide EOD availability (with master-unit conversion) and reject
+ * order lines whose qty exceeds available. No snapshot → allow.
+ */
+export async function assertOrderLinesWithinEodStockServer({
+  admin,
+  lines = [],
+  language = "en",
+} = {}) {
+  if (!admin) {
+    return { ok: true, violations: [] };
+  }
+
+  const [{ data, error }, masterUnits] = await Promise.all([
+    admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", EOD_STOCK_DATASET_KEY)
+      .maybeSingle(),
+    loadMasterUnitConvMap(admin).catch(() => ({})),
+  ]);
+  if (error) throw error;
+
+  let availability;
+  try {
+    availability = buildEodStockAvailability(readEodStockDataset(data?.setting_value), {
+      masterUnits,
+    });
+  } catch {
+    availability = buildEodStockAvailability(null, { masterUnits });
+  }
+
+  return assertOrderLinesWithinEodStock(lines, availability, language);
 }

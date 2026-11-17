@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   applyEodStockUpload,
+  assertOrderLinesWithinEodStock,
   availableEodStockQty,
+  clampOrderQtyToEodStock,
   countryEodStockQty,
   filterItemsWithPositiveCountryEodStock,
   hasPositiveCountryEodStockQty,
@@ -18,6 +20,7 @@ import {
   inferEodCityFromFileName,
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
+  maxOrderQtyForEodStock,
   mergeEodCityUploads,
   parseEodQtyCell,
   parseEodStockDate,
@@ -328,6 +331,33 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);
+  assert.equal(maxOrderQtyForEodStock(availability, "A004426"), 36);
+  assert.equal(maxOrderQtyForEodStock(null, "A004426"), null);
+  assert.equal(clampOrderQtyToEodStock(40, availability, "A004426"), 36);
+  assert.equal(clampOrderQtyToEodStock(10, availability, "A004426"), 10);
+  assert.equal(clampOrderQtyToEodStock(40, null, "A004426"), 40);
+  assert.equal(clampOrderQtyToEodStock(5, availability, "MISSING"), 0);
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 40 }],
+      availability,
+    ).ok,
+    false,
+  );
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 36 }],
+      availability,
+    ).ok,
+    true,
+  );
+  assert.equal(
+    assertOrderLinesWithinEodStock(
+      [{ item_code: "A004426", quantity: 999 }],
+      null,
+    ).ok,
+    true,
+  );
 
   const freshNow = Date.parse("2026-10-27T20:00:00.000Z");
   const staleNow = Date.parse("2026-10-28T11:00:00.000Z");

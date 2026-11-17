@@ -24,6 +24,7 @@ import {
 } from "../../lib/orderApproval.js";
 import { canManageOrderInvoice } from "../../lib/moduleAccess.js";
 import { assertOrderQuantityControls } from "../../lib/orderQuantityControlsServer.js";
+import { assertOrderLinesWithinEodStockServer } from "../../lib/eodStockServer.js";
 import {
   blockedByAvgDaysMessage,
   orderBlockOverrideKey,
@@ -907,6 +908,18 @@ export async function POST(request) {
         }, { status: 400 });
       }
 
+      const stockCheck = await assertOrderLinesWithinEodStockServer({
+        admin,
+        lines: pricedLines,
+      });
+      if (!stockCheck.ok) {
+        return NextResponse.json({
+          success: false,
+          error: stockCheck.error,
+          stockViolations: stockCheck.violations,
+        }, { status: 400 });
+      }
+
       const nowIso = new Date().toISOString();
       const { error: deleteError } = await admin
         .from("sales_order_items")
@@ -1203,6 +1216,18 @@ export async function POST(request) {
         success: false,
         error: quantityControlCheck.error,
         quantityControlViolations: quantityControlCheck.violations,
+      }, { status: 400 });
+    }
+
+    const stockCheck = await assertOrderLinesWithinEodStockServer({
+      admin,
+      lines: pricedLines,
+    });
+    if (!stockCheck.ok) {
+      return NextResponse.json({
+        success: false,
+        error: stockCheck.error,
+        stockViolations: stockCheck.violations,
       }, { status: 400 });
     }
 

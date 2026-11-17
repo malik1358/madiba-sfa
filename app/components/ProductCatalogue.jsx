@@ -886,13 +886,21 @@ export default function ProductCatalogue({
                   <input
                     type="number"
                     min="0"
+                    max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
                     step="1"
                     disabled={disabled}
                     aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`}
                     value={shownQty || ""}
                     onChange={(event) => onQty(item.item_code, unit ? orderQtyToMaster(event.target.value, perMaster) : event.target.value)}
                   />
-                  <button type="button" disabled={disabled} aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`} onClick={() => (unit ? onQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : onIncrease(item.item_code))}>+</button>
+                  <button
+                    type="button"
+                    disabled={disabled || (availableDisplay != null && qty >= availableDisplay)}
+                    aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`}
+                    onClick={() => (unit ? onQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : onIncrease(item.item_code))}
+                  >
+                    +
+                  </button>
                 </div>
                 {unit ? (
                   <select

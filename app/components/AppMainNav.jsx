@@ -19,6 +19,7 @@ const NAV_TEXT = {
   mainNavigation: { en: "Main navigation", ar: "التنقل الرئيسي" },
   searchScreens: { en: "Search screens…", ar: "ابحث عن شاشة…" },
   noScreensFound: { en: "No screens found", ar: "لا توجد شاشات مطابقة" },
+  menu: { en: "Menu", ar: "القائمة" },
 };
 
 export default function AppMainNav() {
@@ -29,6 +30,7 @@ export default function AppMainNav() {
   const { access, loading } = useModuleAccess();
   const [signedIn, setSignedIn] = useState(false);
   const [openGroup, setOpenGroup] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [hoverCapable, setHoverCapable] = useState(false);
@@ -62,11 +64,12 @@ export default function AppMainNav() {
   }, []);
 
   useEffect(() => {
-    if (!openGroup && !searchOpen) return undefined;
+    if (!openGroup && !searchOpen && !menuOpen) return undefined;
 
     function handlePointerDown(event) {
       if (!navRef.current?.contains(event.target)) {
         setOpenGroup("");
+        setMenuOpen(false);
       }
       if (!searchRef.current?.contains(event.target)) {
         setSearchOpen(false);
@@ -75,7 +78,7 @@ export default function AppMainNav() {
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [openGroup, searchOpen]);
+  }, [openGroup, searchOpen, menuOpen]);
 
   const groups = useMemo(
     () => (signedIn && !loading ? listAccessibleNavGroups(access) : []),
@@ -136,6 +139,54 @@ export default function AppMainNav() {
 
   return (
     <nav className="appMainNav" aria-label={t("mainNavigation")} dir={dir} ref={navRef}>
+      <button
+        type="button"
+        className="appMainNavMenuButton"
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+        onClick={() => {
+          setMenuOpen((current) => !current);
+          setOpenGroup("");
+          setSearchOpen(false);
+        }}
+      >
+        <span aria-hidden="true">☰</span> {t("menu")}
+      </button>
+      {menuOpen ? (
+        <div className="appMainNavMobilePanel">
+          {pinnedItems.length > 0 ? (
+            <div className="appMainNavMobilePinned">
+              {pinnedItems.map((item) => (
+                <Link
+                  key={item.moduleKey}
+                  href={item.href}
+                  className={`appMainNavPinnedLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavPinnedLink--active" : ""}`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.key} className="appMainNavMobileGroup">
+              <div className="appMainNavMobileGroupTitle">{localizedNavGroupLabel(group.key, language)}</div>
+              <div className="appMainNavMobileLinks">
+                {group.items.map((item) => (
+                  <Link
+                    key={item.moduleKey}
+                    href={item.href}
+                    className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {localizedModuleLabel(item.moduleKey, language)}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="appMainNavSearch" ref={searchRef}>
         <input
           type="search"

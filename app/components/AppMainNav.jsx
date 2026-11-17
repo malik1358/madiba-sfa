@@ -29,22 +29,11 @@ export default function AppMainNav() {
   const t = translate(language, NAV_TEXT);
   const { access, loading } = useModuleAccess();
   const [signedIn, setSignedIn] = useState(false);
-  const [openGroup, setOpenGroup] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [hoverCapable, setHoverCapable] = useState(false);
   const navRef = useRef(null);
   const searchRef = useRef(null);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const syncHoverCapable = () => setHoverCapable(mediaQuery.matches);
-
-    syncHoverCapable();
-    mediaQuery.addEventListener("change", syncHoverCapable);
-    return () => mediaQuery.removeEventListener("change", syncHoverCapable);
-  }, []);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -64,11 +53,10 @@ export default function AppMainNav() {
   }, []);
 
   useEffect(() => {
-    if (!openGroup && !searchOpen && !menuOpen) return undefined;
+    if (!searchOpen && !menuOpen) return undefined;
 
     function handlePointerDown(event) {
       if (!navRef.current?.contains(event.target)) {
-        setOpenGroup("");
         setMenuOpen(false);
       }
       if (!searchRef.current?.contains(event.target)) {
@@ -78,7 +66,7 @@ export default function AppMainNav() {
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [openGroup, searchOpen, menuOpen]);
+  }, [searchOpen, menuOpen]);
 
   const groups = useMemo(
     () => (signedIn && !loading ? listAccessibleNavGroups(access) : []),
@@ -146,16 +134,15 @@ export default function AppMainNav() {
         aria-haspopup="true"
         onClick={() => {
           setMenuOpen((current) => !current);
-          setOpenGroup("");
           setSearchOpen(false);
         }}
       >
         <span aria-hidden="true">☰</span> {t("menu")}
       </button>
       {menuOpen ? (
-        <div className="appMainNavMobilePanel">
+        <div className="appMainNavMenuPanel">
           {pinnedItems.length > 0 ? (
-            <div className="appMainNavMobilePinned">
+            <div className="appMainNavMenuPinned">
               {pinnedItems.map((item) => (
                 <Link
                   key={item.moduleKey}
@@ -169,9 +156,9 @@ export default function AppMainNav() {
             </div>
           ) : null}
           {groups.map((group) => (
-            <div key={group.key} className="appMainNavMobileGroup">
-              <div className="appMainNavMobileGroupTitle">{localizedNavGroupLabel(group.key, language)}</div>
-              <div className="appMainNavMobileLinks">
+            <div key={group.key} className="appMainNavMenuGroup">
+              <div className="appMainNavMenuGroupTitle">{localizedNavGroupLabel(group.key, language)}</div>
+              <div className="appMainNavMenuLinks">
                 {group.items.map((item) => (
                   <Link
                     key={item.moduleKey}
@@ -231,57 +218,6 @@ export default function AppMainNav() {
           </div>
         ) : null}
       </div>
-      {groups.map((group) => {
-        const isOpen = openGroup === group.key;
-        const hasActiveItem = group.items.some((item) => pathMatchesModuleHref(pathname, item.href));
-
-        return (
-          <div
-            key={group.key}
-            className={`appMainNavGroup${hasActiveItem ? " appMainNavGroup--active" : ""}${isOpen ? " appMainNavGroup--open" : ""}`}
-            onMouseEnter={hoverCapable ? () => setOpenGroup(group.key) : undefined}
-            onMouseLeave={hoverCapable ? () => setOpenGroup("") : undefined}
-          >
-            <button
-              type="button"
-              className="appMainNavGroupButton"
-              aria-expanded={isOpen}
-              aria-haspopup="true"
-              onClick={(event) => {
-                event.stopPropagation();
-                setOpenGroup((current) => (current === group.key ? "" : group.key));
-              }}
-            >
-              {localizedNavGroupLabel(group.key, language)}
-            </button>
-            <div className={`appMainNavDropdown${isOpen ? " appMainNavDropdown--open" : ""}`}>
-              {group.items.map((item) => (
-                <Link
-                  key={item.moduleKey}
-                  href={item.href}
-                  className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
-                  onClick={() => setOpenGroup("")}
-                >
-                  {localizedModuleLabel(item.moduleKey, language)}
-                </Link>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-      {pinnedItems.length > 0 ? (
-        <div className="appMainNavPinned">
-          {pinnedItems.map((item) => (
-            <Link
-              key={item.moduleKey}
-              href={item.href}
-              className={`appMainNavPinnedLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavPinnedLink--active" : ""}`}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-      ) : null}
     </nav>
   );
 }

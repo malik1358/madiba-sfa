@@ -389,7 +389,7 @@ body {
   top: 34px;
   z-index: 9998;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -397,69 +397,8 @@ body {
   border-bottom: 1px solid #c8d8db;
 }
 
-.appMainNavPinned {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-inline-start: auto;
-}
-
 .environmentBanner + .globalAppStatus + .appMainNav {
   top: 68px;
-}
-
-.appMainNavGroup {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-.appMainNavGroupButton {
-  min-height: 34px;
-  padding: 6px 12px;
-  border: 1px solid #b9ccd0;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #073f4c;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.appMainNavGroup--active .appMainNavGroupButton,
-.appMainNavGroupButton:hover,
-.appMainNavGroupButton:focus-visible {
-  background: #073f4c;
-  border-color: #073f4c;
-  color: #ffffff;
-}
-
-.appMainNavDropdown {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  min-width: 210px;
-  padding: 6px;
-  border: 1px solid #c8d8db;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
-  z-index: 10002;
-}
-
-.appMainNavDropdown::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -6px;
-  height: 6px;
-}
-
-.appMainNavDropdown--open {
-  display: grid;
-  gap: 2px;
 }
 
 .appMainNavLink {
@@ -578,10 +517,73 @@ body {
   color: #5b7a81;
 }
 
-/* Mobile-only hamburger menu; hidden on desktop where groups show inline. */
-.appMainNavMenuButton,
-.appMainNavMobilePanel {
-  display: none;
+/* Hamburger menu button + panel (all screen sizes). */
+.appMainNavMenuButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #b9ccd0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.appMainNavMenuButton:hover,
+.appMainNavMenuButton:focus-visible,
+.appMainNavMenuButton[aria-expanded="true"] {
+  background: #073f4c;
+  border-color: #073f4c;
+  color: #ffffff;
+}
+
+.appMainNavMenuPanel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px 20px;
+  position: absolute;
+  top: 100%;
+  inset-inline: 8px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid #c8d8db;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.18);
+  max-height: min(75vh, 560px);
+  overflow-y: auto;
+  z-index: 10003;
+}
+
+.appMainNavMenuPinned {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e0ebed;
+}
+
+.appMainNavMenuGroupTitle {
+  padding: 2px 4px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #0b6173;
+  border-bottom: 1px solid #e0ebed;
+  margin-bottom: 4px;
+}
+
+.appMainNavMenuLinks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 2px 8px;
 }
 
 @media (max-width: 640px) {
@@ -618,76 +620,14 @@ body {
     overflow: visible;
   }
 
-  .appMainNav > .appMainNavGroup,
-  .appMainNav > .appMainNavPinned {
-    display: none;
-  }
-
-  .appMainNavMenuButton {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-    min-height: 34px;
-    padding: 6px 12px;
-    border: 1px solid #b9ccd0;
-    border-radius: 8px;
-    background: #ffffff;
-    color: #073f4c;
-    font-size: 12px;
-    font-weight: 800;
-    cursor: pointer;
-  }
-
-  .appMainNavMenuButton[aria-expanded="true"] {
-    background: #073f4c;
-    border-color: #073f4c;
-    color: #ffffff;
-  }
-
-  .appMainNavMobilePanel {
-    display: grid;
+  .appMainNavMenuPanel {
     gap: 12px;
-    position: absolute;
-    top: 100%;
-    inset-inline: 8px;
-    margin-top: 4px;
     padding: 10px;
-    border: 1px solid #c8d8db;
-    border-radius: 10px;
-    background: #ffffff;
-    box-shadow: 0 8px 24px rgba(7, 63, 76, 0.18);
     max-height: min(70vh, 480px);
-    overflow-y: auto;
-    z-index: 10003;
   }
 
-  .appMainNavMobilePinned {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .appMainNavMobileGroupTitle {
-    padding: 2px 4px 6px;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: #0b6173;
-    border-bottom: 1px solid #e0ebed;
-    margin-bottom: 4px;
-  }
-
-  .appMainNavMobileLinks {
-    display: grid;
+  .appMainNavMenuLinks {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px 8px;
-  }
-
-  .appMainNavPinned {
-    width: 100%;
-    margin-inline-start: 0;
   }
 
   .appMainNavSearch {
@@ -698,10 +638,6 @@ body {
   .appMainNavSearchResults {
     min-width: 0;
     width: 100%;
-  }
-
-  .appMainNavGroup--open {
-    z-index: 10003;
   }
 
   .environmentBanner + .globalAppStatus + .appMainNav {

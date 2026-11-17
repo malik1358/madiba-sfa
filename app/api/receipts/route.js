@@ -13,7 +13,9 @@ import {
   normalizeReceiptDataset,
   parseReceiptRegisterRows,
   prioritizeReceiptSheets,
+  removeReceiptRowsFromDataset,
 } from "../../lib/receiptRegister.js";
+import { canDeleteReceiptRegisterEntry } from "../../lib/moduleAccess.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
@@ -65,7 +67,31 @@ async function resolveProfile(admin, token) {
   return {
     id: profile.id,
     role: String(profile.role || "").toLowerCase(),
+    salesmanCode: String(profile.salesman_code || "").trim(),
+    salesmanName: String(profile.salesman_name || "").trim(),
   };
+}
+
+function normalizeCustomerCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+async function clearCustomerHistoryCache(admin, customerCode) {
+  const code = normalizeCustomerCode(customerCode);
+  if (!code) return 0;
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_key")
+    .like("setting_key", `customer_history_cache:${code}%`);
+  if (error) throw error;
+  const keys = (data || []).map((row) => row.setting_key).filter(Boolean);
+  if (!keys.length) return 0;
+  const { error: deleteError } = await admin
+    .from("system_settings")
+    .delete()
+    .in("setting_key", keys);
+  if (deleteError) throw deleteError;
+  return keys.length;
 }
 
 async function readDataset(admin) {
@@ -366,6 +392,137 @@ export async function POST(request) {
     return NextResponse.json({
       success: false,
       error: error.message || "Unable to upload receipt register.",
+    }, { status: 500 });
+  }
+}
+
+export async function DELETE(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const profile = await resolveProfile(admin, authHeader.replace("Bearer ", ""));
+    if (!canDeleteReceiptRegisterEntry(profile)) {
+      return NextResponse.json({
+        success: false,
+        error: "Only admin or Chaina can delete a receipt from the register.",
+      }, { status: 403 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const customerCode = String(body.customerCode || body.customer_code || "").trim();
+    const customerName = String(body.customerName || body.customer_name || "").trim();
+    const receiptDate = String(body.receiptDate || body.receipt_date || "").slice(0, 10);
+    const vchNo = String(body.vchNo || body.vch_no || "").trim();
+
+    if (!customerCode || !/^\d{4}-\d{2}-\d{2}$/.test(receiptDate) || !vchNo) {
+      return NextResponse.json({
+        success: false,
+        error: "customerCode, receiptDate (YYYY-MM-DD), and vchNo are required.",
+      }, { status: 400 });
+    }
+
+    const existing = await readDataset(admin);
+    const removal = removeReceiptRowsFromDataset(existing.rows, {
+      customerCode,
+      customerName,
+      receiptDate,
+      vchNo,
+    });
+
+    if (!removal.removedCount) {
+      return NextResponse.json({
+        success: false,
+        error: `Receipt ${vchNo} on ${receiptDate} was not found for this customer.`,
+      }, { status: 404 });
+    }
+
+    const nowIso = new Date().toISOString();
+    const liveMatched = removal.rows.filter((row) => row.matched || row.customer_code).length;
+    const payload = {
+      ...existing,
+      uploadedAt: nowIso,
+      rows: removal.rows,
+      rowsCount: removal.rows.length,
+      matchedCount: liveMatched,
+      unmatchedCount: removal.rows.length - liveMatched,
+      lastDeletedAt: nowIso,
+      lastDeletedBy: profile.id,
+      lastDeletedVoucher: {
+        customerCode: normalizeCustomerCode(customerCode),
+        receiptDate,
+        vchNo,
+        removedCount: removal.removedCount,
+      },
+    };
+
+    const { error: upsertError } = await admin
+      .from("system_settings")
+      .upsert([
+        {
+          setting_key: RECEIPT_DATASET_KEY,
+          setting_value: JSON.stringify(payload),
+        },
+        {
+          setting_key: RECEIPT_DATASET_STAMP_KEY,
+          setting_value: nowIso,
+        },
+      ], { onConflict: "setting_key" });
+
+    if (upsertError) throw upsertError;
+
+    const clearedCacheKeys = await clearCustomerHistoryCache(admin, customerCode);
+
+    after(async () => {
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await publishOfflineDataUpdate(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }), {
+          trigger: "receipt-delete",
+          kinds: ["outstanding"],
+          contentHash: hashOfflineDataContent({
+            customerCode: normalizeCustomerCode(customerCode),
+            receiptDate,
+            vchNo,
+            removedCount: removal.removedCount,
+            uploadedAt: nowIso,
+          }),
+        });
+      } catch (broadcastError) {
+        console.error("Offline data broadcast after receipt delete failed:", broadcastError);
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      removedCount: removal.removedCount,
+      removed: removal.removed.map((row) => ({
+        receipt_date: row.receipt_date,
+        vch_no: row.vch_no,
+        vch_type: row.vch_type,
+        amount: row.amount,
+        customer_code: row.customer_code,
+      })),
+      rowsCount: payload.rowsCount,
+      uploadedAt: nowIso,
+      clearedCacheKeys,
+      message: `Deleted receipt ${vchNo} on ${receiptDate} (${removal.removedCount} row(s)).`,
+    });
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: error.message || "Unable to delete receipt.",
     }, { status: 500 });
   }
 }

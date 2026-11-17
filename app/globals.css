@@ -8657,6 +8657,21 @@ button.moduleBiDashKpi:focus-visible {
   background: #eaf3f5;
 }
 
+.paymentSettleDetailCell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.paymentSettleDeleteReceipt {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .paymentSettleStatus {
   display: inline-flex;
   align-items: center;

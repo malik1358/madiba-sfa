@@ -82,6 +82,7 @@ export async function GET(request) {
       hasAllAccess: payload.hasAllAccess,
       visibleSalesmanCodes: payload.visibleSalesmanCodes || [],
       visibleMembers: payload.visibleMembers || [],
+      sharedCustomerCodes: payload.sharedCustomerCodes || [],
     });
 
     const customer = await ensureCustomerVisibleToScope(admin, customerCode, scope);

@@ -204,6 +204,8 @@ Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` ma
 - The customer appears on the outstanding dataset for a visible salesman.
 - The code is a prospect owned by a visible salesman.
 
+Outstanding salesman cells often use a staff-code prefix (`ST107 Mr Belal`). Scope matching strips `ST`/`SM`/`CL`/… prefixes and token-matches the person name so profile code `BELAL` still owns that book. Payment Collections also treats a master-owned customer as in-scope when the upload salesman is that same person, even if invoice-salesman preference would otherwise hide the master owner. `/api/customers/lookup?code=` passes `sharedCustomerCodes` like the `q=` search path.
+
 When the code has no `customers` row and no prospect but **does** appear on the outstanding dataset for a visible salesman (or the caller has all-access), `ensureCustomerVisibleToScope` backfills a minimal `customers` row (code + name, `is_active`) from the dataset and returns it. Outstanding uploads often list new Tally parties with no sales yet; without the backfill, customer phone (`/api/customers/contact`) and GPS (`/api/customers/location`) updates failed with “Customer not found.” and the Payment Collections save loop re-prompted for the mobile on every attempt.
 
 Do not replace this with a single `.eq("current_salesman_code", code)` filter.

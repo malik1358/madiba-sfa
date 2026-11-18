@@ -499,7 +499,8 @@ body {
 }
 
 .appMainNavSearchLink:hover,
-.appMainNavSearchLink:focus-visible {
+.appMainNavSearchLink:focus-visible,
+.appMainNavSearchLink--active {
   background: #edf4f5;
   color: #0b6173;
 }

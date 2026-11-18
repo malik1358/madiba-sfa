@@ -7,6 +7,7 @@ import {
   buildModuleAccess,
   canViewManagementReports,
   canManageOrderInvoice,
+  filterAccessibleModulesByQuery,
   canDeleteReceiptRegisterEntry,
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
@@ -626,4 +627,34 @@ test("potential sales targets is available to salesmen and report viewers, not c
   assert.equal(buildModuleAccess({ role: "product-promoter" }).canAccess("potentialSalesTargets"), false);
   assert.equal(moduleLabelForPath("/management/potential-sales-targets", "en"), "Potential Sales Targets");
   assert.equal(localizedModuleLabel("potentialSalesTargets", "ar"), "\u0639\u0645\u0644\u0627\u0621 \u0645\u0633\u062a\u0647\u062f\u0641\u0648\u0646 \u0645\u062d\u062a\u0645\u0644\u0648\u0646");
+});
+
+test("themed report menus only include screens accessible to the role", () => {
+  for (const role of ["admin", "salesman", "collector"]) {
+    const access = buildModuleAccess({ role, salesmanCode: "SM001" });
+    const groups = listAccessibleNavGroups(access);
+    for (const group of groups) {
+      assert.ok(group.items.length > 0);
+      assert.deepEqual(group.items, listAccessibleModules(access, group.modules));
+    }
+  }
+});
+
+test("screen search matches accessible module labels only", () => {
+  const admin = buildModuleAccess({ role: "admin" });
+  const salesman = buildModuleAccess({ role: "salesman", salesmanCode: "SM001" });
+
+  const misHits = filterAccessibleModulesByQuery(admin, "management mis", "en");
+  assert.equal(misHits.some((item) => item.moduleKey === "mis"), true);
+
+  const mapHits = filterAccessibleModulesByQuery(admin, "customer map", "en");
+  assert.equal(mapHits.some((item) => item.moduleKey === "customerMap"), true);
+  const arabicMapHits = filterAccessibleModulesByQuery(admin, "خريطة العملاء", "ar");
+  assert.equal(arabicMapHits.some((item) => item.moduleKey === "customerMap"), true);
+
+  const salesmanMapHits = filterAccessibleModulesByQuery(salesman, "customer map", "en");
+  assert.equal(salesmanMapHits.some((item) => item.moduleKey === "customerMap"), false);
+
+  assert.deepEqual(filterAccessibleModulesByQuery(admin, "   ", "en"), []);
+  assert.equal(filterAccessibleModulesByQuery(admin, "zzzz-not-a-screen", "en").length, 0);
 });

@@ -13,6 +13,7 @@ import {
   receiptRowIdentity,
   stripPaymentVoucherRows,
   removeUnanchoredDuplicateReceipts,
+  removeReceiptRowsFromDataset,
   findReceiptsForCustomer,
 } from "../app/lib/receiptRegister.js";
 
@@ -727,4 +728,46 @@ test("findReceiptsForCustomer keeps one copy when the same voucher is stored und
   assert.equal(rows.length, 2);
   assert.equal(rows.find((row) => row.vch_no === "599").customer_code, "1620");
   assert.equal(rows.find((row) => row.vch_no === "00072").amount, 356.34);
+});
+
+test("removeReceiptRowsFromDataset drops only the matched customer voucher lines", () => {
+  const rows = [
+    {
+      receipt_date: "2026-11-09",
+      vch_type: "Receipt",
+      vch_no: "10",
+      amount: 65837.5,
+      customer_code: "1001",
+      customer_name: "Sample",
+    },
+    {
+      receipt_date: "2026-11-09",
+      vch_type: "Receipt",
+      vch_no: "10",
+      amount: 65837.5,
+      customer_code: "",
+      customer_name: "Bank",
+      particulars: "Bank",
+    },
+    {
+      receipt_date: "2026-11-09",
+      vch_type: "Receipt",
+      vch_no: "11",
+      amount: 100,
+      customer_code: "1001",
+      customer_name: "Sample",
+    },
+  ];
+
+  const result = removeReceiptRowsFromDataset(rows, {
+    customerCode: "1001",
+    receiptDate: "2026-11-09",
+    vchNo: "10",
+  });
+
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removed[0].vch_no, "10");
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows.some((row) => row.vch_no === "11"), true);
+  assert.equal(result.rows.some((row) => String(row.particulars || "") === "Bank"), true);
 });

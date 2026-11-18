@@ -28,7 +28,14 @@ import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireGpsAccessGate, shouldRequireTransactionGps, isManagementRole } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
-import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
+import {
+  resolveMutualGroupProfiles,
+  expandMutualGroupScopeIdentities,
+  buildSalesmanScopeMatchers,
+  buildSalesmanScopeMatchersFromCodes,
+  normalizeSalesmanCode,
+  isSoyebProfile,
+} from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import { loadSharedCustomerCodesForViewer } from "../../lib/customerShares.js";
@@ -757,7 +764,10 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   }
 
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
-  const scopeMatchers = buildSalesmanScopeMatchers(scope.scopeProfiles || []);
+  const scopeProfiles = Array.isArray(scope.scopeProfiles) ? scope.scopeProfiles : [];
+  const scopeMatchers = scopeProfiles.length > 0
+    ? buildSalesmanScopeMatchers(scopeProfiles)
+    : buildSalesmanScopeMatchersFromCodes([...normalizedScopeCodes]);
 
   const salesmenQuery = admin
     .from("profiles")

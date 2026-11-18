@@ -76,6 +76,10 @@ test("datewise lines stay one row per voucher on the same date", () => {
   assert.equal(sumDatewise(lines, "open_amount"), 1175);
   assert.equal(lines[3].detail.includes("Invoice S1"), true);
   assert.equal(lines.some((row) => row.kind === "Date"), false);
+  const receiptLine = lines.find((row) => row.kind === "Receipt");
+  assert.equal(receiptLine.can_delete_receipt, true);
+  assert.equal(receiptLine.vch_no, "R1");
+  assert.equal(receiptLine.receipt_date, "2025-10-02");
 });
 
 test("datewise receipt detail names a reversed sale when collection only funded a void", () => {

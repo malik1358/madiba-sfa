@@ -110,3 +110,39 @@ test("customer missing from customers, prospects, and outstanding still throws",
   );
   assert.equal(upserts.length, 0);
 });
+
+test("Belal can open master-owned customer 1583 even when outstanding salesman is ST107 Mr Belal", async () => {
+  const belalCustomer = {
+    customer_code: "1583",
+    customer_name: "Zawya Al Tawfeer Foundation",
+    current_salesman_code: "BELAL",
+    previous_salesman_code: null,
+    is_active: true,
+  };
+  const { admin } = createFakeAdmin({
+    customersRows: new Map([["1583", belalCustomer]]),
+    dataset: {
+      rows: [{
+        customer_code: "1583",
+        customer_name: "Zawya Al Tawfeer Foundation",
+        salesman: "ST107 Mr Belal",
+        total_outstanding: 5192.67,
+      }],
+      invoices: [{
+        customer_code: "1583",
+        customer_name: "Zawya Al Tawfeer Foundation",
+        salesman: "ST107 Mr Belal",
+        pending_amount: 139.84,
+      }],
+    },
+  });
+
+  const customer = await ensureCustomerVisibleToScope(admin, "1583", {
+    hasAllAccess: false,
+    visibleSalesmanCodes: ["BELAL"],
+    visibleMembers: [{ salesman_code: "BELAL", salesman_name: "BELAL" }],
+    sharedCustomerCodes: [],
+  });
+  assert.equal(customer.customer_code, "1583");
+  assert.equal(customer.current_salesman_code, "BELAL");
+});

@@ -14,7 +14,7 @@ let sharedAccessLoad = null;
 let sharedAccessMemory = { userId: "", context: null, at: 0 };
 
 function accessCacheKey(userId) {
-  return `moduleAccess:v3:${String(userId || "").trim()}`;
+  return `moduleAccess:v4:${String(userId || "").trim()}`;
 }
 
 function readFreshStamp(userId) {
@@ -53,7 +53,7 @@ async function fetchRoleModuleMatrix(accessToken) {
 async function fetchProfileRow(supabase, userId) {
   const profileQuery = supabase
     .from("profiles")
-    .select("role,salesman_code,stock_take_access")
+    .select("role,salesman_code,salesman_name,stock_take_access")
     .eq("id", userId)
     .maybeSingle();
   let profileRes = await withTimeout(profileQuery, 8000, "PROFILE_TIMEOUT");
@@ -62,7 +62,7 @@ async function fetchProfileRow(supabase, userId) {
     profileRes = await withTimeout(
       supabase
         .from("profiles")
-        .select("role,salesman_code")
+        .select("role,salesman_code,salesman_name")
         .eq("id", userId)
         .maybeSingle(),
       8000,
@@ -107,6 +107,7 @@ function loadSharedAccessContext(supabase, session) {
     const context = {
       role: profile?.role,
       salesmanCode: profile?.salesman_code,
+      salesmanName: profile?.salesman_name,
       collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
       stockTakeAccess: profile?.stock_take_access === true,
       roleModuleMatrix,

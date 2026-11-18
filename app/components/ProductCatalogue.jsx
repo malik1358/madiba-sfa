@@ -35,6 +35,7 @@ import {
 } from "../lib/eodStock.js";
 import {
   buildOrderUnitOptions,
+  orderBaseUnitRate,
   orderQtyInUnit,
   orderQtyToMaster,
   orderRateInUnit,
@@ -797,6 +798,10 @@ export default function ProductCatalogue({
           const unit = pickOrderUnit(unitOptions, orderUnitChoice[item.item_code]);
           const perMaster = unit?.perMaster || 1;
           const shownQty = unit ? orderQtyInUnit(qty, perMaster) : qty;
+          // When the card shows the master (carton) rate, also show the implied lowest-unit rate.
+          const baseUnitPrice = hasPrice && (!unit || unit.key === "master")
+            ? orderBaseUnitRate(priced.rate, eodStock?.masterUnits, item.item_code)
+            : null;
           const showLinePricing = hasPrice && (qty > 0 || showCashDiscountRow || showVolumeDiscountRows);
           const cashAmountLabel = !isCashPayment
             ? (ar ? " · نقداً فقط" : " · Cash only")
@@ -818,6 +823,11 @@ export default function ProductCatalogue({
                 <div className={styles.priceRow}>
                   {discounted && <del className={styles.originalPrice}>{formatMoneyAmount(orderRateInUnit(price, perMaster))} ﷼</del>}
                   <strong className={styles.price}>{hasPrice ? `${formatMoneyAmount(orderRateInUnit(priced.rate, perMaster))} ﷼` : (ar ? "السعر غير متوفر" : "Price unavailable")}</strong>
+                  {baseUnitPrice ? (
+                    <span className={styles.baseUnitPrice}>
+                      {formatMoneyAmount(baseUnitPrice.rate)} ﷼ {ar ? "لكل" : "per"} {baseUnitPrice.label}
+                    </span>
+                  ) : null}
                 </div>
                 {discounted && <span className={styles.discountLabel}>
                   {[

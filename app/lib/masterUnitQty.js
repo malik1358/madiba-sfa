@@ -331,6 +331,23 @@ export function orderRateInUnit(masterRate, perMaster) {
 }
 
 /**
+ * Lowest-unit (base) rate implied by a master-unit price list rate.
+ * Returns null when the item has no master→base conversion.
+ */
+export function orderBaseUnitRate(masterRate, masterUnits, itemCode) {
+  const options = buildOrderUnitOptions(masterUnits, itemCode);
+  const base = options.find((option) => option.key === "base");
+  if (!base) return null;
+  const rate = Number(masterRate);
+  if (!Number.isFinite(rate)) return null;
+  return {
+    rate: orderRateInUnit(rate, base.perMaster),
+    label: base.label,
+    perMaster: base.perMaster,
+  };
+}
+
+/**
  * Apply master-unit conversion to an EOD availability snapshot for one item.
  */
 export function resolveEodStockMasterDisplay(availability, itemCode, rawQty) {

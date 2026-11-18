@@ -49,6 +49,7 @@ import {
   lookupExistingCustomersByMobile,
   normalizeKsaMobile,
 } from "../../lib/customerContact";
+import GenerateOrderLinkButton from "../../components/GenerateOrderLinkButton";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -56,8 +57,12 @@ const TEXT = {
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading prospect registration...", ar: "جاري تحميل تسجيل العميل المحتمل..." },
   orderReceived: { en: "Was an order received?", ar: "هل تم استلام طلب؟" },
-  orderReceivedHint: { en: "Choose Yes to create the order, or No to schedule the next follow-up visit.", ar: "اختر نعم لإنشاء الطلب، أو لا لتحديد موعد زيارة المتابعة القادمة." },
+  orderReceivedHint: {
+    en: "Create the order yourself, send a catalogue link to the customer, or schedule the next follow-up visit.",
+    ar: "أنشئ الطلب بنفسك، أو أرسل رابط الكتالوج للعميل، أو حدد موعد زيارة المتابعة القادمة.",
+  },
   yesCreateOrder: { en: "Yes, Create Order", ar: "نعم، إنشاء طلب" },
+  sendOrderLink: { en: "Send order link", ar: "إرسال رابط الطلب" },
   noScheduleFollowUp: { en: "No, Schedule Follow-up", ar: "لا، تحديد متابعة" },
   nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
   saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
@@ -713,7 +718,12 @@ export default function NewCustomerPage() {
         salesmanCode: form.salesman_code,
       });
 
-      setSavedProspect({ id: data.id, offlineId, query });
+      setSavedProspect({
+        id: data.id,
+        offlineId,
+        query,
+        customerName: form.customer_name_en || form.shop_name || "",
+      });
       setShowFollowUpDate(false);
       setFollowUpDate("");
       setMessage(saveResult.queued
@@ -1153,6 +1163,16 @@ export default function NewCustomerPage() {
                 <button type="button" autoFocus onClick={() => router.push(buildProspectOrderPath(savedProspect.query))}>
                   {t("yesCreateOrder")}
                 </button>
+                <GenerateOrderLinkButton
+                  customerCode={resolveProspectCustomerCode({
+                    id: savedProspect.id,
+                    offline_id: savedProspect.offlineId,
+                  })}
+                  customerName={savedProspect.customerName || ""}
+                  language={language}
+                  labelKey="sendLink"
+                  className="moduleInlineButton"
+                />
                 <button type="button" onClick={() => setShowFollowUpDate(true)}>
                   {t("noScheduleFollowUp")}
                 </button>
@@ -1492,6 +1512,15 @@ export default function NewCustomerPage() {
                             >
                               Create Order
                             </button>
+                            <GenerateOrderLinkButton
+                              customerCode={resolveProspectCustomerCode({
+                                id: row.id,
+                                offline_id: row.offline_id,
+                              })}
+                              customerName={row.company_name || row.customer_name || row.shop_name || ""}
+                              language={language}
+                              labelKey="sendLink"
+                            />
                           </>
                         ) : linkedCode ? (
                           <Link

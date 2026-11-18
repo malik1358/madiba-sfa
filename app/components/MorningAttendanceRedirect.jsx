@@ -14,6 +14,7 @@ import {
   resolveMorningAttendanceRedirectPath,
   writeGateReadyState,
 } from "../lib/morningAttendance";
+import { isPublicCustomerOrderPath } from "../lib/customerOrderLinks.js";
 import {
   buildGpsActivityNote,
   formatGpsFailureMessage,
@@ -59,6 +60,7 @@ export default function MorningAttendanceRedirect() {
   const router = useRouter();
   const { showPopup } = useAppPopup();
   const { language } = useAppLanguage();
+  const publicOrderPath = isPublicCustomerOrderPath(pathname);
   const [checking, setChecking] = useState(true);
   const [attendanceComplete, setAttendanceComplete] = useState(false);
   const [required, setRequired] = useState(false);
@@ -237,7 +239,14 @@ export default function MorningAttendanceRedirect() {
   }
 
   // At home without field Login: allow Collections viewing; do not force the punch overlay.
-  if (checking || !required || attendanceComplete || deskModeActive || !isInlineMorningAttendancePath(pathname)) {
+  if (
+    publicOrderPath
+    || checking
+    || !required
+    || attendanceComplete
+    || deskModeActive
+    || !isInlineMorningAttendancePath(pathname)
+  ) {
     return null;
   }
 

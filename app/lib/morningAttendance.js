@@ -29,6 +29,9 @@ export function canAccessWithoutMorningAttendance(pathname) {
   const path = String(pathname || "").trim().split("?")[0];
   return path === "/"
     || path === "/management/my-day"
+    || path === "/privacy"
+    || path === "/order"
+    || path.startsWith("/order/")
     || isInlineMorningAttendancePath(path);
 }
 

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { getSupabaseClient } from "../lib/supabase";
 import { resolveBackFallbackPath } from "../lib/navigation";
+import { isPublicCustomerOrderPath } from "../lib/customerOrderLinks.js";
 
 const TEXT = {
   back: { en: "Back", ar: "رجوع" },
@@ -71,7 +72,7 @@ export default function AppBackButton() {
     };
   }, [pathname]);
 
-  if (!showBack) return null;
+  if (!showBack || isPublicCustomerOrderPath(pathname)) return null;
 
   function handleBack() {
     if (typeof window !== "undefined" && window.history.length > 1) {

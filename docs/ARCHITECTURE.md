@@ -19,16 +19,19 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 ## Layers
 
 ```text
-Browser (app/page.js, app/management/*, app/components/*)
+Browser (app/page.js, app/management/*, app/components/*, app/order/[token])
   -> getSupabaseClient() for login and a few direct reads
   -> fetch /api/* with the user access token
+  -> public /order/<token> talks only to /api/customer-order-links/[token] (no JWT)
 API route (app/api/**/route.js)
   -> verify JWT with the service-role client, or verify CRON_SECRET
+  -> customer order links: create requires JWT + sales scope; redeem/submit validate opaque token + expiry
   -> enforce sales scope in application code
   -> read/write Postgres and Storage
 Postgres
   -> RLS still exists, but service-role calls bypass it
   -> active_sales view + system_settings JSON for datasets
+  -> customer_order_links is service-role only (no anon/authenticated policies)
 ```
 
 The service role is server-only. Losing the scope checks in an API route would expose other salesmen’s customers even though RLS exists, because the service role bypasses RLS.

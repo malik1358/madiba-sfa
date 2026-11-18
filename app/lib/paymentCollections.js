@@ -7,8 +7,12 @@ import {
   resolveInvoiceAgingDays,
   resolveInvoiceDays,
 } from "./outstanding.js";
-import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 import {
+  buildSalesmanScopeMatchersFromCodes,
+  salesmanValueMatchesScope,
+} from "./mutualSalesmanGroups.js";
+import {
+  assignedSalesmanCodes,
   customerAssignmentMatchesScope,
   customerHasActiveSalesmanTransfer,
 } from "./customerSalesmanAssignment.js";
@@ -60,6 +64,23 @@ function customerMasterInScope(customer, scopeMatchers, scopeCodeSet) {
   return customerAssignmentMatchesScope(customer, scopeMatchers, scopeCodeSet);
 }
 
+/** True when upload salesman is the same person as the customer-master owner (ST107 Mr Belal ↔ BELAL). */
+function invoiceSalesmanMatchesCustomerMaster(customer, customerInvoices, aggregateRowSalesman) {
+  const masterCodes = assignedSalesmanCodes(customer);
+  if (masterCodes.length === 0) return false;
+  const masterMatchers = buildSalesmanScopeMatchersFromCodes(masterCodes);
+  const candidates = [
+    pickOutstandingSalesmanName(customerInvoices),
+    aggregateRowSalesman,
+    ...(customerInvoices || []).map((invoice) => invoice?.salesman),
+  ];
+  return candidates.some((name) => (
+    name
+    && !isPlaceholderSalesmanValue(name)
+    && salesmanValueMatchesScope(name, masterMatchers)
+  ));
+}
+
 export function customerMatchesCollectionScope({
   customer = {},
   customerInvoices = [],
@@ -90,6 +111,8 @@ export function customerMatchesCollectionScope({
   const rowOwned = aggregateRowSalesman && !isPlaceholderSalesmanValue(aggregateRowSalesman)
     && salesmanValueMatchesScope(aggregateRowSalesman, scopeMatchers);
   const masterInScope = customerMasterInScope(customer, scopeMatchers, scopeCodeSet);
+  const masterOwnsInvoiceSalesman = masterInScope
+    && invoiceSalesmanMatchesCustomerMaster(customer, customerInvoices, aggregateRowSalesman);
 
   const hasInvoiceSalesman = Boolean(
     (uploadSalesman && !isPlaceholderSalesmanValue(uploadSalesman))
@@ -97,7 +120,7 @@ export function customerMatchesCollectionScope({
   );
 
   if (hasInvoiceSalesman) {
-    return Boolean(invoiceOwned || rowOwned || (
+    return Boolean(invoiceOwned || rowOwned || masterOwnsInvoiceSalesman || (
       customerHasActiveSalesmanTransfer(customer) && masterInScope
     ));
   }

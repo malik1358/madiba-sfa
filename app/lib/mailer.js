@@ -5,6 +5,58 @@ export function parseEmailList(value) {
     .filter((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry));
 }
 
+/**
+ * When a listed address appears on To/CC, also CC these inboxes.
+ * Sohail (boss of Soyeb) mirrors every mail that includes Soyeb.
+ * Override with EMAIL_RECIPIENT_MIRRORS as "from=to1,to2;from2=to3".
+ */
+export const DEFAULT_EMAIL_RECIPIENT_MIRRORS = {
+  "soyeb@noorshukran.com": ["sohail.budhiya@noorshukran.com"],
+};
+
+export function parseEmailRecipientMirrors(env = {}) {
+  const configured = String(env.EMAIL_RECIPIENT_MIRRORS || "").trim();
+  if (!configured) {
+    return { ...DEFAULT_EMAIL_RECIPIENT_MIRRORS };
+  }
+
+  const mirrors = {};
+  configured.split(";").forEach((pair) => {
+    const trimmed = String(pair || "").trim();
+    if (!trimmed) return;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) return;
+    const from = parseEmailList(trimmed.slice(0, eq))[0];
+    const targets = parseEmailList(trimmed.slice(eq + 1));
+    if (!from || !targets.length) return;
+    mirrors[from] = [...new Set([...(mirrors[from] || []), ...targets])];
+  });
+  return Object.keys(mirrors).length ? mirrors : { ...DEFAULT_EMAIL_RECIPIENT_MIRRORS };
+}
+
+export function applyEmailRecipientMirrors({ to = [], cc = [] } = {}, env = {}) {
+  const toList = [...new Set(parseEmailList(Array.isArray(to) ? to.join(",") : to))];
+  const ccList = [...new Set(parseEmailList(Array.isArray(cc) ? cc.join(",") : cc))]
+    .filter((email) => !toList.includes(email));
+  const mirrors = parseEmailRecipientMirrors(env);
+  const present = new Set([...toList, ...ccList]);
+  const extraCc = [];
+
+  present.forEach((email) => {
+    (mirrors[email] || []).forEach((target) => {
+      if (!target || present.has(target) || toList.includes(target) || ccList.includes(target)) return;
+      if (extraCc.includes(target)) return;
+      extraCc.push(target);
+      present.add(target);
+    });
+  });
+
+  return {
+    to: toList,
+    cc: [...ccList, ...extraCc],
+  };
+}
+
 export function isLikelyEmail(value) {
   return parseEmailList(value).length === 1;
 }
@@ -152,9 +204,10 @@ export async function sendEmail(message, env = process.env) {
     throw new Error("Email is not configured. Set SMTP_HOST and SMTP_FROM, or RESEND_API_KEY and SMTP_FROM.");
   }
 
-  const to = parseEmailList(Array.isArray(message.to) ? message.to.join(",") : message.to);
-  const cc = parseEmailList(Array.isArray(message.cc) ? message.cc.join(",") : message.cc)
-    .filter((email) => !to.includes(email));
+  const { to, cc } = applyEmailRecipientMirrors({
+    to: message.to,
+    cc: message.cc,
+  }, env);
 
   if (!to.length) {
     throw new Error("No email recipients.");

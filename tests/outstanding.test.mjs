@@ -378,6 +378,25 @@ test("outstanding ownership uses scope matchers for parenthetical salesman label
   assert.deepEqual([...ownership.ownedCustomerCodes].sort(), ["1290", "1542"]);
 });
 
+test("outstanding ownership matches ST107 Mr Belal to BELAL without scopeMatchers", () => {
+  const ownership = resolveOutstandingCustomerOwnership({
+    rows: [{
+      customer_code: "1583",
+      customer_name: "Zawya Al Tawfeer Foundation",
+      salesman: "ST107 Mr Belal",
+      total_outstanding: 5192.67,
+    }],
+    invoices: [{
+      customer_code: "1583",
+      customer_name: "Zawya Al Tawfeer Foundation",
+      salesman: "ST107 Mr Belal",
+      pending_amount: 139.84,
+    }],
+  }, ["BELAL"], null);
+
+  assert.equal(customerMatchesOutstandingCodeSet("1583", ownership.ownedCustomerCodes), true);
+});
+
 test("outstanding ownership honors aggregate pending-bills row salesman over invoice labels", () => {
   const junaidScope = buildSalesmanScopeMatchers([
     { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },

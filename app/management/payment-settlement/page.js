@@ -32,6 +32,7 @@ import { groupStatementRowsByDate, statementDatesWithDifference, statementDayDif
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { canDeleteReceiptRegisterEntry } from "../../lib/moduleAccess.js";
 
 const TEXT = {
   title: { en: "Payment Settlement", ar: "تسوية المدفوعات" },
@@ -115,6 +116,16 @@ const TEXT = {
   statementNone: {
     en: "No ledger lines found. Use a Tally ledger export with Date, Debit, and Credit columns.",
     ar: "لم يتم العثور على سطور دفتر. استخدم تصدير دفتر تالي بأعمدة التاريخ والمدين والدائن.",
+  },
+  deleteReceipt: { en: "Delete", ar: "حذف" },
+  deleteReceiptConfirm: {
+    en: "Delete receipt {voucher} on {date} from the receipt register? Settlement will reload.",
+    ar: "حذف سند القبض {voucher} بتاريخ {date} من سجل المقبوضات؟ ستُعاد تحميل التسوية.",
+  },
+  deleteReceiptBusy: { en: "Deleting…", ar: "جاري الحذف…" },
+  deleteReceiptDone: {
+    en: "Receipt deleted. Settlement reloaded.",
+    ar: "تم حذف السند. أُعيد تحميل التسوية.",
   },
   note: {
     en: "Referenced credit notes settle the named Ref. No. first (VAT-incl) and count in Paid. They do not cut that bill's sales figure. Only what the named bill cannot take follows oldest-open FIFO. Unreferenced CNs follow oldest-open FIFO. Dual-party Payments settle Purchases first, then leftover unpays prior Paid on earlier sales (Dr). A Purchase no Payment covers settles sales invoices already dated on or before that purchase, and does not prepay a later invoice. Open is not forced to the outstanding upload. Avg days uses paid receipts only, then open invoices older than that paid avg. Immediate full reversals stay in Sales but are excluded from avg days.",
@@ -296,10 +307,16 @@ export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const { access } = useModuleAccess();
+  const canDeleteReceipt = canDeleteReceiptRegisterEntry({
+    role: access.role,
+    salesmanCode: access.salesmanCode,
+    salesmanName: access.salesmanName,
+  });
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   usePopupMessages({ error, message });
+  const [deletingReceiptKey, setDeletingReceiptKey] = useState("");
 
   const [matches, setMatches] = useState([]);
   const [matchQuery, setMatchQuery] = useState("");
@@ -433,6 +450,50 @@ export default function PaymentSettlementPage() {
       setLoadingSettlement(false);
     }
   }, [authHeaders]);
+
+  const deleteReceiptRow = useCallback(async (row) => {
+    if (!canDeleteReceipt || !selectedCustomer?.customer_code || !row?.vch_no) return;
+    const receiptDate = String(row.receipt_date || row.date || "").slice(0, 10);
+    const vchNo = String(row.vch_no || row.voucher || "").trim();
+    if (!receiptDate || !vchNo) return;
+
+    const confirmText = String(t("deleteReceiptConfirm") || "")
+      .replace("{voucher}", vchNo)
+      .replace("{date}", receiptDate);
+    if (typeof window !== "undefined" && !window.confirm(confirmText)) return;
+
+    const deleteKey = `${receiptDate}|${vchNo}`;
+    setDeletingReceiptKey(deleteKey);
+    setError("");
+    setMessage("");
+    try {
+      const headers = await authHeaders();
+      if (!headers) return;
+      const response = await fetch("/api/receipts", {
+        method: "DELETE",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerCode: selectedCustomer.customer_code,
+          customerName: selectedCustomer.customer_name || "",
+          receiptDate,
+          vchNo,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to delete receipt.");
+      }
+      await loadSettlement(selectedCustomer);
+      setMessage(payload.message || t("deleteReceiptDone"));
+    } catch (err) {
+      setError(err.message || "Unable to delete receipt.");
+    } finally {
+      setDeletingReceiptKey("");
+    }
+  }, [authHeaders, canDeleteReceipt, loadSettlement, selectedCustomer, t]);
 
   const searchCustomers = useCallback(async (query) => {
     const needle = String(query || "").trim();
@@ -1621,9 +1682,23 @@ export default function PaymentSettlementPage() {
                           <td>{formatOptionalMoney(row.collected_amount)}</td>
                           <td className="moduleBiTotalCol">{formatOptionalMoney(row.open_amount)}</td>
                           <td>
-                            {row.kind === "Invoice" && row.detail
-                              ? <span className={statusClass(row.detail)}>{row.detail}</span>
-                              : (row.detail || "—")}
+                            <div className="paymentSettleDetailCell">
+                              {row.kind === "Invoice" && row.detail
+                                ? <span className={statusClass(row.detail)}>{row.detail}</span>
+                                : (row.detail || "—")}
+                              {canDeleteReceipt && row.can_delete_receipt && row.vch_no ? (
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton moduleDangerButton paymentSettleDeleteReceipt"
+                                  disabled={Boolean(deletingReceiptKey)}
+                                  onClick={() => deleteReceiptRow(row)}
+                                >
+                                  {deletingReceiptKey === `${String(row.receipt_date || row.date || "").slice(0, 10)}|${row.vch_no}`
+                                    ? t("deleteReceiptBusy")
+                                    : t("deleteReceipt")}
+                                </button>
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                       ))}

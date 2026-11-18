@@ -209,6 +209,17 @@ export function canManageOrderInvoice(role) {
   return isInvoiceMakerRole(normalized) || isAdminRole(normalized) || normalized === "manager";
 }
 
+/** Admin/report-user, or invoice-maker Chaina (IV006) — Payment Settlement receipt delete. */
+export const RECEIPT_DELETE_ALLOWED_SALESMAN_CODES = ["IV006"];
+
+export function canDeleteReceiptRegisterEntry(context = {}) {
+  if (isAdminRole(context.role)) return true;
+  const code = String(context.salesmanCode || context.salesman_code || "").trim().toUpperCase();
+  if (RECEIPT_DELETE_ALLOWED_SALESMAN_CODES.includes(code)) return true;
+  const name = String(context.salesmanName || context.salesman_name || "").trim().toLowerCase();
+  return name === "chaina";
+}
+
 export function shouldRequireTransactionGps(role) {
   return !isInvoiceMakerRole(role);
 }
@@ -263,6 +274,8 @@ export function buildModuleAccess(context = {}) {
 
   const access = {
     role,
+    salesmanCode: String(context.salesmanCode || "").trim(),
+    salesmanName: String(context.salesmanName || "").trim(),
     collectionOnly: isCollector,
     hasManagementPanel: isAdmin || isManager || isInvoiceMaker || isCollector,
     modules: {

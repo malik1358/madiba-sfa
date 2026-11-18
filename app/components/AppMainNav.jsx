@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MODULES,
+  filterAccessibleModulesByQuery,
   listAccessibleNavGroups,
   localizedModuleLabel,
   localizedNavGroupLabel,
@@ -17,6 +18,7 @@ import { getSupabaseClient } from "../lib/supabase";
 
 const NAV_TEXT = {
   mainNavigation: { en: "Main navigation", ar: "التنقل الرئيسي" },
+  searchScreensAria: { en: "Search screens", ar: "البحث في الشاشات" },
   searchScreens: { en: "Search screens…", ar: "ابحث عن شاشة…" },
   noScreensFound: { en: "No screens found", ar: "لا توجد شاشات مطابقة" },
   menu: { en: "Menu", ar: "القائمة" },
@@ -32,6 +34,7 @@ export default function AppMainNav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const navRef = useRef(null);
   const searchRef = useRef(null);
 
@@ -68,6 +71,12 @@ export default function AppMainNav() {
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [searchOpen, menuOpen]);
 
+  useEffect(() => {
+    setSearchQuery("");
+    setSearchOpen(false);
+    setMenuOpen(false);
+  }, [pathname]);
+
   const groups = useMemo(
     () => (signedIn && !loading ? listAccessibleNavGroups(access) : []),
     [access, loading, signedIn],
@@ -89,36 +98,57 @@ export default function AppMainNav() {
     },
     [access, language, loading, signedIn],
   );
+  const searchResults = useMemo(
+    () => (signedIn && !loading ? filterAccessibleModulesByQuery(access, searchQuery, language).slice(0, 12) : []),
+    [access, language, loading, searchQuery, signedIn],
+  );
 
-  const searchableScreens = useMemo(() => {
-    const seen = new Set();
-    const items = [];
-    for (const group of groups) {
-      for (const item of group.items) {
-        if (seen.has(item.moduleKey)) continue;
-        seen.add(item.moduleKey);
-        items.push({
-          moduleKey: item.moduleKey,
-          href: item.href,
-          groupKey: group.key,
-          labelEn: localizedModuleLabel(item.moduleKey, "en").toLowerCase(),
-          labelAr: localizedModuleLabel(item.moduleKey, "ar"),
-        });
-      }
-    }
-    return items;
-  }, [groups]);
-  const searchResults = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-    return searchableScreens
-      .filter((item) => item.labelEn.includes(query) || item.labelAr.includes(query))
-      .slice(0, 12);
-  }, [searchQuery, searchableScreens]);
+  useEffect(() => {
+    setActiveSearchIndex(0);
+  }, [searchQuery]);
 
   function closeSearch() {
-    setSearchQuery("");
     setSearchOpen(false);
+    setSearchQuery("");
+    setActiveSearchIndex(0);
+  }
+
+  function goToScreen(href) {
+    if (!href) return;
+    closeSearch();
+    setMenuOpen(false);
+    router.push(href);
+  }
+
+  function handleSearchKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSearch();
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (!searchResults.length) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSearchOpen(true);
+      setActiveSearchIndex((current) => (current + 1) % searchResults.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSearchOpen(true);
+      setActiveSearchIndex((current) => (current - 1 + searchResults.length) % searchResults.length);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const target = searchResults[activeSearchIndex] || searchResults[0];
+      if (target?.href) goToScreen(target.href);
+    }
   }
 
   if (!signedIn || (groups.length === 0 && pinnedItems.length === 0)) {
@@ -180,40 +210,43 @@ export default function AppMainNav() {
           className="appMainNavSearchInput"
           value={searchQuery}
           placeholder={t("searchScreens")}
-          aria-label={t("searchScreens")}
+          aria-label={t("searchScreensAria")}
+          aria-expanded={searchOpen}
+          aria-controls="app-main-nav-search-results"
+          autoComplete="off"
+          onFocus={() => setSearchOpen(true)}
           onChange={(event) => {
             setSearchQuery(event.target.value);
             setSearchOpen(true);
+            setMenuOpen(false);
           }}
-          onFocus={() => setSearchOpen(true)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              closeSearch();
-              event.currentTarget.blur();
-            } else if (event.key === "Enter" && searchResults.length > 0) {
-              event.preventDefault();
-              const href = searchResults[0].href;
-              closeSearch();
-              router.push(href);
-            }
-          }}
+          onKeyDown={handleSearchKeyDown}
         />
         {searchOpen && searchQuery.trim() ? (
-          <div className="appMainNavSearchResults">
-            {searchResults.length > 0 ? (
-              searchResults.map((item) => (
+          <div
+            id="app-main-nav-search-results"
+            className="appMainNavSearchResults"
+            role="listbox"
+          >
+            {searchResults.length === 0 ? (
+              <div className="appMainNavSearchEmpty">{t("noScreensFound")}</div>
+            ) : (
+              searchResults.map((item, index) => (
                 <Link
                   key={item.moduleKey}
                   href={item.href}
-                  className="appMainNavSearchLink"
-                  onClick={closeSearch}
+                  role="option"
+                  aria-selected={index === activeSearchIndex}
+                  className={`appMainNavSearchLink${index === activeSearchIndex ? " appMainNavSearchLink--active" : ""}`}
+                  onMouseEnter={() => setActiveSearchIndex(index)}
+                  onClick={() => closeSearch()}
                 >
-                  <span>{localizedModuleLabel(item.moduleKey, language)}</span>
-                  <span className="appMainNavSearchGroupTag">{localizedNavGroupLabel(item.groupKey, language)}</span>
+                  <span>{item.label}</span>
+                  <span className="appMainNavSearchGroupTag">
+                    {localizedNavGroupLabel(groups.find((group) => group.items.some((entry) => entry.moduleKey === item.moduleKey))?.key, language)}
+                  </span>
                 </Link>
               ))
-            ) : (
-              <div className="appMainNavSearchEmpty">{t("noScreensFound")}</div>
             )}
           </div>
         ) : null}

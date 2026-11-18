@@ -9,6 +9,7 @@ import {
   mergePackingMasterUnitConvMap,
   orderQtyInUnit,
   orderQtyToMaster,
+  orderBaseUnitRate,
   orderRateInUnit,
   parsePackingMasterConv,
   pickOrderUnit,
@@ -162,6 +163,18 @@ test("pcs entry round-trips through master-unit storage and keeps pricing exact"
   assert.equal(orderRateInUnit(60, 1), 60);
   assert.equal(orderQtyToMaster("", 12), 0);
   assert.equal(orderQtyToMaster(-3, 12), 0);
+});
+
+test("orderBaseUnitRate divides the carton rate by pieces per master", () => {
+  const units = { A1: { masterUom: "Ctn", baseUom: "Pcs", conv: 10 } };
+  assert.deepEqual(orderBaseUnitRate(100, units, "A1"), {
+    rate: 10,
+    label: "Pcs",
+    perMaster: 10,
+  });
+  assert.equal(orderBaseUnitRate(100, units, "MISSING"), null);
+  assert.equal(orderBaseUnitRate(100, { A1: { masterUom: "Ctn", baseUom: "Pcs", conv: 1 } }, "A1"), null);
+  assert.equal(orderBaseUnitRate(Number.NaN, units, "A1"), null);
 });
 
 test("stepOrderQtyInUnit steps by one selected unit and floors at zero", () => {

@@ -138,6 +138,14 @@ test("packing label shows the description directly and selling unit is separatel
   assert.doesNotMatch(packingBlock, /Unit not specified/);
 });
 
+test("catalogue price row shows lowest-unit rate beside the master-unit price", () => {
+  const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
+  assert.match(source, /orderBaseUnitRate\(/);
+  assert.match(source, /styles\.baseUnitPrice/);
+  assert.match(source, /baseUnitPrice\.rate/);
+  assert.match(source, /unit\.key === "master"/);
+});
+
 test("catalogue flags selected cart items missing prices after a pricing change", () => {
   const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
   const selector = source.match(/const unpricedCartCodes = [^\r\n]+/)[0];

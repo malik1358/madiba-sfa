@@ -9,6 +9,7 @@ import {
   isCustomerOrderLinkExpired,
   isPublicCustomerOrderPath,
   isValidOrderLinkTokenShape,
+  requireCustomerOrderLinkPricing,
   sanitizeCustomerOrderLinkCatalogPayload,
 } from "../app/lib/customerOrderLinks.js";
 import { canAccessWithoutMorningAttendance } from "../app/lib/morningAttendance.js";
@@ -82,11 +83,23 @@ test("customer-facing catalog keeps only priced in-stock catalogue codes", () =>
   );
 });
 
+test("order link creation requires explicit city and wholesale/retail", () => {
+  assert.equal(requireCustomerOrderLinkPricing({}).ok, false);
+  assert.equal(requireCustomerOrderLinkPricing({ pricingRegion: "riyadh" }).ok, false);
+  assert.equal(requireCustomerOrderLinkPricing({ pricingType: "wholesale" }).ok, false);
+  assert.deepEqual(
+    requireCustomerOrderLinkPricing({ pricingRegion: "Dammam", pricingType: "Retail" }),
+    { ok: true, pricingRegion: "dammam", pricingType: "retail" },
+  );
+});
+
 test("sanitize catalog payload strips stock qty and keeps customer-safe fields", () => {
   const sanitized = sanitizeCustomerOrderLinkCatalogPayload({
     customerCode: "1224",
     customerName: "Demo Customer",
     paymentType: "credit",
+    pricingRegion: "dammam",
+    pricingType: "retail",
     schemes: [{
       id: "scheme-1",
       name: "Mix deal",
@@ -116,4 +129,6 @@ test("sanitize catalog payload strips stock qty and keeps customer-safe fields",
   assert.equal(sanitized.items[0].master_unit, "CTN");
   assert.equal(sanitized.schemes[0].name, "Mix deal");
   assert.equal(sanitized.customerCode, "1224");
+  assert.equal(sanitized.pricingRegion, "dammam");
+  assert.equal(sanitized.pricingType, "retail");
 });

@@ -62,9 +62,9 @@ export async function POST(request) {
       profile,
       customerCode,
       customerName,
-      pricingRegion: body?.pricingRegion || scope?.pricingRegion || "",
+      pricingRegion: body?.pricingRegion || body?.pricing_region || "",
       paymentType: body?.paymentType || "credit",
-      pricingType: body?.pricingType || "wholesale",
+      pricingType: body?.pricingType || body?.pricing_type || "",
     });
 
     return json({ success: true, link });

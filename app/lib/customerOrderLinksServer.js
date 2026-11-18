@@ -7,6 +7,7 @@ import {
   isCustomerOrderLinkExpired,
   isValidOrderLinkTokenShape,
   normalizeOrderLinkToken,
+  requireCustomerOrderLinkPricing,
   sanitizeCustomerOrderLinkCatalogPayload,
 } from "./customerOrderLinks.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
@@ -220,6 +221,9 @@ export async function createCustomerOrderLink(admin, {
   if (!admin) fail("Server configuration is incomplete.", 500);
   if (!userId) fail("Not authenticated", 401);
 
+  const pricingChoice = requireCustomerOrderLinkPricing({ pricingRegion, pricingType });
+  if (!pricingChoice.ok) fail(pricingChoice.error);
+
   const code = await resolvePersistedCustomerCode(admin, customerCode);
   if (!code) fail("Customer is required.");
 
@@ -254,9 +258,8 @@ export async function createCustomerOrderLink(admin, {
   const token = createCustomerOrderLinkToken();
   const now = new Date();
   const expiresAt = customerOrderLinkExpiresAt(now, CUSTOMER_ORDER_LINK_TTL_HOURS);
-  const region = normalizePricingRegion(
-    pricingRegion || scope?.pricingRegion || profile?.pricing_region || "riyadh",
-  );
+  const region = pricingChoice.pricingRegion;
+  const type = pricingChoice.pricingType;
 
   const insertRow = {
     token,
@@ -269,7 +272,7 @@ export async function createCustomerOrderLink(admin, {
     salesman_name: orderMaker.salesmanName || orderMaker.salesmanCode,
     pricing_region: region,
     payment_type: normalizePaymentType(paymentType),
-    pricing_type: normalizePricingType(pricingType),
+    pricing_type: type,
     expires_at: expiresAt.toISOString(),
   };
 
@@ -294,6 +297,8 @@ export async function createCustomerOrderLink(admin, {
     customerCode: data.customer_code,
     customerName: data.customer_name,
     isProspect: Boolean(data.is_prospect),
+    pricingRegion: region,
+    pricingType: type,
     expiresAt: data.expires_at,
     createdAt: data.created_at,
     ttlHours: CUSTOMER_ORDER_LINK_TTL_HOURS,
@@ -410,6 +415,7 @@ export async function loadCustomerOrderLinkCatalog(admin, token) {
     customerName: link.customer_name,
     isProspect: Boolean(link.is_prospect),
     paymentType: link.payment_type,
+    pricingRegion: link.pricing_region,
     pricingType: link.pricing_type,
     expiresAt: link.expires_at,
     submittedOrder,

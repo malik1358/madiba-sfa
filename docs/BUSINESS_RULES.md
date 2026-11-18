@@ -121,6 +121,7 @@ Constants in `app/lib/workdayActivity.js`:
 ## Customer order links (passwordless)
 
 - Staff who can open Customer Audit generate a **Generate order link** for the selected customer. New Customer / prospects get **Send order link** beside Create Order and Schedule Follow-up.
+- Before the link is created, staff **must choose city price** (Riyadh / Dammam / Jeddah) and **wholesale or retail**. The API rejects missing choices. The guest catalogue shows **only that city + that price type** — no other city or wholesale/retail switcher.
 - The link is `/order/<token>`, valid **36 hours** from creation (Asia/Riyadh clock for display). No login. Opaque token; customer cannot switch customer or browse other company data.
 - The guest catalogue shows only **in-stock** priced catalogue items (positive countrywide EOD qty). **Available qty is never shown.** If no EOD snapshot is loaded, the guest catalogue is empty.
 - Quantities are **master unit only** (carton / highest unit). There is no piece/base-unit selector on the public page. Prices, packing, schemes, and cash/volume discount previews match the staff catalogue rules; stock numbers stay hidden. Over-stock submits fail with a quantity-too-high message that does not reveal available qty.

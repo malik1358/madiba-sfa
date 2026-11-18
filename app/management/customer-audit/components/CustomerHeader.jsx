@@ -13,6 +13,7 @@ export default function CustomerHeader({
   updatingOrderBlock = false,
   onToggleOrderBlock = null,
   pricingRegion = "",
+  pricingType = "wholesale",
   paymentType = "credit",
   language = "en",
   showOrderLink = true,
@@ -46,6 +47,7 @@ export default function CustomerHeader({
             customerCode={customer.customer_code}
             customerName={customer.customer_name}
             pricingRegion={pricingRegion}
+            pricingType={pricingType}
             paymentType={paymentType}
             language={language}
           />

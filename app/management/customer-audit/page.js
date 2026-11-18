@@ -611,6 +611,7 @@ function CustomerAuditPageContent() {
           updatingOrderBlock={updatingOrderBlock}
           onToggleOrderBlock={toggleOrderBlockOverride}
           pricingRegion={pricingRegion}
+          pricingType={pricingType}
           paymentType={paymentType}
           language={language}
         />

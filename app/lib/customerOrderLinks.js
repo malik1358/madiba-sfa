@@ -93,6 +93,18 @@ export function buildCustomerFacingCatalogItems({
 }
 
 /** Strip fields that must never reach the customer browser. */
+export function requireCustomerOrderLinkPricing({ pricingRegion, pricingType } = {}) {
+  const region = String(pricingRegion || "").trim().toLowerCase();
+  const type = String(pricingType || "").trim().toLowerCase();
+  if (!["riyadh", "dammam", "jeddah"].includes(region)) {
+    return { ok: false, error: "Select which city price to send (Riyadh, Dammam, or Jeddah)." };
+  }
+  if (!["wholesale", "retail"].includes(type)) {
+    return { ok: false, error: "Select wholesale or retail for this order link." };
+  }
+  return { ok: true, pricingRegion: region, pricingType: type };
+}
+
 export function sanitizeCustomerOrderLinkCatalogPayload(payload = {}) {
   const items = Array.isArray(payload.items) ? payload.items.map((item) => ({
     item_code: String(item.item_code || "").trim().toUpperCase(),
@@ -131,6 +143,9 @@ export function sanitizeCustomerOrderLinkCatalogPayload(payload = {}) {
     customerName: String(payload.customerName || "").trim(),
     isProspect: Boolean(payload.isProspect),
     paymentType: String(payload.paymentType || "credit").trim().toLowerCase() === "cash" ? "cash" : "credit",
+    pricingRegion: ["riyadh", "dammam", "jeddah"].includes(String(payload.pricingRegion || "").trim().toLowerCase())
+      ? String(payload.pricingRegion).trim().toLowerCase()
+      : "riyadh",
     pricingType: String(payload.pricingType || "wholesale").trim().toLowerCase() === "retail" ? "retail" : "wholesale",
     expiresAt: String(payload.expiresAt || "").trim(),
     submittedOrder: payload.submittedOrder && typeof payload.submittedOrder === "object"

@@ -10,6 +10,7 @@ import {
   formatMoneyAmount,
   lookupDiscountRate,
   lookupValueDiscountSlabs,
+  pricingRegionLabel,
   VALUE_DISCOUNT_SLABS,
 } from "../../lib/regionalPricing.js";
 import { evaluateOrderSchemes } from "../../lib/orderSchemes.js";
@@ -213,6 +214,13 @@ export default function CustomerOrderLinkPage() {
           <p>Browse available items, set quantities in the master unit (carton), and submit your order. No login required.</p>
           <div className={styles.meta}>
             {catalog?.customerCode ? <span>Code: {catalog.customerCode}</span> : null}
+            {catalog?.pricingRegion ? (
+              <span>
+                Prices: {pricingRegionLabel(catalog.pricingRegion)}
+                {" · "}
+                {catalog.pricingType === "retail" ? "Retail" : "Wholesale"}
+              </span>
+            ) : null}
             {catalog?.expiresAt ? <span>Link valid until {formatExpiry(catalog.expiresAt)} (Asia/Riyadh)</span> : null}
           </div>
         </header>

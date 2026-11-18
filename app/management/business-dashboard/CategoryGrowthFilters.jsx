@@ -60,6 +60,7 @@ export default function CategoryGrowthFilters({
   showSearch = true,
   showStatusFilters = true,
   hint,
+  embedded = false,
 }) {
   const t = translate(language, TEXT);
   const active = hasActiveGrowthFilters(applied);
@@ -86,10 +87,12 @@ export default function CategoryGrowthFilters({
   }
 
   return (
-    <section className="moduleSection">
-      <div className="moduleSectionHeader">
-        <h2>{t("title")}</h2>
-      </div>
+    <section className={`moduleSection${embedded ? " moduleSection--embedded" : ""}`}>
+      {embedded ? null : (
+        <div className="moduleSectionHeader">
+          <h2>{t("title")}</h2>
+        </div>
+      )}
       <p className="moduleHint">{hint || t("hint")}</p>
 
       <div className="moduleFormGrid moduleBiFilterGrid">

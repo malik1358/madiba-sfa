@@ -8,6 +8,7 @@ import {
   canViewManagementReports,
   canManageOrderInvoice,
   filterAccessibleModulesByQuery,
+  canDeleteReceiptRegisterEntry,
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
   listAccessibleModules,
@@ -170,6 +171,38 @@ test("admin manager and invoice-maker can set pending order invoice status", () 
   assert.equal(canManageOrderInvoice("invoice-maker"), true);
   assert.equal(canManageOrderInvoice("invoice_maker"), true);
   assert.equal(canManageOrderInvoice("salesman"), false);
+});
+
+test("only admin and Chaina can delete receipt-register rows", () => {
+  assert.equal(canDeleteReceiptRegisterEntry({ role: "admin" }), true);
+  assert.equal(canDeleteReceiptRegisterEntry({ role: "report-user" }), true);
+  assert.equal(canDeleteReceiptRegisterEntry({
+    role: "invoice-maker",
+    salesmanCode: "IV006",
+    salesmanName: "Chaina",
+  }), true);
+  assert.equal(canDeleteReceiptRegisterEntry({
+    role: "invoice-maker",
+    salesman_code: "iv006",
+  }), true);
+  assert.equal(canDeleteReceiptRegisterEntry({
+    role: "invoice-maker",
+    salesmanName: "Chaina",
+  }), true);
+  assert.equal(canDeleteReceiptRegisterEntry({ role: "invoice-maker" }), false);
+  assert.equal(canDeleteReceiptRegisterEntry({ role: "manager" }), false);
+  assert.equal(canDeleteReceiptRegisterEntry({ role: "salesman", salesmanCode: "SM001" }), false);
+});
+
+test("module access exposes salesman identity for receipt-delete gates", () => {
+  const access = buildModuleAccess({
+    role: "invoice-maker",
+    salesmanCode: "IV006",
+    salesmanName: "Chaina",
+  });
+  assert.equal(access.salesmanCode, "IV006");
+  assert.equal(access.salesmanName, "Chaina");
+  assert.equal(canDeleteReceiptRegisterEntry(access), true);
 });
 
 test("invoice-makers can access hierarchy upload, reports, and gps map", () => {

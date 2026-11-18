@@ -111,6 +111,10 @@ export function flattenDatewiseLines(days) {
         open_amount: null,
         detail: receiptDetail(receipt),
         unmatched_collection: applications.some((application) => application?.unmatched_collection),
+        receipt_date: receipt.receipt_date || date,
+        vch_no: String(receipt.vch_no || "").trim(),
+        vch_type: String(receipt.vch_type || "").trim(),
+        can_delete_receipt: true,
       });
     });
   });

@@ -784,6 +784,37 @@ export function findReceiptsForCustomer(dataset, customerCode, customerName = ""
     });
 }
 
+/**
+ * Drop customer-matching receipt/payment party lines for one voucher.
+ * Bank/cash counterpart lines for the same voucher are left alone.
+ */
+export function removeReceiptRowsFromDataset(rows = [], match = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const customerCode = String(match.customerCode || match.customer_code || "").trim();
+  const customerName = String(match.customerName || match.customer_name || "").trim();
+  const receiptDate = String(match.receiptDate || match.receipt_date || "").slice(0, 10);
+  const vchNo = String(match.vchNo || match.vch_no || "").trim().toUpperCase();
+  if (!customerCode || !receiptDate || !vchNo) {
+    return { rows: list, removed: [], removedCount: 0 };
+  }
+
+  const removed = [];
+  const kept = [];
+  list.forEach((row) => {
+    const built = buildReceiptRow(row);
+    const sameDate = String(built.receipt_date || "").slice(0, 10) === receiptDate;
+    const sameVoucher = String(built.vch_no || "").trim().toUpperCase() === vchNo;
+    const sameCustomer = receiptRowMatchesCustomer(built, customerCode, customerName);
+    if (sameDate && sameVoucher && sameCustomer) {
+      removed.push(built);
+      return;
+    }
+    kept.push(row);
+  });
+
+  return { rows: kept, removed, removedCount: removed.length };
+}
+
 export function monthKeyFromReceiptDate(value) {
   const iso = excelDateToIso(value) || String(value || "").slice(0, 10);
   return /^\d{4}-\d{2}/.test(iso) ? iso.slice(0, 7) : "";

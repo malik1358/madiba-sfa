@@ -236,6 +236,14 @@ export function expandMutualGroupScopeIdentities(allProfiles, currentProfile, op
   )];
 }
 
+/** Drop leading staff/payroll codes such as ST107 / SM003 / CL012 before name matching. */
+export function stripSalesmanStaffCodePrefix(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^(ST|SM|CL|IV|PP|MG|AD|RU)\d+\b[\s._-]*/i, "")
+    .trim();
+}
+
 export function buildSalesmanScopeMatchers(scopeProfiles) {
   const codes = new Set();
   const comparableNames = new Set();
@@ -247,6 +255,11 @@ export function buildSalesmanScopeMatchers(scopeProfiles) {
     if (code) {
       codes.add(code);
       tokens.add(code);
+      const strippedCode = normalizeSalesmanCode(stripSalesmanStaffCodePrefix(code));
+      if (strippedCode) {
+        codes.add(strippedCode);
+        tokens.add(strippedCode);
+      }
     }
 
     const name = normalizeSalesmanName(profile?.salesman_name);
@@ -256,6 +269,11 @@ export function buildSalesmanScopeMatchers(scopeProfiles) {
       const loose = looseSalesmanName(profile?.salesman_name);
       if (loose) looseNames.add(loose);
       nameTokens(profile?.salesman_name).forEach((token) => tokens.add(token));
+      const strippedName = stripSalesmanStaffCodePrefix(profile?.salesman_name);
+      if (strippedName) {
+        comparableNames.add(comparableSalesmanName(strippedName));
+        nameTokens(strippedName).forEach((token) => tokens.add(token));
+      }
     }
 
     profileGroupKeys(profile).forEach((key) => {
@@ -267,20 +285,37 @@ export function buildSalesmanScopeMatchers(scopeProfiles) {
   return { codes, comparableNames, looseNames, tokens };
 }
 
+/** Build matchers when only salesman codes are known (no profile rows). */
+export function buildSalesmanScopeMatchersFromCodes(codes) {
+  return buildSalesmanScopeMatchers(
+    [...new Set((codes || []).map((code) => String(code || "").trim()).filter(Boolean))]
+      .map((code) => ({ salesman_code: code, salesman_name: code })),
+  );
+}
+
 export function salesmanValueMatchesScope(value, matchers) {
   const raw = String(value || "").trim();
   if (!raw || !matchers) return false;
 
-  const code = normalizeSalesmanCode(raw);
-  if (code && matchers.codes.has(code)) return true;
+  const candidates = [...new Set([
+    raw,
+    stripSalesmanStaffCodePrefix(raw),
+  ].filter(Boolean))];
 
-  const comparable = comparableSalesmanName(raw);
-  if (comparable && matchers.comparableNames.has(comparable)) return true;
+  for (const candidate of candidates) {
+    const code = normalizeSalesmanCode(candidate);
+    if (code && matchers.codes.has(code)) return true;
 
-  const loose = looseSalesmanName(raw);
-  if (loose && matchers.looseNames.has(loose)) return true;
+    const comparable = comparableSalesmanName(candidate);
+    if (comparable && matchers.comparableNames.has(comparable)) return true;
 
-  if (code && matchers.tokens.has(code)) return true;
+    const loose = looseSalesmanName(candidate);
+    if (loose && matchers.looseNames.has(loose)) return true;
 
-  return nameTokens(raw).some((token) => matchers.tokens.has(token));
+    if (code && matchers.tokens.has(code)) return true;
+
+    if (nameTokens(candidate).some((token) => matchers.tokens.has(token))) return true;
+  }
+
+  return false;
 }

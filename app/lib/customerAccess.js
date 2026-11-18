@@ -5,17 +5,24 @@ import {
   resolveOutstandingCustomerOwnership,
 } from "./outstanding.js";
 import { resolveCustomerMasterExportFields } from "./customerCode.js";
-import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
+import {
+  buildSalesmanScopeMatchers,
+  buildSalesmanScopeMatchersFromCodes,
+} from "./mutualSalesmanGroups.js";
 
 /** Shape `ensureCustomerVisibleToScope` needs from payment-collections `getSalesScope`. */
 export function collectionCustomerAccessScope(scope) {
   const scopeProfiles = Array.isArray(scope?.scopeProfiles) ? scope.scopeProfiles : [];
+  const visibleSalesmanCodes = scope?.visibleSalesmanCodes || [];
+  const scopeMatchers = scopeProfiles.length > 0
+    ? buildSalesmanScopeMatchers(scopeProfiles)
+    : buildSalesmanScopeMatchersFromCodes(visibleSalesmanCodes);
   return {
     hasAllAccess: Boolean(scope?.hasAllAccess),
-    visibleSalesmanCodes: scope?.visibleSalesmanCodes || [],
+    visibleSalesmanCodes,
     sharedCustomerCodes: scope?.sharedCustomerCodes || [],
     visibleMembers: scopeProfiles,
-    scopeMatchers: buildSalesmanScopeMatchers(scopeProfiles),
+    scopeMatchers,
   };
 }
 import { findCustomerByCode } from "./prospectCustomerLink.js";
@@ -35,9 +42,16 @@ function normalizeCode(value) {
 export function withSalesScopeMatchers(scope) {
   if (!scope) return { visibleSalesmanCodes: [], scopeMatchers: buildSalesmanScopeMatchers([]) };
   if (scope.scopeMatchers) return scope;
+  const members = scope.visibleMembers || [];
+  if (members.length > 0) {
+    return {
+      ...scope,
+      scopeMatchers: buildSalesmanScopeMatchers(members),
+    };
+  }
   return {
     ...scope,
-    scopeMatchers: buildSalesmanScopeMatchers(scope.visibleMembers || []),
+    scopeMatchers: buildSalesmanScopeMatchersFromCodes(scope.visibleSalesmanCodes || []),
   };
 }
 

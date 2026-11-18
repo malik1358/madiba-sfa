@@ -624,7 +624,10 @@ export async function runDailyVisitReportEmailCycle(admin, {
     });
   }
 
+  // Build every personal report first, then send digests, then personal SMTP.
+  // Digests used to go last and were the first thing lost on Vercel timeouts.
   const reportMessageByUserId = new Map();
+  const pendingUserSends = [];
   const incentiveByCode = await loadIncentiveBySalesmanCode(admin, reportDate);
   for (const { profile, user } of recipients) {
     let userReport = {
@@ -703,27 +706,13 @@ export async function runDailyVisitReportEmailCycle(admin, {
       continue;
     }
 
-    try {
-      const sent = await send({ ...message, to }, env);
-      results.push({
-        userId: userReport.userId,
-        userName: userReport.userName,
-        status: "sent",
-        to,
-        kind: "user",
-        provider: sent?.provider || null,
-        hasTeamKpis: Boolean(teamPayload),
-      });
-    } catch (error) {
-      results.push({
-        userId: userReport.userId,
-        userName: userReport.userName,
-        status: "failed",
-        to,
-        kind: "user",
-        error: error.message || "Unable to send email",
-      });
-    }
+    pendingUserSends.push({
+      userId: userReport.userId,
+      userName: userReport.userName,
+      to,
+      message,
+      hasTeamKpis: Boolean(teamPayload),
+    });
   }
 
   async function sendDigestEmail({ userId, userName, to, message, kind }) {
@@ -856,6 +845,30 @@ export async function runDailyVisitReportEmailCycle(admin, {
           : null,
       }),
     });
+  }
+
+  for (const pending of pendingUserSends) {
+    try {
+      const sent = await send({ ...pending.message, to: pending.to }, env);
+      results.push({
+        userId: pending.userId,
+        userName: pending.userName,
+        status: "sent",
+        to: pending.to,
+        kind: "user",
+        provider: sent?.provider || null,
+        hasTeamKpis: pending.hasTeamKpis,
+      });
+    } catch (error) {
+      results.push({
+        userId: pending.userId,
+        userName: pending.userName,
+        status: "failed",
+        to: pending.to,
+        kind: "user",
+        error: error.message || "Unable to send email",
+      });
+    }
   }
 
   const sentCount = results.filter((row) => row.status === "sent").length;

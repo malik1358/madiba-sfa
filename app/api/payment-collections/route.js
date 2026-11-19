@@ -66,6 +66,7 @@ import {
   patchCollectionVisitSummaryVisitDistance,
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
+import { normalizeWhatsappSummaryText } from "../../lib/whatsappText.js";
 import {
   buildCurrentDayActivityEntry,
   loadDayActivityTillMessage,
@@ -1215,7 +1216,9 @@ export async function POST(request) {
     const gpsAccuracyMeters = gpsAccuracyRaw === null || gpsAccuracyRaw === undefined || gpsAccuracyRaw === ""
       ? null
       : Number(gpsAccuracyRaw);
-    const summaryText = String(formData.get("summaryText") || formData.get("whatsappMessage") || "").trim();
+    const summaryText = normalizeWhatsappSummaryText(
+      formData.get("summaryText") || formData.get("whatsappMessage") || "",
+    ).trim();
     const queuePriority = Number(formData.get("queuePriority") || 0);
     const probabilityScore = Number(formData.get("probabilityScore") || 0);
     const probabilityLabel = String(formData.get("probabilityLabel") || "").trim();

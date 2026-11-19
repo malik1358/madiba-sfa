@@ -341,7 +341,7 @@ test("patchCollectionVisitSummaryVisitDistance replaces Arabic distance block in
 المديونية:
 0-30: 0
 
-GPS: https://www.google.com/maps/search/?api=1&query=24.626017%2C46.66654
+GPS: https://maps.google.com/?q=24.626017,46.66654
 المسافة من العميل: 0.00 km
 المسافة من السابق: 0.00 km
 وقت الانتظار التقديري: -`;

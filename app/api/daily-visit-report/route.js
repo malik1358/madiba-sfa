@@ -1,6 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { canViewManagementReports, isManagementRole } from "../../lib/moduleAccess.js";
 import { buildDailyVisitReport } from "../../lib/dailyVisitReportServer.js";
+import {
+  filterVisitReportAvailableUsers,
+  resolveSubordinateUserIds,
+  resolveVisitReportAudience,
+} from "../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,6 +60,26 @@ function parseReportDate(value) {
   return date;
 }
 
+async function loadSubordinateIds(admin, profile, viewAll) {
+  if (viewAll) return new Set();
+
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,salesman_code,salesman_name,role")
+      .order("salesman_name"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  return resolveSubordinateUserIds(
+    usersRes.data?.users || [],
+    profile,
+    profilesRes.data || [],
+  );
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -75,20 +100,32 @@ export async function GET(request) {
 
     const profile = await getProfile(admin, user.id);
     const viewAll = canViewAllUsers(profile);
-    const restrictToSelf = !viewAll;
-    const userIdFilter = userId || (restrictToSelf ? user.id : "");
+    const subordinateIds = await loadSubordinateIds(admin, profile, viewAll);
+    const audience = resolveVisitReportAudience({
+      actorUserId: user.id,
+      requestedUserId: userId,
+      viewAll,
+      subordinateIds,
+    });
 
-    if (!viewAll && userId && userId !== user.id) {
+    if (!audience.allowed) {
       throw new Error("You do not have access to other users' visit reports.");
     }
 
-    const report = await buildDailyVisitReport(admin, { date, userIdFilter });
+    const report = await buildDailyVisitReport(admin, {
+      date,
+      userIdFilter: audience.userIdFilter,
+    });
 
     return Response.json({
       success: true,
       canSendVisitReportEmail: canSendVisitReportEmail(profile),
       canSendPotentialSalesTargetsTrial: String(profile?.role || "").toLowerCase() === "admin",
       ...report,
+      availableUsers: filterVisitReportAvailableUsers(
+        report.availableUsers,
+        audience.allowedUserIds,
+      ),
     });
   } catch (error) {
     console.error("Error building daily visit report:", error);

@@ -23,6 +23,7 @@
 .price { font-size: 21px; color: #0f4c5c; margin-top: auto; }
 .priceRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: auto; }
 .originalPrice { color: #687f87; font-size: 14px; }
+.baseUnitPrice { color: #526c75; font-size: 14px; font-weight: 600; }
 .discountLabel {
   display: inline-block;
   color: #0f766e;
@@ -88,6 +89,7 @@
   .cardBody { padding: 12px; }
   .cardBody h3 { font-size: 14px; }
   .price { font-size: 17px; }
+  .baseUnitPrice { font-size: 12px; }
   .share { min-height: 36px; font-size: 12px; padding: 6px; }
   .qty { height: 38px; gap: 3px; }
   .qty button { width: 32px; flex-shrink: 0; }

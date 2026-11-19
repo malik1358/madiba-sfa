@@ -1520,6 +1520,7 @@ export default function MisPage() {
                   showSearch={false}
                   showStatusFilters={false}
                   hint={t("filtersHint")}
+                  embedded
                 />
               </MisFilterDrawer>
 

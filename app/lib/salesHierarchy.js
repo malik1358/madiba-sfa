@@ -202,3 +202,55 @@ export function customerSalesmanAssignmentMatchesScope(customerSalesmanCode, sco
 
   return false;
 }
+
+/**
+ * Daily Visit Report / inactivity-log audience for one actor.
+ * Management/collector (viewAll) may open anyone. Field bosses may open self
+ * plus nested reporting-chain subordinates even when their role is still salesman.
+ */
+export function resolveVisitReportAudience({
+  actorUserId,
+  requestedUserId = "",
+  viewAll = false,
+  subordinateIds = new Set(),
+} = {}) {
+  const selfId = String(actorUserId || "").trim();
+  const targetId = String(requestedUserId || "").trim();
+  const teamIds = new Set(
+    [selfId, ...[...(subordinateIds || [])].map((id) => String(id || "").trim())].filter(Boolean),
+  );
+
+  if (viewAll) {
+    return {
+      allowed: true,
+      userIdFilter: targetId || "",
+      allowedUserIds: null,
+    };
+  }
+
+  if (targetId) {
+    if (!teamIds.has(targetId)) {
+      return {
+        allowed: false,
+        userIdFilter: "",
+        allowedUserIds: teamIds,
+      };
+    }
+    return {
+      allowed: true,
+      userIdFilter: targetId,
+      allowedUserIds: teamIds,
+    };
+  }
+
+  return {
+    allowed: true,
+    userIdFilter: selfId,
+    allowedUserIds: teamIds,
+  };
+}
+
+export function filterVisitReportAvailableUsers(availableUsers = [], allowedUserIds = null) {
+  if (!allowedUserIds) return availableUsers || [];
+  return (availableUsers || []).filter((entry) => allowedUserIds.has(String(entry?.userId || "")));
+}

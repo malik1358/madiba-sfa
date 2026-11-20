@@ -473,7 +473,12 @@ export function summarizeRouteDistanceKm(visits) {
 }
 
 export function buildGoogleMapsPointUrl(latitude, longitude) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  // Prefer a single-query Maps link (no &). WhatsApp click-to-chat truncates at
+  // an unencoded &, and a smashed one-line summary lets ?api=1&query=… absorb
+  // every following field into the GPS URL.
+  return `https://maps.google.com/?q=${lat},${lng}`;
 }
 
 export function parseGpsFromActivityNote(note) {

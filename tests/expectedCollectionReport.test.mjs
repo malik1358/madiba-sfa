@@ -321,7 +321,7 @@ test("resolveCompanyAvgCollectionDays means eligible customer avgs", () => {
   assert.equal(resolveCompanyAvgCollectionDays(new Map(), { fallbackDays: 77 }), 77);
 });
 
-test("buildExpectedCollectionHorizonReport places never-paid/avg>120 via company avg and keeps electronics in months", () => {
+test("buildExpectedCollectionHorizonReport keeps current month strict and forwards company-avg proxies", () => {
   const report = buildExpectedCollectionHorizonReport([
     {
       customer_code: "1001",
@@ -381,32 +381,29 @@ test("buildExpectedCollectionHorizonReport places never-paid/avg>120 via company
       ["1258C", { buildingMaterial: 0, electronics: 0, rest: 100 }],
     ]),
     monthEnd: "2026-11-30",
+    asOf: "2026-11-20",
     excludedCustomerCodes: new Set(["1258C", "1258"]),
     companyAvgDays: 60,
   });
 
-  // company avg = 60; never-paid/slow: 2026-10-01 + 60 = 2026-11-30 → current
-  // electronics full 1000 stays in current with 1001
   assert.equal(report.companyAvgDays, 60);
-  assert.ok(report.months.length >= 6);
-  assert.equal(report.months[0].total, 3200); // 1000 + 1000 + 500 + 700
-  assert.equal(report.reconciliation.nearTermTotal, 3200);
-  assert.equal(report.reconciliation.laterTotal, 800);
-  assert.equal(report.reconciliation.expectedInMonths, 4000);
+  // Current month stays strict BM+Rest only: 1000 (N1) + 400 (E1 BM) = 1400
+  assert.equal(report.months[0].total, 1400);
+  assert.equal(report.total, 1400);
+  // Proxies + electronics are forwarded out of November (asOf 11-20 + 60 → Jan 19)
   assert.equal(report.reconciliation.proxyPlaced.neverPaid.pendingAmount, 500);
   assert.equal(report.reconciliation.proxyPlaced.avgOver120.pendingAmount, 700);
-  assert.equal(report.reconciliation.excluded.electronics.pendingAmount, 0);
-  assert.equal(report.reconciliation.excluded.legal.pendingAmount, 300);
-  assert.equal(report.reconciliation.excludedTotal, 300);
-  assert.equal(report.reconciliation.totalPending, 4300);
-  assert.equal(report.reconciliation.accountedTotal, 4300);
+  assert.equal(report.months[0].rows.some((row) => row.refNo === "NP1"), false);
+  assert.equal(report.months[0].rows.some((row) => row.placementReason === "electronics"), false);
+  const january = report.months.find((month) => month.monthKey === "2027-01");
+  assert.ok(january);
+  assert.equal(january.total, 1800); // 500 + 700 + 600 electronics
   const april = report.months.find((month) => month.monthKey === "2027-04");
   assert.ok(april);
   assert.equal(april.total, 800);
-  assert.equal(april.isNearTerm, false);
-  const proxyRow = report.months[0].rows.find((row) => row.refNo === "NP1");
-  assert.equal(proxyRow.avgSource, "company");
-  assert.equal(proxyRow.avgDays, 60);
+  assert.equal(report.reconciliation.excluded.legal.pendingAmount, 300);
+  assert.equal(report.reconciliation.totalPending, 4300);
+  assert.equal(report.reconciliation.accountedTotal, 4300);
 });
 
 test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {

@@ -117,7 +117,7 @@ export async function loadExpectedCollectionReport(admin, {
 } = {}) {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
-  const cacheKey = `${monthEnd}|${asOf}|horizon-company-avg-v3`;
+  const cacheKey = `${monthEnd}|${asOf}|horizon-strict-nov-v4`;
   const cached = expectedCollectionReportCache;
   if (
     cached
@@ -193,6 +193,7 @@ export async function loadExpectedCollectionReport(admin, {
     enrichedByCode,
     customerMix,
     monthEnd,
+    asOf,
     excludedCustomerCodes: excludedLegalCustomers,
     companyAvgDays,
   });
@@ -201,7 +202,7 @@ export async function loadExpectedCollectionReport(admin, {
     asOf,
     monthEnd: detail.monthEnd,
     companyAvgDays: detail.companyAvgDays,
-    rule: "customer avg ≤120; never-paid and avg>120 use company avg days; full pending incl. electronics in approx-pay month; legal excluded; KPI estimate still BM+Rest strict rules",
+    rule: "current month = strict BM+Rest (overdue counts); never-paid/avg>120 use company avg in forward months only; electronics in months but not current; legal excluded",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,

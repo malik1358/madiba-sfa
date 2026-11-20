@@ -18,8 +18,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Expected Collection", ar: "التحصيل المتوقع" },
   subtitle: {
-    en: "Open outstanding placed into expected pay months by avg days. Never-paid and avg >120 use the company average; electronics stays in the same month. Only the legal queue stays outside months.",
-    ar: "تُوزَّع المستحقات المفتوحة على أشهر السداد حسب متوسط الأيام. من لم يسدد ومتوسط >120 يستخدمان متوسط الشركة؛ الإلكترونيات في نفس الشهر. الطابور القانوني فقط يبقى خارج الأشهر.",
+    en: "Current month stays the strict BM+Rest estimate. Never-paid / avg >120 use company avg in forward months only; electronics is in months but not the current-month estimate. Legal stays outside.",
+    ar: "الشهر الحالي يبقى تقدير مواد البناء+الباقي الصارم. من لم يسدد ومتوسط >120 يستخدمان متوسط الشركة في أشهر لاحقة فقط؛ الإلكترونيات في الأشهر لكن ليس في تقدير الشهر الحالي. القانوني خارج الأشهر.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: {
@@ -84,8 +84,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Month rows use each customer’s avg days when ≤120. Never-paid and avg >120 invoices use the company average and appear in those months (full pending, including electronics). Later months beyond the first three are labeled Later. Only legal-queue outstanding stays outside the month grid. KPI Collection estimate is unchanged (still BM+Rest, strict exclusions).",
-    ar: "صفوف الأشهر تستخدم متوسط العميل إن كان ≤120. فواتير من لم يسدد ومتوسط >120 تستخدم متوسط الشركة وتظهر في تلك الأشهر (كامل المتبقي بما فيه الإلكترونيات). الأشهر بعد الثلاثة الأولى تُوسم بـ لاحق. مستحقات الطابور القانوني فقط خارج الشبكة. تقدير مؤشرات التحصيل دون تغيير.",
+    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Never-paid and avg >120 are scheduled with company avg into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
+    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). من لم يسدد ومتوسط >120 يُجدولان بمتوسط الشركة في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
   },
 };
 

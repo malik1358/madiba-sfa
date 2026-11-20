@@ -1,3 +1,4 @@
+import { lastDayOfMonth, shiftMonthKey } from "./biReportPeriod.js";
 import {
   isKpiUploadSummaryCustomerExcluded,
   isOpenInvoiceExpectedThisMonth,
@@ -6,8 +7,30 @@ import {
 } from "./kpiUploadSummaryCategories.js";
 import { normalizeCode, normalizeName } from "./outstanding.js";
 
+export const EXPECTED_COLLECTION_HORIZON_MONTHS = 3;
+
 function money(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+export function resolveExpectedCollectionMonthEnds(monthEnd = "", horizonMonths = EXPECTED_COLLECTION_HORIZON_MONTHS) {
+  const end = String(monthEnd || "").slice(0, 10);
+  const startKey = /^\d{4}-\d{2}-\d{2}$/.test(end) ? end.slice(0, 7) : "";
+  const count = Math.max(1, Math.min(12, Number(horizonMonths) || EXPECTED_COLLECTION_HORIZON_MONTHS));
+  if (!startKey) return [];
+  const months = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const monthKey = shiftMonthKey(startKey, offset);
+    const resolvedEnd = lastDayOfMonth(monthKey) || `${monthKey}-28`;
+    months.push({
+      offset,
+      monthKey,
+      monthEnd: resolvedEnd,
+      afterMonthEnd: offset > 0 ? (months[offset - 1]?.monthEnd || "") : "",
+      isCurrent: offset === 0,
+    });
+  }
+  return months;
 }
 
 export function resolveExpectedCollectionSalesman(invoice = {}) {
@@ -158,19 +181,56 @@ function daysBetween(from, to) {
   return Math.round((b - a) / 86400000);
 }
 
+function summarizeExpectedCollectionRows(rows = [], {
+  monthKey = "",
+  monthEnd = "",
+  afterMonthEnd = "",
+  offset = 0,
+  isCurrent = false,
+} = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const bmTotal = money(list.reduce((sum, row) => sum + Number(row.bmValue || 0), 0));
+  const restTotal = money(list.reduce((sum, row) => sum + Number(row.restValue || 0), 0));
+  const total = money(list.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  const pendingAmount = money(list.reduce((sum, row) => sum + Number(row.pendingAmount || 0), 0));
+  const customerCodes = new Set(list.map((row) => row.customerCode).filter(Boolean));
+  return {
+    offset,
+    monthKey: String(monthKey || monthEnd || "").slice(0, 7),
+    monthEnd: String(monthEnd || "").slice(0, 10),
+    afterMonthEnd: String(afterMonthEnd || "").slice(0, 10),
+    isCurrent: Boolean(isCurrent),
+    total,
+    bmTotal,
+    restTotal,
+    pendingAmount,
+    customerCount: customerCodes.size,
+    invoiceCount: list.length,
+    rows: list,
+  };
+}
+
 /**
  * Flat invoice rows for BM+Rest open expected collection by month-end.
  * Matches the agreed estimate list: avg days from the map, legal excluded,
  * amount = BM + Rest mix share only (electronics share omitted).
+ * Pass afterMonthEnd to keep only invoices newly expected in that month window
+ * (approx pay after the prior month-end and on/before this month-end).
  */
 export function buildExpectedCollectionDetailRows(invoices = [], {
   avgDaysByCustomer = new Map(),
   enrichedByCode = new Map(),
   customerMix = new Map(),
   monthEnd = "",
+  afterMonthEnd = "",
+  monthKey = "",
+  offset = 0,
+  isCurrent = false,
   excludedCustomerCodes = null,
 } = {}) {
   const end = String(monthEnd || "").slice(0, 10);
+  const after = String(afterMonthEnd || "").slice(0, 10);
+  const key = String(monthKey || end).slice(0, 7);
   const rows = [];
 
   (invoices || []).forEach((invoice) => {
@@ -184,7 +244,12 @@ export function buildExpectedCollectionDetailRows(invoices = [], {
       ? avgDaysByCustomer.get(customerCode)
       : avgDaysByCustomer?.[customerCode];
     const invoiceDate = String(invoice?.invoice_date || "").slice(0, 10);
-    if (!isOpenInvoiceExpectedThisMonth({ invoiceDate, avgDays, monthEnd: end })) return;
+    if (!isOpenInvoiceExpectedThisMonth({
+      invoiceDate,
+      avgDays,
+      monthEnd: end,
+      afterMonthEnd: after,
+    })) return;
 
     const mix = customerMix instanceof Map
       ? customerMix.get(customerCode)
@@ -216,6 +281,7 @@ export function buildExpectedCollectionDetailRows(invoices = [], {
       amount,
       daysToMonthEnd: daysBetween(invoiceDate, end),
       approxPayDate,
+      expectedMonthKey: key,
       bmValue,
       restValue,
     });
@@ -231,18 +297,74 @@ export function buildExpectedCollectionDetailRows(invoices = [], {
     || String(left.refNo).localeCompare(String(right.refNo))
   ));
 
-  const bmTotal = money(rows.reduce((sum, row) => sum + Number(row.bmValue || 0), 0));
-  const restTotal = money(rows.reduce((sum, row) => sum + Number(row.restValue || 0), 0));
-  const total = money(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-  const customerCodes = new Set(rows.map((row) => row.customerCode));
+  return summarizeExpectedCollectionRows(rows, {
+    monthKey: key,
+    monthEnd: end,
+    afterMonthEnd: after,
+    offset,
+    isCurrent,
+  });
+}
+
+/**
+ * Current KSA month + next two month-ends (same BM+Rest / avg-days rules).
+ * Each months[] entry is the incremental window for that month; cumulative*
+ * fields are expected by that month-end (includes prior months in the horizon).
+ */
+export function buildExpectedCollectionHorizonReport(invoices = [], options = {}) {
+  const horizonMonths = resolveExpectedCollectionMonthEnds(
+    options.monthEnd,
+    options.horizonMonths || EXPECTED_COLLECTION_HORIZON_MONTHS,
+  );
+  const months = horizonMonths.map((horizon) => buildExpectedCollectionDetailRows(invoices, {
+    ...options,
+    monthEnd: horizon.monthEnd,
+    afterMonthEnd: horizon.afterMonthEnd,
+    monthKey: horizon.monthKey,
+    offset: horizon.offset,
+    isCurrent: horizon.isCurrent,
+  }));
+
+  let cumulativeTotal = 0;
+  let cumulativeBmTotal = 0;
+  let cumulativeRestTotal = 0;
+  let cumulativePendingAmount = 0;
+  const cumulativeCustomerCodes = new Set();
+  let cumulativeInvoiceCount = 0;
+
+  const withCumulative = months.map((month) => {
+    cumulativeTotal = money(cumulativeTotal + Number(month.total || 0));
+    cumulativeBmTotal = money(cumulativeBmTotal + Number(month.bmTotal || 0));
+    cumulativeRestTotal = money(cumulativeRestTotal + Number(month.restTotal || 0));
+    cumulativePendingAmount = money(cumulativePendingAmount + Number(month.pendingAmount || 0));
+    cumulativeInvoiceCount += Number(month.invoiceCount || 0);
+    (month.rows || []).forEach((row) => {
+      if (row?.customerCode) cumulativeCustomerCodes.add(row.customerCode);
+    });
+    return {
+      ...month,
+      cumulativeTotal,
+      cumulativeBmTotal,
+      cumulativeRestTotal,
+      cumulativePendingAmount,
+      cumulativeCustomerCount: cumulativeCustomerCodes.size,
+      cumulativeInvoiceCount,
+    };
+  });
+
+  const current = withCumulative[0] || summarizeExpectedCollectionRows([], {
+    monthEnd: String(options.monthEnd || "").slice(0, 10),
+    isCurrent: true,
+  });
 
   return {
-    monthEnd: end,
-    total,
-    bmTotal,
-    restTotal,
-    customerCount: customerCodes.size,
-    invoiceCount: rows.length,
-    rows,
+    monthEnd: current.monthEnd,
+    total: current.total,
+    bmTotal: current.bmTotal,
+    restTotal: current.restTotal,
+    customerCount: current.customerCount,
+    invoiceCount: current.invoiceCount,
+    rows: current.rows,
+    months: withCumulative,
   };
 }

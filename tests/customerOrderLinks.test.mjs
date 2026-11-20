@@ -73,6 +73,8 @@ test("customer-facing catalog keeps only priced in-stock catalogue codes", () =>
   const items = buildCustomerFacingCatalogItems({ sheetItems, regionPriceMap, eodStock });
   assert.deepEqual(items.map((item) => item.item_code), ["A001111"]);
   assert.equal(items[0].master_unit, "CTN");
+  assert.equal(items[0].base_unit, "Pcs");
+  assert.equal(items[0].unit_conv, 12);
   assert.equal(items[0].price, 10);
   assert.equal("available" in items[0], false);
   assert.equal("stock" in items[0], false);
@@ -116,6 +118,8 @@ test("sanitize catalog payload strips stock qty and keeps customer-safe fields",
       category: "Stationery",
       price: 10,
       master_unit: "CTN",
+      base_unit: "Pcs",
+      unit_conv: 12,
       packing: "12 Pcs / CTN",
       photos: [{ id: "photo-1" }],
       available: 99,
@@ -127,6 +131,8 @@ test("sanitize catalog payload strips stock qty and keeps customer-safe fields",
   assert.equal(sanitized.items[0].available, undefined);
   assert.equal(sanitized.items[0].stockQty, undefined);
   assert.equal(sanitized.items[0].master_unit, "CTN");
+  assert.equal(sanitized.items[0].base_unit, "Pcs");
+  assert.equal(sanitized.items[0].unit_conv, 12);
   assert.equal(sanitized.schemes[0].name, "Mix deal");
   assert.equal(sanitized.customerCode, "1224");
   assert.equal(sanitized.pricingRegion, "dammam");

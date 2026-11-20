@@ -73,12 +73,15 @@ export function buildCustomerFacingCatalogItems({
       if (!hasCataloguePrice(price)) return null;
       if (!hasPositiveCountryEodStockQty(stock, code)) return null;
       const master = lookupMasterUnitConv(units, code);
+      const conv = Number(master?.conv);
       return {
         item_code: code,
         item_name: String(item?.item_name || code).trim() || code,
         category: String(item?.category || "").trim(),
         price,
         master_unit: String(master?.masterUom || "").trim(),
+        base_unit: String(master?.baseUom || "").trim(),
+        unit_conv: Number.isFinite(conv) && conv > 1 ? conv : 0,
       };
     })
     .filter(Boolean);
@@ -106,19 +109,24 @@ export function requireCustomerOrderLinkPricing({ pricingRegion, pricingType } =
 }
 
 export function sanitizeCustomerOrderLinkCatalogPayload(payload = {}) {
-  const items = Array.isArray(payload.items) ? payload.items.map((item) => ({
-    item_code: String(item.item_code || "").trim().toUpperCase(),
-    item_name: String(item.item_name || "").trim(),
-    category: String(item.category || "").trim(),
-    price: Number(item.price) || 0,
-    master_unit: String(item.master_unit || "").trim(),
-    packing: String(item.packing || "").trim(),
-    photos: Array.isArray(item.photos)
-      ? item.photos
-        .map((photo) => ({ id: String(photo?.id || "").trim() }))
-        .filter((photo) => photo.id)
-      : [],
-  })).filter((item) => item.item_code && item.price > 0) : [];
+  const items = Array.isArray(payload.items) ? payload.items.map((item) => {
+    const conv = Number(item.unit_conv);
+    return {
+      item_code: String(item.item_code || "").trim().toUpperCase(),
+      item_name: String(item.item_name || "").trim(),
+      category: String(item.category || "").trim(),
+      price: Number(item.price) || 0,
+      master_unit: String(item.master_unit || "").trim(),
+      base_unit: String(item.base_unit || "").trim(),
+      unit_conv: Number.isFinite(conv) && conv > 1 ? conv : 0,
+      packing: String(item.packing || "").trim(),
+      photos: Array.isArray(item.photos)
+        ? item.photos
+          .map((photo) => ({ id: String(photo?.id || "").trim() }))
+          .filter((photo) => photo.id)
+        : [],
+    };
+  }).filter((item) => item.item_code && item.price > 0) : [];
 
   const schemes = Array.isArray(payload.schemes)
     ? payload.schemes

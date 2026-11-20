@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import { translate } from "../../lib/appLanguage.js";
 import {
   catalogueCardPrice,
 } from "../../lib/productCatalogue.js";
@@ -13,13 +15,89 @@ import {
   pricingRegionLabel,
   VALUE_DISCOUNT_SLABS,
 } from "../../lib/regionalPricing.js";
+import { orderRateInUnit } from "../../lib/masterUnitQty.js";
 import { evaluateOrderSchemes } from "../../lib/orderSchemes.js";
 import styles from "./order.module.css";
 
-function formatExpiry(value) {
+const TEXT = {
+  opening: { en: "Opening your catalogue…", ar: "جاري فتح الكتالوج…" },
+  yourOrder: { en: "Your order", ar: "طلبك" },
+  intro: {
+    en: "Browse available items, set quantities in the master unit (carton), and submit your order. No login required.",
+    ar: "تصفح الأصناف المتاحة، أدخل الكمية بوحدة الكرتون (الوحدة الكبرى)، ثم أرسل الطلب. لا يلزم تسجيل الدخول.",
+  },
+  code: { en: "Code", ar: "الكود" },
+  prices: { en: "Prices", ar: "الأسعار" },
+  wholesale: { en: "Wholesale", ar: "جملة" },
+  retail: { en: "Retail", ar: "تجزئة" },
+  validUntil: { en: "Link valid until", ar: "الرابط صالح حتى" },
+  ksa: { en: "Asia/Riyadh", ar: "توقيت الرياض" },
+  alreadySubmitted: {
+    en: "This order was already submitted. You can still view the catalogue until the link expires.",
+    ar: "تم إرسال هذا الطلب مسبقاً. يمكنك متابعة عرض الكتالوج حتى انتهاء صلاحية الرابط.",
+  },
+  submittedKeepOpen: {
+    en: "Order {order} was submitted. This link stays open until {until} ({tz}).",
+    ar: "تم إرسال الطلب {order}. يبقى هذا الرابط مفتوحاً حتى {until} ({tz}).",
+  },
+  submittedOk: {
+    en: "Order {order} submitted successfully. Thank you.",
+    ar: "تم إرسال الطلب {order} بنجاح. شكراً لك.",
+  },
+  activeSchemes: { en: "Active schemes", ar: "العروض النشطة" },
+  schemeOff: {
+    en: "{amount} ﷼ off every {qty} of {code}",
+    ar: "خصم {amount} ﷼ لكل {qty} من {code}",
+  },
+  searchPlaceholder: {
+    en: "Search item code or name",
+    ar: "ابحث بكود الصنف أو الاسم",
+  },
+  searchAria: { en: "Search catalogue", ar: "بحث في الكتالوج" },
+  category: { en: "Category", ar: "الفئة" },
+  allCategories: { en: "All categories", ar: "كل الفئات" },
+  noStock: {
+    en: "No in-stock items are available on this link right now.",
+    ar: "لا توجد أصناف متوفرة في المخزون على هذا الرابط حالياً.",
+  },
+  noMatch: { en: "No items match your search.", ar: "لا توجد أصناف مطابقة لبحثك." },
+  noPhoto: { en: "No photo", ar: "لا توجد صورة" },
+  general: { en: "General", ar: "عام" },
+  packing: { en: "Packing", ar: "التعبئة" },
+  per: { en: "per", ar: "لكل" },
+  masterUnit: { en: "master unit", ar: "الوحدة الكبرى" },
+  baseUnit: { en: "Pcs", ar: "قطعة" },
+  lowestUnitPrice: { en: "Lowest unit", ar: "أقل وحدة" },
+  cashDiscount: { en: "Cash discount", ar: "خصم نقدي" },
+  cashOnly: { en: "Cash only", ar: "نقداً فقط" },
+  volume: { en: "Volume", ar: "خصم الكمية" },
+  itemTotal: { en: "Item total", ar: "إجمالي الصنف" },
+  decrease: { en: "Decrease", ar: "تقليل" },
+  increase: { en: "Increase", ar: "زيادة" },
+  quantity: { en: "Quantity", ar: "الكمية" },
+  items: { en: "items", ar: "أصناف" },
+  item: { en: "item", ar: "صنف" },
+  qty: { en: "Qty", ar: "الكمية" },
+  submit: { en: "Submit order", ar: "إرسال الطلب" },
+  submitting: { en: "Submitting…", ar: "جاري الإرسال…" },
+  needQty: {
+    en: "Enter a quantity for at least one item.",
+    ar: "أدخل كمية لصنف واحد على الأقل.",
+  },
+  openFailed: {
+    en: "Unable to open this order link.",
+    ar: "تعذر فتح رابط الطلب.",
+  },
+  submitFailed: {
+    en: "Unable to submit the order.",
+    ar: "تعذر إرسال الطلب.",
+  },
+};
+
+function formatExpiry(value, language = "ar") {
   const ms = Date.parse(String(value || ""));
   if (!Number.isFinite(ms)) return "";
-  return new Date(ms).toLocaleString("en-GB", {
+  return new Date(ms).toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
     timeZone: "Asia/Riyadh",
     day: "2-digit",
     month: "short",
@@ -29,21 +107,46 @@ function formatExpiry(value) {
   });
 }
 
+function fillTemplate(template, values = {}) {
+  return String(template || "").replace(/\{(\w+)\}/g, (_, key) => (
+    values[key] == null ? "" : String(values[key])
+  ));
+}
+
 export default function CustomerOrderLinkPage() {
   const params = useParams();
   const token = String(params?.token || "").trim();
+  // Customer links always open in Arabic; guest can switch to English on this page only.
+  const [language, setLanguage] = useState("ar");
+  const t = translate(language, TEXT);
+  const dir = language === "ar" ? "rtl" : "ltr";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [catalog, setCatalog] = useState(null);
   const [quantities, setQuantities] = useState({});
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [requestId] = useState(() => (
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
       : `req-${Date.now()}`
   ));
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const previousLang = document.documentElement.lang;
+    const previousDir = document.documentElement.dir;
+    document.documentElement.lang = language;
+    document.documentElement.dir = dir;
+    if (document.body) document.body.dir = dir;
+    return () => {
+      document.documentElement.lang = previousLang || "en";
+      document.documentElement.dir = previousDir || "ltr";
+      if (document.body) document.body.dir = previousDir || "ltr";
+    };
+  }, [language, dir]);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,23 +161,39 @@ export default function CustomerOrderLinkPage() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload?.success) {
-          throw new Error(payload?.error || "Unable to open this order link.");
+          throw new Error(payload?.error || t("openFailed"));
         }
         if (!cancelled) {
           setCatalog(payload.catalog);
           if (payload.catalog?.submittedOrder?.orderNumber) {
-            setMessage(`Order ${payload.catalog.submittedOrder.orderNumber} was submitted. This link stays open until ${formatExpiry(payload.catalog.expiresAt)} (Asia/Riyadh).`);
+            setMessage(fillTemplate(t("submittedKeepOpen"), {
+              order: payload.catalog.submittedOrder.orderNumber,
+              until: formatExpiry(payload.catalog.expiresAt, language),
+              tz: t("ksa"),
+            }));
           }
         }
       } catch (err) {
-        if (!cancelled) setError(err.message || "Unable to open this order link.");
+        if (!cancelled) setError(err.message || t("openFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
     if (token) load();
     return () => { cancelled = true; };
+    // Intentionally load once per token; language only affects labels after load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    if (!catalog?.submittedOrder?.orderNumber) return;
+    const label = translate(language, TEXT);
+    setMessage(fillTemplate(label("submittedKeepOpen"), {
+      order: catalog.submittedOrder.orderNumber,
+      until: formatExpiry(catalog.expiresAt, language),
+      tz: label("ksa"),
+    }));
+  }, [catalog, language]);
 
   const items = catalog?.items || [];
   const schemes = catalog?.schemes || [];
@@ -123,15 +242,26 @@ export default function CustomerOrderLinkPage() {
     };
   }, [items, quantities, paymentType, cashDiscountMap, valueDiscountMap, schemeApplications, orderLines.length]);
 
+  const categories = useMemo(() => {
+    const set = new Set();
+    for (const item of items) {
+      const category = String(item.category || "").trim();
+      if (category) set.add(category);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const q = String(search || "").trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => (
-      String(item.item_code || "").toLowerCase().includes(q)
-      || String(item.item_name || "").toLowerCase().includes(q)
-      || String(item.category || "").toLowerCase().includes(q)
-    ));
-  }, [items, search]);
+    const selectedCategory = String(categoryFilter || "").trim();
+    return items.filter((item) => {
+      if (selectedCategory && String(item.category || "").trim() !== selectedCategory) return false;
+      if (!q) return true;
+      return String(item.item_code || "").toLowerCase().includes(q)
+        || String(item.item_name || "").toLowerCase().includes(q)
+        || String(item.category || "").toLowerCase().includes(q);
+    });
+  }, [items, search, categoryFilter]);
 
   function setQty(code, next) {
     if (readOnly) return;
@@ -142,7 +272,7 @@ export default function CustomerOrderLinkPage() {
   async function submitOrder() {
     if (readOnly || submitting) return;
     if (orderLines.length === 0) {
-      setError("Enter a quantity for at least one item.");
+      setError(t("needQty"));
       return;
     }
     setSubmitting(true);
@@ -164,9 +294,9 @@ export default function CustomerOrderLinkPage() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.success) {
-        throw new Error(payload?.error || "Unable to submit the order.");
+        throw new Error(payload?.error || t("submitFailed"));
       }
-      setMessage(`Order ${payload.orderNumber} submitted successfully. Thank you.`);
+      setMessage(fillTemplate(t("submittedOk"), { order: payload.orderNumber }));
       setCatalog((current) => current ? {
         ...current,
         readOnly: true,
@@ -185,20 +315,27 @@ export default function CustomerOrderLinkPage() {
         },
       } : current);
     } catch (err) {
-      setError(err.message || "Unable to submit the order.");
+      setError(err.message || t("submitFailed"));
     } finally {
       setSubmitting(false);
     }
   }
 
   if (loading) {
-    return <main className={styles.page}><div className={styles.loading}>Opening your catalogue…</div></main>;
+    return (
+      <main className={styles.page} dir={dir} lang={language}>
+        <div className={styles.loading}>{t("opening")}</div>
+      </main>
+    );
   }
 
   if (error && !catalog) {
     return (
-      <main className={styles.page}>
+      <main className={styles.page} dir={dir} lang={language}>
         <div className={styles.shell}>
+          <div className={styles.langBar}>
+            <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+          </div>
           <div className={`${styles.banner} ${styles.bannerError}`}>{error}</div>
         </div>
       </main>
@@ -206,22 +343,29 @@ export default function CustomerOrderLinkPage() {
   }
 
   return (
-    <main className={styles.page}>
+    <main className={styles.page} dir={dir} lang={language}>
       <div className={styles.shell}>
+        <div className={styles.langBar}>
+          <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+        </div>
         <header className={styles.hero}>
           <div className={styles.brand}>MADIBA</div>
-          <h1>{catalog?.customerName || "Your order"}</h1>
-          <p>Browse available items, set quantities in the master unit (carton), and submit your order. No login required.</p>
+          <h1>{catalog?.customerName || t("yourOrder")}</h1>
+          <p>{t("intro")}</p>
           <div className={styles.meta}>
-            {catalog?.customerCode ? <span>Code: {catalog.customerCode}</span> : null}
+            {catalog?.customerCode ? <span>{t("code")}: {catalog.customerCode}</span> : null}
             {catalog?.pricingRegion ? (
               <span>
-                Prices: {pricingRegionLabel(catalog.pricingRegion)}
+                {t("prices")}: {pricingRegionLabel(catalog.pricingRegion)}
                 {" · "}
-                {catalog.pricingType === "retail" ? "Retail" : "Wholesale"}
+                {catalog.pricingType === "retail" ? t("retail") : t("wholesale")}
               </span>
             ) : null}
-            {catalog?.expiresAt ? <span>Link valid until {formatExpiry(catalog.expiresAt)} (Asia/Riyadh)</span> : null}
+            {catalog?.expiresAt ? (
+              <span>
+                {t("validUntil")} {formatExpiry(catalog.expiresAt, language)} ({t("ksa")})
+              </span>
+            ) : null}
           </div>
         </header>
 
@@ -229,19 +373,23 @@ export default function CustomerOrderLinkPage() {
         {error ? <div className={`${styles.banner} ${styles.bannerError}`}>{error}</div> : null}
         {readOnly ? (
           <div className={`${styles.banner} ${styles.bannerWarn}`}>
-            This order was already submitted. You can still view the catalogue until the link expires.
+            {t("alreadySubmitted")}
           </div>
         ) : null}
 
         {schemes.length > 0 ? (
           <section className={styles.schemes}>
-            <h2>Active schemes</h2>
+            <h2>{t("activeSchemes")}</h2>
             <ul>
               {schemes.map((scheme) => (
                 <li key={scheme.id}>
                   {scheme.name || scheme.id}
                   {scheme.rewardEveryQty > 0 && scheme.unitDiscountSar > 0
-                    ? ` — ${formatMoneyAmount(scheme.unitDiscountSar)} ﷼ off every ${scheme.rewardEveryQty} of ${scheme.rewardItemCode}`
+                    ? ` — ${fillTemplate(t("schemeOff"), {
+                      amount: formatMoneyAmount(scheme.unitDiscountSar),
+                      qty: scheme.rewardEveryQty,
+                      code: scheme.rewardItemCode,
+                    })}`
                     : null}
                 </li>
               ))}
@@ -250,20 +398,31 @@ export default function CustomerOrderLinkPage() {
         ) : null}
 
         <div className={styles.toolbar}>
+          <label className={styles.categoryFilter}>
+            <span>{t("category")}</span>
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              aria-label={t("category")}
+            >
+              <option value="">{t("allCategories")}</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
           <input
             type="search"
-            placeholder="Search item code, name, or category"
+            placeholder={t("searchPlaceholder")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            aria-label="Search catalogue"
+            aria-label={t("searchAria")}
           />
         </div>
 
         {filteredItems.length === 0 ? (
           <div className={styles.empty}>
-            {items.length === 0
-              ? "No in-stock items are available on this link right now."
-              : "No items match your search."}
+            {items.length === 0 ? t("noStock") : t("noMatch")}
           </div>
         ) : (
           <div className={styles.grid}>
@@ -284,7 +443,15 @@ export default function CustomerOrderLinkPage() {
                 .filter((slab) => slab.rate > 0);
               const discounted = priced.rate < item.price - 0.000001;
               const photoId = item.photos?.[0]?.id;
-              const unitLabel = item.master_unit || "master unit";
+              const unitLabel = item.master_unit || t("masterUnit");
+              const unitConv = Number(item.unit_conv) || 0;
+              const baseUnitLabel = item.base_unit || t("baseUnit");
+              const lowestUnitRate = unitConv > 1
+                ? orderRateInUnit(priced.rate, unitConv)
+                : 0;
+              const lowestUnitBase = unitConv > 1 && discounted
+                ? orderRateInUnit(item.price, unitConv)
+                : 0;
               return (
                 <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
                   <div className={styles.gallery}>
@@ -295,38 +462,51 @@ export default function CustomerOrderLinkPage() {
                         alt={item.item_name}
                       />
                     ) : (
-                      <div className={styles.placeholder}>No photo</div>
+                      <div className={styles.placeholder}>{t("noPhoto")}</div>
                     )}
                   </div>
                   <div className={styles.cardBody}>
-                    <span className={styles.category}>{item.category || "General"}</span>
+                    <span className={styles.category}>{item.category || t("general")}</span>
                     <h3>{item.item_name}</h3>
                     <div className={styles.code}>{item.item_code}</div>
                     {item.packing ? (
-                      <p className={styles.packing}><strong>Packing:</strong> {item.packing}</p>
+                      <p className={styles.packing}><strong>{t("packing")}:</strong> {item.packing}</p>
                     ) : null}
                     <div className={styles.priceRow}>
                       {discounted ? <del className={styles.originalPrice}>{formatMoneyAmount(item.price)} ﷼</del> : null}
                       <strong className={styles.price}>{formatMoneyAmount(priced.rate)} ﷼</strong>
                     </div>
-                    <div className={styles.unitHint}>per {unitLabel}</div>
+                    <div className={styles.unitHint}>{t("per")} {unitLabel}</div>
+                    {lowestUnitRate > 0 ? (
+                      <div className={styles.lowestUnit}>
+                        <span>{t("lowestUnitPrice")}: </span>
+                        {lowestUnitBase > 0 ? (
+                          <del className={styles.originalPrice}>{formatMoneyAmount(lowestUnitBase)} ﷼</del>
+                        ) : null}
+                        <strong>{formatMoneyAmount(lowestUnitRate)} ﷼</strong>
+                        <span> {t("per")} {baseUnitLabel}</span>
+                      </div>
+                    ) : null}
                     {(cashRate > 0 || volumeSlabRows.length > 0 || qty > 0) ? (
                       <div className={styles.linePricing}>
                         {cashRate > 0 ? (
                           <div className={styles.linePricingRow}>
-                            <span>Cash discount</span>
-                            <span>{formatDiscountPercent(cashRate)}{paymentType === "cash" ? "" : " · Cash only"}</span>
+                            <span>{t("cashDiscount")}</span>
+                            <span>
+                              {formatDiscountPercent(cashRate)}
+                              {paymentType === "cash" ? "" : ` · ${t("cashOnly")}`}
+                            </span>
                           </div>
                         ) : null}
                         {volumeSlabRows.map((slab) => (
                           <div key={`${item.item_code}-vol-${slab.threshold}`} className={styles.linePricingRow}>
-                            <span>Volume ≥ {formatMoneyAmount(slab.threshold)}</span>
+                            <span>{t("volume")} ≥ {formatMoneyAmount(slab.threshold)}</span>
                             <span>{formatDiscountPercent(slab.rate)}</span>
                           </div>
                         ))}
                         {qty > 0 ? (
                           <div className={styles.linePricingRow}>
-                            <span>Item total</span>
+                            <span>{t("itemTotal")}</span>
                             <strong>{formatMoneyAmount(priced.lineValue)} ﷼</strong>
                           </div>
                         ) : null}
@@ -336,7 +516,7 @@ export default function CustomerOrderLinkPage() {
                       <button
                         type="button"
                         disabled={readOnly || qty <= 0}
-                        aria-label={`Decrease ${item.item_name}`}
+                        aria-label={`${t("decrease")} ${item.item_name}`}
                         onClick={() => setQty(item.item_code, qty - 1)}
                       >
                         -
@@ -346,14 +526,14 @@ export default function CustomerOrderLinkPage() {
                         min="0"
                         step="1"
                         disabled={readOnly}
-                        aria-label={`Quantity ${item.item_name}`}
+                        aria-label={`${t("quantity")} ${item.item_name}`}
                         value={qty || ""}
                         onChange={(event) => setQty(item.item_code, event.target.value)}
                       />
                       <button
                         type="button"
                         disabled={readOnly}
-                        aria-label={`Increase ${item.item_name}`}
+                        aria-label={`${t("increase")} ${item.item_name}`}
                         onClick={() => setQty(item.item_code, qty + 1)}
                       >
                         +
@@ -369,13 +549,15 @@ export default function CustomerOrderLinkPage() {
         {!readOnly ? (
           <div className={styles.cart}>
             <div>
-              <strong>{cartSummary.lines} item{cartSummary.lines === 1 ? "" : "s"}</strong>
+              <strong>
+                {cartSummary.lines} {cartSummary.lines === 1 ? t("item") : t("items")}
+              </strong>
               <span>
-                Qty {cartSummary.totalQty} · {formatMoneyAmount(cartSummary.totalValue)} ﷼
+                {t("qty")} {cartSummary.totalQty} · {formatMoneyAmount(cartSummary.totalValue)} ﷼
               </span>
             </div>
             <button type="button" onClick={() => { void submitOrder(); }} disabled={submitting || cartSummary.lines === 0}>
-              {submitting ? "Submitting…" : "Submit order"}
+              {submitting ? t("submitting") : t("submit")}
             </button>
           </div>
         ) : null}

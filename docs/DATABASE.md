@@ -183,6 +183,14 @@ Schemes and quantity limits are settings, not tables:
 - `push_notification_log`: counts plus `reference_key`.
 - `inactivity_email_cycle_log`: one row per cron cycle (`report_date`, `checked`, `sent`, `login_reminders_sent`, `skipped`, `details` jsonb).
 
+## HR Management
+
+Migration `20261120120000_hr_management.sql` (**apply in Supabase before the HR screens are used**; until then `/api/hr/*` returns 503 with `migrationRequired`). All three tables have RLS on, `SELECT` for `authenticated` only when `(select public.is_management())`, and `ALL` for `service_role`. Writes always go through `/api/hr/*` (admin|manager only, checked in the route).
+
+- `hr_employees`: uuid PK, unique `employee_code` (uppercased), `full_name`, `full_name_ar`, optional `profile_id` → `profiles(id)` (`ON DELETE SET NULL`, unique when set), `designation`, `department`, `nationality`, `iqama_no`, `phone`, `join_date`, `status` (`ACTIVE`/`INACTIVE`), master `basic_salary`, `housing_allowance`, `transport_allowance`, `other_allowance`, `notes`. Staff are not the same as `profiles`: only linked rows can prefill attendance.
+- `hr_monthly_records`: uuid PK, unique (`employee_id`, `month` `YYYY-MM`), `status` (`DRAFT`/`FINAL`), `source` (`MANUAL`/`IMPORT`/`PREFILL`), earnings (`basic_salary`, `housing_allowance`, `transport_allowance`, `other_allowance`, `overtime_amount`, `bonus_amount`, `commission_amount`), deductions (`absence_deduction`, `loan_deduction`, `advance_deduction`, `penalty_deduction`, `other_deduction`), attendance (`working_days`, `present_days`, `absent_days`, `leave_days`, `holiday_days`, `overtime_hours`), stored `gross_earnings`, `total_deductions`, `net_pay`, `finalized_at/by`. Totals are recomputed by `computeMonthlyTotals` on every write; there is no GOSI/statutory engine.
+- `hr_leave_entries`: uuid PK, `employee_id`, `leave_type` (`ANNUAL`/`SICK`/`UNPAID`/`EMERGENCY`/`HAJJ`/`OTHER`), `start_date`, `end_date`, `days` (non-Friday days, computed by the API), `status` (`PENDING`/`APPROVED`/`REJECTED`), `notes`.
+
 ## Optional table not in migrations
 
 `sales_bi_monthly` (`sql/setup_sales_bi_monthly.sql`): monthly cube columns `month`, `category`, salesman, customer, item, `voucher_type`, `local_import`, `abc_class`, `sales_amount`, `quantity`, `line_count`. RLS is enabled and the script does not add a read policy. The app’s primary cube is `system_settings.sales_bi_cube_v1`.

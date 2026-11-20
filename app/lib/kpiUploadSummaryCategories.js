@@ -324,12 +324,16 @@ export function isOpenInvoiceExpectedThisMonth({
   invoiceDate = "",
   avgDays = null,
   monthEnd = "",
+  afterMonthEnd = "",
 } = {}) {
   if (!isExpectedCollectionAvgDaysEligible(avgDays)) return false;
   const expectedPayDate = resolveExpectedPayDate(invoiceDate, avgDays);
   const end = String(monthEnd || "").slice(0, 10);
   if (!expectedPayDate || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return false;
-  return expectedPayDate <= end;
+  if (expectedPayDate > end) return false;
+  const after = String(afterMonthEnd || "").slice(0, 10);
+  if (after && /^\d{4}-\d{2}-\d{2}$/.test(after) && expectedPayDate <= after) return false;
+  return true;
 }
 
 export function splitAmountByCategoryMix(amount, mix = null) {

@@ -1,6 +1,7 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  augmentTransactionsWithMissingReferencedSales,
   buildCreditNotes,
   buildDaysToPayObservations,
   buildPaymentBehavior,
@@ -13,6 +14,7 @@ import {
   parseCreditNoteReferences,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
+import { flattenLedgerLinesExcludingReversed } from "../app/lib/datewiseLines.js";
 
 test("sales incl VAT total matches the sum of each invoice rounded to halalas", () => {
   // Customer 1073. Raw VAT is 59,119.476, which prints as 59,119.48.
@@ -2546,5 +2548,88 @@ test("a credit note that already voided its named bill does not take a later ide
   assert.equal(ledger.reversedInvoices.length, 1);
   assert.equal(ledger.reversedInvoices[0].voucher_number, "100");
   assert.equal(ledger.invoices.some((row) => row.voucher_number === "140"), true);
+});
+
+test("customer 1691 rebuilds missing JNFD/015 sale from CN 801 so the ledger shows it", () => {
+  // Production: Jeddah sales file never imported JNFD vouchers; only CN 801
+  // (Ref JNFD/015) landed in active_sales while outstanding still shows 272.06 open.
+  const cnLines = [
+    {
+      transaction_date: "2026-11-11",
+      voucher_number: "801",
+      voucher_type: "Credit Note",
+      reference: "JNFD/015",
+      customer_code: "1691",
+      customer_name: "Saleem Arabia Trading Company,",
+      salesman_name: "BASHEER KARUVAL",
+      item_code: "A003452",
+      item_name: "Madiba Pure Petrolium Jelly 200gm x 48 (Aloevera)",
+      quantity: -48,
+      sales_amount: -138.03,
+    },
+    {
+      transaction_date: "2026-11-11",
+      voucher_number: "801",
+      voucher_type: "Credit Note",
+      reference: "JNFD/015",
+      customer_code: "1691",
+      customer_name: "Saleem Arabia Trading Company,",
+      salesman_name: "BASHEER KARUVAL",
+      item_code: "A003937",
+      item_name: "MADIBA PAPAYA SOAP 72 pcs x 125 gm X 34011190",
+      quantity: -144,
+      sales_amount: -258.94,
+    },
+    {
+      transaction_date: "2026-11-11",
+      voucher_number: "801",
+      voucher_type: "Credit Note",
+      reference: "JNFD/015",
+      customer_code: "1691",
+      customer_name: "Saleem Arabia Trading Company,",
+      salesman_name: "BASHEER KARUVAL",
+      item_code: "A005970",
+      item_name: "AL QARIRAH - LARA - AIR FRESHNER - 300ML",
+      quantity: -72,
+      sales_amount: -347.75,
+    },
+  ];
+  const outstandingInvoices = [
+    {
+      ref_no: "JNFD/015",
+      invoice_date: "2026-11-08",
+      pending_amount: 272.06,
+      customer_code: "1691",
+      customer_name: "Saleem Arabia Trading Company,",
+      salesman: "Basheer Karuval",
+    },
+  ];
+
+  const augmented = augmentTransactionsWithMissingReferencedSales(cnLines, outstandingInvoices);
+  assert.equal(
+    augmented.some((row) => row.voucher_number === "JNFD/015" && row.synthetic_missing_sale),
+    true,
+  );
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: cnLines,
+    receipts: [],
+    outstandingInvoices,
+    todayIso: "2026-11-20",
+  });
+
+  const sale = ledger.invoices.find((row) => row.voucher_number === "JNFD/015");
+  assert.ok(sale, "JNFD/015 must appear on Invoices & Settlement");
+  assert.equal(sale.tally_only, undefined);
+  assert.ok(Number(sale.amount_incl_vat) > 272.06);
+  assert.ok(Math.abs(Number(sale.remaining) - 272.06) <= 0.02);
+  assert.ok(Number(sale.credit_note_settled) > 0);
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "JNFD/015"), false);
+
+  const ledgerLines = flattenLedgerLinesExcludingReversed(ledger.datewise || []);
+  assert.equal(
+    ledgerLines.some((row) => row.kind === "Invoice" && row.voucher === "JNFD/015"),
+    true,
+  );
 });
 

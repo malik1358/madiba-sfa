@@ -5,6 +5,7 @@ import {
   buildReceiptSummaryShareImage,
   buildWhatsappAppUrl,
   buildWhatsappShareUrl,
+  normalizeWhatsappSummaryText,
   prepareWhatsappAttachmentShare,
   shareTextAndFilesOnWhatsapp,
   shouldOmitWebShareText,
@@ -12,11 +13,55 @@ import {
   whatsappCacheFileName,
   wrapWhatsappSummaryLines,
 } from "../app/lib/whatsappShare.js";
+import { buildGoogleMapsPointUrl } from "../app/lib/geo.js";
+import { patchWhatsappSummaryDayActivity } from "../app/lib/dayActivityWhatsapp.js";
 
 test("buildWhatsappShareUrl encodes message text", () => {
   const url = buildWhatsappShareUrl("Customer: Test\nCode: 1254");
   assert.match(url, /^https:\/\/api\.whatsapp\.com\/send\?text=/);
   assert.ok(url.includes("Customer%3A%20Test"));
+});
+
+test("normalizeWhatsappSummaryText strips CRLF so WhatsApp keeps line breaks", () => {
+  const normalized = normalizeWhatsappSummaryText(
+    "Customer: Test\r\nQueue priority: 36.\r\nGPS: https://maps.google.com/?q=24.6,46.7\r\nDistance from customer: 1.00 km",
+  );
+  assert.equal(normalized.includes("\r"), false);
+  assert.match(normalized, /Customer: Test\nQueue priority: 36\.\nGPS:/);
+});
+
+test("buildWhatsappShareUrl encodes CRLF summaries without %0D", () => {
+  const url = buildWhatsappShareUrl(
+    "Customer: Test\r\nGPS: https://maps.google.com/?q=24.6,46.7\r\nDistance from customer: 1.00 km",
+  );
+  assert.equal(url.includes("%0D"), false);
+  assert.ok(url.includes("Customer%3A%20Test%0AGPS%3A%20"));
+  assert.ok(url.includes("Distance%20from%20customer"));
+});
+
+test("buildGoogleMapsPointUrl avoids & so WhatsApp text URLs cannot truncate at query=", () => {
+  assert.equal(buildGoogleMapsPointUrl(24.636141, 46.707131), "https://maps.google.com/?q=24.636141,46.707131");
+  assert.equal(String(buildGoogleMapsPointUrl(24.636141, 46.707131)).includes("&"), false);
+});
+
+test("patchWhatsappSummaryDayActivity replaces CRLF totals instead of duplicating", () => {
+  const stored = [
+    "Customer: Test",
+    "Visits with order: 1 / 100 ﷼",
+    "Visits without order: 2",
+    "Collections: 0 / 0 ﷼",
+  ].join("\r\n");
+  const patched = patchWhatsappSummaryDayActivity(stored, {
+    known: true,
+    orderCount: 3,
+    orderValue: 900,
+    visitWithoutOrderCount: 1,
+    collectionCount: 2,
+    collectionValue: 400,
+  });
+  assert.equal(patched.includes("\r"), false);
+  assert.equal((patched.match(/Visits with order:/g) || []).length, 1);
+  assert.match(patched, /Visits with order: 3 \/ 900 ﷼\nVisits without order: 1\nCollections: 2 \/ 400 ﷼/);
 });
 
 test("buildWhatsappShareUrl supports optional destination number", () => {

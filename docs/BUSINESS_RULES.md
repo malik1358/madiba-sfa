@@ -28,6 +28,16 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 - Salesman visit plan is on for field roles unless `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` is `0`, `false`, or `no`.
 - `is_management()` SQL includes admin, report-user, and manager. It does not include invoice makers, collectors, or product promoters.
 
+## HR Management
+
+- **Scope**: all company staff live in `hr_employees` (not only app users). `profile_id` optionally links a staff row to a `profiles` login; one profile per staff row.
+- **Access** (`app/lib/hr/hrAccess.js`, `moduleAccess.js`): Employees, Monthly Feed and Leave modules are admin + report-user + manager. `canWriteHr` is **admin or manager only**; report-user is read-only (API returns 403 on writes). Payroll Summary (`hrPayrollSummary`) is any `canViewManagementReports` role (adds invoice-maker) and returns monthly/department totals only, never per-person pay.
+- **Net pay** = sum of earnings (basic, housing, transport, other allowance, overtime, bonus, commission) − sum of deductions (absence, loan, advance, penalty, other). No GOSI/statutory calculation; negative net is allowed and shown.
+- **Monthly feed**: rows are unique per (employee, `YYYY-MM`). New months default earnings from the employee master. Input paths: manual edit, Excel import (template headers or aliases/Arabic labels; missing columns leave existing values untouched; unknown employee codes, duplicates and negative amounts are reported per row), and Prefill.
+- **DRAFT/FINAL**: only DRAFT rows are overwritten by save, import or prefill; FINAL rows are skipped (reported) and the DB update also filters `status = 'DRAFT'`. **Reopen** returns a FINAL row to DRAFT; **Finalize** locks it (`finalized_at/by`).
+- **Attendance ledger**: HR keeps its own counts per month. **Prefill** uses `buildMonthlyAttendanceReportForUser` for linked salesman/collector profiles (others are skipped with a reason). **Fridays are holidays**: never working, present, absent or leave days; a Friday login is ignored. A no-login elapsed weekday is absent unless covered by APPROVED leave, in which case it is leave. Future approved leave days count as leave. Absence deduction is entered by HR, not auto-calculated.
+- **Leave**: days exclude Fridays; overlapping non-rejected leave for the same employee is rejected; only APPROVED leave feeds attendance.
+
 ## Workday and attendance
 
 Constants in `app/lib/workdayActivity.js`:

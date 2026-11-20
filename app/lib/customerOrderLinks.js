@@ -1,7 +1,6 @@
 import { isCatalogueProductCode, hasCataloguePrice, normalizeCatalogueCode } from "./productCatalogue.js";
 import {
-  filterItemsWithPositiveCountryEodStock,
-  hasPositiveCountryEodStockQty,
+  countryEodStockQty,
   normalizeEodStockAvailability,
 } from "./eodStock.js";
 import { lookupMasterUnitConv } from "./masterUnitQty.js";
@@ -52,7 +51,18 @@ export function buildCustomerOrderLinkUrl(origin, token) {
 }
 
 /**
- * Customer-facing catalog: priced catalogue codes that are in stock.
+ * Public order links: item must have strictly positive KSA countrywide EOD stock
+ * (Riyadh + Dammam + Jeddah). Missing/inactive EOD → not sellable on the link.
+ * Never treat "unknown stock" as in stock for guests.
+ */
+export function isCustomerOrderLinkItemInKsaStock(eodStock, itemCode) {
+  const available = countryEodStockQty(eodStock, itemCode);
+  return available != null && available > 0;
+}
+
+/**
+ * Customer-facing catalog: priced catalogue codes with positive KSA stock only.
+ * Never attach available/stock qty fields — guests must not see stock-in-hand.
  * When no EOD snapshot is loaded, return an empty list (do not dump the full price book).
  */
 export function buildCustomerFacingCatalogItems({
@@ -71,7 +81,7 @@ export function buildCustomerFacingCatalogItems({
       if (!code || !isCatalogueProductCode(code)) return null;
       const price = lookupPositiveRate(regionPriceMap, code, item?.rate ?? item?.price ?? 0);
       if (!hasCataloguePrice(price)) return null;
-      if (!hasPositiveCountryEodStockQty(stock, code)) return null;
+      if (!isCustomerOrderLinkItemInKsaStock(stock, code)) return null;
       const master = lookupMasterUnitConv(units, code);
       const conv = Number(master?.conv);
       return {
@@ -86,13 +96,12 @@ export function buildCustomerFacingCatalogItems({
     })
     .filter(Boolean);
 
-  const inStock = filterItemsWithPositiveCountryEodStock(priced, stock);
-  inStock.sort((a, b) => {
+  priced.sort((a, b) => {
     const cat = String(a.category || "").localeCompare(String(b.category || ""), undefined, { sensitivity: "base" });
     if (cat !== 0) return cat;
     return String(a.item_name || "").localeCompare(String(b.item_name || ""), undefined, { sensitivity: "base" });
   });
-  return inStock;
+  return priced;
 }
 
 /** Strip fields that must never reach the customer browser. */
@@ -111,6 +120,7 @@ export function requireCustomerOrderLinkPricing({ pricingRegion, pricingType } =
 export function sanitizeCustomerOrderLinkCatalogPayload(payload = {}) {
   const items = Array.isArray(payload.items) ? payload.items.map((item) => {
     const conv = Number(item.unit_conv);
+    // Whitelist only — never forward available/stock/eod/qty-on-hand fields.
     return {
       item_code: String(item.item_code || "").trim().toUpperCase(),
       item_name: String(item.item_name || "").trim(),

@@ -7,6 +7,7 @@ import {
   buildCustomerOrderLinkUrl,
   customerOrderLinkExpiresAt,
   isCustomerOrderLinkExpired,
+  isCustomerOrderLinkItemInKsaStock,
   isPublicCustomerOrderPath,
   isValidOrderLinkTokenShape,
   requireCustomerOrderLinkPricing,
@@ -83,6 +84,10 @@ test("customer-facing catalog keeps only priced in-stock catalogue codes", () =>
     buildCustomerFacingCatalogItems({ sheetItems, regionPriceMap, eodStock: { active: false } }),
     [],
   );
+
+  assert.equal(isCustomerOrderLinkItemInKsaStock(eodStock, "A001111"), true);
+  assert.equal(isCustomerOrderLinkItemInKsaStock(eodStock, "A002222"), false);
+  assert.equal(isCustomerOrderLinkItemInKsaStock({ active: false }, "A001111"), false);
 });
 
 test("order link creation requires explicit city and wholesale/retail", () => {

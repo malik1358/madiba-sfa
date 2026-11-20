@@ -23,8 +23,8 @@ const TEXT = {
   opening: { en: "Opening your catalogue…", ar: "جاري فتح الكتالوج…" },
   yourOrder: { en: "Your order", ar: "طلبك" },
   intro: {
-    en: "Browse available items, set quantities in the master unit (carton), and submit your order. No login required.",
-    ar: "تصفح الأصناف المتاحة، أدخل الكمية بوحدة الكرتون (الوحدة الكبرى)، ثم أرسل الطلب. لا يلزم تسجيل الدخول.",
+    en: "Browse the catalogue, set quantities in the master unit (carton), and submit your order. No login required.",
+    ar: "تصفح الكتالوج، أدخل الكمية بوحدة الكرتون (الوحدة الكبرى)، ثم أرسل الطلب. لا يلزم تسجيل الدخول.",
   },
   code: { en: "Code", ar: "الكود" },
   prices: { en: "Prices", ar: "الأسعار" },
@@ -57,8 +57,8 @@ const TEXT = {
   category: { en: "Category", ar: "الفئة" },
   allCategories: { en: "All categories", ar: "كل الفئات" },
   noStock: {
-    en: "No in-stock items are available on this link right now.",
-    ar: "لا توجد أصناف متوفرة في المخزون على هذا الرابط حالياً.",
+    en: "No catalogue items are ready on this link right now.",
+    ar: "لا توجد أصناف جاهزة على هذا الرابط حالياً.",
   },
   noMatch: { en: "No items match your search.", ar: "لا توجد أصناف مطابقة لبحثك." },
   noPhoto: { en: "No photo", ar: "لا توجد صورة" },

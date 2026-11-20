@@ -50,6 +50,12 @@ export function lookupPositiveRate(rateMap, itemCode, fallback = 0) {
   return Number.isFinite(fallbackRate) && fallbackRate > 0 ? fallbackRate : 0;
 }
 
+/**
+ * Copy a positive rate across a replacement family. Used for discount maps and
+ * order-time helpers — not for publishing catalogue / sync price maps. A code
+ * with no numeric sheet rate must stay unpriced so it does not appear in the
+ * Product Catalogue.
+ */
 export function applyPriceCodeAliases(priceMap) {
   const next = { ...(priceMap || {}) };
 

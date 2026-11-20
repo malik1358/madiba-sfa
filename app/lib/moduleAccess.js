@@ -64,6 +64,10 @@ export const MODULES = {
   eodStock: { href: "/management/eod-stock", label: "End-of-day Stock" },
   orderedNotInSales: { href: "/management/ordered-not-in-sales", label: "Ordered Not in Sales" },
   interCityStockTransfer: { href: "/management/inter-city-stock-transfer", label: "Inter-city Stock Transfer" },
+  hrEmployees: { href: "/management/hr-employees", label: "HR Employees" },
+  hrMonthly: { href: "/management/hr-monthly", label: "HR Monthly Feed" },
+  hrLeave: { href: "/management/hr-leave", label: "HR Leave" },
+  hrPayrollSummary: { href: "/management/hr-payroll-summary", label: "Payroll Summary" },
   roleAccess: { href: "/management/role-access", label: "Role Access" },
 };
 
@@ -155,6 +159,11 @@ export const NAV_GROUPS = [
     key: "warehouse",
     label: "Warehouse",
     modules: ["stockTake", "eodStock", "orderedNotInSales", "interCityStockTransfer"],
+  },
+  {
+    key: "hr",
+    label: "HR Management",
+    modules: ["hrEmployees", "hrMonthly", "hrLeave", "hrPayrollSummary"],
   },
   {
     key: "admin",
@@ -338,6 +347,11 @@ export function buildModuleAccess(context = {}) {
       orderedNotInSales: hasManagementReportAccess,
       interCityStockTransfer: hasManagementReportAccess,
       stockTake: stockTakeAccess,
+      // HR: admin/report-user/manager open the staff screens (writes are admin|manager only, see hrAccess.js).
+      hrEmployees: isAdmin || isManager,
+      hrMonthly: isAdmin || isManager,
+      hrLeave: isAdmin || isManager,
+      hrPayrollSummary: hasManagementReportAccess,
       roleAccess: isAdmin,
     },
   };
@@ -584,6 +598,10 @@ export const MODULE_LABELS = {
   orderedNotInSales: { en: "Ordered Not in Sales", ar: "مطلوب وغير مباع" },
   interCityStockTransfer: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },
+  hrEmployees: { en: "HR Employees", ar: "موظفو الموارد البشرية" },
+  hrMonthly: { en: "HR Monthly Feed", ar: "بيانات الرواتب الشهرية" },
+  hrLeave: { en: "HR Leave", ar: "إجازات الموظفين" },
+  hrPayrollSummary: { en: "Payroll Summary", ar: "ملخص الرواتب" },
   roleAccess: { en: "Role Access", ar: "صلاحيات الأدوار" },
 };
 
@@ -597,6 +615,7 @@ export const NAV_GROUP_LABELS = {
   gpsReports: { en: "GPS & Maps", ar: "الخرائط و GPS" },
   itemReports: { en: "Item Reports", ar: "تقارير الأصناف" },
   warehouse: { en: "Warehouse", ar: "المستودع" },
+  hr: { en: "HR Management", ar: "إدارة الموارد البشرية" },
   admin: { en: "Setup & Admin", ar: "الإعداد والإدارة" },
 };
 

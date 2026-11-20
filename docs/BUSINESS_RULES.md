@@ -120,6 +120,16 @@ Constants in `app/lib/workdayActivity.js`:
 - Schemes live in the `order_schemes` setting.
 - Pending Orders **Update prices & schemes** (admin, manager, invoice-maker) re-prices a non-draft order from the live catalogue and current schemes while keeping item codes and quantities. It is available only when no invoice PDF is uploaded (`invoiceFilePath` / `invoiceUploadedAt` absent). Payment type, pricing city, and wholesale/retail come from `order_pricing_meta:<id>` (or order history). The action writes new line rates/totals, refreshes order `total_value`, appends `UPDATED_PRICING` history, and is rejected once an invoice file exists.
 
+## Customer order links (passwordless)
+
+- Staff who can open Customer Audit generate a **Generate order link** for the selected customer. New Customer / prospects get **Send order link** beside Create Order and Schedule Follow-up.
+- Before the link is created, staff **must choose city price** (Riyadh / Dammam / Jeddah) and **wholesale or retail**. The API rejects missing choices. The guest catalogue shows **only that city + that price type** — no other city or wholesale/retail switcher.
+- The link is `/order/<token>`, valid **36 hours** from creation (Asia/Riyadh clock for display). No login. Opaque token; customer cannot switch customer or browse other company data.
+- The guest catalogue shows only **in-stock** priced catalogue items (positive countrywide EOD qty). **Available qty is never shown.** If no EOD snapshot is loaded, the guest catalogue is empty.
+- Quantities are **master unit only** (carton / highest unit). There is no piece/base-unit selector on the public page. Prices, packing, schemes, and cash/volume discount previews match the staff catalogue rules; stock numbers stay hidden. Over-stock submits fail with a quantity-too-high message that does not reveal available qty.
+- Submit creates a normal `SUBMITTED` `sales_orders` row owned by the **issuer** (`created_by` / `salesman_*` from the staff who generated the link), queues **Pending for invoice creation**, and locks that link to one submitted order. The page stays open until `expires_at` for viewing. A new link is required to change the order.
+- Photos on the public page load only through the same token (`/api/customer-order-links/[token]/photo`). Apply migration `20261118120000_customer_order_links.sql` before use.
+
 ## Pricing
 
 - Catalogue cards label the actual packing description directly as **Packing**. A separate **Selling unit** row appears only when the master unit is available. Missing master units must not imply that an existing sheet packing description is missing. This display rule does not infer selling units or alter order quantities/prices.

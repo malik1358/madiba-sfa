@@ -15,6 +15,7 @@ import {
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
+import { isPublicCustomerOrderPath } from "../lib/customerOrderLinks.js";
 
 const NAV_TEXT = {
   mainNavigation: { en: "Main navigation", ar: "التنقل الرئيسي" },
@@ -151,7 +152,7 @@ export default function AppMainNav() {
     }
   }
 
-  if (!signedIn || (groups.length === 0 && pinnedItems.length === 0)) {
+  if (isPublicCustomerOrderPath(pathname) || !signedIn || (groups.length === 0 && pinnedItems.length === 0)) {
     return null;
   }
 

@@ -304,6 +304,13 @@ The collections UI was split so a background queue refresh does not remount the 
 
 Vercel deploys production from `main` only (`vercel.json` `git.deploymentEnabled`); Preview deployments are intentionally off. Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes (also flushes deferred team mail and due KPI upload summary emails). GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Manual KPI upload summary force: `/api/cron/kpi-upload-summary-email`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
 
+## HR Management
+
+- Pure helpers in `app/lib/hr/`: `hrAccess.js` (gates), `hrEmployees.js` (validation/row mapping), `hrMonthlyFeed.js` (totals, import parsing, attendance ledger, payroll summaries), `hrLeave.js`, `hrServer.js` (service-role auth + loaders + attendance prefill via `monthlyAttendanceReportServer.js`), `hrClient.js` (authed fetch, xlsx template/read in the browser).
+- Routes: `/api/hr/employees` (GET/POST/PUT), `/api/hr/monthly` (GET; POST actions `save|import|prefill|finalize|reopen`), `/api/hr/leave` (GET/POST/PUT/DELETE), `/api/hr/payroll-summary` (GET). Each verifies the bearer token, loads the profile, then `checkHrAccess(role, "read"|"write"|"payroll")`. Missing tables return 503 `migrationRequired`.
+- Excel import: the browser parses the sheet with `xlsx` and posts header-keyed rows; the server re-parses with `parseHrMonthlyImportRows` (server is authoritative).
+- Pages `app/management/hr-{employees,monthly,leave,payroll-summary}` use `ExportableTable` + `BiExcelHead`/`useBiExcelFilters`, Total footers, and up/down/current cell classes. Nav group `hr` sits before `admin`; module keys `hrEmployees`, `hrMonthly`, `hrLeave`, `hrPayrollSummary`.
+
 ## Patterns to copy
 
 - Parse JSON from `system_settings` defensively. Bad JSON should not crash the page.

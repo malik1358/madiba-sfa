@@ -4,7 +4,7 @@ import {
   resolveOverdueDaysFromDueDate,
   toNumber,
 } from "./outstanding.js";
-import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
+import { VAT_RATE, amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
 import {
   HISTORIC_PERFORMANCE_MONTHS,
   ksaMonthKey,
@@ -517,6 +517,175 @@ export function classifyCreditNoteKind(voucherType = "", voucherNumber = "") {
     return "Credit Note";
   }
   return "Credit Note / Return";
+}
+
+/**
+ * Guess a sales voucher type for a synthesized missing invoice from its prefix.
+ * Jeddah credit uses JNFD (same series as Tally order allocation).
+ */
+function syntheticSalesVoucherType(voucherNumber = "") {
+  const raw = String(voucherNumber || "").trim().toUpperCase();
+  if (raw.startsWith("JNFD/") || raw.startsWith("JC/")) return "SALES-NON FOOD DIVISION";
+  if (raw.startsWith("DNFD/") || raw.startsWith("DC/")) return "DAMMAM W/S CREDIT";
+  if (raw.startsWith("RNFD/") || raw.startsWith("RC/") || raw.startsWith("RS/")) return "RIYADH W/S CREDIT";
+  if (raw.startsWith("NFD/")) return "SALES-NON FOOD DIVISION";
+  return "Sales";
+}
+
+/**
+ * When a credit note names a sales voucher that never landed in `active_sales`
+ * (Jeddah JNFD uploads often ship CNs only), rebuild that sale so the customer
+ * ledger / settlement can show it. Lines mirror the CN items; any Tally open
+ * residual from the outstanding file is added so Machine Open matches pending
+ * after the named CN settles (customer 1691 JNFD/015 + CN 801).
+ */
+export function augmentTransactionsWithMissingReferencedSales(
+  transactions = [],
+  outstandingInvoices = [],
+) {
+  const source = Array.isArray(transactions) ? transactions : [];
+  const existingSaleRefs = new Set();
+  source.forEach((row) => {
+    if (isCreditNoteTransaction(row)) return;
+    const voucher = normalizeRef(row?.voucher_number || row?.reference);
+    if (voucher) existingSaleRefs.add(voucher);
+  });
+
+  const outstandingByRef = new Map();
+  (Array.isArray(outstandingInvoices) ? outstandingInvoices : []).forEach((invoice) => {
+    const ref = normalizeRef(invoice?.ref_no || invoice?.voucher_number);
+    if (!ref || existingSaleRefs.has(ref)) return;
+    const pending = toNumber(invoice?.pending_amount);
+    const current = outstandingByRef.get(ref) || {
+      ref_no: String(invoice?.ref_no || invoice?.voucher_number || "").trim(),
+      invoice_date: dateOnly(invoice?.invoice_date) || "",
+      pending_amount: 0,
+      customer_code: String(invoice?.customer_code || "").trim(),
+      customer_name: String(invoice?.customer_name || "").trim(),
+      salesman: String(invoice?.salesman || invoice?.salesman_name || "").trim(),
+    };
+    if (!current.invoice_date && invoice?.invoice_date) {
+      current.invoice_date = dateOnly(invoice.invoice_date) || current.invoice_date;
+    }
+    if (!current.ref_no) {
+      current.ref_no = String(invoice?.ref_no || invoice?.voucher_number || "").trim();
+    }
+    if (!current.customer_code && invoice?.customer_code) {
+      current.customer_code = String(invoice.customer_code).trim();
+    }
+    if (!current.customer_name && invoice?.customer_name) {
+      current.customer_name = String(invoice.customer_name).trim();
+    }
+    if (!current.salesman && (invoice?.salesman || invoice?.salesman_name)) {
+      current.salesman = String(invoice.salesman || invoice.salesman_name).trim();
+    }
+    current.pending_amount = roundMoney(current.pending_amount + Math.max(0, pending));
+    outstandingByRef.set(ref, current);
+  });
+
+  /** @type {Map<string, { displayVoucher: string, lines: object[], creditDate: string }>} */
+  const missingByRef = new Map();
+  source.forEach((row) => {
+    if (!isCreditNoteTransaction(row)) return;
+    const refs = parseCreditNoteReferences(row?.reference);
+    if (!refs.length) return;
+    refs.forEach((ref) => {
+      if (!ref || existingSaleRefs.has(ref)) return;
+      const current = missingByRef.get(ref) || {
+        displayVoucher: String(row?.reference || "").trim() || ref,
+        lines: [],
+        creditDate: "",
+      };
+      const creditDate = dateOnly(row?.transaction_date) || "";
+      if (creditDate && (!current.creditDate || creditDate < current.creditDate)) {
+        current.creditDate = creditDate;
+      }
+      // Prefer the Ref. No. text from the CN when it is a single voucher.
+      if (refs.length === 1 && String(row?.reference || "").trim()) {
+        current.displayVoucher = String(row.reference).trim();
+      }
+      current.lines.push(row);
+      missingByRef.set(ref, current);
+    });
+  });
+
+  const synthetic = [];
+  const emitRefs = new Set([...missingByRef.keys(), ...outstandingByRef.keys()]);
+  emitRefs.forEach((ref) => {
+    if (existingSaleRefs.has(ref)) return;
+    const bundle = missingByRef.get(ref) || null;
+    const outstanding = outstandingByRef.get(ref) || null;
+    // Only rebuild when a CN names the missing voucher. Bare outstanding-only
+    // bills already appear as Tally open rows without inventing item lines.
+    if (!bundle?.lines?.length) return;
+
+    const invoiceDate = outstanding?.invoice_date || bundle.creditDate;
+    if (!invoiceDate) return;
+    const displayVoucher = outstanding?.ref_no || bundle.displayVoucher || ref;
+    const voucherType = syntheticSalesVoucherType(displayVoucher);
+    const salesman = outstanding?.salesman
+      || String(bundle.lines[0]?.salesman_name || bundle.lines[0]?.salesman_code || "").trim();
+    const customerCode = outstanding?.customer_code
+      || String(bundle.lines[0]?.customer_code || "").trim();
+    const customerName = outstanding?.customer_name
+      || String(bundle.lines[0]?.customer_name || "").trim();
+
+    let mirroredExcl = 0;
+    bundle.lines.forEach((row) => {
+      const excl = Math.abs(toNumber(row?.sales_amount));
+      if (excl <= SETTLEMENT_DUST && Math.abs(toNumber(row?.quantity)) <= SETTLEMENT_DUST) return;
+      mirroredExcl = roundMoney(mirroredExcl + excl);
+      synthetic.push({
+        transaction_date: invoiceDate,
+        voucher_number: displayVoucher,
+        voucher_type: voucherType,
+        reference: "",
+        customer_code: customerCode || row?.customer_code || "",
+        customer_name: customerName || row?.customer_name || "",
+        salesman_code: salesman || row?.salesman_code || "",
+        salesman_name: salesman || row?.salesman_name || "",
+        item_code: row?.item_code || "",
+        item_name: row?.item_name || "",
+        category: row?.category || "",
+        quantity: Math.abs(toNumber(row?.quantity)),
+        rate: toNumber(row?.rate),
+        sales_amount: excl,
+        synthetic_missing_sale: true,
+      });
+    });
+
+    const pendingIncl = Math.max(0, toNumber(outstanding?.pending_amount));
+    if (pendingIncl > AMOUNT_TOLERANCE) {
+      // Outstanding pending is VAT-inclusive. Rebuild the open residual as excl
+      // so FIFO remaining after the named CN equals that pending.
+      const residualExcl = roundMoney(pendingIncl / (1 + VAT_RATE));
+      if (residualExcl > AMOUNT_TOLERANCE) {
+        synthetic.push({
+          transaction_date: invoiceDate,
+          voucher_number: displayVoucher,
+          voucher_type: voucherType,
+          reference: "",
+          customer_code: customerCode,
+          customer_name: customerName,
+          salesman_code: salesman,
+          salesman_name: salesman,
+          item_code: "",
+          item_name: "Open balance (sales file missing)",
+          category: "",
+          quantity: 1,
+          rate: residualExcl,
+          sales_amount: residualExcl,
+          synthetic_missing_sale: true,
+          synthetic_outstanding_residual: true,
+        });
+      }
+    } else if (mirroredExcl <= AMOUNT_TOLERANCE) {
+      return;
+    }
+  });
+
+  if (!synthetic.length) return source;
+  return source.concat(synthetic);
 }
 
 /**
@@ -1974,7 +2143,11 @@ function buildPaymentBehaviorCore({
   todayIso = new Date().toISOString().slice(0, 10),
 } = {}) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
-  const { invoices, allocations } = matchPaymentsFifo(transactions, receipts);
+  const ledgerTransactions = augmentTransactionsWithMissingReferencedSales(
+    transactions,
+    outstandingInvoices,
+  );
+  const { invoices, allocations } = matchPaymentsFifo(ledgerTransactions, receipts);
   const unpaidFromSales = invoices
     .filter((invoice) => toNumber(invoice.remaining) > 0.009)
     .map((invoice) => ({
@@ -2438,6 +2611,10 @@ export function buildPaymentSettlementLedger({
   todayIso = new Date().toISOString().slice(0, 10),
 } = {}) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const ledgerTransactions = augmentTransactionsWithMissingReferencedSales(
+    transactions,
+    outstandingInvoices,
+  );
   const {
     invoices,
     allocations,
@@ -2454,9 +2631,9 @@ export function buildPaymentSettlementLedger({
     reversedInvoices = [],
     reversedSaleRefunds = [],
     cancelledReceiptKeys = new Set(),
-  } = matchPaymentsFifo(transactions, receipts);
+  } = matchPaymentsFifo(ledgerTransactions, receipts);
   const summary = buildPaymentBehavior({
-    transactions,
+    transactions: ledgerTransactions,
     receipts,
     outstandingCustomer,
     outstandingInvoices,

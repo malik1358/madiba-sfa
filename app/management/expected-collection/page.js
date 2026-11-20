@@ -18,8 +18,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Expected Collection", ar: "التحصيل المتوقع" },
   subtitle: {
-    en: "Open invoices expected to pay by each month-end for the current KSA month and the next two (BM + Rest). Same rules as the KPI Collection expected-remaining estimate.",
-    ar: "الفواتير المفتوحة المتوقع تحصيلها حتى نهاية كل شهر للشهر الحالي في السعودية والشهرين التاليين (مواد بناء + الباقي). نفس قواعد تقدير التحصيل المتوقع في مؤشرات الأداء.",
+    en: "Open outstanding reconciled into expected pay months (BM + Rest) plus excluded buckets (never-paid, avg >120, legal, electronics). Near-term focus stays the current KSA month and the next two.",
+    ar: "تسوية المستحقات المفتوحة على أشهر السداد المتوقع (مواد بناء + الباقي) مع بنود الاستبعاد (لم يسدد، متوسط >120، قانوني، إلكترونيات). التركيز القريب يبقى الشهر الحالي والشهرين التاليين.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: {
@@ -53,12 +53,25 @@ const TEXT = {
   invoices: { en: "Invoices", ar: "الفواتير" },
   monthEnd: { en: "Month-end", ar: "نهاية الشهر" },
   asOf: { en: "As of", ar: "حتى" },
-  horizon: { en: "3-month estimate", ar: "تقدير 3 أشهر" },
+  horizon: { en: "Expected by month", ar: "المتوقع حسب الشهر" },
   month: { en: "Month", ar: "الشهر" },
   newInMonth: { en: "New in month", ar: "جديد في الشهر" },
   byMonthEnd: { en: "By month-end", ar: "حتى نهاية الشهر" },
   currentMonth: { en: "Current", ar: "الحالي" },
+  laterMonth: { en: "Later", ar: "لاحق" },
   detailFor: { en: "Detail for", ar: "التفاصيل لـ" },
+  balance: { en: "Outstanding balance", ar: "رصيد المستحقات" },
+  totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
+  expectedInMonths: { en: "Expected in months (BM+Rest)", ar: "المتوقع في الأشهر (مواد بناء+الباقي)" },
+  nearTermExpected: { en: "Near-term (3 months)", ar: "القريب (3 أشهر)" },
+  laterExpected: { en: "Later months", ar: "أشهر لاحقة" },
+  excludedTotal: { en: "Not in month estimate", ar: "خارج تقدير الأشهر" },
+  neverPaid: { en: "Never paid / no receipt", ar: "لم يسدد / بلا إيصال" },
+  avgOver120: { en: "Avg days > 120", ar: "متوسط الأيام > 120" },
+  legalQueue: { en: "Legal queue", ar: "الطابور القانوني" },
+  electronicsShare: { en: "Electronics mix share", ar: "حصة الإلكترونيات" },
+  accounted: { en: "Accounted (months + excluded)", ar: "المحتسب (أشهر + مستبعد)" },
+  bucket: { en: "Bucket", ar: "البند" },
   noRows: {
     en: "No open invoices are expected to pay in this month window under the current rule.",
     ar: "لا توجد فواتير مفتوحة متوقع سدادها في نافذة هذا الشهر حسب القاعدة الحالية.",
@@ -70,8 +83,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Summary shows each month’s new expected SAR and the cumulative amount by that month-end. Detail tabs list invoices newly expected in the selected month (current includes overdue still open). Grouped by salesman, then customer. Avg days = max(lifetime, last paid); no payment yet, avg >120, and legal-queue customers are excluded. Amount is BM + Rest share.",
-    ar: "الملخص يعرض المتوقع الجديد لكل شهر والإجمالي التراكمي حتى نهايته. تبويبات التفاصيل تعرض الفواتير المتوقع سدادها جديداً في الشهر المختار (الشهر الحالي يشمل المتأخر المفتوح). مجمّع حسب المندوب ثم العميل. متوسط الأيام = أعلى قيمة بين العمر وآخر سداد؛ يُستبعد من لم يسدد أو تجاوز 120 يوماً والطابور القانوني. المبلغ حصة مواد البناء + الباقي.",
+    en: "Month rows place every eligible BM+Rest invoice in its approx-pay month (overdue in current). Months after the first three are labeled Later so the rest of the estimate is visible. The balance table explains the gap vs total outstanding: never-paid, avg >120, legal queue, and electronics share are not month-estimated. Detail is grouped by salesman, then customer.",
+    ar: "صفوف الأشهر تضع كل فاتورة مؤهلة (مواد بناء+الباقي) في شهر السداد التقريبي (المتأخر في الحالي). الأشهر بعد الثلاثة الأولى تُوسم بـ لاحق لإظهار باقي التقدير. جدول الرصيد يفسر الفرق عن إجمالي المستحقات: من لم يسدد ومتوسط >120 والطابور القانوني وحصة الإلكترونيات خارج تقدير الأشهر.",
   },
 };
 
@@ -199,20 +212,27 @@ export default function ExpectedCollectionPage() {
     () => (Array.isArray(report?.months) ? report.months : []),
     [report],
   );
+  const reconciliation = report?.reconciliation || null;
   const horizonRows = useMemo(() => {
     if (months.length) {
-      return months.map((month) => ({
-        monthKey: month.monthKey,
-        monthLabel: `${monthLabel(month.monthKey)}${month.isCurrent ? ` (${t("currentMonth")})` : ""}`,
-        monthEnd: month.monthEnd || "",
-        customerCount: month.customerCount ?? 0,
-        invoiceCount: month.invoiceCount ?? 0,
-        bmTotal: month.bmTotal || 0,
-        restTotal: month.restTotal || 0,
-        total: month.total || 0,
-        cumulativeTotal: month.cumulativeTotal ?? month.total ?? 0,
-        isCurrent: Boolean(month.isCurrent),
-      }));
+      return months.map((month) => {
+        const tags = [];
+        if (month.isCurrent) tags.push(t("currentMonth"));
+        if (month.isNearTerm === false) tags.push(t("laterMonth"));
+        return {
+          monthKey: month.monthKey,
+          monthLabel: `${monthLabel(month.monthKey)}${tags.length ? ` (${tags.join(", ")})` : ""}`,
+          monthEnd: month.monthEnd || "",
+          customerCount: month.customerCount ?? 0,
+          invoiceCount: month.invoiceCount ?? 0,
+          bmTotal: month.bmTotal || 0,
+          restTotal: month.restTotal || 0,
+          total: month.total || 0,
+          cumulativeTotal: month.cumulativeTotal ?? month.total ?? 0,
+          isCurrent: Boolean(month.isCurrent),
+          isNearTerm: month.isNearTerm !== false,
+        };
+      });
     }
     if (!report) return [];
     const key = String(report.monthEnd || "").slice(0, 7);
@@ -227,8 +247,95 @@ export default function ExpectedCollectionPage() {
       total: report.total || 0,
       cumulativeTotal: report.total || 0,
       isCurrent: true,
+      isNearTerm: true,
     }];
   }, [months, report, t]);
+  const balanceRows = useMemo(() => {
+    if (!reconciliation) return [];
+    const excluded = reconciliation.excluded || {};
+    return [
+      {
+        key: "totalOutstanding",
+        bucket: t("totalOutstanding"),
+        amount: reconciliation.totalPending || 0,
+        customers: "",
+        invoices: "",
+      },
+      {
+        key: "nearTerm",
+        bucket: t("nearTermExpected"),
+        amount: reconciliation.nearTermTotal || 0,
+        customers: "",
+        invoices: "",
+      },
+      {
+        key: "later",
+        bucket: t("laterExpected"),
+        amount: reconciliation.laterTotal || 0,
+        customers: "",
+        invoices: "",
+      },
+      {
+        key: "expectedInMonths",
+        bucket: t("expectedInMonths"),
+        amount: reconciliation.expectedInMonths || 0,
+        customers: "",
+        invoices: "",
+      },
+      {
+        key: "neverPaid",
+        bucket: t("neverPaid"),
+        amount: excluded.neverPaid?.pendingAmount || 0,
+        customers: excluded.neverPaid?.customerCount ?? 0,
+        invoices: excluded.neverPaid?.invoiceCount ?? 0,
+      },
+      {
+        key: "avgOver120",
+        bucket: t("avgOver120"),
+        amount: excluded.avgOver120?.pendingAmount || 0,
+        customers: excluded.avgOver120?.customerCount ?? 0,
+        invoices: excluded.avgOver120?.invoiceCount ?? 0,
+      },
+      {
+        key: "legal",
+        bucket: t("legalQueue"),
+        amount: excluded.legal?.pendingAmount || 0,
+        customers: excluded.legal?.customerCount ?? 0,
+        invoices: excluded.legal?.invoiceCount ?? 0,
+      },
+      {
+        key: "electronics",
+        bucket: t("electronicsShare"),
+        amount: excluded.electronics?.pendingAmount || 0,
+        customers: excluded.electronics?.customerCount ?? 0,
+        invoices: excluded.electronics?.invoiceCount ?? 0,
+      },
+      {
+        key: "accounted",
+        bucket: t("accounted"),
+        amount: reconciliation.accountedTotal || 0,
+        customers: "",
+        invoices: "",
+      },
+    ];
+  }, [reconciliation, t]);
+  const balanceFilterValueOf = useCallback((row, key) => {
+    if (key === "bucket") return row.bucket || "";
+    if (key === "amount") return formatAmount(row.amount);
+    if (key === "customers") return row.customers === "" ? "" : String(row.customers);
+    if (key === "invoices") return row.invoices === "" ? "" : String(row.invoices);
+    return "";
+  }, []);
+  const {
+    filters: balanceFilters,
+    options: balanceOptions,
+    visibleRows: visibleBalanceRows,
+    setFilter: setBalanceFilter,
+  } = useBiExcelFilters(
+    balanceRows,
+    ["bucket", "amount", "customers", "invoices"],
+    balanceFilterValueOf,
+  );
   const horizonFilterValueOf = useCallback((row, key) => {
     if (key === "monthLabel") return row.monthLabel || "";
     if (key === "monthEnd") return row.monthEnd || "";
@@ -388,15 +495,17 @@ export default function ExpectedCollectionPage() {
             <p className="moduleHint">
               {t("asOf")}: {report?.asOf || "—"}
               {" · "}
-              {t("totalExpected")}: {formatAmount(horizonTotals.total)}
+              {t("totalOutstanding")}: {formatAmount(reconciliation?.totalPending || 0)}
+              {" · "}
+              {t("nearTermExpected")}: {formatAmount(reconciliation?.nearTermTotal || horizonTotals.total)}
+              {" · "}
+              {t("laterExpected")}: {formatAmount(reconciliation?.laterTotal || 0)}
+              {" · "}
+              {t("excludedTotal")}: {formatAmount(reconciliation?.excludedTotal || 0)}
               {" · "}
               BM: {formatAmount(horizonTotals.bmTotal)}
               {" · "}
               Rest: {formatAmount(horizonTotals.restTotal)}
-              {" · "}
-              {t("customers")}: {horizonTotals.customerCount}
-              {" · "}
-              {t("invoices")}: {horizonTotals.invoiceCount}
             </p>
             <p className="moduleHint">{t("hint")}</p>
             {error ? <p className="moduleHint">{error}</p> : null}
@@ -406,7 +515,7 @@ export default function ExpectedCollectionPage() {
               <ExportableTable
                 filename="expected-collection-horizon"
                 tableId="expected-collection-horizon"
-                sheetName="3-month estimate"
+                sheetName="Expected by month"
                 className="moduleTableWrap moduleBiTableWrap"
               >
                 <table className="moduleTable moduleBiTable">
@@ -456,6 +565,7 @@ export default function ExpectedCollectionPage() {
                             >
                               {monthLabel(month.monthKey)}
                               {month.isCurrent ? ` (${t("currentMonth")})` : ""}
+                              {month.isNearTerm === false ? ` (${t("laterMonth")})` : ""}
                             </button>
                           </td>
                           <td>{month.monthEnd || "—"}</td>
@@ -487,6 +597,67 @@ export default function ExpectedCollectionPage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
+              <h2>{t("balance")}</h2>
+              <span>{visibleBalanceRows.length}</span>
+            </div>
+            <p className="moduleHint">
+              {t("totalOutstanding")}: {formatAmount(reconciliation?.totalPending || 0)}
+              {" = "}
+              {t("expectedInMonths")}: {formatAmount(reconciliation?.expectedInMonths || 0)}
+              {" + "}
+              {t("excludedTotal")}: {formatAmount(reconciliation?.excludedTotal || 0)}
+            </p>
+            {loading ? null : reconciliation ? (
+              <ExportableTable
+                filename="expected-collection-balance"
+                tableId="expected-collection-balance"
+                sheetName="Outstanding balance"
+                className="moduleTableWrap moduleBiTableWrap"
+              >
+                <table className="moduleTable moduleBiTable">
+                  <thead>
+                    <tr>
+                      <BiExcelHead label={t("bucket")} filterKey="bucket" options={balanceOptions} filters={balanceFilters} onChange={setBalanceFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("customers")} filterKey="customers" options={balanceOptions} filters={balanceFilters} onChange={setBalanceFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("invoices")} filterKey="invoices" options={balanceOptions} filters={balanceFilters} onChange={setBalanceFilter} allLabel={t("all")} />
+                      <BiExcelHead
+                        label={t("amount")}
+                        filterKey="amount"
+                        options={balanceOptions}
+                        filters={balanceFilters}
+                        onChange={setBalanceFilter}
+                        allLabel={t("all")}
+                        className="moduleBiTotalCol"
+                        summary={formatAmount(reconciliation?.totalPending || 0)}
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleBalanceRows.map((row) => (
+                      <tr
+                        key={row.key}
+                        className={
+                          row.key === "totalOutstanding" || row.key === "accounted"
+                            ? "moduleBiTotalRow"
+                            : row.key === "later"
+                              ? "moduleBiMonthCell--current"
+                              : undefined
+                        }
+                      >
+                        <td><strong>{row.bucket}</strong></td>
+                        <td>{row.customers === "" ? "—" : row.customers}</td>
+                        <td>{row.invoices === "" ? "—" : row.invoices}</td>
+                        <td className="moduleBiTotalCol"><strong>{formatAmount(row.amount)}</strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ExportableTable>
+            ) : null}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
               <h2>{t("detailFor")}: {monthLabel(activeMonth?.monthKey)}</h2>
               <span>{visibleRows.length}</span>
               {months.map((month) => (
@@ -499,6 +670,7 @@ export default function ExpectedCollectionPage() {
                 >
                   {monthLabel(month.monthKey)}
                   {month.isCurrent ? ` (${t("currentMonth")})` : ""}
+                  {month.isNearTerm === false ? ` (${t("laterMonth")})` : ""}
                 </button>
               ))}
               <button type="button" className="moduleInlineButton" onClick={expandAll}>{t("expandAll")}</button>

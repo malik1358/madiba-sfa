@@ -113,7 +113,7 @@ export async function loadExpectedCollectionReport(admin, {
 } = {}) {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
-  const cacheKey = `${monthEnd}|${asOf}|horizon-3m-v1`;
+  const cacheKey = `${monthEnd}|${asOf}|horizon-balance-v2`;
   const cached = expectedCollectionReportCache;
   if (
     cached
@@ -176,7 +176,7 @@ export async function loadExpectedCollectionReport(admin, {
   const report = {
     asOf,
     monthEnd: detail.monthEnd,
-    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end; current + next 2 months",
+    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay month buckets + excluded reconciliation to total outstanding",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,
@@ -184,6 +184,7 @@ export async function loadExpectedCollectionReport(admin, {
     invoiceCount: detail.invoiceCount,
     rows: detail.rows,
     months: detail.months,
+    reconciliation: detail.reconciliation,
   };
   expectedCollectionReportCache = {
     key: cacheKey,

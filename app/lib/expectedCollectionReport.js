@@ -1,5 +1,6 @@
 import { lastDayOfMonth, shiftMonthKey } from "./biReportPeriod.js";
 import {
+  isExpectedCollectionAvgDaysEligible,
   isKpiUploadSummaryCustomerExcluded,
   isOpenInvoiceExpectedThisMonth,
   resolveExpectedPayDate,
@@ -8,15 +9,43 @@ import {
 import { normalizeCode, normalizeName } from "./outstanding.js";
 
 export const EXPECTED_COLLECTION_HORIZON_MONTHS = 3;
+export const EXPECTED_COLLECTION_MAX_MONTHS = 12;
 
 function money(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function emptyExcludedBucket() {
+  return {
+    pendingAmount: 0,
+    amount: 0,
+    bmValue: 0,
+    restValue: 0,
+    electronicsValue: 0,
+    customerCount: 0,
+    invoiceCount: 0,
+  };
+}
+
+function finalizeExcludedBucket(bucket, customerCodes) {
+  return {
+    pendingAmount: money(bucket.pendingAmount),
+    amount: money(bucket.amount),
+    bmValue: money(bucket.bmValue),
+    restValue: money(bucket.restValue),
+    electronicsValue: money(bucket.electronicsValue),
+    customerCount: customerCodes.size,
+    invoiceCount: bucket.invoiceCount,
+  };
+}
+
 export function resolveExpectedCollectionMonthEnds(monthEnd = "", horizonMonths = EXPECTED_COLLECTION_HORIZON_MONTHS) {
   const end = String(monthEnd || "").slice(0, 10);
   const startKey = /^\d{4}-\d{2}-\d{2}$/.test(end) ? end.slice(0, 7) : "";
-  const count = Math.max(1, Math.min(12, Number(horizonMonths) || EXPECTED_COLLECTION_HORIZON_MONTHS));
+  const count = Math.max(
+    1,
+    Math.min(EXPECTED_COLLECTION_MAX_MONTHS, Number(horizonMonths) || EXPECTED_COLLECTION_HORIZON_MONTHS),
+  );
   if (!startKey) return [];
   const months = [];
   for (let offset = 0; offset < count; offset += 1) {
@@ -28,9 +57,182 @@ export function resolveExpectedCollectionMonthEnds(monthEnd = "", horizonMonths 
       monthEnd: resolvedEnd,
       afterMonthEnd: offset > 0 ? (months[offset - 1]?.monthEnd || "") : "",
       isCurrent: offset === 0,
+      isNearTerm: offset < EXPECTED_COLLECTION_HORIZON_MONTHS,
     });
   }
   return months;
+}
+
+/**
+ * Assign every open invoice to an expected month (BM+Rest) or an excluded bucket
+ * so Total outstanding can be reconciled against the month grid.
+ * Overdue eligible invoices land in the current month (approx pay ≤ current month-end).
+ */
+export function classifyExpectedCollectionOutstanding(invoices = [], {
+  avgDaysByCustomer = new Map(),
+  enrichedByCode = new Map(),
+  customerMix = new Map(),
+  monthEnd = "",
+  excludedCustomerCodes = null,
+} = {}) {
+  const currentEnd = String(monthEnd || "").slice(0, 10);
+  const currentMonthKey = currentEnd.slice(0, 7);
+  const rowsByMonth = new Map();
+  const excluded = {
+    neverPaid: emptyExcludedBucket(),
+    avgOver120: emptyExcludedBucket(),
+    legal: emptyExcludedBucket(),
+    electronics: emptyExcludedBucket(),
+  };
+  const excludedCustomers = {
+    neverPaid: new Set(),
+    avgOver120: new Set(),
+    legal: new Set(),
+    electronics: new Set(),
+  };
+  let totalPending = 0;
+  let latestMonthKey = currentMonthKey;
+
+  const pushExcluded = (key, {
+    pending,
+    bmValue = 0,
+    restValue = 0,
+    electronicsValue = 0,
+    customerCode,
+  }) => {
+    const bucket = excluded[key];
+    bucket.pendingAmount = money(bucket.pendingAmount + pending);
+    bucket.bmValue = money(bucket.bmValue + bmValue);
+    bucket.restValue = money(bucket.restValue + restValue);
+    bucket.electronicsValue = money(bucket.electronicsValue + electronicsValue);
+    bucket.amount = money(bucket.amount + bmValue + restValue + electronicsValue);
+    bucket.invoiceCount += 1;
+    if (customerCode) excludedCustomers[key].add(customerCode);
+  };
+
+  (invoices || []).forEach((invoice) => {
+    const pending = Number(invoice?.pending_amount ?? invoice?.amount ?? 0);
+    if (!(pending > 0)) return;
+    const customerCode = normalizeCode(invoice?.customer_code);
+    if (!customerCode) return;
+    totalPending = money(totalPending + pending);
+
+    const mix = customerMix instanceof Map
+      ? customerMix.get(customerCode)
+      : customerMix?.[customerCode];
+    const split = splitAmountByCategoryMix(pending, mix);
+    const bmValue = money(split.buildingMaterial);
+    const restValue = money(split.rest);
+    const electronicsValue = money(split.electronics);
+
+    if (isKpiUploadSummaryCustomerExcluded(customerCode, excludedCustomerCodes)) {
+      pushExcluded("legal", {
+        pending,
+        bmValue,
+        restValue,
+        electronicsValue,
+        customerCode,
+      });
+      return;
+    }
+
+    const avgDays = avgDaysByCustomer instanceof Map
+      ? avgDaysByCustomer.get(customerCode)
+      : avgDaysByCustomer?.[customerCode];
+    if (avgDays == null || avgDays === "") {
+      pushExcluded("neverPaid", {
+        pending,
+        bmValue,
+        restValue,
+        electronicsValue,
+        customerCode,
+      });
+      return;
+    }
+    if (!isExpectedCollectionAvgDaysEligible(avgDays)) {
+      pushExcluded("avgOver120", {
+        pending,
+        bmValue,
+        restValue,
+        electronicsValue,
+        customerCode,
+      });
+      return;
+    }
+
+    if (electronicsValue > 0.009) {
+      pushExcluded("electronics", {
+        pending: electronicsValue,
+        electronicsValue,
+        customerCode,
+      });
+    }
+
+    const amount = money(bmValue + restValue);
+    if (!(amount > 0.009)) return;
+
+    const invoiceDate = String(invoice?.invoice_date || "").slice(0, 10);
+    let approxPayDate = resolveExpectedPayDate(invoiceDate, avgDays);
+    if (!approxPayDate) return;
+    // Overdue still-open counts in the current month, same as the month-end estimate.
+    if (approxPayDate <= currentEnd) {
+      approxPayDate = currentEnd;
+    }
+    const expectedMonthKey = String(approxPayDate).slice(0, 7);
+    if (expectedMonthKey > latestMonthKey) latestMonthKey = expectedMonthKey;
+
+    const enriched = enrichedByCode instanceof Map
+      ? enrichedByCode.get(customerCode)
+      : enrichedByCode?.[customerCode];
+    const salesman = resolveExpectedCollectionSalesman(invoice);
+    const monthEndForRow = lastDayOfMonth(expectedMonthKey) || `${expectedMonthKey}-28`;
+    const row = {
+      customerCode,
+      customerName: String(invoice?.customer_name || enriched?.customer_name || "").trim(),
+      salesmanCode: salesman.salesmanCode,
+      salesmanName: salesman.salesmanName,
+      avgDays: Number.isFinite(Number(avgDays)) ? Number(avgDays) : null,
+      lifetimeAvg: enriched?.avg_days_to_pay ?? enriched?.avgDaysToPay ?? null,
+      lastPaidInvoiceDays: enriched?.last_paid_invoice_days ?? enriched?.lastPaidInvoiceDays ?? null,
+      lastReceiptDate: String(enriched?.last_receipt_date || "").slice(0, 10) || "",
+      refNo: String(invoice?.ref_no || invoice?.voucher_number || "").trim(),
+      invoiceDate,
+      pendingAmount: money(pending),
+      amount,
+      daysToMonthEnd: daysBetween(invoiceDate, monthEndForRow),
+      approxPayDate: resolveExpectedPayDate(invoiceDate, avgDays),
+      expectedMonthKey,
+      bmValue,
+      restValue,
+    };
+    const list = rowsByMonth.get(expectedMonthKey) || [];
+    list.push(row);
+    rowsByMonth.set(expectedMonthKey, list);
+  });
+
+  return {
+    totalPending,
+    currentMonthKey,
+    latestMonthKey,
+    rowsByMonth,
+    excluded: {
+      neverPaid: finalizeExcludedBucket(excluded.neverPaid, excludedCustomers.neverPaid),
+      avgOver120: finalizeExcludedBucket(excluded.avgOver120, excludedCustomers.avgOver120),
+      legal: finalizeExcludedBucket(excluded.legal, excludedCustomers.legal),
+      electronics: finalizeExcludedBucket(excluded.electronics, excludedCustomers.electronics),
+    },
+  };
+}
+
+function monthSpanCount(fromMonthKey = "", toMonthKey = "") {
+  const from = String(fromMonthKey || "").slice(0, 7);
+  const to = String(toMonthKey || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(from) || !/^\d{4}-\d{2}$/.test(to) || to < from) return 0;
+  const fromYear = Number(from.slice(0, 4));
+  const fromMonth = Number(from.slice(5, 7));
+  const toYear = Number(to.slice(0, 4));
+  const toMonth = Number(to.slice(5, 7));
+  return ((toYear - fromYear) * 12) + (toMonth - fromMonth) + 1;
 }
 
 export function resolveExpectedCollectionSalesman(invoice = {}) {
@@ -306,24 +508,49 @@ export function buildExpectedCollectionDetailRows(invoices = [], {
   });
 }
 
+function sortExpectedCollectionRows(rows = []) {
+  return [...(rows || [])].sort((left, right) => (
+    String(left.salesmanName || left.salesmanCode || "").localeCompare(
+      String(right.salesmanName || right.salesmanCode || ""),
+    )
+    || right.amount - left.amount
+    || String(left.customerCode).localeCompare(String(right.customerCode))
+    || String(left.invoiceDate).localeCompare(String(right.invoiceDate))
+    || String(left.refNo).localeCompare(String(right.refNo))
+  ));
+}
+
 /**
- * Current KSA month + next two month-ends (same BM+Rest / avg-days rules).
- * Each months[] entry is the incremental window for that month; cumulative*
- * fields are expected by that month-end (includes prior months in the horizon).
+ * Month grid covering the near-term 3 months plus any later months that still
+ * hold BM+Rest expected invoices, plus an excluded-bucket reconciliation so
+ * Total outstanding = expected-in-months + never-paid + avg>120 + legal + electronics.
  */
 export function buildExpectedCollectionHorizonReport(invoices = [], options = {}) {
-  const horizonMonths = resolveExpectedCollectionMonthEnds(
-    options.monthEnd,
-    options.horizonMonths || EXPECTED_COLLECTION_HORIZON_MONTHS,
+  const classified = classifyExpectedCollectionOutstanding(invoices, options);
+  const nearTerm = Math.max(
+    EXPECTED_COLLECTION_HORIZON_MONTHS,
+    Number(options.horizonMonths) || EXPECTED_COLLECTION_HORIZON_MONTHS,
   );
-  const months = horizonMonths.map((horizon) => buildExpectedCollectionDetailRows(invoices, {
-    ...options,
-    monthEnd: horizon.monthEnd,
-    afterMonthEnd: horizon.afterMonthEnd,
-    monthKey: horizon.monthKey,
-    offset: horizon.offset,
-    isCurrent: horizon.isCurrent,
-  }));
+  const spanToLatest = monthSpanCount(classified.currentMonthKey, classified.latestMonthKey);
+  const monthCount = Math.max(
+    nearTerm,
+    Math.min(EXPECTED_COLLECTION_MAX_MONTHS, spanToLatest || nearTerm),
+  );
+  const horizonMonths = resolveExpectedCollectionMonthEnds(options.monthEnd, monthCount);
+
+  const months = horizonMonths.map((horizon) => {
+    const rows = sortExpectedCollectionRows(classified.rowsByMonth.get(horizon.monthKey) || []);
+    return {
+      ...summarizeExpectedCollectionRows(rows, {
+        monthKey: horizon.monthKey,
+        monthEnd: horizon.monthEnd,
+        afterMonthEnd: horizon.afterMonthEnd,
+        offset: horizon.offset,
+        isCurrent: horizon.isCurrent,
+      }),
+      isNearTerm: horizon.isNearTerm,
+    };
+  });
 
   let cumulativeTotal = 0;
   let cumulativeBmTotal = 0;
@@ -331,6 +558,7 @@ export function buildExpectedCollectionHorizonReport(invoices = [], options = {}
   let cumulativePendingAmount = 0;
   const cumulativeCustomerCodes = new Set();
   let cumulativeInvoiceCount = 0;
+  let nearTermTotal = 0;
 
   const withCumulative = months.map((month) => {
     cumulativeTotal = money(cumulativeTotal + Number(month.total || 0));
@@ -338,6 +566,7 @@ export function buildExpectedCollectionHorizonReport(invoices = [], options = {}
     cumulativeRestTotal = money(cumulativeRestTotal + Number(month.restTotal || 0));
     cumulativePendingAmount = money(cumulativePendingAmount + Number(month.pendingAmount || 0));
     cumulativeInvoiceCount += Number(month.invoiceCount || 0);
+    if (month.isNearTerm) nearTermTotal = money(nearTermTotal + Number(month.total || 0));
     (month.rows || []).forEach((row) => {
       if (row?.customerCode) cumulativeCustomerCodes.add(row.customerCode);
     });
@@ -356,6 +585,14 @@ export function buildExpectedCollectionHorizonReport(invoices = [], options = {}
     monthEnd: String(options.monthEnd || "").slice(0, 10),
     isCurrent: true,
   });
+  const excludedTotal = money(
+    Number(classified.excluded.neverPaid.pendingAmount || 0)
+    + Number(classified.excluded.avgOver120.pendingAmount || 0)
+    + Number(classified.excluded.legal.pendingAmount || 0)
+    + Number(classified.excluded.electronics.pendingAmount || 0),
+  );
+  const expectedInMonths = cumulativeTotal;
+  const laterTotal = money(expectedInMonths - nearTermTotal);
 
   return {
     monthEnd: current.monthEnd,
@@ -366,5 +603,14 @@ export function buildExpectedCollectionHorizonReport(invoices = [], options = {}
     invoiceCount: current.invoiceCount,
     rows: current.rows,
     months: withCumulative,
+    reconciliation: {
+      totalPending: classified.totalPending,
+      expectedInMonths,
+      nearTermTotal,
+      laterTotal,
+      excludedTotal,
+      excluded: classified.excluded,
+      accountedTotal: money(expectedInMonths + excludedTotal),
+    },
   };
 }

@@ -5,6 +5,7 @@ import {
 } from "./dayActivityWhatsapp.js";
 import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
+import { normalizeWhatsappSummaryText } from "./whatsappText.js";
 import { formatWorkingHoursWhatsappLines } from "./workingHoursWhatsapp.js";
 
 function formatMoney(value) {
@@ -210,7 +211,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
     }),
     formatDayActivityWhatsappLines(options.dayActivity),
   );
-  return lines.join("\n");
+  return normalizeWhatsappSummaryText(lines.join("\n"));
 }
 
 function escapeRegExp(value) {
@@ -223,7 +224,7 @@ export function patchCollectionVisitSummaryVisitNumber(
   labels = COLLECTION_VISIT_SUMMARY_LABELS,
 ) {
   const visitNumber = Number(visitNumberForDay || 0);
-  const text = String(summary || "");
+  const text = normalizeWhatsappSummaryText(summary);
   if (!text || visitNumber <= 0) return text;
 
   const labelVariants = [
@@ -259,7 +260,7 @@ export function patchCollectionVisitSummaryVisitDistance(
   metrics = {},
   labels = COLLECTION_VISIT_SUMMARY_LABELS,
 ) {
-  let text = String(summary || "");
+  let text = normalizeWhatsappSummaryText(summary);
   if (!text) return text;
 
   const distanceLines = formatVisitDistanceWhatsappLines(metrics, {
@@ -324,7 +325,7 @@ export function patchCollectionVisitSummaryEnglishRemark(
   englishRemark,
   labels = COLLECTION_VISIT_SUMMARY_LABELS,
 ) {
-  const text = String(summary || "");
+  const text = normalizeWhatsappSummaryText(summary);
   const english = String(englishRemark || "").trim().replace(/\.+$/, "");
   if (!text || !english) return text;
 

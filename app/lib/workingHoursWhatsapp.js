@@ -12,6 +12,7 @@ import {
   timelineRowFromActivityLog,
   timelineRowFromCollectionVisit,
 } from "./visitDistanceWhatsapp.js";
+import { normalizeWhatsappSummaryText } from "./whatsappText.js";
 
 export const WORKING_HOURS_WHATSAPP_LABELS = {
   workingHours: "Working hours",
@@ -375,7 +376,7 @@ export function patchWhatsappSummaryWorkingHours(
   hours = null,
   labels = WORKING_HOURS_WHATSAPP_LABELS,
 ) {
-  const text = String(summary || "");
+  const text = normalizeWhatsappSummaryText(summary);
   if (!text) return text;
 
   const line = formatWorkingHoursWhatsappLine(hours, labels);

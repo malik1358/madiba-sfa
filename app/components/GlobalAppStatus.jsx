@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { translate, useAppLanguage } from "../lib/appLanguage";
+import { isPublicCustomerOrderPath } from "../lib/customerOrderLinks.js";
 import {
   dataRefreshProgressPercent,
   formatDataAge,
@@ -48,6 +50,7 @@ const STEP_LABELS = {
 };
 
 export default function GlobalAppStatus({ environment, buildId, buildTime = "" }) {
+  const pathname = usePathname();
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const [identity, setIdentity] = useState("");
@@ -55,6 +58,7 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
   const [pendingSync, setPendingSync] = useState(0);
   const [dataStatus, setDataStatus] = useState(() => getDataRefreshStatus());
   const [refreshingNow, setRefreshingNow] = useState(false);
+  const hideChrome = isPublicCustomerOrderPath(pathname);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -177,6 +181,8 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
       subscription.unsubscribe();
     };
   }, [language]);
+
+  if (hideChrome) return null;
 
   return (
     <div className={`globalAppStatus globalAppStatus${environment}`} role="status" dir={dir}>

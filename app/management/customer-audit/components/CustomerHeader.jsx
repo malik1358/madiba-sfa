@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatPaymentDaysLabel, HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
 import { blockedByAvgDaysMessage } from "../../../lib/customerOrderBlock.js";
+import GenerateOrderLinkButton from "../../../components/GenerateOrderLinkButton";
 
 export default function CustomerHeader({
   customer,
@@ -11,6 +12,11 @@ export default function CustomerHeader({
   canManageOrderBlock = false,
   updatingOrderBlock = false,
   onToggleOrderBlock = null,
+  pricingRegion = "",
+  pricingType = "wholesale",
+  paymentType = "credit",
+  language = "en",
+  showOrderLink = true,
 }) {
   const salesmanLabel = String(outstandingSalesman || "").trim()
     || String(customer.current_salesman_code || "").trim()
@@ -35,6 +41,18 @@ export default function CustomerHeader({
         {customer.customer_code} {customer.customer_name}
       </h2>
       <div className="auditHeroSalesman">{salesmanLabel}</div>
+      {showOrderLink ? (
+        <div style={{ marginTop: "10px" }}>
+          <GenerateOrderLinkButton
+            customerCode={customer.customer_code}
+            customerName={customer.customer_name}
+            pricingRegion={pricingRegion}
+            pricingType={pricingType}
+            paymentType={paymentType}
+            language={language}
+          />
+        </div>
+      ) : null}
 
       <section className="auditSummaryGrid">
         <div className="auditSummaryCard">

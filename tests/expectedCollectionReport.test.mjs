@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildExpectedCollectionDetailRows,
+  buildExpectedCollectionHorizonReport,
   groupExpectedCollectionRowsByCustomer,
   groupExpectedCollectionRowsBySalesman,
+  resolveExpectedCollectionMonthEnds,
 } from "../app/lib/expectedCollectionReport.js";
 import { buildCustomerCategoryMixFromSalesRows } from "../app/lib/expectedCollectionReportServer.js";
+import { isOpenInvoiceExpectedThisMonth } from "../app/lib/kpiUploadSummaryCategories.js";
 
 test("buildExpectedCollectionDetailRows keeps BM+Rest expected invoices and drops legal/electronics-only", () => {
   const avgDaysByCustomer = new Map([
@@ -215,6 +218,178 @@ test("groupExpectedCollectionRowsByCustomer merges same customer invoices with E
   assert.equal(customers[1].customerCode, "2002");
   assert.equal(customers[1].invoiceCount, 1);
   assert.equal(customers[1].amount, 300);
+});
+
+test("resolveExpectedCollectionMonthEnds returns current plus next two month-ends", () => {
+  const months = resolveExpectedCollectionMonthEnds("2026-11-30");
+  assert.equal(months.length, 3);
+  assert.deepEqual(months.map((row) => row.monthKey), ["2026-11", "2026-12", "2027-01"]);
+  assert.deepEqual(months.map((row) => row.monthEnd), ["2026-11-30", "2026-12-31", "2027-01-31"]);
+  assert.equal(months[0].afterMonthEnd, "");
+  assert.equal(months[1].afterMonthEnd, "2026-11-30");
+  assert.equal(months[2].afterMonthEnd, "2026-12-31");
+});
+
+test("isOpenInvoiceExpectedThisMonth supports exclusive afterMonthEnd window", () => {
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-10-15",
+    avgDays: 30,
+    monthEnd: "2026-11-30",
+  }), true);
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-10-15",
+    avgDays: 30,
+    monthEnd: "2026-12-31",
+    afterMonthEnd: "2026-11-30",
+  }), false);
+  assert.equal(isOpenInvoiceExpectedThisMonth({
+    invoiceDate: "2026-11-20",
+    avgDays: 30,
+    monthEnd: "2026-12-31",
+    afterMonthEnd: "2026-11-30",
+  }), true);
+});
+
+test("buildExpectedCollectionHorizonReport splits current and next two months", () => {
+  const report = buildExpectedCollectionHorizonReport([
+    {
+      customer_code: "1001",
+      customer_name: "Current Month",
+      salesman: "Ahmed",
+      ref_no: "NOW",
+      invoice_date: "2026-10-15",
+      pending_amount: 1000,
+    },
+    {
+      customer_code: "1002",
+      customer_name: "Next Month",
+      salesman: "Ahmed",
+      ref_no: "DEC",
+      invoice_date: "2026-11-20",
+      pending_amount: 400,
+    },
+    {
+      customer_code: "1003",
+      customer_name: "Month After",
+      salesman: "Belal",
+      ref_no: "JAN",
+      invoice_date: "2026-12-15",
+      pending_amount: 250,
+    },
+  ], {
+    avgDaysByCustomer: new Map([
+      ["1001", 30],
+      ["1002", 30],
+      ["1003", 30],
+    ]),
+    customerMix: new Map([
+      ["1001", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+      ["1002", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1003", { buildingMaterial: 50, electronics: 0, rest: 50 }],
+    ]),
+    monthEnd: "2026-11-30",
+  });
+
+  assert.equal(report.months.length, 3);
+  assert.equal(report.total, 1000);
+  assert.equal(report.invoiceCount, 1);
+  assert.equal(report.months[0].total, 1000);
+  assert.equal(report.months[0].cumulativeTotal, 1000);
+  assert.equal(report.months[1].total, 400);
+  assert.equal(report.months[1].rows[0].refNo, "DEC");
+  assert.equal(report.months[1].cumulativeTotal, 1400);
+  assert.equal(report.months[2].total, 250);
+  assert.equal(report.months[2].cumulativeTotal, 1650);
+  assert.equal(report.months[2].cumulativeInvoiceCount, 3);
+  assert.equal(report.months[2].cumulativeCustomerCount, 3);
+  assert.equal(report.reconciliation.totalPending, 1650);
+  assert.equal(report.reconciliation.expectedInMonths, 1650);
+  assert.equal(report.reconciliation.nearTermTotal, 1650);
+  assert.equal(report.reconciliation.laterTotal, 0);
+  assert.equal(report.reconciliation.excludedTotal, 0);
+  assert.equal(report.reconciliation.accountedTotal, 1650);
+});
+
+test("buildExpectedCollectionHorizonReport shows later months and excluded balance buckets", () => {
+  const report = buildExpectedCollectionHorizonReport([
+    {
+      customer_code: "1001",
+      customer_name: "Near",
+      ref_no: "N1",
+      invoice_date: "2026-10-15",
+      pending_amount: 1000,
+    },
+    {
+      customer_code: "1002",
+      customer_name: "Later Apr",
+      ref_no: "L1",
+      invoice_date: "2026-12-20",
+      pending_amount: 800,
+    },
+    {
+      customer_code: "1003",
+      customer_name: "Electronics mix",
+      ref_no: "E1",
+      invoice_date: "2026-10-01",
+      pending_amount: 1000,
+    },
+    {
+      customer_code: "1004",
+      customer_name: "Never paid",
+      ref_no: "NP1",
+      invoice_date: "2026-09-01",
+      pending_amount: 500,
+    },
+    {
+      customer_code: "1005",
+      customer_name: "Slow payer",
+      ref_no: "S1",
+      invoice_date: "2026-08-01",
+      pending_amount: 700,
+    },
+    {
+      customer_code: "1258C",
+      customer_name: "Legal",
+      ref_no: "LEG1",
+      invoice_date: "2026-07-01",
+      pending_amount: 300,
+    },
+  ], {
+    avgDaysByCustomer: new Map([
+      ["1001", 30],
+      ["1002", 120],
+      ["1003", 40],
+      ["1005", 180],
+    ]),
+    customerMix: new Map([
+      ["1001", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+      ["1002", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1003", { buildingMaterial: 40, electronics: 60, rest: 0 }],
+      ["1004", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1005", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+      ["1258C", { buildingMaterial: 0, electronics: 0, rest: 100 }],
+    ]),
+    monthEnd: "2026-11-30",
+    excludedCustomerCodes: new Set(["1258C", "1258"]),
+  });
+
+  // 1002: 2026-12-20 + 120 days = 2027-04-19 → Apr 27 (later than first 3 months)
+  assert.ok(report.months.length >= 6);
+  assert.equal(report.months[0].total, 1400); // 1000 BM + 400 BM from electronics mix invoice
+  assert.equal(report.reconciliation.nearTermTotal, 1400);
+  assert.equal(report.reconciliation.laterTotal, 800);
+  assert.equal(report.reconciliation.expectedInMonths, 2200);
+  assert.equal(report.reconciliation.excluded.electronics.pendingAmount, 600);
+  assert.equal(report.reconciliation.excluded.neverPaid.pendingAmount, 500);
+  assert.equal(report.reconciliation.excluded.avgOver120.pendingAmount, 700);
+  assert.equal(report.reconciliation.excluded.legal.pendingAmount, 300);
+  assert.equal(report.reconciliation.excludedTotal, 2100);
+  assert.equal(report.reconciliation.totalPending, 4300);
+  assert.equal(report.reconciliation.accountedTotal, 4300);
+  const april = report.months.find((month) => month.monthKey === "2027-04");
+  assert.ok(april);
+  assert.equal(april.total, 800);
+  assert.equal(april.isNearTerm, false);
 });
 
 test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {

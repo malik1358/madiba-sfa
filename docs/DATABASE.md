@@ -115,6 +115,8 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 `sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`. Indexes include `created_at DESC` and `updated_at DESC` (`20261018180000_sales_orders_created_updated_indexes.sql`) for recent-order lists and the app-performance two-day count. Apply that migration in Supabase before relying on it.
 
+`customer_order_links` (`20261118120000_customer_order_links.sql`): opaque passwordless catalogue tokens for one customer or prospect. Columns: `token` (unique), `customer_code`, `customer_name`, `is_prospect`, optional `prospect_id`, `created_by` → `profiles`, issuer `salesman_code` / `salesman_name`, `pricing_region`, `payment_type`, `pricing_type`, `expires_at` (create + 36h), optional `submitted_order_id` → `sales_orders`, `submitted_at`. RLS on with **no** anon/authenticated policies — `service_role` only via API. Apply in Supabase before Generate order link / `/order/<token>` work.
+
 Orphan `mobile_field_snapshot_v1:*` rows in `system_settings` are removed after a completed mobile-snapshot rebuild (`pruneOrphanMobileFieldSnapshots`). Stale snapshots inflate toast storage and slow settings traffic; keep only keys listed in `mobile_field_snapshot_meta_v1`.
 
 `salesman_code` / `salesman_name` are the order maker (authenticated profile at save/submit), not a copy of `customers.current_salesman_code`. `/api/sales-orders` overwrites both from the caller’s profile; the client still sends `customerSalesmanCode` only for pricing-region fallback.

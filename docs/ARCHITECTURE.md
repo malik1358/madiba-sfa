@@ -19,16 +19,19 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 ## Layers
 
 ```text
-Browser (app/page.js, app/management/*, app/components/*)
+Browser (app/page.js, app/management/*, app/components/*, app/order/[token])
   -> getSupabaseClient() for login and a few direct reads
   -> fetch /api/* with the user access token
+  -> public /order/<token> talks only to /api/customer-order-links/[token] (no JWT)
 API route (app/api/**/route.js)
   -> verify JWT with the service-role client, or verify CRON_SECRET
+  -> customer order links: create requires JWT + sales scope; redeem/submit validate opaque token + expiry
   -> enforce sales scope in application code
   -> read/write Postgres and Storage
 Postgres
   -> RLS still exists, but service-role calls bypass it
   -> active_sales view + system_settings JSON for datasets
+  -> customer_order_links is service-role only (no anon/authenticated policies)
 ```
 
 The service role is server-only. Losing the scope checks in an API route would expose other salesmen’s customers even though RLS exists, because the service role bypasses RLS.
@@ -51,7 +54,7 @@ Item Master Analysis (`/management/item-master-analysis`, module `itemMasterAnal
 
 Returns Above Sales (`/management/returns-above-sales`, module `returnsAboveSales` in Reports) is a read-only management report. `GET /api/returns-above-sales` checks the caller JWT and management-report access, pages `active_sales`, and keeps customer + item pairs whose return value exceeds sales value. Quantity is not part of the comparison. `A003927` is rolled into `A003928`. Numeric vouchers that differ only by a leading zero are counted once. A credit-note `reference` that names a sales voucher missing from the live batch is loaded once from the newest `sales_raw` batch for that customer and item. Pure aggregation is `buildReturnsAboveSalesReport` in `app/lib/returnsAboveSales.js`; DB load is `loadReturnsAboveSalesReport` in `app/lib/returnsAboveSalesServer.js`. The morning email is `POST /api/cron/returns-above-sales-email` (`returnsAboveSalesEmail.js`). No migration.
 
-Expected Collection (`/management/expected-collection`, module `expectedCollection` in Reports) is a read-only management report. `GET /api/expected-collection` checks the caller JWT and management-report access, loads outstanding invoices + receipt register + legal transfers, pages `active_sales` for those customers (chunked, concurrent) to compute avg pay days and BM/Rest mix from the same sales rows (no sales BI cube load), and returns BM+Rest invoice rows expected by month-end (`buildExpectedCollectionDetailRows` / `loadExpectedCollectionReport`). The UI groups rows by salesman then by customer (`groupExpectedCollectionRowsBySalesman` / `groupExpectedCollectionRowsByCustomer`); multi-invoice customers are collapsible under an expanded salesman. A 3-minute in-process cache avoids repeating the sales scan on immediate reopen. The KPI upload summary email Collection month-end estimate uses the same BM+Rest expected remaining (`sumExpectedCollectionCategoryBuckets` / `resolveExpectedCollectionMonthEndEstimate`) instead of Collection workday pace. No migration.
+Expected Collection (`/management/expected-collection`, module `expectedCollection` in Reports) is a read-only management report. `GET /api/expected-collection` checks the caller JWT and management-report access, loads outstanding invoices + receipt register + legal transfers, pages `active_sales` for those customers (chunked, concurrent) to compute avg pay days and BM/Rest mix from the same sales rows (no sales BI cube load), and returns a **month + balance reconciliation** (`classifyExpectedCollectionOutstanding` / `buildExpectedCollectionHorizonReport` / `loadExpectedCollectionReport`): near-term current + next two KSA months, plus later months when eligible approx-pay dates fall beyond that, and `reconciliation` buckets (never-paid / avg>120 / legal / electronics) so Total outstanding accounts. Top-level `rows`/`total` stay current-month for KPI compatibility. The UI shows the month grid, outstanding-balance table, and month tabs for detail. Detail groups rows by salesman then by customer (`groupExpectedCollectionRowsBySalesman` / `groupExpectedCollectionRowsByCustomer`); multi-invoice customers are collapsible under an expanded salesman. A 3-minute in-process cache avoids repeating the sales scan on immediate reopen. The KPI upload summary email Collection month-end estimate uses the same BM+Rest expected remaining (`sumExpectedCollectionCategoryBuckets` / `resolveExpectedCollectionMonthEndEstimate`) instead of Collection workday pace. No migration.
 
 Expected Stocked Sales (`/management/expected-stocked-sales`, module `expectedStockedSales` in Reports) is a read-only management report. `GET /api/expected-stocked-sales` checks the caller JWT and management-report access, pages `active_sales`, drops LP* codes and the incomplete current KSA month, detects up to three company seasonal calendar months (completed months ≥ 1.25× median monthly sales), merges replacement item codes via `resolveCanonicalItemCode` / `PRICE_CODE_ALIASES` and pack-insensitive name families (`expectedStockedItemFamilyKey`), and builds two cohorts (lifetime GP% > 10% and GP% > 0%). For each item it takes the second-highest non-seasonal month’s net sales and profit as expected SAR / GP / margin. Pure aggregation is `buildExpectedStockedSalesReport` in `app/lib/expectedStockedSales.js`; DB load is `loadExpectedStockedSalesReport` in `app/lib/expectedStockedSalesServer.js`. Weekly trend email is `POST /api/cron/expected-stocked-sales-email` (`expectedStockedSalesEmail.js` / `expectedStockedSalesEmailServer.js`, `maxDuration` 300s): compares current cohort totals to `expected_stocked_sales_email_snapshot_v1` and claims `expected_stocked_sales_email:<week-monday>`. No migration.
 
@@ -117,7 +120,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/user/sales-scope` — visible salesman codes
 - `/api/user/table-column-prefs` — GET/PUT per-user hidden table columns in `system_settings.table_column_prefs_v1:<auth.user.id>` (JWT only; merges one `tableId` on PUT)
-- `/api/expected-collection` — BM+Rest open invoices expected by month-end (management-report JWT)
+- `/api/expected-collection` — BM+Rest open invoices expected by current + next 2 month-ends (management-report JWT)
 - `/api/expected-stocked-sales` — expected monthly sales if stocked (2nd-highest non-seasonal month; GP>10%; no LP*)
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
   - Lookup `?q=` returns at most 20 code/name matches inside the caller's sales scope, including inactive customers. Payment Settlement uses that search and then loads one customer. It does not call `/api/customers/visible` on open. Exact `?code=` lookup is unchanged.

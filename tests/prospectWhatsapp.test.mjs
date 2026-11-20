@@ -38,7 +38,7 @@ test("buildProspectFollowUpWhatsappSummary matches field visit report format", (
   assert.doesNotMatch(summary, /Outstanding:/);
   assert.doesNotMatch(summary, /0-30:/);
   assert.doesNotMatch(summary, /Total:/);
-  assert.match(summary, /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.7136%2C46\.6753/);
+  assert.match(summary, /GPS: https:\/\/maps\.google\.com\/\?q=24\.7136,46\.6753/);
   assert.match(summary, /Distance from customer: 0.12 km/);
   assert.match(summary, /Distance from previous: 3.40 km/);
   assert.match(summary, /Est. waiting: 0 min/);

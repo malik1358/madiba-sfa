@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   customerSalesmanAssignmentMatchesScope,
+  filterVisitReportAvailableUsers,
   findHeadProfile,
   headSalesmanMetadataMatchesLeader,
   resolveReportingChain,
   resolveReportingChainFromAuth,
   resolveSubordinateUserIds,
+  resolveVisitReportAudience,
 } from "../app/lib/salesHierarchy.js";
 import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
 
@@ -207,4 +209,63 @@ test("resolveReportingChain walks bosses by head_salesman_code", async () => {
   const chain = await resolveReportingChain(admin, "george-id");
   assert.deepEqual(chain.map((boss) => boss.id), ["nabil-id", "gm-id"]);
   assert.equal(chain[0].email, "nabil@madiba.com");
+});
+
+test("resolveVisitReportAudience lets a salesman boss open nested subordinates", () => {
+  const subordinateIds = new Set(["soyeb", "junaid", "parvez"]);
+
+  const deniedPeer = resolveVisitReportAudience({
+    actorUserId: "sohail",
+    requestedUserId: "outsider",
+    viewAll: false,
+    subordinateIds,
+  });
+  assert.equal(deniedPeer.allowed, false);
+
+  const allowedNested = resolveVisitReportAudience({
+    actorUserId: "sohail",
+    requestedUserId: "parvez",
+    viewAll: false,
+    subordinateIds,
+  });
+  assert.equal(allowedNested.allowed, true);
+  assert.equal(allowedNested.userIdFilter, "parvez");
+  assert.equal(allowedNested.allowedUserIds.has("parvez"), true);
+  assert.equal(allowedNested.allowedUserIds.has("sohail"), true);
+
+  const selfOnly = resolveVisitReportAudience({
+    actorUserId: "sohail",
+    requestedUserId: "",
+    viewAll: false,
+    subordinateIds,
+  });
+  assert.equal(selfOnly.allowed, true);
+  assert.equal(selfOnly.userIdFilter, "sohail");
+
+  const managementAll = resolveVisitReportAudience({
+    actorUserId: "admin",
+    requestedUserId: "",
+    viewAll: true,
+    subordinateIds: new Set(),
+  });
+  assert.equal(managementAll.allowed, true);
+  assert.equal(managementAll.userIdFilter, "");
+  assert.equal(managementAll.allowedUserIds, null);
+});
+
+test("filterVisitReportAvailableUsers keeps only the actor team", () => {
+  const users = [
+    { userId: "sohail", userName: "Sohail" },
+    { userId: "parvez", userName: "Parvez" },
+    { userId: "outsider", userName: "Outsider" },
+  ];
+  const allowed = new Set(["sohail", "parvez"]);
+  assert.deepEqual(
+    filterVisitReportAvailableUsers(users, allowed).map((row) => row.userId),
+    ["sohail", "parvez"],
+  );
+  assert.deepEqual(
+    filterVisitReportAvailableUsers(users, null).map((row) => row.userId),
+    ["sohail", "parvez", "outsider"],
+  );
 });

@@ -498,6 +498,31 @@ export function listAccessibleNavGroups(access) {
     .filter((group) => group.items.length > 0);
 }
 
+/** Case-insensitive screen search across accessible modules (EN + AR labels). */
+export function filterAccessibleModulesByQuery(access, query = "", language = "en") {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return [];
+
+  return listAccessibleModules(access)
+    .map((item) => {
+      const label = localizedModuleLabel(item.moduleKey, language)
+        || localizedModuleLabel(item.moduleKey, "en")
+        || item.label
+        || item.moduleKey;
+      const en = localizedModuleLabel(item.moduleKey, "en").toLowerCase();
+      const ar = localizedModuleLabel(item.moduleKey, "ar").toLowerCase();
+      const key = String(item.moduleKey || "").toLowerCase();
+      const href = String(item.href || "").toLowerCase();
+      const haystack = `${en} ${ar} ${key} ${href}`;
+      if (!haystack.includes(needle)) return null;
+      return {
+        ...item,
+        label,
+      };
+    })
+    .filter(Boolean);
+}
+
 export function moduleLabelForPath(href, language = "en") {
   const normalizedHref = String(href || "").trim();
   const match = Object.entries(MODULES).find(([, module]) => module.href === normalizedHref);

@@ -42,7 +42,7 @@ test("formatVisitGpsWhatsappValue labels MADIBA store entries instead of a Googl
   );
   assert.match(
     formatVisitGpsWhatsappValue({ latitude: 24.72, longitude: 46.72 }),
-    /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.72%2C46\.72$/,
+    /^https:\/\/maps\.google\.com\/\?q=24\.72,46\.72$/,
   );
 
   const lines = formatVisitDistanceWhatsappLines({
@@ -82,7 +82,7 @@ test("resolveVisitDistanceMetrics uses customer GPS, previous GPS, and waiting t
 
   const lines = formatVisitDistanceWhatsappLines(metrics);
   assert.equal(lines[0], "");
-  assert.match(lines[1], /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.72%2C46\.72/);
+  assert.match(lines[1], /GPS: https:\/\/maps\.google\.com\/\?q=24\.72,46\.72/);
   assert.match(lines[2], /Distance from customer: \d+\.\d{2} km/);
   assert.match(lines[3], /Distance from previous: \d+\.\d{2} km/);
   assert.match(lines[4], /Est. waiting:/);

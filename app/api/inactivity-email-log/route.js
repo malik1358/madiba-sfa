@@ -1,6 +1,10 @@
 import { isManagementRole } from "../../lib/moduleAccess.js";
 import { createClient } from "@supabase/supabase-js";
 import { loadInactivityEmailLog } from "../../lib/inactivityEmailServer.js";
+import {
+  resolveSubordinateUserIds,
+  resolveVisitReportAudience,
+} from "../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -28,7 +32,7 @@ async function getAuthUser(request) {
 async function getProfile(admin, userId) {
   const { data, error } = await admin
     .from("profiles")
-    .select("id,role")
+    .select("id,role,salesman_code,salesman_name")
     .eq("id", userId)
     .maybeSingle();
 
@@ -48,6 +52,26 @@ function parseReportDate(value) {
     throw new Error("Invalid report date. Use YYYY-MM-DD.");
   }
   return date;
+}
+
+async function loadSubordinateIds(admin, profile, viewAll) {
+  if (viewAll) return new Set();
+
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,salesman_code,salesman_name,role")
+      .order("salesman_name"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  return resolveSubordinateUserIds(
+    usersRes.data?.users || [],
+    profile,
+    profilesRes.data || [],
+  );
 }
 
 export async function GET(request) {
@@ -70,15 +94,21 @@ export async function GET(request) {
 
     const profile = await getProfile(admin, user.id);
     const viewAll = canViewAllUsers(profile);
-    const userIdFilter = userId || (viewAll ? "" : user.id);
+    const subordinateIds = await loadSubordinateIds(admin, profile, viewAll);
+    const audience = resolveVisitReportAudience({
+      actorUserId: user.id,
+      requestedUserId: userId,
+      viewAll,
+      subordinateIds,
+    });
 
-    if (!viewAll && userId && userId !== user.id) {
+    if (!audience.allowed) {
       throw new Error("You do not have access to other users' inactivity email logs.");
     }
 
     const log = await loadInactivityEmailLog(admin, {
       reportDate: date,
-      userId: userIdFilter,
+      userId: typeof audience.userIdFilter === "string" ? audience.userIdFilter : user.id,
     });
 
     return Response.json({

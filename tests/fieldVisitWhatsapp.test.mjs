@@ -92,7 +92,7 @@ test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the
     },
   });
 
-  assert.match(summary, /Total: 0\n\nGPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.7136%2C46\.6753/);
+  assert.match(summary, /Total: 0\n\nGPS: https:\/\/maps\.google\.com\/\?q=24\.7136,46\.6753/);
   assert.match(summary, /Distance from customer: 0.12 km/);
   assert.match(summary, /Distance from previous: 3.40 km/);
   assert.match(summary, /Est. waiting: 25 min/);
@@ -132,7 +132,7 @@ test("buildFieldVisitWhatsappSummary omits outstanding for prospect customer cod
   assert.doesNotMatch(summary, /0-30:/);
   assert.doesNotMatch(summary, /31-60:/);
   assert.doesNotMatch(summary, /Total:/);
-  assert.match(summary, /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.56706%2C46\.686261/);
+  assert.match(summary, /GPS: https:\/\/maps\.google\.com\/\?q=24\.56706,46\.686261/);
 });
 
 test("buildFieldVisitWhatsappSummary omits outstanding when is_prospect is set", () => {

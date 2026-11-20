@@ -1,8 +1,11 @@
 import { wrapShareText } from "./catalogueShareCard.js";
 import { normalizeWhatsappNumber } from "./paymentCollections.js";
+import { normalizeWhatsappSummaryText } from "./whatsappText.js";
+
+export { normalizeWhatsappSummaryText } from "./whatsappText.js";
 
 export function buildWhatsappShareUrl(text, phoneNumber = "") {
-  const message = String(text || "").trim();
+  const message = normalizeWhatsappSummaryText(text).trim();
   if (!message) return "";
 
   const encoded = encodeURIComponent(message);
@@ -15,7 +18,7 @@ export function buildWhatsappShareUrl(text, phoneNumber = "") {
 }
 
 export function buildWhatsappAppUrl(text) {
-  const message = String(text || "").trim();
+  const message = normalizeWhatsappSummaryText(text).trim();
   if (!message) return "";
   return `whatsapp://send?text=${encodeURIComponent(message)}`;
 }
@@ -50,7 +53,7 @@ function openUrlWithoutLeaving(url) {
 }
 
 export function openWhatsappDirect(text, options = {}) {
-  const message = String(text || "").trim();
+  const message = normalizeWhatsappSummaryText(text).trim();
   if (!message) {
     return { success: false, reason: "empty" };
   }
@@ -457,7 +460,7 @@ async function sharePreparedFilesOnWeb(files, { title, message, includeText }) {
 }
 
 export async function copyTextToClipboard(text) {
-  const value = String(text || "").trim();
+  const value = normalizeWhatsappSummaryText(text).trim();
   if (!value || typeof document === "undefined") return false;
 
   try {
@@ -498,7 +501,7 @@ export async function copyTextToClipboard(text) {
 }
 
 export async function shareTextOnWhatsapp(text, options = {}) {
-  const message = String(text || "").trim();
+  const message = normalizeWhatsappSummaryText(text).trim();
   if (!message) {
     return { success: false, reason: "empty" };
   }
@@ -545,7 +548,7 @@ export async function shareTextOnWhatsapp(text, options = {}) {
 }
 
 export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}) {
-  const originalMessage = String(text || "").trim();
+  const originalMessage = normalizeWhatsappSummaryText(text).trim();
   const incomingFiles = normalizeShareFiles(files);
 
   if (!originalMessage && incomingFiles.length === 0) {

@@ -5,6 +5,7 @@ import {
   timelineRowFromActivityLog,
   timelineRowFromCollectionVisit,
 } from "./visitDistanceWhatsapp.js";
+import { normalizeWhatsappSummaryText } from "./whatsappText.js";
 
 export const DAY_ACTIVITY_WHATSAPP_TIMEOUT_MS = 8000;
 
@@ -495,8 +496,9 @@ function dayActivityBlockPattern(labels = DAY_ACTIVITY_WHATSAPP_LABELS) {
     labels.visitsWithoutOrder || DAY_ACTIVITY_WHATSAPP_LABELS.visitsWithoutOrder,
   );
   const collections = escapeRegExp(labels.collections || DAY_ACTIVITY_WHATSAPP_LABELS.collections);
+  // Accept CRLF left over from Android FormData so we replace instead of append.
   return new RegExp(
-    `(?:\\n\\n|\\n)?^${withOrder}:\\s*.+$\\n^${withoutOrder}:\\s*.+$\\n^${collections}:\\s*.+(?:\\n\\n|\\n)?`,
+    `(?:\\r?\\n\\r?\\n|\\r?\\n)?^${withOrder}:\\s*.+$\\r?\\n^${withoutOrder}:\\s*.+$\\r?\\n^${collections}:\\s*.+(?:\\r?\\n\\r?\\n|\\r?\\n)?`,
     "m",
   );
 }
@@ -506,7 +508,7 @@ export function patchWhatsappSummaryDayActivity(
   stats = null,
   labels = DAY_ACTIVITY_WHATSAPP_LABELS,
 ) {
-  const text = String(summary || "");
+  const text = normalizeWhatsappSummaryText(summary);
   if (!text) return text;
 
   const lines = formatDayActivityWhatsappLines(stats, labels);

@@ -18,8 +18,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Expected Collection", ar: "التحصيل المتوقع" },
   subtitle: {
-    en: "Open invoices expected to pay by month-end (BM + Rest). Same rules as the KPI Collection expected-remaining estimate.",
-    ar: "الفواتير المفتوحة المتوقع تحصيلها حتى نهاية الشهر (مواد بناء + الباقي). نفس قواعد تقدير التحصيل المتوقع في مؤشرات الأداء.",
+    en: "Open invoices expected to pay by each month-end for the current KSA month and the next two (BM + Rest). Same rules as the KPI Collection expected-remaining estimate.",
+    ar: "الفواتير المفتوحة المتوقع تحصيلها حتى نهاية كل شهر للشهر الحالي في السعودية والشهرين التاليين (مواد بناء + الباقي). نفس قواعد تقدير التحصيل المتوقع في مؤشرات الأداء.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: {
@@ -53,9 +53,15 @@ const TEXT = {
   invoices: { en: "Invoices", ar: "الفواتير" },
   monthEnd: { en: "Month-end", ar: "نهاية الشهر" },
   asOf: { en: "As of", ar: "حتى" },
+  horizon: { en: "3-month estimate", ar: "تقدير 3 أشهر" },
+  month: { en: "Month", ar: "الشهر" },
+  newInMonth: { en: "New in month", ar: "جديد في الشهر" },
+  byMonthEnd: { en: "By month-end", ar: "حتى نهاية الشهر" },
+  currentMonth: { en: "Current", ar: "الحالي" },
+  detailFor: { en: "Detail for", ar: "التفاصيل لـ" },
   noRows: {
-    en: "No open invoices are expected to pay by this month-end under the current rule.",
-    ar: "لا توجد فواتير مفتوحة متوقع سدادها حتى نهاية هذا الشهر حسب القاعدة الحالية.",
+    en: "No open invoices are expected to pay in this month window under the current rule.",
+    ar: "لا توجد فواتير مفتوحة متوقع سدادها في نافذة هذا الشهر حسب القاعدة الحالية.",
   },
   accessDenied: {
     en: "Only admin, manager, or invoice maker can open this report.",
@@ -64,8 +70,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Grouped by salesman, then by customer, with Expected SAR totals. Expand a salesman for customers; expand a customer only when they have more than one invoice. Avg days = max(lifetime, last paid); no payment yet, avg >120, and legal-queue customers are excluded. Amount is BM + Rest share; approx pay on/before month-end.",
-    ar: "مجمّع حسب المندوب ثم العميل مع إجمالي المتوقع. وسّع المندوب للعملاء؛ وسّع العميل فقط عند وجود أكثر من فاتورة. متوسط الأيام = أعلى قيمة بين العمر وآخر سداد؛ يُستبعد من لم يسدد أو تجاوز 120 يوماً والطابور القانوني. المبلغ حصة مواد البناء + الباقي.",
+    en: "Summary shows each month’s new expected SAR and the cumulative amount by that month-end. Detail tabs list invoices newly expected in the selected month (current includes overdue still open). Grouped by salesman, then customer. Avg days = max(lifetime, last paid); no payment yet, avg >120, and legal-queue customers are excluded. Amount is BM + Rest share.",
+    ar: "الملخص يعرض المتوقع الجديد لكل شهر والإجمالي التراكمي حتى نهايته. تبويبات التفاصيل تعرض الفواتير المتوقع سدادها جديداً في الشهر المختار (الشهر الحالي يشمل المتأخر المفتوح). مجمّع حسب المندوب ثم العميل. متوسط الأيام = أعلى قيمة بين العمر وآخر سداد؛ يُستبعد من لم يسدد أو تجاوز 120 يوماً والطابور القانوني. المبلغ حصة مواد البناء + الباقي.",
   },
 };
 
@@ -99,6 +105,14 @@ function formatMaybe(value) {
   return String(value);
 }
 
+function monthLabel(monthKey) {
+  const text = String(monthKey || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(text)) return "—";
+  const [year, month] = text.split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[Number(month) - 1]} ${year.slice(2)}`;
+}
+
 function cellValue(row, key) {
   if (key === "salesmanName") return row.salesmanName || row.salesmanCode || "";
   if (key === "customerName") return row.customerName || "";
@@ -127,6 +141,7 @@ export default function ExpectedCollectionPage() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [report, setReport] = useState(null);
+  const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
 
   const loadReport = useCallback(async () => {
@@ -164,6 +179,10 @@ export default function ExpectedCollectionPage() {
         throw new Error(payload?.error || "Unable to load the report.");
       }
       setReport(payload);
+      const firstMonth = Array.isArray(payload?.months) && payload.months[0]
+        ? payload.months[0].monthKey
+        : String(payload?.monthEnd || "").slice(0, 7);
+      setSelectedMonthKey(firstMonth || "");
       setExpandedKeys(new Set());
     } catch (err) {
       setError(err.message || "Unable to load the report.");
@@ -176,7 +195,82 @@ export default function ExpectedCollectionPage() {
     void loadReport();
   }, [loadReport]);
 
-  const rows = useMemo(() => (Array.isArray(report?.rows) ? report.rows : []), [report]);
+  const months = useMemo(
+    () => (Array.isArray(report?.months) ? report.months : []),
+    [report],
+  );
+  const horizonRows = useMemo(() => {
+    if (months.length) {
+      return months.map((month) => ({
+        monthKey: month.monthKey,
+        monthLabel: `${monthLabel(month.monthKey)}${month.isCurrent ? ` (${t("currentMonth")})` : ""}`,
+        monthEnd: month.monthEnd || "",
+        customerCount: month.customerCount ?? 0,
+        invoiceCount: month.invoiceCount ?? 0,
+        bmTotal: month.bmTotal || 0,
+        restTotal: month.restTotal || 0,
+        total: month.total || 0,
+        cumulativeTotal: month.cumulativeTotal ?? month.total ?? 0,
+        isCurrent: Boolean(month.isCurrent),
+      }));
+    }
+    if (!report) return [];
+    const key = String(report.monthEnd || "").slice(0, 7);
+    return [{
+      monthKey: key,
+      monthLabel: `${monthLabel(key)} (${t("currentMonth")})`,
+      monthEnd: report.monthEnd || "",
+      customerCount: report.customerCount || 0,
+      invoiceCount: report.invoiceCount || 0,
+      bmTotal: report.bmTotal || 0,
+      restTotal: report.restTotal || 0,
+      total: report.total || 0,
+      cumulativeTotal: report.total || 0,
+      isCurrent: true,
+    }];
+  }, [months, report, t]);
+  const horizonFilterValueOf = useCallback((row, key) => {
+    if (key === "monthLabel") return row.monthLabel || "";
+    if (key === "monthEnd") return row.monthEnd || "";
+    if (key === "customerCount") return String(row.customerCount ?? "");
+    if (key === "invoiceCount") return String(row.invoiceCount ?? "");
+    if (key === "bmTotal") return formatAmount(row.bmTotal);
+    if (key === "restTotal") return formatAmount(row.restTotal);
+    if (key === "total") return formatAmount(row.total);
+    if (key === "cumulativeTotal") return formatAmount(row.cumulativeTotal);
+    return "";
+  }, []);
+  const {
+    filters: horizonFilters,
+    options: horizonOptions,
+    visibleRows: visibleHorizonRows,
+    setFilter: setHorizonFilter,
+  } = useBiExcelFilters(
+    horizonRows,
+    ["monthLabel", "monthEnd", "customerCount", "invoiceCount", "bmTotal", "restTotal", "total", "cumulativeTotal"],
+    horizonFilterValueOf,
+  );
+  const activeMonth = useMemo(() => {
+    if (!months.length) {
+      return {
+        monthKey: selectedMonthKey || String(report?.monthEnd || "").slice(0, 7),
+        monthEnd: report?.monthEnd || "",
+        rows: Array.isArray(report?.rows) ? report.rows : [],
+        total: report?.total || 0,
+        bmTotal: report?.bmTotal || 0,
+        restTotal: report?.restTotal || 0,
+        customerCount: report?.customerCount || 0,
+        invoiceCount: report?.invoiceCount || 0,
+        isCurrent: true,
+      };
+    }
+    return months.find((month) => month.monthKey === selectedMonthKey) || months[0];
+  }, [months, selectedMonthKey, report]);
+
+  const rows = useMemo(
+    () => (Array.isArray(activeMonth?.rows) ? activeMonth.rows : []),
+    [activeMonth],
+  );
   const filterValueOf = useCallback((row, key) => cellValue(row, key), []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, filterValueOf);
   const salesmanGroups = useMemo(
@@ -198,6 +292,26 @@ export default function ExpectedCollectionPage() {
     bmValue: 0,
     restValue: 0,
   }), [visibleRows]);
+
+  const horizonTotals = useMemo(() => {
+    if (!months.length) {
+      return {
+        total: Number(report?.total || 0),
+        bmTotal: Number(report?.bmTotal || 0),
+        restTotal: Number(report?.restTotal || 0),
+        customerCount: Number(report?.customerCount || 0),
+        invoiceCount: Number(report?.invoiceCount || 0),
+      };
+    }
+    const last = months[months.length - 1];
+    return {
+      total: Number(last?.cumulativeTotal || 0),
+      bmTotal: Number(last?.cumulativeBmTotal || 0),
+      restTotal: Number(last?.cumulativeRestTotal || 0),
+      customerCount: Number(last?.cumulativeCustomerCount || 0),
+      invoiceCount: Number(last?.cumulativeInvoiceCount || 0),
+    };
+  }, [months, report]);
 
   const toggleGroup = useCallback((key) => {
     setExpandedKeys((current) => {
@@ -222,6 +336,11 @@ export default function ExpectedCollectionPage() {
   }, [salesmanGroups]);
 
   const collapseAll = useCallback(() => {
+    setExpandedKeys(new Set());
+  }, []);
+
+  const selectMonth = useCallback((monthKey) => {
+    setSelectedMonthKey(monthKey);
     setExpandedKeys(new Set());
   }, []);
 
@@ -262,20 +381,135 @@ export default function ExpectedCollectionPage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
-              <h2>{t("title")}</h2>
-              <span>{visibleRows.length}</span>
-              <button type="button" className="moduleInlineButton" onClick={expandAll}>{t("expandAll")}</button>
-              <button type="button" className="moduleInlineButton" onClick={collapseAll}>{t("collapseAll")}</button>
+              <h2>{t("horizon")}</h2>
+              <span>{months.length || 1}</span>
               <button type="button" className="moduleInlineButton" onClick={loadReport}>{t("refresh")}</button>
             </div>
             <p className="moduleHint">
               {t("asOf")}: {report?.asOf || "—"}
               {" · "}
-              {t("monthEnd")}: {report?.monthEnd || "—"}
+              {t("totalExpected")}: {formatAmount(horizonTotals.total)}
               {" · "}
-              {t("customers")}: {report?.customerCount ?? 0}
+              BM: {formatAmount(horizonTotals.bmTotal)}
               {" · "}
-              {t("invoices")}: {report?.invoiceCount ?? 0}
+              Rest: {formatAmount(horizonTotals.restTotal)}
+              {" · "}
+              {t("customers")}: {horizonTotals.customerCount}
+              {" · "}
+              {t("invoices")}: {horizonTotals.invoiceCount}
+            </p>
+            <p className="moduleHint">{t("hint")}</p>
+            {error ? <p className="moduleHint">{error}</p> : null}
+            {loading ? (
+              <div className="moduleLoading">{t("loading")}</div>
+            ) : (
+              <ExportableTable
+                filename="expected-collection-horizon"
+                tableId="expected-collection-horizon"
+                sheetName="3-month estimate"
+                className="moduleTableWrap moduleBiTableWrap"
+              >
+                <table className="moduleTable moduleBiTable">
+                  <thead>
+                    <tr>
+                      <BiExcelHead label={t("month")} filterKey="monthLabel" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("monthEnd")} filterKey="monthEnd" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("customers")} filterKey="customerCount" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("invoices")} filterKey="invoiceCount" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("bm")} filterKey="bmTotal" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead label={t("rest")} filterKey="restTotal" options={horizonOptions} filters={horizonFilters} onChange={setHorizonFilter} allLabel={t("all")} />
+                      <BiExcelHead
+                        label={t("newInMonth")}
+                        filterKey="total"
+                        options={horizonOptions}
+                        filters={horizonFilters}
+                        onChange={setHorizonFilter}
+                        allLabel={t("all")}
+                        className="moduleBiTotalCol"
+                        summary={formatAmount(horizonTotals.total)}
+                      />
+                      <BiExcelHead
+                        label={t("byMonthEnd")}
+                        filterKey="cumulativeTotal"
+                        options={horizonOptions}
+                        filters={horizonFilters}
+                        onChange={setHorizonFilter}
+                        allLabel={t("all")}
+                        className="moduleBiTotalCol"
+                        summary={formatAmount(horizonTotals.total)}
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleHorizonRows.map((month, index) => {
+                      const active = month.monthKey === activeMonth?.monthKey;
+                      return (
+                        <tr
+                          key={month.monthKey || month.monthEnd || index}
+                          className={active ? "moduleBiMonthCell--current" : undefined}
+                        >
+                          <td>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => selectMonth(month.monthKey)}
+                            >
+                              {monthLabel(month.monthKey)}
+                              {month.isCurrent ? ` (${t("currentMonth")})` : ""}
+                            </button>
+                          </td>
+                          <td>{month.monthEnd || "—"}</td>
+                          <td>{month.customerCount ?? 0}</td>
+                          <td>{month.invoiceCount ?? 0}</td>
+                          <td>{formatAmount(month.bmTotal)}</td>
+                          <td>{formatAmount(month.restTotal)}</td>
+                          <td className="moduleBiTotalCol"><strong>{formatAmount(month.total)}</strong></td>
+                          <td className="moduleBiTotalCol">
+                            <strong>{formatAmount(month.cumulativeTotal ?? month.total)}</strong>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="moduleBiTotalRow">
+                      <td colSpan={4}><strong>{t("total")}</strong></td>
+                      <td><strong>{formatAmount(horizonTotals.bmTotal)}</strong></td>
+                      <td><strong>{formatAmount(horizonTotals.restTotal)}</strong></td>
+                      <td className="moduleBiTotalCol"><strong>{formatAmount(horizonTotals.total)}</strong></td>
+                      <td className="moduleBiTotalCol"><strong>{formatAmount(horizonTotals.total)}</strong></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </ExportableTable>
+            )}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("detailFor")}: {monthLabel(activeMonth?.monthKey)}</h2>
+              <span>{visibleRows.length}</span>
+              {months.map((month) => (
+                <button
+                  key={`tab:${month.monthKey}`}
+                  type="button"
+                  className="moduleInlineButton"
+                  aria-pressed={month.monthKey === activeMonth?.monthKey}
+                  onClick={() => selectMonth(month.monthKey)}
+                >
+                  {monthLabel(month.monthKey)}
+                  {month.isCurrent ? ` (${t("currentMonth")})` : ""}
+                </button>
+              ))}
+              <button type="button" className="moduleInlineButton" onClick={expandAll}>{t("expandAll")}</button>
+              <button type="button" className="moduleInlineButton" onClick={collapseAll}>{t("collapseAll")}</button>
+            </div>
+            <p className="moduleHint">
+              {t("monthEnd")}: {activeMonth?.monthEnd || "—"}
+              {" · "}
+              {t("customers")}: {activeMonth?.customerCount ?? 0}
+              {" · "}
+              {t("invoices")}: {activeMonth?.invoiceCount ?? 0}
               {" · "}
               {t("salesman")}: {salesmanGroups.length}
               {" · "}
@@ -285,17 +519,15 @@ export default function ExpectedCollectionPage() {
               {" · "}
               {t("totalExpected")}: {formatAmount(totals.amount)}
             </p>
-            <p className="moduleHint">{t("hint")}</p>
-            {error ? <p className="moduleHint">{error}</p> : null}
             {loading ? (
               <div className="moduleLoading">{t("loading")}</div>
             ) : rows.length === 0 ? (
               <div className="moduleHint">{t("noRows")}</div>
             ) : (
               <ExportableTable
-                filename="expected-collection"
+                filename={`expected-collection-${activeMonth?.monthKey || "month"}`}
                 tableId="expected-collection"
-                sheetName="Expected collection"
+                sheetName={`Expected ${monthLabel(activeMonth?.monthKey)}`}
                 className="moduleTableWrap moduleBiTableWrap"
               >
                 <table className="moduleTable moduleBiTable">

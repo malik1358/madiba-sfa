@@ -6,7 +6,7 @@ import {
   loadSalesRowsByCustomer,
   lookupByCustomerCode,
 } from "./collectionAvgDays.js";
-import { buildExpectedCollectionDetailRows } from "./expectedCollectionReport.js";
+import { buildExpectedCollectionHorizonReport } from "./expectedCollectionReport.js";
 import {
   buildCustomerCategoryMixFromFacts,
   buildKpiUploadSummaryExcludedCustomerSet,
@@ -113,7 +113,7 @@ export async function loadExpectedCollectionReport(admin, {
 } = {}) {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
-  const cacheKey = `${monthEnd}|${asOf}|by-salesman-v1`;
+  const cacheKey = `${monthEnd}|${asOf}|horizon-3m-v1`;
   const cached = expectedCollectionReportCache;
   if (
     cached
@@ -165,7 +165,7 @@ export async function loadExpectedCollectionReport(admin, {
     enrichedCustomers.map((row) => [normalizeCode(row.customer_code), pickCustomerAvgDaysToPay(row)]),
   );
 
-  const detail = buildExpectedCollectionDetailRows(outstandingInvoices, {
+  const detail = buildExpectedCollectionHorizonReport(outstandingInvoices, {
     avgDaysByCustomer,
     enrichedByCode,
     customerMix,
@@ -176,13 +176,14 @@ export async function loadExpectedCollectionReport(admin, {
   const report = {
     asOf,
     monthEnd: detail.monthEnd,
-    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end",
+    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end; current + next 2 months",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,
     customerCount: detail.customerCount,
     invoiceCount: detail.invoiceCount,
     rows: detail.rows,
+    months: detail.months,
   };
   expectedCollectionReportCache = {
     key: cacheKey,

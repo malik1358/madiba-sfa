@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSessionWithTimeout, withTimeout } from '../../../lib/authSession';
+import { getSessionWithTimeout, resolveAuthSession, withTimeout } from '../../../lib/authSession';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { mergeCustomerHistoryState } from '../../../lib/customerHistoryReceipts.js';
 import {
@@ -61,7 +61,7 @@ export function useCustomerData({ setError, setMessage }) {
       setSearching(true);
       setError('');
       try {
-        const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
+        const session = await resolveAuthSession(supabase, SESSION_TIMEOUT_MS);
         if (!session?.access_token) throw new Error('Please login again.');
 
         const response = await fetch(`/api/customers/lookup?q=${encodeURIComponent(queryText)}`, {

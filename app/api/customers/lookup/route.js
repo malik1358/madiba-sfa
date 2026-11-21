@@ -2,7 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../lib/customerAccess.js";
 import { resolveCustomerMasterExportFields } from "../../../lib/customerCode.js";
 import { findCustomersByMobile, isValidKsaMobile, normalizeKsaMobile } from "../../../lib/customerContact.js";
-import { findCustomersForSettlementSearch } from "../../../lib/customerSearch.js";
+import {
+  findCustomersForSettlementSearch,
+  resolveCustomerLookupScope,
+} from "../../../lib/customerSearch.js";
 import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -50,7 +53,8 @@ export async function GET(request) {
     });
 
     if (searchQuery.length >= 2 && !customerCode && !isValidKsaMobile(mobile)) {
-      const payload = await resolveSalesScopeForUserId(admin, user.id);
+      // Company-wide roles skip Auth listUsers; scoped roles reuse the 60s scope cache.
+      const payload = await resolveCustomerLookupScope(admin, user, resolveSalesScopeForUserId);
       const scope = withSalesScopeMatchers({
         hasAllAccess: payload.hasAllAccess,
         visibleSalesmanCodes: payload.visibleSalesmanCodes || [],

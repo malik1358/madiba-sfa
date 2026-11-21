@@ -383,10 +383,17 @@ export async function loadCustomerOrderLinkCatalog(admin, token) {
     const detail = catalogueDetails?.details?.[item.item_code]
       || catalogueDetails?.details?.[normalizeCatalogueCode(item.item_code)]
       || {};
+    // Re-assert KSA stock and never attach stock-in-hand numbers for guests.
     return {
-      ...item,
+      item_code: item.item_code,
+      item_name: item.item_name,
+      category: item.category,
+      price: item.price,
+      master_unit: item.master_unit,
+      base_unit: item.base_unit,
+      unit_conv: item.unit_conv,
       packing: String(detail.packing || "").trim(),
-      photos: Array.isArray(detail.photos) ? detail.photos : [],
+      photos: Array.isArray(detail.photos) ? detail.photos.map((photo) => ({ id: String(photo?.id || "").trim() })).filter((photo) => photo.id) : [],
     };
   });
 

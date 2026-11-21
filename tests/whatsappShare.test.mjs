@@ -5,6 +5,7 @@ import {
   buildReceiptSummaryShareImage,
   buildWhatsappAppUrl,
   buildWhatsappShareUrl,
+  downloadWhatsappShareFiles,
   normalizeWhatsappSummaryText,
   prepareWhatsappAttachmentShare,
   shareTextAndFilesOnWhatsapp,
@@ -132,14 +133,19 @@ test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const previousCreateObjectURL = URL.createObjectURL;
+  const previousRevokeObjectURL = URL.revokeObjectURL;
   const openedUrls = [];
+  const downloads = [];
   const fakeAnchor = {
     href: "",
     target: "",
     rel: "",
+    download: "",
     style: {},
     click() {
-      openedUrls.push(this.href);
+      if (this.download) downloads.push({ href: this.href, download: this.download });
+      else openedUrls.push(this.href);
     },
   };
 
@@ -155,6 +161,8 @@ test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is
     writable: true,
     value: {},
   });
+  URL.createObjectURL = () => "blob:receipt";
+  URL.revokeObjectURL = () => {};
   globalThis.document = {
     body: {
       appendChild() {},
@@ -192,6 +200,9 @@ test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is
     assert.equal(result.fallback, true);
     assert.equal(result.reason, "files-not-supported");
     assert.equal(result.method, "whatsapp-url");
+    assert.equal(result.filesDownloaded, true);
+    assert.equal(downloads.length, 1);
+    assert.equal(downloads[0].download, "receipt.jpg");
     assert.ok(openedUrls.some((url) => String(url).includes("whatsapp")));
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
@@ -203,6 +214,118 @@ test("shareTextAndFilesOnWhatsapp falls back to WhatsApp text when file share is
     } else {
       delete globalThis.navigator;
     }
+    URL.createObjectURL = previousCreateObjectURL;
+    URL.revokeObjectURL = previousRevokeObjectURL;
+  }
+});
+
+test("shareTextAndFilesOnWhatsapp downloads catalogue photos when file share is unavailable", async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const previousCreateObjectURL = URL.createObjectURL;
+  const previousRevokeObjectURL = URL.revokeObjectURL;
+  const downloads = [];
+
+  globalThis.window = {
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {},
+  });
+  URL.createObjectURL = () => "blob:catalogue";
+  URL.revokeObjectURL = () => {};
+  globalThis.document = {
+    body: {
+      appendChild() {},
+      removeChild() {},
+    },
+    createElement(tag) {
+      assert.equal(tag, "a");
+      return {
+        href: "",
+        download: "",
+        rel: "",
+        style: {},
+        click() {
+          downloads.push(this.download);
+        },
+      };
+    },
+  };
+
+  try {
+    const file = new File([new Blob(["photo"], { type: "image/jpeg" })], "A001-share.jpg", {
+      type: "image/jpeg",
+    });
+    const result = await shareTextAndFilesOnWhatsapp("", [file], {
+      title: "Product catalogue",
+      dialogTitle: "Share on WhatsApp",
+      keepSeparateFiles: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.fallback, true);
+    assert.equal(result.method, "download-files");
+    assert.equal(result.reason, "files-not-supported");
+    assert.deepEqual(downloads, ["A001-share.jpg"]);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousNavigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", previousNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+    URL.createObjectURL = previousCreateObjectURL;
+    URL.revokeObjectURL = previousRevokeObjectURL;
+  }
+});
+
+test("downloadWhatsappShareFiles triggers one browser download per file", async () => {
+  const previousDocument = globalThis.document;
+  const previousCreateObjectURL = URL.createObjectURL;
+  const previousRevokeObjectURL = URL.revokeObjectURL;
+  const downloads = [];
+
+  URL.createObjectURL = () => "blob:file";
+  URL.revokeObjectURL = () => {};
+  globalThis.document = {
+    body: {
+      appendChild() {},
+      removeChild() {},
+    },
+    createElement(tag) {
+      assert.equal(tag, "a");
+      return {
+        href: "",
+        download: "",
+        rel: "",
+        style: {},
+        click() {
+          downloads.push(this.download);
+        },
+      };
+    },
+  };
+
+  try {
+    const files = [
+      new File([new Blob(["a"], { type: "image/jpeg" })], "one.jpg", { type: "image/jpeg" }),
+      new File([new Blob(["b"], { type: "image/jpeg" })], "two.jpg", { type: "image/jpeg" }),
+    ];
+    const ok = await downloadWhatsappShareFiles(files, { pauseMs: 0 });
+    assert.equal(ok, true);
+    assert.deepEqual(downloads, ["one.jpg", "two.jpg"]);
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    URL.createObjectURL = previousCreateObjectURL;
+    URL.revokeObjectURL = previousRevokeObjectURL;
   }
 });
 

@@ -18,8 +18,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Expected Collection", ar: "التحصيل المتوقع" },
   subtitle: {
-    en: "Open outstanding reconciled into expected pay months (BM + Rest) plus excluded buckets (never-paid, avg >120, legal, electronics). Near-term focus stays the current KSA month and the next two.",
-    ar: "تسوية المستحقات المفتوحة على أشهر السداد المتوقع (مواد بناء + الباقي) مع بنود الاستبعاد (لم يسدد، متوسط >120، قانوني، إلكترونيات). التركيز القريب يبقى الشهر الحالي والشهرين التاليين.",
+    en: "Current month stays the strict BM+Rest estimate. Never-paid / avg >120 use company avg in forward months only; electronics is in months but not the current-month estimate. Legal stays outside.",
+    ar: "الشهر الحالي يبقى تقدير مواد البناء+الباقي الصارم. من لم يسدد ومتوسط >120 يستخدمان متوسط الشركة في أشهر لاحقة فقط؛ الإلكترونيات في الأشهر لكن ليس في تقدير الشهر الحالي. القانوني خارج الأشهر.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: {
@@ -62,15 +62,16 @@ const TEXT = {
   detailFor: { en: "Detail for", ar: "التفاصيل لـ" },
   balance: { en: "Outstanding balance", ar: "رصيد المستحقات" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
-  expectedInMonths: { en: "Expected in months (BM+Rest)", ar: "المتوقع في الأشهر (مواد بناء+الباقي)" },
+  expectedInMonths: { en: "Expected in months", ar: "المتوقع في الأشهر" },
   nearTermExpected: { en: "Near-term (3 months)", ar: "القريب (3 أشهر)" },
   laterExpected: { en: "Later months", ar: "أشهر لاحقة" },
   excludedTotal: { en: "Not in month estimate", ar: "خارج تقدير الأشهر" },
-  neverPaid: { en: "Never paid / no receipt", ar: "لم يسدد / بلا إيصال" },
-  avgOver120: { en: "Avg days > 120", ar: "متوسط الأيام > 120" },
-  legalQueue: { en: "Legal queue", ar: "الطابور القانوني" },
-  electronicsShare: { en: "Electronics mix share", ar: "حصة الإلكترونيات" },
-  accounted: { en: "Accounted (months + excluded)", ar: "المحتسب (أشهر + مستبعد)" },
+  neverPaidProxy: { en: "Never paid → months (company avg)", ar: "لم يسدد → أشهر (متوسط الشركة)" },
+  avgOver120Proxy: { en: "Avg >120 → months (company avg)", ar: "متوسط >120 → أشهر (متوسط الشركة)" },
+  legalQueue: { en: "Legal queue (not in months)", ar: "الطابور القانوني (خارج الأشهر)" },
+  electronicsNote: { en: "Electronics now included in month rows", ar: "الإلكترونيات مضمّنة الآن في صفوف الأشهر" },
+  companyAvg: { en: "Company avg days", ar: "متوسط أيام الشركة" },
+  accounted: { en: "Accounted (months + legal)", ar: "المحتسب (أشهر + قانوني)" },
   bucket: { en: "Bucket", ar: "البند" },
   noRows: {
     en: "No open invoices are expected to pay in this month window under the current rule.",
@@ -83,8 +84,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "Month rows place every eligible BM+Rest invoice in its approx-pay month (overdue in current). Months after the first three are labeled Later so the rest of the estimate is visible. The balance table explains the gap vs total outstanding: never-paid, avg >120, legal queue, and electronics share are not month-estimated. Detail is grouped by salesman, then customer.",
-    ar: "صفوف الأشهر تضع كل فاتورة مؤهلة (مواد بناء+الباقي) في شهر السداد التقريبي (المتأخر في الحالي). الأشهر بعد الثلاثة الأولى تُوسم بـ لاحق لإظهار باقي التقدير. جدول الرصيد يفسر الفرق عن إجمالي المستحقات: من لم يسدد ومتوسط >120 والطابور القانوني وحصة الإلكترونيات خارج تقدير الأشهر.",
+    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Never-paid and avg >120 are scheduled with company avg into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
+    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). من لم يسدد ومتوسط >120 يُجدولان بمتوسط الشركة في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
   },
 };
 
@@ -253,6 +254,7 @@ export default function ExpectedCollectionPage() {
   const balanceRows = useMemo(() => {
     if (!reconciliation) return [];
     const excluded = reconciliation.excluded || {};
+    const proxy = reconciliation.proxyPlaced || {};
     return [
       {
         key: "totalOutstanding",
@@ -283,18 +285,18 @@ export default function ExpectedCollectionPage() {
         invoices: "",
       },
       {
-        key: "neverPaid",
-        bucket: t("neverPaid"),
-        amount: excluded.neverPaid?.pendingAmount || 0,
-        customers: excluded.neverPaid?.customerCount ?? 0,
-        invoices: excluded.neverPaid?.invoiceCount ?? 0,
+        key: "neverPaidProxy",
+        bucket: t("neverPaidProxy"),
+        amount: proxy.neverPaid?.pendingAmount || 0,
+        customers: proxy.neverPaid?.customerCount ?? 0,
+        invoices: proxy.neverPaid?.invoiceCount ?? 0,
       },
       {
-        key: "avgOver120",
-        bucket: t("avgOver120"),
-        amount: excluded.avgOver120?.pendingAmount || 0,
-        customers: excluded.avgOver120?.customerCount ?? 0,
-        invoices: excluded.avgOver120?.invoiceCount ?? 0,
+        key: "avgOver120Proxy",
+        bucket: t("avgOver120Proxy"),
+        amount: proxy.avgOver120?.pendingAmount || 0,
+        customers: proxy.avgOver120?.customerCount ?? 0,
+        invoices: proxy.avgOver120?.invoiceCount ?? 0,
       },
       {
         key: "legal",
@@ -302,13 +304,6 @@ export default function ExpectedCollectionPage() {
         amount: excluded.legal?.pendingAmount || 0,
         customers: excluded.legal?.customerCount ?? 0,
         invoices: excluded.legal?.invoiceCount ?? 0,
-      },
-      {
-        key: "electronics",
-        bucket: t("electronicsShare"),
-        amount: excluded.electronics?.pendingAmount || 0,
-        customers: excluded.electronics?.customerCount ?? 0,
-        invoices: excluded.electronics?.invoiceCount ?? 0,
       },
       {
         key: "accounted",
@@ -495,18 +490,21 @@ export default function ExpectedCollectionPage() {
             <p className="moduleHint">
               {t("asOf")}: {report?.asOf || "—"}
               {" · "}
+              {t("companyAvg")}: {report?.companyAvgDays ?? reconciliation?.companyAvgDays ?? "—"}
+              {" · "}
               {t("totalOutstanding")}: {formatAmount(reconciliation?.totalPending || 0)}
               {" · "}
               {t("nearTermExpected")}: {formatAmount(reconciliation?.nearTermTotal || horizonTotals.total)}
               {" · "}
               {t("laterExpected")}: {formatAmount(reconciliation?.laterTotal || 0)}
               {" · "}
-              {t("excludedTotal")}: {formatAmount(reconciliation?.excludedTotal || 0)}
+              {t("legalQueue")}: {formatAmount(reconciliation?.excludedTotal || 0)}
               {" · "}
               BM: {formatAmount(horizonTotals.bmTotal)}
               {" · "}
               Rest: {formatAmount(horizonTotals.restTotal)}
             </p>
+            <p className="moduleHint">{t("electronicsNote")}</p>
             <p className="moduleHint">{t("hint")}</p>
             {error ? <p className="moduleHint">{error}</p> : null}
             {loading ? (

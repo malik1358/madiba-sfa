@@ -5,6 +5,7 @@ import {
   buildExpectedCollectionHorizonReport,
   groupExpectedCollectionRowsByCustomer,
   groupExpectedCollectionRowsBySalesman,
+  resolveCompanyAvgCollectionDays,
   resolveExpectedCollectionMonthEnds,
 } from "../app/lib/expectedCollectionReport.js";
 import { buildCustomerCategoryMixFromSalesRows } from "../app/lib/expectedCollectionReportServer.js";
@@ -310,7 +311,17 @@ test("buildExpectedCollectionHorizonReport splits current and next two months", 
   assert.equal(report.reconciliation.accountedTotal, 1650);
 });
 
-test("buildExpectedCollectionHorizonReport shows later months and excluded balance buckets", () => {
+test("resolveCompanyAvgCollectionDays means eligible customer avgs", () => {
+  assert.equal(resolveCompanyAvgCollectionDays(new Map([
+    ["1001", 30],
+    ["1002", 90],
+    ["1003", 180],
+    ["1004", null],
+  ])), 60);
+  assert.equal(resolveCompanyAvgCollectionDays(new Map(), { fallbackDays: 77 }), 77);
+});
+
+test("buildExpectedCollectionHorizonReport keeps current month strict and forwards company-avg proxies", () => {
   const report = buildExpectedCollectionHorizonReport([
     {
       customer_code: "1001",
@@ -337,14 +348,14 @@ test("buildExpectedCollectionHorizonReport shows later months and excluded balan
       customer_code: "1004",
       customer_name: "Never paid",
       ref_no: "NP1",
-      invoice_date: "2026-09-01",
+      invoice_date: "2026-10-01",
       pending_amount: 500,
     },
     {
       customer_code: "1005",
       customer_name: "Slow payer",
       ref_no: "S1",
-      invoice_date: "2026-08-01",
+      invoice_date: "2026-10-01",
       pending_amount: 700,
     },
     {
@@ -370,26 +381,29 @@ test("buildExpectedCollectionHorizonReport shows later months and excluded balan
       ["1258C", { buildingMaterial: 0, electronics: 0, rest: 100 }],
     ]),
     monthEnd: "2026-11-30",
+    asOf: "2026-11-20",
     excludedCustomerCodes: new Set(["1258C", "1258"]),
+    companyAvgDays: 60,
   });
 
-  // 1002: 2026-12-20 + 120 days = 2027-04-19 → Apr 27 (later than first 3 months)
-  assert.ok(report.months.length >= 6);
-  assert.equal(report.months[0].total, 1400); // 1000 BM + 400 BM from electronics mix invoice
-  assert.equal(report.reconciliation.nearTermTotal, 1400);
-  assert.equal(report.reconciliation.laterTotal, 800);
-  assert.equal(report.reconciliation.expectedInMonths, 2200);
-  assert.equal(report.reconciliation.excluded.electronics.pendingAmount, 600);
-  assert.equal(report.reconciliation.excluded.neverPaid.pendingAmount, 500);
-  assert.equal(report.reconciliation.excluded.avgOver120.pendingAmount, 700);
-  assert.equal(report.reconciliation.excluded.legal.pendingAmount, 300);
-  assert.equal(report.reconciliation.excludedTotal, 2100);
-  assert.equal(report.reconciliation.totalPending, 4300);
-  assert.equal(report.reconciliation.accountedTotal, 4300);
+  assert.equal(report.companyAvgDays, 60);
+  // Current month stays strict BM+Rest only: 1000 (N1) + 400 (E1 BM) = 1400
+  assert.equal(report.months[0].total, 1400);
+  assert.equal(report.total, 1400);
+  // Proxies + electronics are forwarded out of November (asOf 11-20 + 60 → Jan 19)
+  assert.equal(report.reconciliation.proxyPlaced.neverPaid.pendingAmount, 500);
+  assert.equal(report.reconciliation.proxyPlaced.avgOver120.pendingAmount, 700);
+  assert.equal(report.months[0].rows.some((row) => row.refNo === "NP1"), false);
+  assert.equal(report.months[0].rows.some((row) => row.placementReason === "electronics"), false);
+  const january = report.months.find((month) => month.monthKey === "2027-01");
+  assert.ok(january);
+  assert.equal(january.total, 1800); // 500 + 700 + 600 electronics
   const april = report.months.find((month) => month.monthKey === "2027-04");
   assert.ok(april);
   assert.equal(april.total, 800);
-  assert.equal(april.isNearTerm, false);
+  assert.equal(report.reconciliation.excluded.legal.pendingAmount, 300);
+  assert.equal(report.reconciliation.totalPending, 4300);
+  assert.equal(report.reconciliation.accountedTotal, 4300);
 });
 
 test("buildCustomerCategoryMixFromSalesRows classifies BM and Rest without the BI cube", () => {

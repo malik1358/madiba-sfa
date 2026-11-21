@@ -241,6 +241,27 @@ test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops",
   assert.equal(hours.value, "7h 24m");
 });
 
+test("resolveDayRouteWorkingHours counts prospect follow-ups as near stops", () => {
+  // Basheer 2026-11-21: first after-08:00 stop was PROSPECT_FOLLOW_UP at 09:47,
+  // then ORDER_SUBMITTED at 11:06 and VISIT_REPORT at 12:07. WhatsApp used to
+  // ignore the prospect stops and start at 11:06 while the Day route showed 09:47.
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-11-20T21:01:44.000Z", transactionType: "MORNING_ATTENDANCE" },
+    { savedAt: "2026-11-20T21:32:20.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-11-21T06:47:04.000Z", transactionType: "PROSPECT_FOLLOW_UP", isFarFromCustomer: false },
+    { savedAt: "2026-11-21T06:56:34.000Z", transactionType: "PROSPECT_FOLLOW_UP", isFarFromCustomer: false },
+    { savedAt: "2026-11-21T07:39:26.000Z", transactionType: "PROSPECT_FOLLOW_UP", isFarFromCustomer: false },
+    { savedAt: "2026-11-21T08:06:21.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-11-21T09:07:06.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+  ]);
+
+  assert.equal(hours.minutes, 140);
+  assert.equal(hours.value, "2h 20m");
+  assert.deepEqual(hours.ranges, [
+    { fromAt: "2026-11-21T06:47:04.000Z", toAt: "2026-11-21T09:07:06.000Z" },
+  ]);
+});
+
 test("resolveDayRouteWorkingHours exposes counted from and to ranges", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },

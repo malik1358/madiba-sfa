@@ -101,7 +101,7 @@ export async function loadHrLeaveEntries(admin, { employeeId = "", fromDate = ""
 export async function loadLinkableProfiles(admin) {
   const { data, error } = await admin
     .from("profiles")
-    .select("id,role,salesman_code,salesman_name,email")
+    .select("id,role,salesman_code,salesman_name,email,is_active")
     .order("salesman_name", { ascending: true })
     .limit(2000);
   if (error) throw error;
@@ -111,6 +111,7 @@ export async function loadLinkableProfiles(admin) {
     salesmanCode: profile.salesman_code || "",
     name: profile.salesman_name || profile.email || profile.id,
     email: profile.email || "",
+    isActive: profile.is_active !== false,
   }));
 }
 

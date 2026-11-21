@@ -9,10 +9,12 @@ export const DAY_ROUTE_LONG_IDLE_BREAK_THRESHOLD_MINUTES = 120;
 
 const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "VISIT_REPORT",
+  "PROSPECT_FOLLOW_UP",
   "COLLECTION_VISIT",
   "ORDER_SUBMITTED",
 ]);
 // An accepted customer GPS update (including Order edited) is also a near stop.
+// Prospect follow-ups are field visits (Daily Visit Report remaps them to VISIT_REPORT).
 
 const KIND_COLORS = {
   stop: "#2563eb",

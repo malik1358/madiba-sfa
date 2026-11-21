@@ -3,6 +3,7 @@ import {
   employeeToRow,
   findProfileLinkConflict,
   normalizeEmployeeInput,
+  planHierarchyStaffSync,
   rowToEmployee,
   summarizeEmployees,
 } from "../../../lib/hr/hrEmployees.js";
@@ -15,7 +16,7 @@ import {
   readJsonBody,
 } from "../../../lib/hr/hrServer.js";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
@@ -35,9 +36,7 @@ export async function GET(request) {
   }
 }
 
-async function saveEmployee(request, { update }) {
-  const { admin, user } = await authenticateHr(request, "write");
-  const body = await readJsonBody(request);
+async function upsertEmployee(admin, user, body, { update }) {
   const { value, errors } = normalizeEmployeeInput(body);
   if (errors.length) throw new HrHttpError(400, errors.join(" "));
 
@@ -64,9 +63,71 @@ async function saveEmployee(request, { update }) {
   return Response.json({ success: true, employee: rowToEmployee(data) });
 }
 
+async function syncFromHierarchy(admin, user) {
+  const profiles = await loadLinkableProfiles(admin);
+  const employees = await loadHrEmployees(admin);
+  const plan = planHierarchyStaffSync(profiles, employees);
+
+  let created = 0;
+  let updated = 0;
+  const errors = [];
+
+  for (const draft of plan.creates) {
+    const { value, errors: validationErrors } = normalizeEmployeeInput(draft);
+    if (validationErrors.length) {
+      errors.push({ employeeCode: draft.employeeCode, error: validationErrors.join(" ") });
+      continue;
+    }
+    const { error } = await admin
+      .from("hr_employees")
+      .insert({ ...employeeToRow(value), created_by: user.id });
+    if (error) {
+      errors.push({ employeeCode: draft.employeeCode, error: error.message || "Insert failed" });
+      continue;
+    }
+    created += 1;
+  }
+
+  for (const draft of plan.updates) {
+    const { value, errors: validationErrors } = normalizeEmployeeInput(draft);
+    if (validationErrors.length) {
+      errors.push({ employeeCode: draft.employeeCode, error: validationErrors.join(" ") });
+      continue;
+    }
+    const { error } = await admin
+      .from("hr_employees")
+      .update(employeeToRow(value))
+      .eq("id", draft.id);
+    if (error) {
+      errors.push({ employeeCode: draft.employeeCode, error: error.message || "Update failed" });
+      continue;
+    }
+    updated += 1;
+  }
+
+  const nextEmployees = await loadHrEmployees(admin);
+  return Response.json({
+    success: true,
+    created,
+    updated,
+    skipped: plan.summary.skipped,
+    considered: plan.summary.considered,
+    errors,
+    employees: nextEmployees,
+    profiles,
+    summary: summarizeEmployees(nextEmployees),
+  });
+}
+
 export async function POST(request) {
   try {
-    return await saveEmployee(request, { update: false });
+    const { admin, user } = await authenticateHr(request, "write");
+    const body = await readJsonBody(request);
+    const action = String(body?.action || "").trim().toLowerCase();
+    if (action === "sync-from-hierarchy" || action === "pull-salesman-hierarchy") {
+      return await syncFromHierarchy(admin, user);
+    }
+    return await upsertEmployee(admin, user, body, { update: false });
   } catch (error) {
     return hrErrorResponse(error);
   }
@@ -74,7 +135,9 @@ export async function POST(request) {
 
 export async function PUT(request) {
   try {
-    return await saveEmployee(request, { update: true });
+    const { admin, user } = await authenticateHr(request, "write");
+    const body = await readJsonBody(request);
+    return await upsertEmployee(admin, user, body, { update: true });
   } catch (error) {
     return hrErrorResponse(error);
   }

@@ -28,6 +28,7 @@ import {
   storeUploadedExcel,
 } from "../../lib/uploadFilesStorage.js";
 import {
+  buildLatestCustomerMapFromRows,
   laterTransactionDate,
   resolveImportedBookOwner,
 } from "../../lib/customerBookOwner.js";
@@ -168,80 +169,6 @@ function excelDate(value) {
 
 function findValue(row, possibilities) {
   return findImportValue(row, possibilities);
-}
-
-function pickLatestCustomerRow(existing, candidate) {
-  if (!existing) return candidate;
-
-  if (
-    candidate.transaction_date &&
-    (
-      !existing.transaction_date ||
-      candidate.transaction_date > existing.transaction_date
-    )
-  ) {
-    return candidate;
-  }
-
-  if (
-    candidate.transaction_date &&
-    existing.transaction_date &&
-    candidate.transaction_date === existing.transaction_date &&
-    Number(candidate.source_row_number || 0) >
-      Number(existing.source_row_number || 0)
-  ) {
-    return candidate;
-  }
-
-  return existing;
-}
-
-async function loadLatestCustomersFromBatch(admin, batchId, customerCodes) {
-  const latestCustomer = new Map();
-  const codes = [...new Set((customerCodes || []).filter(Boolean))];
-  if (!batchId || codes.length === 0) return latestCustomer;
-
-  const CUSTOMER_LOOKUP_CHUNK = 200;
-
-  for (
-    let index = 0;
-    index < codes.length;
-    index += CUSTOMER_LOOKUP_CHUNK
-  ) {
-    const chunk = codes.slice(
-      index,
-      index + CUSTOMER_LOOKUP_CHUNK
-    );
-
-    const {
-      data,
-      error,
-    } = await admin
-      .from("sales_raw")
-      .select(
-        "customer_code,customer_name,salesman_code,salesman_name,transaction_date,source_row_number"
-      )
-      .eq("import_batch_id", batchId)
-      .in("customer_code", chunk);
-
-    if (error) {
-      throw error;
-    }
-
-    for (const row of data || []) {
-      if (!row.customer_code) continue;
-
-      latestCustomer.set(
-        row.customer_code,
-        pickLatestCustomerRow(
-          latestCustomer.get(row.customer_code),
-          row
-        )
-      );
-    }
-  }
-
-  return latestCustomer;
 }
 
 async function loadExistingCustomersByCode(admin, customerCodes) {
@@ -1154,19 +1081,10 @@ export async function POST(request) {
        12. UPDATE CUSTOMER MASTER FOR UPLOADED CUSTOMERS
        ======================================================== */
 
-    const affectedCustomerCodes = [
-      ...new Set(
-        mappedRows
-          .map((row) => row.customer_code)
-          .filter(Boolean)
-      ),
-    ];
-
-    const latestCustomer = await loadLatestCustomersFromBatch(
-      admin,
-      liveBatchId,
-      affectedCustomerCodes
-    );
+    // Build from the in-memory upload rows. Re-querying sales_raw with a large
+    // `.in(customer_code, …)` silently truncates under PostgREST and left new
+    // parties (e.g. customer 1704 for Thamer) out of the customer master.
+    const latestCustomer = buildLatestCustomerMapFromRows(mappedRows);
 
     await upsertCustomersFromLatestMap(
       admin,

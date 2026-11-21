@@ -135,9 +135,19 @@ test("sanitize catalog payload strips stock qty and keeps customer-safe fields",
   assert.equal(sanitized.items.length, 1);
   assert.equal(sanitized.items[0].available, undefined);
   assert.equal(sanitized.items[0].stockQty, undefined);
+  assert.equal(sanitized.items[0].category, "Stationery");
   assert.equal(sanitized.items[0].master_unit, "CTN");
   assert.equal(sanitized.items[0].base_unit, "Pcs");
   assert.equal(sanitized.items[0].unit_conv, 12);
+
+  const casing = sanitizeCustomerOrderLinkCatalogPayload({
+    items: [
+      { item_code: "A001111", item_name: "A", category: "baby Care", price: 1 },
+      { item_code: "A001112", item_name: "B", category: "Body Care", price: 1 },
+    ],
+  });
+  assert.equal(casing.items[0].category, "Baby Care");
+  assert.equal(casing.items[1].category, "Personal Care");
   assert.equal(sanitized.schemes[0].name, "Mix deal");
   assert.equal(sanitized.customerCode, "1224");
   assert.equal(sanitized.pricingRegion, "dammam");

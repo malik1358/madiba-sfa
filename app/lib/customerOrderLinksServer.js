@@ -34,6 +34,8 @@ import {
   resolveSalesmanOrderPrefix,
 } from "./salesmanOrderNumber.js";
 import { ORDER_STATUS_PENDING_INVOICE_CREATION } from "./orderApproval.js";
+import { buildOrderCopyPdfAttachment } from "./invoiceUploadEmailServer.js";
+import { queueCustomerOrderLinkSubmitNotifications } from "./customerOrderLinkSubmitEmailServer.js";
 import {
   findProspectByOfflineId,
   parseOfflineProspectIdFromCustomerCode,
@@ -448,6 +450,20 @@ export async function readCustomerOrderLinkPhoto(admin, token, photoId) {
   return readCataloguePhoto(admin, id);
 }
 
+/** Guest PDF download after submit — only for the order already tied to this token. */
+export async function buildCustomerOrderLinkPdf(admin, token) {
+  const link = await loadLinkByToken(admin, token);
+  const orderId = Number(link.submitted_order_id);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    fail("Submit the order first to download the PDF.", 409);
+  }
+  try {
+    return await buildOrderCopyPdfAttachment(admin, orderId);
+  } catch (error) {
+    fail(error?.message || "Unable to build the order PDF.", 500);
+  }
+}
+
 export async function submitCustomerOrderLinkOrder(admin, token, {
   lines = [],
   requestId = "",
@@ -683,13 +699,31 @@ export async function submitCustomerOrderLinkOrder(admin, token, {
     .is("submitted_order_id", null);
   if (linkUpdateError) throw linkUpdateError;
 
+  const resolvedOrderNumber = order.order_number || orderNumber;
+  queueCustomerOrderLinkSubmitNotifications(admin, {
+    orderId,
+    orderNumber: resolvedOrderNumber,
+    customerCode: link.customer_code,
+    customerName: link.customer_name,
+    salesmanCode: link.salesman_code,
+    salesmanName: link.salesman_name,
+    createdBy: link.created_by,
+    totalValue: roundedTotal,
+    lineCount: normalizedLines.length,
+    submittedAtIso: nowIso,
+    pricingRegion: pricedCatalog.region,
+    pricingType: link.pricing_type,
+    isProspect: Boolean(link.is_prospect),
+  });
+
   return {
     orderId,
-    orderNumber: order.order_number || orderNumber,
+    orderNumber: resolvedOrderNumber,
     status: "SUBMITTED",
     customerCode: link.customer_code,
     customerName: link.customer_name,
     totalValue: roundedTotal,
     expiresAt: link.expires_at,
+    pdfPath: `/api/customer-order-links/${encodeURIComponent(link.token)}/pdf`,
   };
 }

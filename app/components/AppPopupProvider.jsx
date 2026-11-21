@@ -152,13 +152,27 @@ export function AppPopupProvider({ children }) {
 
     if (result.success) {
       if (result.fallback) {
+        const downloadedOnly = result.method === "download-files";
         setPopup((current) => {
           if (!current) return current;
+          const hasText = Boolean(String(current.whatsappText || "").trim());
+          let message;
+          if (downloadedOnly && !hasText) {
+            message = language === "ar"
+              ? "تم تنزيل الصور. افتح واتساب وأرفقها يدوياً."
+              : "Photos downloaded. Open WhatsApp and attach them manually.";
+          } else if (downloadedOnly) {
+            message = language === "ar"
+              ? "تم تنزيل المرفقات. افتح واتساب وأرفقها، والصق الملخص إذا لزم."
+              : "Attachments downloaded. Open WhatsApp, attach them, and paste the summary if needed.";
+          } else {
+            message = language === "ar"
+              ? "تم فتح واتساب بالملخص. أرفق الصور أو الملفات يدوياً إذا لم تُضمَّن."
+              : "WhatsApp opened with the summary. Attach the photos/files manually if they were not included.";
+          }
           return {
             ...current,
-            message: language === "ar"
-              ? "تم فتح واتساب بالملخص. أرفق الصور أو الملفات يدوياً إذا لم تُضمَّن."
-              : "WhatsApp opened with the summary. Attach the photos/files manually if they were not included.",
+            message,
             variant: "warning",
           };
         });
@@ -170,11 +184,25 @@ export function AppPopupProvider({ children }) {
 
     setPopup((current) => {
       if (!current) return current;
+      const hasText = Boolean(String(current.whatsappText || "").trim());
+      const hasFiles = (current.whatsappFiles || []).length > 0;
+      let message;
+      if (hasFiles && !hasText) {
+        message = language === "ar"
+          ? "تعذر مشاركة الصور على واتساب من هذا المتصفح. جرّب من الجوال أو احفظ الصور وأرفقها يدوياً."
+          : "Could not share the photos to WhatsApp from this browser. Try from a phone, or save the photos and attach them manually.";
+      } else if (hasFiles) {
+        message = language === "ar"
+          ? "تعذر فتح واتساب بالمرفقات. انسخ الملخص أدناه وأرفق الملفات يدوياً."
+          : "Could not open WhatsApp with the attachments. Copy the summary below and attach the files manually.";
+      } else {
+        message = language === "ar"
+          ? "تعذر فتح واتساب. انسخ الملخص أدناه والصقه يدوياً."
+          : "Could not open WhatsApp. Copy the summary below and paste manually.";
+      }
       return {
         ...current,
-        message: language === "ar"
-          ? "تعذر فتح واتساب. انسخ الملخص أدناه والصقه يدوياً."
-          : "Could not open WhatsApp. Copy the summary below and paste manually.",
+        message,
         variant: "warning",
       };
     });
@@ -183,16 +211,21 @@ export function AppPopupProvider({ children }) {
   const value = useMemo(() => ({ showPopup, closePopup }), [showPopup, closePopup]);
 
   const hasWhatsappFiles = (popup?.whatsappFiles || []).length > 0;
+  const hasWhatsappText = Boolean(String(popup?.whatsappText || "").trim());
   const firstFileType = String(popup?.whatsappFiles?.[0]?.type || popup?.whatsappFiles?.[0]?.name || "").toLowerCase();
   const isSinglePdf = hasWhatsappFiles && popup?.whatsappFiles?.length === 1 && firstFileType.includes("pdf");
   const whatsappHint = hasWhatsappFiles
-    ? (isSinglePdf
-      ? (language === "ar"
-        ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
-        : "Summary copied. Share the PDF and summary on WhatsApp now.")
+    ? (hasWhatsappText
+      ? (isSinglePdf
+        ? (language === "ar"
+          ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
+          : "Summary copied. Share the PDF and summary on WhatsApp now.")
+        : (language === "ar"
+          ? "تم نسخ الملخص. شارك الصورة على واتساب والصق الملخص كتعليق إذا أردت."
+          : "Summary copied. Share the photo on WhatsApp and paste the summary as a caption if you want."))
       : (language === "ar"
-        ? "تم نسخ الملخص. صورة الإيصال تتضمن الملخص مع المرفق. الصق الملخص فقط إذا أردت تعليقاً نصياً."
-        : "Summary copied. The receipt photo includes the summary with the attachment. Paste only if you want a text caption."))
+        ? "الصور جاهزة وفيها التفاصيل. اضغط مشاركة على واتساب."
+        : "Photos are ready with the details on the image. Tap Share on WhatsApp."))
     : (language === "ar"
       ? "تم نسخ الملخص. شاركه على واتساب الآن."
       : "Summary copied. Share it on WhatsApp now.");

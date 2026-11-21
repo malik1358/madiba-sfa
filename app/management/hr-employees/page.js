@@ -20,8 +20,8 @@ const FILTER_KEYS = ["code", "name", "department", "designation", "status", "lin
 const TEXT = {
   title: { en: "HR Employees", ar: "موظفو الموارد البشرية" },
   subtitle: {
-    en: "All company staff. Link a staff row to a login profile to prefill attendance.",
-    ar: "جميع موظفي الشركة. اربط الموظف بحساب دخول لتعبئة الحضور تلقائياً.",
+    en: "All company staff. Use Pull from Salesman Hierarchy to import logins (already linked), or Edit → Linked login to attach a profile for My Day prefill.",
+    ar: "جميع موظفي الشركة. استخدم السحب من هيكل المندوبين لاستيراد الحسابات مرتبطة، أو عدّل → الحساب المرتبط لربط ملف لتغذية الحضور من يومي.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading staff...", ar: "جاري تحميل الموظفين..." },
@@ -34,6 +34,12 @@ const TEXT = {
   linkedStaff: { en: "Linked to login", ar: "مرتبط بحساب" },
   packageTotal: { en: "Monthly package (active)", ar: "إجمالي الباقة الشهرية (النشطين)" },
   addEmployee: { en: "Add employee", ar: "إضافة موظف" },
+  pullHierarchy: { en: "Pull from Salesman Hierarchy", ar: "سحب من هيكل المندوبين" },
+  pulling: { en: "Pulling...", ar: "جاري السحب..." },
+  pullHint: {
+    en: "Creates or updates one HR staff row per salesman code and links that login so Monthly Feed can Prefill from My Day. Salaries are left blank for you to fill.",
+    ar: "ينشئ أو يحدّث صف موظف لكل كود مندوب ويربط حساب الدخول لتعبئة الحضور من يومي. الرواتب تبقى فارغة لتدخلها أنت.",
+  },
   editEmployee: { en: "Edit employee", ar: "تعديل موظف" },
   code: { en: "Employee code", ar: "رقم الموظف" },
   name: { en: "Name", ar: "الاسم" },
@@ -93,6 +99,7 @@ export default function HrEmployeesPage() {
   const { access, loading: accessLoading } = useModuleAccess();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [employees, setEmployees] = useState([]);
@@ -188,6 +195,39 @@ export default function HrEmployeesPage() {
     }
   }
 
+  async function pullFromHierarchy() {
+    if (!canWrite || pulling) return;
+    setPulling(true);
+    setError("");
+    setMessage("");
+    try {
+      const payload = await hrFetch(supabaseClient, "/api/hr/employees", {
+        method: "POST",
+        body: { action: "sync-from-hierarchy" },
+      });
+      setEmployees(payload.employees || []);
+      setProfiles(payload.profiles || []);
+      const parts = [
+        language === "ar"
+          ? `أُنشئ ${payload.created || 0}، حُدّث ${payload.updated || 0}، تُخطي ${payload.skipped || 0}`
+          : `Created ${payload.created || 0}, updated ${payload.updated || 0}, skipped ${payload.skipped || 0}`,
+      ];
+      if (payload.errors?.length) {
+        parts.push(
+          language === "ar"
+            ? `${payload.errors.length} أخطاء`
+            : `${payload.errors.length} errors`,
+        );
+        setError(payload.errors.slice(0, 5).map((item) => `${item.employeeCode}: ${item.error}`).join(" | "));
+      }
+      setMessage(parts.join(". "));
+    } catch (err) {
+      setError(err.message || "Unable to pull from Salesman Hierarchy.");
+    } finally {
+      setPulling(false);
+    }
+  }
+
   if (!supabaseClient) return <SupabaseUnavailable />;
 
   return (
@@ -221,6 +261,10 @@ export default function HrEmployeesPage() {
                   <button type="button" className="moduleInlineButton" onClick={() => setForm({ ...EMPTY_FORM })}>
                     {t("addEmployee")}
                   </button>
+                  <button type="button" className="moduleInlineButton" disabled={pulling} onClick={pullFromHierarchy}>
+                    {pulling ? t("pulling") : t("pullHierarchy")}
+                  </button>
+                  <p className="moduleHint">{t("pullHint")}</p>
                 </div>
               ) : null}
 

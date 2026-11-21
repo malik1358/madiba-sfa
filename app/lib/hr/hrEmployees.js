@@ -152,3 +152,171 @@ export function summarizeEmployees(employees = []) {
     monthlyPackage: roundHrMoney(active.reduce((sum, employee) => sum + employeeMonthlyPackage(employee), 0)),
   };
 }
+
+/** Map a Salesman Hierarchy / profiles role to an HR department label. */
+export function departmentForHierarchyRole(role) {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "collector") return "Collections";
+  if (normalized === "manager") return "Management";
+  if (normalized === "invoice-maker") return "Office";
+  if (normalized === "admin" || normalized === "report-user") return "Admin";
+  if (normalized === "product-promoter") return "Sales";
+  return "Sales";
+}
+
+/** Human designation from the app role (English). */
+export function designationForHierarchyRole(role) {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "collector") return "Collector";
+  if (normalized === "manager") return "Manager";
+  if (normalized === "invoice-maker") return "Invoice maker";
+  if (normalized === "admin") return "Admin";
+  if (normalized === "report-user") return "Report user";
+  if (normalized === "product-promoter") return "Product promoter";
+  if (normalized === "salesman") return "Salesman";
+  return text(role) || "Staff";
+}
+
+/**
+ * Build a new HR employee payload from a Salesman Hierarchy profile.
+ * employee_code = salesman_code; profile is linked for My Day prefill.
+ */
+export function employeeFromHierarchyProfile(profile = {}) {
+  const employeeCode = normalizeEmployeeCode(profile.salesmanCode ?? profile.salesman_code);
+  const fullName = text(profile.name ?? profile.salesman_name ?? profile.email);
+  const role = profile.role || "";
+  const isActive = profile.isActive !== false && profile.is_active !== false;
+  return {
+    employeeCode,
+    fullName,
+    fullNameAr: "",
+    profileId: text(profile.id) || null,
+    designation: designationForHierarchyRole(role),
+    department: departmentForHierarchyRole(role),
+    nationality: "",
+    iqamaNo: "",
+    phone: "",
+    joinDate: null,
+    status: isActive ? "ACTIVE" : "INACTIVE",
+    basicSalary: 0,
+    housingAllowance: 0,
+    transportAllowance: 0,
+    otherAllowance: 0,
+    notes: "Imported from Salesman Hierarchy",
+  };
+}
+
+/**
+ * Plan create/update/skip actions to pull Salesman Hierarchy profiles into HR Employees.
+ * - Creates a staff row per salesman_code when missing, already linked to that profile.
+ * - Updates existing rows: refresh name/status/designation/department; link profile when free.
+ * - Never overwrites salary/allowance fields on an existing row.
+ * - Skips profiles without a salesman code, and profile links already owned by another code.
+ */
+export function planHierarchyStaffSync(profiles = [], employees = []) {
+  const existingByCode = new Map(
+    (employees || [])
+      .filter((employee) => employee.employeeCode)
+      .map((employee) => [employee.employeeCode, employee]),
+  );
+  const linkedProfileIds = new Map();
+  (employees || []).forEach((employee) => {
+    if (employee.profileId) linkedProfileIds.set(employee.profileId, employee.employeeCode);
+  });
+
+  const creates = [];
+  const updates = [];
+  const skipped = [];
+  const seenCodes = new Set();
+
+  for (const profile of profiles || []) {
+    const draft = employeeFromHierarchyProfile(profile);
+    if (!draft.employeeCode) {
+      skipped.push({ reason: "missing_code", profileId: profile.id || null, name: draft.fullName });
+      continue;
+    }
+    if (!draft.fullName) {
+      skipped.push({ reason: "missing_name", profileId: profile.id || null, employeeCode: draft.employeeCode });
+      continue;
+    }
+    if (seenCodes.has(draft.employeeCode)) {
+      skipped.push({ reason: "duplicate_code", profileId: profile.id || null, employeeCode: draft.employeeCode });
+      continue;
+    }
+    seenCodes.add(draft.employeeCode);
+
+    const ownerCode = linkedProfileIds.get(draft.profileId);
+    if (ownerCode && ownerCode !== draft.employeeCode) {
+      skipped.push({
+        reason: "profile_linked_elsewhere",
+        profileId: draft.profileId,
+        employeeCode: draft.employeeCode,
+        linkedTo: ownerCode,
+      });
+      continue;
+    }
+
+    const existing = existingByCode.get(draft.employeeCode);
+    if (!existing) {
+      creates.push(draft);
+      if (draft.profileId) linkedProfileIds.set(draft.profileId, draft.employeeCode);
+      continue;
+    }
+
+    const nextProfileId = existing.profileId || draft.profileId;
+    if (draft.profileId && existing.profileId && existing.profileId !== draft.profileId) {
+      skipped.push({
+        reason: "code_already_linked_other_profile",
+        employeeCode: draft.employeeCode,
+        profileId: draft.profileId,
+        linkedProfileId: existing.profileId,
+      });
+      continue;
+    }
+
+    const patch = {
+      id: existing.id,
+      employeeCode: existing.employeeCode,
+      fullName: draft.fullName || existing.fullName,
+      fullNameAr: existing.fullNameAr || "",
+      profileId: nextProfileId,
+      designation: existing.designation || draft.designation,
+      department: existing.department || draft.department,
+      nationality: existing.nationality || "",
+      iqamaNo: existing.iqamaNo || "",
+      phone: existing.phone || "",
+      joinDate: existing.joinDate || null,
+      status: draft.status,
+      basicSalary: existing.basicSalary || 0,
+      housingAllowance: existing.housingAllowance || 0,
+      transportAllowance: existing.transportAllowance || 0,
+      otherAllowance: existing.otherAllowance || 0,
+      notes: existing.notes || draft.notes,
+    };
+
+    const changed = patch.fullName !== existing.fullName
+      || patch.profileId !== existing.profileId
+      || patch.status !== existing.status
+      || patch.designation !== existing.designation
+      || patch.department !== existing.department;
+
+    if (changed) {
+      updates.push(patch);
+      if (patch.profileId) linkedProfileIds.set(patch.profileId, patch.employeeCode);
+    } else {
+      skipped.push({ reason: "unchanged", employeeCode: draft.employeeCode, profileId: draft.profileId });
+    }
+  }
+
+  return {
+    creates,
+    updates,
+    skipped,
+    summary: {
+      created: creates.length,
+      updated: updates.length,
+      skipped: skipped.length,
+      considered: (profiles || []).length,
+    },
+  };
+}

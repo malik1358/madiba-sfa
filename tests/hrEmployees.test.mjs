@@ -8,10 +8,13 @@ import {
   checkHrAccess,
 } from "../app/lib/hr/hrAccess.js";
 import {
+  departmentForHierarchyRole,
+  employeeFromHierarchyProfile,
   employeeMonthlyPackage,
   employeeToRow,
   findProfileLinkConflict,
   normalizeEmployeeInput,
+  planHierarchyStaffSync,
   rowToEmployee,
   summarizeEmployees,
 } from "../app/lib/hr/hrEmployees.js";
@@ -122,6 +125,76 @@ test("employee summary counts active, linked and monthly package", () => {
     { status: "INACTIVE", profileId: null, basicSalary: 9999 },
   ]);
   assert.deepEqual(summary, { total: 3, active: 2, inactive: 1, linked: 1, monthlyPackage: 3250 });
+});
+
+test("hierarchy profile maps to linked HR staff with role department", () => {
+  assert.equal(departmentForHierarchyRole("collector"), "Collections");
+  assert.equal(departmentForHierarchyRole("invoice_maker"), "Office");
+  const draft = employeeFromHierarchyProfile({
+    id: "11111111-1111-1111-1111-111111111111",
+    salesman_code: " sm005 ",
+    salesman_name: "Sohail",
+    role: "salesman",
+    is_active: true,
+  });
+  assert.equal(draft.employeeCode, "SM005");
+  assert.equal(draft.fullName, "Sohail");
+  assert.equal(draft.profileId, "11111111-1111-1111-1111-111111111111");
+  assert.equal(draft.department, "Sales");
+  assert.equal(draft.designation, "Salesman");
+  assert.equal(draft.status, "ACTIVE");
+  assert.equal(draft.basicSalary, 0);
+});
+
+test("planHierarchyStaffSync creates, links, and skips conflicts without wiping salaries", () => {
+  const profiles = [
+    { id: "p1", salesmanCode: "SM001", name: "Ali", role: "salesman", isActive: true },
+    { id: "p2", salesmanCode: "CL01", name: "Omar", role: "collector", isActive: true },
+    { id: "p3", salesmanCode: "", name: "No code", role: "admin", isActive: true },
+    { id: "p4", salesmanCode: "SM009", name: "Taken", role: "salesman", isActive: true },
+  ];
+  const employees = [
+    {
+      id: "e1",
+      employeeCode: "SM001",
+      fullName: "Old Ali",
+      profileId: null,
+      department: "",
+      designation: "",
+      status: "INACTIVE",
+      basicSalary: 4000,
+      housingAllowance: 1000,
+      transportAllowance: 0,
+      otherAllowance: 0,
+      notes: "",
+    },
+    {
+      id: "e9",
+      employeeCode: "XX9",
+      fullName: "Other",
+      profileId: "p4",
+      department: "Sales",
+      designation: "Salesman",
+      status: "ACTIVE",
+      basicSalary: 0,
+      housingAllowance: 0,
+      transportAllowance: 0,
+      otherAllowance: 0,
+      notes: "",
+    },
+  ];
+  const plan = planHierarchyStaffSync(profiles, employees);
+  assert.equal(plan.creates.length, 1);
+  assert.equal(plan.creates[0].employeeCode, "CL01");
+  assert.equal(plan.creates[0].profileId, "p2");
+  assert.equal(plan.updates.length, 1);
+  assert.equal(plan.updates[0].employeeCode, "SM001");
+  assert.equal(plan.updates[0].profileId, "p1");
+  assert.equal(plan.updates[0].fullName, "Ali");
+  assert.equal(plan.updates[0].status, "ACTIVE");
+  assert.equal(plan.updates[0].basicSalary, 4000);
+  assert.ok(plan.skipped.some((row) => row.reason === "missing_code"));
+  assert.ok(plan.skipped.some((row) => row.reason === "profile_linked_elsewhere"));
 });
 
 test("leave days skip Fridays (2026-11-20 is a Friday)", () => {

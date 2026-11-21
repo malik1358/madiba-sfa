@@ -76,6 +76,26 @@ test("resolveWorkingHoursTillMessage matches the daily visit near-stop window", 
   assert.match(hours.value, /^4h 30m \(17:19 - 21:49\)$/);
 });
 
+test("resolveWorkingHoursTillMessage counts prospect follow-ups like the Day route", () => {
+  const hours = resolveWorkingHoursTillMessage({
+    entries: [
+      { savedAt: "2026-11-20T21:01:44.000Z", transactionType: "MORNING_ATTENDANCE" },
+      { savedAt: "2026-11-21T06:47:04.000Z", transactionType: "PROSPECT_FOLLOW_UP", isFarFromCustomer: false },
+      { savedAt: "2026-11-21T08:06:21.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    ],
+    untilAt: "2026-11-21T09:07:06.000Z",
+    currentEntry: {
+      savedAt: "2026-11-21T09:07:06.000Z",
+      transactionType: "VISIT_REPORT",
+      isFarFromCustomer: false,
+    },
+  });
+
+  assert.equal(hours.known, true);
+  assert.equal(hours.minutes, 140);
+  assert.match(hours.value, /^2h 20m \(09:47 - 12:07\)$/);
+});
+
 test("resolveWorkingHoursTillMessage drops an unlogged idle longer than two hours", () => {
   const hours = resolveWorkingHoursTillMessage({
     entries: [

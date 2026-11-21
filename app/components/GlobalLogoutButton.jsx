@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useLogoutWithDaySummary } from "../hooks/useLogoutWithDaySummary";
 import { getSupabaseClient } from "../lib/supabase";
+import { isPublicCustomerOrderPath } from "../lib/customerOrderLinks.js";
 
 const TEXT = {
   logout: { en: "Logout", ar: "تسجيل الخروج" },
@@ -67,7 +68,7 @@ export default function GlobalLogoutButton() {
     };
   }, [pathname]);
 
-  if (!visible) return null;
+  if (!visible || isPublicCustomerOrderPath(pathname)) return null;
 
   return (
     <>

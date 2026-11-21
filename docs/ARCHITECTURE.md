@@ -19,16 +19,19 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 ## Layers
 
 ```text
-Browser (app/page.js, app/management/*, app/components/*)
+Browser (app/page.js, app/management/*, app/components/*, app/order/[token])
   -> getSupabaseClient() for login and a few direct reads
   -> fetch /api/* with the user access token
+  -> public /order/<token> talks only to /api/customer-order-links/[token] (no JWT)
 API route (app/api/**/route.js)
   -> verify JWT with the service-role client, or verify CRON_SECRET
+  -> customer order links: create requires JWT + sales scope; redeem/submit validate opaque token + expiry
   -> enforce sales scope in application code
   -> read/write Postgres and Storage
 Postgres
   -> RLS still exists, but service-role calls bypass it
   -> active_sales view + system_settings JSON for datasets
+  -> customer_order_links is service-role only (no anon/authenticated policies)
 ```
 
 The service role is server-only. Losing the scope checks in an API route would expose other salesmen’s customers even though RLS exists, because the service role bypasses RLS.
@@ -51,7 +54,7 @@ Item Master Analysis (`/management/item-master-analysis`, module `itemMasterAnal
 
 Returns Above Sales (`/management/returns-above-sales`, module `returnsAboveSales` in Reports) is a read-only management report. `GET /api/returns-above-sales` checks the caller JWT and management-report access, pages `active_sales`, and keeps customer + item pairs whose return value exceeds sales value. Quantity is not part of the comparison. `A003927` is rolled into `A003928`. Numeric vouchers that differ only by a leading zero are counted once. A credit-note `reference` that names a sales voucher missing from the live batch is loaded once from the newest `sales_raw` batch for that customer and item. Pure aggregation is `buildReturnsAboveSalesReport` in `app/lib/returnsAboveSales.js`; DB load is `loadReturnsAboveSalesReport` in `app/lib/returnsAboveSalesServer.js`. The morning email is `POST /api/cron/returns-above-sales-email` (`returnsAboveSalesEmail.js`). No migration.
 
-Expected Collection (`/management/expected-collection`, module `expectedCollection` in Reports) is a read-only management report. `GET /api/expected-collection` checks the caller JWT and management-report access, loads outstanding invoices + receipt register + legal transfers, pages `active_sales` for those customers (chunked, concurrent) to compute avg pay days and BM/Rest mix from the same sales rows (no sales BI cube load), and returns BM+Rest invoice rows expected by month-end (`buildExpectedCollectionDetailRows` / `loadExpectedCollectionReport`). The UI groups rows by salesman then by customer (`groupExpectedCollectionRowsBySalesman` / `groupExpectedCollectionRowsByCustomer`); multi-invoice customers are collapsible under an expanded salesman. A 3-minute in-process cache avoids repeating the sales scan on immediate reopen. The KPI upload summary email Collection month-end estimate uses the same BM+Rest expected remaining (`sumExpectedCollectionCategoryBuckets` / `resolveExpectedCollectionMonthEndEstimate`) instead of Collection workday pace. No migration.
+Expected Collection (`/management/expected-collection`, module `expectedCollection` in Reports) is a read-only management report. `GET /api/expected-collection` checks the caller JWT and management-report access, loads outstanding invoices + receipt register + legal transfers, pages `active_sales` for those customers (chunked, concurrent) to compute avg pay days and mix, resolves **company avg days** (`resolveCompanyAvgCollectionDays`, fallback rolling 3m DSO), and returns a **month + balance reconciliation** (`classifyExpectedCollectionOutstanding` / `buildExpectedCollectionHorizonReport` / `loadExpectedCollectionReport`): customer avg ≤120 uses own days; never-paid / avg>120 use company avg; full pending (electronics included) lands in the approx-pay month; legal stays excluded. Near-term current + next two KSA months, plus later months as needed. Top-level `rows`/`total` stay current-month for KPI compatibility. UI: month grid, outstanding-balance table, month detail tabs. KPI upload summary Collection month-end estimate stays on the strict BM+Rest path (`sumExpectedCollectionCategoryBuckets` / `resolveExpectedCollectionMonthEndEstimate`). No migration.
 
 Expected Stocked Sales (`/management/expected-stocked-sales`, module `expectedStockedSales` in Reports) is a read-only management report. `GET /api/expected-stocked-sales` checks the caller JWT and management-report access, pages `active_sales`, drops LP* codes and the incomplete current KSA month, detects up to three company seasonal calendar months (completed months ≥ 1.25× median monthly sales), merges replacement item codes via `resolveCanonicalItemCode` / `PRICE_CODE_ALIASES` and pack-insensitive name families (`expectedStockedItemFamilyKey`), and builds two cohorts (lifetime GP% > 10% and GP% > 0%). For each item it takes the second-highest non-seasonal month’s net sales and profit as expected SAR / GP / margin. Pure aggregation is `buildExpectedStockedSalesReport` in `app/lib/expectedStockedSales.js`; DB load is `loadExpectedStockedSalesReport` in `app/lib/expectedStockedSalesServer.js`. Weekly trend email is `POST /api/cron/expected-stocked-sales-email` (`expectedStockedSalesEmail.js` / `expectedStockedSalesEmailServer.js`, `maxDuration` 300s): compares current cohort totals to `expected_stocked_sales_email_snapshot_v1` and claims `expected_stocked_sales_email:<week-monday>`. No migration.
 
@@ -117,7 +120,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/user/sales-scope` — visible salesman codes
 - `/api/user/table-column-prefs` — GET/PUT per-user hidden table columns in `system_settings.table_column_prefs_v1:<auth.user.id>` (JWT only; merges one `tableId` on PUT)
-- `/api/expected-collection` — BM+Rest open invoices expected by month-end (management-report JWT)
+- `/api/expected-collection` — BM+Rest open invoices expected by current + next 2 month-ends (management-report JWT)
 - `/api/expected-stocked-sales` — expected monthly sales if stocked (2nd-highest non-seasonal month; GP>10%; no LP*)
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
   - Lookup `?q=` returns at most 20 code/name matches inside the caller's sales scope, including inactive customers. Payment Settlement uses that search and then loads one customer. It does not call `/api/customers/visible` on open. Exact `?code=` lookup is unchanged.
@@ -301,6 +304,13 @@ The collections UI was split so a background queue refresh does not remount the 
 
 Vercel deploys production from `main` only (`vercel.json` `git.deploymentEnabled`); Preview deployments are intentionally off. Vercel cron (`vercel.json`) calls `/api/cron/inactivity-push` every 10 minutes (also flushes deferred team mail and due KPI upload summary emails). GitHub Actions workflows call the same style of endpoint with `x-cron-secret`. Manual KPI upload summary force: `/api/cron/kpi-upload-summary-email`. Schedules are listed in `docs/DEPLOYMENT.md`. Handlers live under `app/api/cron/`.
 
+## HR Management
+
+- Pure helpers in `app/lib/hr/`: `hrAccess.js` (gates), `hrEmployees.js` (validation/row mapping), `hrMonthlyFeed.js` (totals, import parsing, attendance ledger, payroll summaries), `hrLeave.js`, `hrServer.js` (service-role auth + loaders + attendance prefill via `monthlyAttendanceReportServer.js`), `hrClient.js` (authed fetch, xlsx template/read in the browser).
+- Routes: `/api/hr/employees` (GET/POST/PUT), `/api/hr/monthly` (GET; POST actions `save|import|prefill|finalize|reopen`), `/api/hr/leave` (GET/POST/PUT/DELETE), `/api/hr/payroll-summary` (GET). Each verifies the bearer token, loads the profile, then `checkHrAccess(role, "read"|"write"|"payroll")`. Missing tables return 503 `migrationRequired`.
+- Excel import: the browser parses the sheet with `xlsx` and posts header-keyed rows; the server re-parses with `parseHrMonthlyImportRows` (server is authoritative).
+- Pages `app/management/hr-{employees,monthly,leave,payroll-summary}` use `ExportableTable` + `BiExcelHead`/`useBiExcelFilters`, Total footers, and up/down/current cell classes. Nav group `hr` sits before `admin`; module keys `hrEmployees`, `hrMonthly`, `hrLeave`, `hrPayrollSummary`.
+
 ## Patterns to copy
 
 - Parse JSON from `system_settings` defensively. Bad JSON should not crash the page.
@@ -330,7 +340,7 @@ These are large or shared. Read them fully enough to see callers before editing:
 
 - Config: `capacitor.config.js` — `appId` `com.madiba.sfa`, `appName` `MADIBA SFA`, `webDir` `public`, server URL defaults to `https://madiba-sfa.vercel.app` (override with `CAPACITOR_SERVER_URL`).
 - Native project: `android/`. Field UI still comes from the hosted Next.js site; rebuild APK only when native code, permissions, or Capacitor plugins change.
-- Order PDF / WhatsApp file share on Android use `@capacitor/filesystem` + `@capacitor/share` (`app/lib/orderPdfExport.js`, `app/lib/whatsappShare.js`). Both are listed in `android/capacitor.settings.gradle` / `android/app/capacitor.build.gradle`. `npm run cap:sync` (CI Android APK job) regenerates `capacitor.plugins.json`. Before calling native write/share, the web app checks `Capacitor.isPluginAvailable`; if Filesystem/Share are missing (outdated APK), it falls back to browser download / Web Share instead of showing `"Filesystem" plugin is not implemented on android`. Collection WhatsApp shares the receipt/payment photo as the image and the visit summary as text with that image. Collection visit summary text stays English (including **Remark (English)**) even when the UI language is Arabic, matching field-visit WhatsApp. Several photos are stacked into one JPEG without printing the summary on the picture. The summary is also copied. If file share still fails, WhatsApp opens with the summary text (`fallback: true`) and the UI asks the user to attach photos manually.
+- Order PDF / WhatsApp file share on Android use `@capacitor/filesystem` + `@capacitor/share` (`app/lib/orderPdfExport.js`, `app/lib/whatsappShare.js`). Both are listed in `android/capacitor.settings.gradle` / `android/app/capacitor.build.gradle`. `npm run cap:sync` (CI Android APK job) regenerates `capacitor.plugins.json`. Before calling native write/share, the web app checks `Capacitor.isPluginAvailable`; if Filesystem/Share are missing (outdated APK), it falls back to browser download / Web Share instead of showing `"Filesystem" plugin is not implemented on android`. Collection WhatsApp shares the receipt/payment photo as the image and the visit summary as text with that image. Collection visit summary text stays English (including **Remark (English)**) even when the UI language is Arabic, matching field-visit WhatsApp. Several photos are stacked into one JPEG without printing the summary on the picture. The summary is also copied. If file share still fails, `downloadWhatsappShareFiles` saves the prepared attachments and WhatsApp opens with the summary text when present (`fallback: true`); catalogue shares (image only, no caption) download the photos and tell the user to attach them in WhatsApp. The popup must not claim a summary was copied when `whatsappText` is empty.
 - Tracking: `app/lib/nativeFieldTracking.js` + `app/components/NativeFieldTracking.jsx`. Foreground service notification, idle GPS after 15 minutes without transaction activity, check cycle every 5 minutes while the process runs. Pings pause during lunch and after end of day.
 - Push: device tokens in `device_push_tokens`; server FCM via `FIREBASE_SERVICE_ACCOUNT_JSON` and `app/lib/fcm.js`. Without Firebase server config, local inactivity alerts can still work; remote push does not.
 - Minimum APK: env + `system_settings.android_apk_min_version_v1`.

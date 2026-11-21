@@ -610,6 +610,10 @@ function CustomerAuditPageContent() {
           canManageOrderBlock={isAdmin}
           updatingOrderBlock={updatingOrderBlock}
           onToggleOrderBlock={toggleOrderBlockOverride}
+          pricingRegion={pricingRegion}
+          pricingType={pricingType}
+          paymentType={paymentType}
+          language={language}
         />
 
         {!analytics ? (

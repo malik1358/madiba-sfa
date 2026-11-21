@@ -658,3 +658,40 @@ test("screen search matches accessible module labels only", () => {
   assert.deepEqual(filterAccessibleModulesByQuery(admin, "   ", "en"), []);
   assert.equal(filterAccessibleModulesByQuery(admin, "zzzz-not-a-screen", "en").length, 0);
 });
+
+test("HR module: screens for admin/report-user/manager, payroll summary for report viewers, nav group before admin", () => {
+  const hrKeys = ["hrEmployees", "hrMonthly", "hrLeave", "hrPayrollSummary"];
+  for (const role of ["admin", "report-user", "manager"]) {
+    const access = buildModuleAccess({ role });
+    for (const key of hrKeys) assert.equal(access.canAccess(key), true, `${role} ${key}`);
+  }
+
+  const invoiceMaker = buildModuleAccess({ role: "invoice-maker" });
+  assert.equal(invoiceMaker.canAccess("hrPayrollSummary"), true);
+  assert.equal(invoiceMaker.canAccess("hrEmployees"), false);
+  assert.equal(invoiceMaker.canAccess("hrMonthly"), false);
+  assert.equal(invoiceMaker.canAccess("hrLeave"), false);
+
+  for (const access of [
+    buildModuleAccess({ role: "salesman", salesmanCode: "SM001" }),
+    buildModuleAccess({ role: "collector", salesmanCode: "CL01" }),
+    buildModuleAccess({ role: "product-promoter" }),
+  ]) {
+    for (const key of hrKeys) assert.equal(access.canAccess(key), false, `${access.role} ${key}`);
+  }
+
+  const keys = NAV_GROUPS.map((group) => group.key);
+  assert.ok(keys.indexOf("hr") > -1);
+  assert.equal(keys.indexOf("hr"), keys.indexOf("admin") - 1);
+  assert.deepEqual(NAV_GROUPS.find((group) => group.key === "hr").modules, hrKeys);
+  assert.equal(localizedNavGroupLabel("hr", "en"), "HR Management");
+  assert.equal(localizedNavGroupLabel("hr", "ar"), "إدارة الموارد البشرية");
+  assert.equal(localizedModuleLabel("hrPayrollSummary", "en"), "Payroll Summary");
+  assert.equal(moduleLabelForPath("/management/hr-monthly", "en"), "HR Monthly Feed");
+  assert.ok(localizedModuleLabel("hrLeave", "ar"));
+
+  const matrix = buildDefaultRoleModuleMatrix();
+  assert.equal(matrix.manager.hrEmployees, true);
+  assert.equal(matrix["invoice-maker"].hrPayrollSummary, true);
+  assert.equal(matrix.salesman.hrEmployees, false);
+});

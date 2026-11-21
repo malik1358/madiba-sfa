@@ -500,6 +500,50 @@ export async function copyTextToClipboard(text) {
   }
 }
 
+/**
+ * Desktop browsers often cannot hand files to WhatsApp via Web Share.
+ * Download each prepared attachment so the user can attach them manually.
+ */
+export async function downloadWhatsappShareFiles(files = [], options = {}) {
+  if (typeof document === "undefined" || typeof URL === "undefined") return false;
+
+  const shareFiles = normalizeShareFiles(files);
+  if (!shareFiles.length) return false;
+
+  const pauseMs = Math.max(0, Number(options.pauseMs ?? 250) || 0);
+  const wait = typeof options.wait === "function"
+    ? options.wait
+    : (ms) => new Promise((resolve) => {
+      if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+        window.setTimeout(resolve, ms);
+      } else {
+        setTimeout(resolve, ms);
+      }
+    });
+
+  try {
+    for (let index = 0; index < shareFiles.length; index += 1) {
+      const file = shareFiles[index];
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = String(file.name || `attachment-${index + 1}.jpg`).trim() || `attachment-${index + 1}.jpg`;
+      anchor.rel = "noopener noreferrer";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      if (pauseMs > 0 && index < shareFiles.length - 1) {
+        await wait(pauseMs);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function shareTextOnWhatsapp(text, options = {}) {
   const message = normalizeWhatsappSummaryText(text).trim();
   if (!message) {
@@ -617,9 +661,21 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     }
   }
 
-  // Native/Web Share could not attach files (outdated APK, WebView limits, etc.).
-  // Still open WhatsApp with the summary text; callers show the attach-manually hint.
+  // Native/Web Share could not attach files (outdated APK, desktop browser, etc.).
+  // Download the prepared files so they can be attached in WhatsApp Web/desktop.
+  const downloaded = await downloadWhatsappShareFiles(shareFiles);
+
   if (!originalMessage) {
+    if (downloaded) {
+      return {
+        success: true,
+        method: "download-files",
+        fallback: true,
+        reason: "files-not-supported",
+        textCopied: false,
+        embeddedSummary: false,
+      };
+    }
     return { success: false, reason: "files-not-supported" };
   }
 
@@ -630,12 +686,22 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
   });
 
   if (!textResult.success) {
-    return textResult;
+    return downloaded
+      ? {
+        success: true,
+        method: "download-files",
+        fallback: true,
+        reason: "files-not-supported",
+        textCopied: Boolean(originalMessage),
+        embeddedSummary: false,
+      }
+      : textResult;
   }
 
   return {
     ...textResult,
     fallback: true,
     reason: "files-not-supported",
+    filesDownloaded: downloaded,
   };
 }

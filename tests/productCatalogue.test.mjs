@@ -568,6 +568,11 @@ test("catalogue UI keeps photos and packing on the device", () => {
   assert.doesNotMatch(source, /shareTextOnWhatsapp/);
   assert.doesNotMatch(source, /not uploaded, saved, or shared/);
   assert.doesNotMatch(source, /previewPhotos/);
+  const popup = fs.readFileSync(new URL("../app/components/AppPopupProvider.jsx", import.meta.url), "utf8");
+  assert.match(popup, /Photos are ready with the details on the image/);
+  assert.match(popup, /Photos downloaded\. Open WhatsApp and attach them manually/);
+  assert.match(popup, /Could not share the photos to WhatsApp from this browser/);
+  assert.match(popup, /download-files/);
 });
 
 test("catalogue carousel advances and share lines put price and packing on the image", () => {

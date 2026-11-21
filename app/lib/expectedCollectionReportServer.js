@@ -6,7 +6,11 @@ import {
   loadSalesRowsByCustomer,
   lookupByCustomerCode,
 } from "./collectionAvgDays.js";
-import { buildExpectedCollectionDetailRows } from "./expectedCollectionReport.js";
+import {
+  buildExpectedCollectionHorizonReport,
+  resolveCompanyAvgCollectionDays,
+} from "./expectedCollectionReport.js";
+import { RECEIVABLE_DAYS_DATASET_KEY } from "./receivableDays.js";
 import {
   buildCustomerCategoryMixFromFacts,
   buildKpiUploadSummaryExcludedCustomerSet,
@@ -113,7 +117,7 @@ export async function loadExpectedCollectionReport(admin, {
 } = {}) {
   const asOf = String(todayIso || getKsaDateString()).slice(0, 10);
   const monthEnd = resolveMonthEnd(month || asOf);
-  const cacheKey = `${monthEnd}|${asOf}|by-salesman-v1`;
+  const cacheKey = `${monthEnd}|${asOf}|horizon-strict-nov-v4`;
   const cached = expectedCollectionReportCache;
   if (
     cached
@@ -165,24 +169,48 @@ export async function loadExpectedCollectionReport(admin, {
     enrichedCustomers.map((row) => [normalizeCode(row.customer_code), pickCustomerAvgDaysToPay(row)]),
   );
 
-  const detail = buildExpectedCollectionDetailRows(outstandingInvoices, {
+  let rolling3mDays = null;
+  try {
+    const receivableCache = await readJsonSetting(admin, RECEIVABLE_DAYS_DATASET_KEY);
+    const rows = Array.isArray(receivableCache?.rows) ? receivableCache.rows : [];
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const value = Number(rows[index]?.receivable_days_3m);
+      if (Number.isFinite(value) && value >= 0) {
+        rolling3mDays = value;
+        break;
+      }
+    }
+  } catch {
+    rolling3mDays = null;
+  }
+
+  const companyAvgDays = resolveCompanyAvgCollectionDays(avgDaysByCustomer, {
+    fallbackDays: rolling3mDays,
+  });
+
+  const detail = buildExpectedCollectionHorizonReport(outstandingInvoices, {
     avgDaysByCustomer,
     enrichedByCode,
     customerMix,
     monthEnd,
+    asOf,
     excludedCustomerCodes: excludedLegalCustomers,
+    companyAvgDays,
   });
 
   const report = {
     asOf,
     monthEnd: detail.monthEnd,
-    rule: "max(lifetime avg, last paid invoice days); require ≥1 payment; avg days >120 excluded; exclude legal; BM+Rest share; approx pay ≤ month-end",
+    companyAvgDays: detail.companyAvgDays,
+    rule: "current month = strict BM+Rest (overdue counts); never-paid/avg>120 use company avg in forward months only; electronics in months but not current; legal excluded",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,
     customerCount: detail.customerCount,
     invoiceCount: detail.invoiceCount,
     rows: detail.rows,
+    months: detail.months,
+    reconciliation: detail.reconciliation,
   };
   expectedCollectionReportCache = {
     key: cacheKey,

@@ -160,7 +160,7 @@ Wholesale/retail needs no schema migration. `price_catalog_cache.pricing_rules` 
 | `item_master_analysis` | Power BI Item Master Analysis mirror (Tally `mst_stock_item` + Swamiji Google Sheet). Unique `row_key`. Synced every 8 hours. Migration `20261113140000_item_master_analysis.sql`. Does not replace `items_master`. |
 | `products` | Selling catalog: names, `category`, `unit` default `CTN`, `price`, `vat_percent` default 15, `stock_status`, `is_active`, `do_not_use`. |
 | `product_categories`, `product_subcategories` | Category tree. |
-| `price_catalog_cache` | What `/api/pricing/cache` reads (`default`, `pricing_rules`, `order_schemes`, `order_quantity_controls`). `default.price_map` holds only positive Google Sheet / Apps Script rates after sync (no sales-history backfill). Quantity controls are returned as `quantityControls` for offline New Order checks. |
+| `price_catalog_cache` | What `/api/pricing/cache` reads (`default`, `pricing_rules`, `order_schemes`, `order_quantity_controls`). `default.price_map` holds only positive Google Sheet / Apps Script rates after sync (no sales-history backfill, no `PRICE_CODE_ALIASES` sibling copy for unpriced codes). Quantity controls are returned as `quantityControls` for offline New Order checks. |
 | `price_catalog_snapshots` | Dump written by price sync. `price_map` jsonb. |
 | `item_price_history` | `item_code`, `region` default `riyadh`, `price`, `recorded_at`, `source` default `price_sync`. |
 | `kpi_targets` | Unique (`salesman_code`, `target_month`). Later columns: `collection_target`, `office_supplies_sales_target`, `other_sales_target`, `local_item_sales_target`, `new_skus_to_repeat_customers_target`, `updated_by`. |

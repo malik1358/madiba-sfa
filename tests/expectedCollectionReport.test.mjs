@@ -321,6 +321,31 @@ test("resolveCompanyAvgCollectionDays means eligible customer avgs", () => {
   assert.equal(resolveCompanyAvgCollectionDays(new Map(), { fallbackDays: 77 }), 77);
 });
 
+test("resolveCompanyAvgCollectionDays with customerMix uses Rest-dominant only", () => {
+  const avgDays = new Map([
+    ["BM1", 40],
+    ["EL1", 50],
+    ["REST1", 70],
+    ["REST2", 90],
+    ["MIX_BM", 30],
+  ]);
+  const customerMix = new Map([
+    ["BM1", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+    ["EL1", { buildingMaterial: 0, electronics: 100, rest: 0 }],
+    ["REST1", { buildingMaterial: 10, electronics: 0, rest: 90 }],
+    ["REST2", { buildingMaterial: 0, electronics: 20, rest: 80 }],
+    ["MIX_BM", { buildingMaterial: 80, electronics: 0, rest: 20 }],
+  ]);
+  // Rest-dominant only: (70 + 90) / 2 = 80
+  assert.equal(resolveCompanyAvgCollectionDays(avgDays, { customerMix }), 80);
+  assert.equal(resolveCompanyAvgCollectionDays(avgDays, {
+    customerMix: new Map([
+      ["BM1", { buildingMaterial: 100, electronics: 0, rest: 0 }],
+    ]),
+    fallbackDays: 66,
+  }), 66);
+});
+
 test("buildExpectedCollectionHorizonReport keeps current month strict and forwards company-avg proxies", () => {
   const report = buildExpectedCollectionHorizonReport([
     {

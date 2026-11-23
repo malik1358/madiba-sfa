@@ -22,10 +22,41 @@ import {
   WAREHOUSE_INVOICE_JAVED_EMAIL,
 } from "../app/lib/warehouseInvoiceRecipients.js";
 
-test("invoiceFileNumberFromName strips path and pdf suffix", () => {
+test("invoiceFileNumberFromName strips path, pdf suffix, and storage uuid prefix", () => {
   assert.equal(invoiceFileNumberFromName("C:/tmp/Inv_4521.pdf"), "Inv_4521");
   assert.equal(invoiceFileNumberFromName("4521.PDF"), "4521");
+  assert.equal(
+    invoiceFileNumberFromName("1432/1253/1795347696829-df87361c-4498-4341-ad62-c761cf04c175-DC-0087.pdf"),
+    "DC-0087",
+  );
   assert.equal(invoiceFileNumberFromName(""), "");
+});
+
+test("buildWarehouseInvoiceResumeRow requires uploaded file path and shows invoice number", () => {
+  const withPath = buildWarehouseInvoiceResumeRow({
+    order: {
+      id: "1253",
+      order_number: "MOI549",
+      customer_code: "1432",
+      customer_name: "Rawad",
+      salesman_name: "MOIN",
+      status: "SUBMITTED",
+    },
+    meta: {
+      invoiceUploadedAt: "2026-11-22T11:41:36.829Z",
+      invoiceFilePath: "1432/1253/1795347696829-df87361c-4498-4341-ad62-c761cf04c175-DC-0087.pdf",
+      invoiceAmountExclVat: 6076.8,
+    },
+    pricingRegion: "dammam",
+  });
+  assert.equal(withPath.invoiceFileNumber, "DC-0087");
+
+  const noPath = buildWarehouseInvoiceResumeRow({
+    order: { id: "9", status: "SUBMITTED", order_number: "X" },
+    meta: { invoiceUploadedAt: "2026-11-22T11:41:36.829Z", status: "Invoice made" },
+    pricingRegion: "dammam",
+  });
+  assert.equal(noPath, null);
 });
 
 test("warehouse buckets route Riyadh/Jeddah to Iliyas and Dammam to Javed", () => {
@@ -72,13 +103,13 @@ test("selectWarehouseInvoiceResumeRows keeps uploads inside the KSA day window",
     ["1", {
       invoiceUploadedAt: "2026-11-22T10:00:00.000Z",
       originalFileName: "Inv_100.pdf",
-      invoiceFilePath: "a/1.pdf",
+      invoiceFilePath: "a/1/1795-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee-Inv_100.pdf",
       invoiceAmountExclVat: 100,
     }],
     ["2", {
       invoiceUploadedAt: "2026-11-20T10:00:00.000Z",
       originalFileName: "Inv_200.pdf",
-      invoiceFilePath: "a/2.pdf",
+      invoiceFilePath: "a/2/1795-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee-Inv_200.pdf",
     }],
   ]);
   const pricingRegionByOrder = new Map([["1", "dammam"], ["2", "riyadh"]]);
@@ -109,7 +140,7 @@ test("buildDailyWarehouseInvoiceResumeEmail includes invoice file number and tea
     meta: {
       invoiceUploadedAt: "2026-11-22T12:00:00.000Z",
       originalFileName: "Inv_7788.pdf",
-      invoiceFilePath: "x.pdf",
+      invoiceFilePath: "1500/9/1795-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee-Inv_7788.pdf",
       invoiceAmountExclVat: 250.5,
     },
     pricingRegion: "jeddah",

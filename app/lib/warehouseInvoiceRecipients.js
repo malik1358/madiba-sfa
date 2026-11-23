@@ -73,11 +73,35 @@ export function resolveDailyWarehouseInvoiceResumeCc(env = process.env, to = [])
     .filter((email) => !recipients.has(email));
 }
 
+const STORAGE_UPLOAD_PREFIX =
+  /^\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(.+)$/i;
+
+/**
+ * Derive the human invoice file number from an upload name or storage object key.
+ * Storage keys look like: `1432/1253/<ts>-<uuid>-DC-0087.pdf` → `DC-0087`.
+ */
 export function invoiceFileNumberFromName(fileName = "") {
   const raw = String(fileName || "").trim();
   if (!raw) return "";
-  const base = raw.replace(/^.*[\\/]/, "").replace(/\.pdf$/i, "").trim();
-  return base || raw;
+  let base = raw.replace(/^.*[\\/]/, "").replace(/\.pdf$/i, "").trim();
+  const prefixed = base.match(STORAGE_UPLOAD_PREFIX);
+  if (prefixed?.[1]) base = String(prefixed[1]).trim();
+  return base || "";
+}
+
+/** Prefer original upload name; fall back to the stored invoice object key. */
+export function resolveInvoiceFileNumberFromMeta(meta = {}) {
+  const payload = meta && typeof meta === "object" ? meta : {};
+  const candidates = [
+    payload.originalFileName,
+    payload.invoiceFileName,
+    payload.invoiceFilePath,
+  ];
+  for (const candidate of candidates) {
+    const number = invoiceFileNumberFromName(candidate);
+    if (number) return number;
+  }
+  return "";
 }
 
 export { pricingRegionLabel };

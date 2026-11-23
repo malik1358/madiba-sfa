@@ -3,10 +3,10 @@ import { hasUploadedInvoice, parseInvoiceMeta } from "./missingInvoiceEmail.js";
 import { formatSalesOrderNumber } from "./salesOrderNumber.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 import {
-  invoiceFileNumberFromName,
   pricingRegionLabel,
   resolveDailyWarehouseInvoiceResumeCc,
   resolveDailyWarehouseInvoiceResumeTo,
+  resolveInvoiceFileNumberFromMeta,
   warehouseInvoiceBucketKey,
   warehouseInvoiceBucketLabel,
   warehouseInvoicePricingRegion,
@@ -35,14 +35,21 @@ export function buildWarehouseInvoiceResumeRow({
   pricingRegion = "",
 } = {}) {
   const payload = parseInvoiceMeta(meta) || {};
+  // Only rows with a real uploaded PDF path (Invoice made with file).
   if (!hasUploadedInvoice(payload)) return null;
+  if (!String(payload.invoiceFilePath || "").trim()) return null;
   const uploadedMs = invoiceUploadedAtMs(payload);
   if (!Number.isFinite(uploadedMs)) return null;
+
+  const invoiceFileNumber = resolveInvoiceFileNumberFromMeta(payload);
+  if (!invoiceFileNumber) return null;
 
   const region = warehouseInvoicePricingRegion(
     pricingRegion || payload.pricingRegion || payload.region || "",
   );
-  const fileName = String(payload.originalFileName || payload.invoiceFileName || "").trim();
+  const fileName = String(
+    payload.originalFileName || payload.invoiceFileName || payload.invoiceFilePath || "",
+  ).trim();
   const amount = Number(payload.invoiceAmountExclVat);
   return {
     orderId: String(order?.id || payload.orderId || "").trim(),
@@ -53,8 +60,8 @@ export function buildWarehouseInvoiceResumeRow({
     pricingRegion: region,
     cityLabel: pricingRegionLabel(region),
     bucketKey: warehouseInvoiceBucketKey(region),
-    invoiceFileNumber: invoiceFileNumberFromName(fileName) || "-",
-    invoiceFileName: fileName || "-",
+    invoiceFileNumber,
+    invoiceFileName: fileName || invoiceFileNumber,
     amountExclVat: Number.isFinite(amount) ? amount : null,
     uploadedAtIso: payload.invoiceUploadedAt || "",
     uploadedAtMs: uploadedMs,

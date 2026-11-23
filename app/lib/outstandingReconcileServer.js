@@ -12,7 +12,11 @@ import {
   normalizeReceiptDataset,
 } from "./receiptRegister.js";
 import { mergeSalesSnapshots } from "./salesHistory.js";
-import { buildPaymentSettlementLedger } from "./paymentBehavior.js";
+import {
+  buildPaymentSettlementLedger,
+  missingReferencedSalesVouchers,
+  pickFullMissingReferencedSales,
+} from "./paymentBehavior.js";
 import {
   createSalesCoverageCollector,
   detectSalesCoverageGaps,
@@ -34,9 +38,70 @@ import {
 import { isMissingRpcError } from "./salesmanIdentityMatch.js";
 
 const SALES_PAGE_SIZE = 1000;
+const MISSING_VOUCHER_CHUNK = 80;
 // import_batch_id is required so mergeSalesSnapshots can keep same-signature lines
 // that share one active batch (customer-history already selects it).
 const SALES_SELECT = "id,import_batch_id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_name,category,item_code,item_name,quantity,sales_amount";
+
+function chunkList(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/**
+ * Same as Payment Settlement history: when a CN names a voucher missing from
+ * active_sales, pull the full invoice from sales_raw. Without this, residual
+ * CN-mirror sales understate the bill and a real receipt (1258C 176,000 on
+ * NFD/107) invents a false −176k Difference on Outstanding Compare.
+ */
+async function attachMissingReferencedSalesFromRaw(admin, customerCodes, transactions) {
+  const source = Array.isArray(transactions) ? transactions : [];
+  const missing = missingReferencedSalesVouchers(source);
+  if (!missing.length) return source;
+
+  const codeList = [...new Set(
+    (Array.isArray(customerCodes) ? customerCodes : [])
+      .map((code) => normalizeCode(code))
+      .filter(Boolean),
+  )];
+  const historyRows = [];
+  try {
+    for (const chunk of chunkList(missing, MISSING_VOUCHER_CHUNK)) {
+      let from = 0;
+      while (true) {
+        let query = admin
+          .from("sales_raw")
+          .select(SALES_SELECT)
+          .in("voucher_number", chunk)
+          .order("id", { ascending: true })
+          .range(from, from + SALES_PAGE_SIZE - 1);
+        if (codeList.length === 1) {
+          query = query.eq("customer_code", codeList[0]);
+        } else if (codeList.length > 1) {
+          query = query.in("customer_code", codeList);
+        }
+        const { data, error } = await query;
+        if (error) {
+          if (isMissingTableError(error)) return source;
+          throw error;
+        }
+        historyRows.push(...(data || []));
+        if (!data || data.length < SALES_PAGE_SIZE) break;
+        from += SALES_PAGE_SIZE;
+      }
+    }
+  } catch (error) {
+    if (isMissingTableError(error)) return source;
+    throw error;
+  }
+
+  const extra = pickFullMissingReferencedSales(source, historyRows);
+  if (!extra.length) return source;
+  return mergeSalesSnapshots([...source, ...extra]);
+}
 
 function parseJson(value) {
   try {
@@ -324,8 +389,13 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     groupCodes.forEach((code) => seenCodes.add(code));
     try {
       const merged = mergeSalesSnapshots(groupSales);
-      merged.forEach((row) => coverage.add(row));
-      evaluate(preferred, merged);
+      const withMissingSales = await attachMissingReferencedSalesFromRaw(
+        admin,
+        groupCodes,
+        merged,
+      );
+      withMissingSales.forEach((row) => coverage.add(row));
+      evaluate(preferred, withMissingSales);
     } catch (error) {
       failedCount += 1;
       console.error(`Outstanding reconcile failed for ${preferred}:`, error);

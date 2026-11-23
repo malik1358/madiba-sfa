@@ -170,7 +170,16 @@ test("sendInvoiceUploadNotification emails recipients with order and invoice PDF
     { id: "boss-1", email: "boss-auth@example.com", user_metadata: {} },
   ];
 
-  const admin = createFakeAdmin({ order, lines, profiles, authUsers });
+  const admin = createFakeAdmin({
+    order,
+    lines,
+    profiles,
+    authUsers,
+    settings: [{
+      setting_key: "order_pricing_meta:378",
+      setting_value: JSON.stringify({ pricingRegion: "riyadh" }),
+    }],
+  });
   const result = await sendInvoiceUploadNotification(admin, {
     orderId: "378",
     invoiceBuffer: Buffer.from("%PDF-1.4 invoice"),
@@ -192,11 +201,57 @@ test("sendInvoiceUploadNotification emails recipients with order and invoice PDF
   assert.ok(sent[0].to.includes("sales-report@example.com"));
   assert.ok(sent[0].to.includes("boss@example.com"));
   assert.ok(sent[0].to.includes("iliyas.belliyaru@noorshukran.com"));
+  assert.ok(!sent[0].to.includes("dwh@noorshukran.com"));
   assert.deepEqual(sent[0].cc, ["malik@pinasz.com"]);
   assert.equal(sent[0].attachments.length, 2);
   assert.match(sent[0].attachments[0].filename, /\.pdf$/i);
   assert.match(sent[0].attachments[1].filename, /Inv_1\.pdf$/i);
   assert.match(sent[0].subject, /MOI12/);
+});
+
+test("sendInvoiceUploadNotification routes Dammam warehouse To to Javed", async () => {
+  const sent = [];
+  const order = {
+    id: "500",
+    order_number: "MOI50",
+    customer_code: "2000",
+    customer_name: "Dammam Shop",
+    salesman_code: "S02",
+    salesman_name: "Sales Two",
+    status: "SUBMITTED",
+    created_by: "sales-2",
+  };
+  const admin = createFakeAdmin({
+    order,
+    lines: [{ id: 1, item_code: "A1", item_name: "Item A", category: "CAT", quantity: 1, rate: 5, line_value: 5 }],
+    profiles: [
+      { id: "uploader-1", salesman_code: "INV1", salesman_name: "Invoice Maker", role: "invoice-maker", email: "uploader@example.com" },
+      { id: "sales-2", salesman_code: "S02", salesman_name: "Sales Two", role: "salesman", email: "sales2@example.com" },
+    ],
+    authUsers: [
+      { id: "uploader-1", email: "uploader@example.com", user_metadata: {} },
+      { id: "sales-2", email: "sales2@example.com", user_metadata: {} },
+    ],
+    settings: [{
+      setting_key: "order_pricing_meta:500",
+      setting_value: JSON.stringify({ pricingRegion: "dammam" }),
+    }],
+  });
+  const result = await sendInvoiceUploadNotification(admin, {
+    orderId: "500",
+    invoiceBuffer: Buffer.from("%PDF-1.4 invoice"),
+    invoiceFileName: "Inv_Dammam.pdf",
+    uploaderUserId: "uploader-1",
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@pinasz.com" },
+    loadCatalog: async () => null,
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test", id: "msg-dammam" };
+    },
+  });
+  assert.equal(result.sent, true);
+  assert.ok(sent[0].to.includes("dwh@noorshukran.com"));
+  assert.ok(!sent[0].to.includes("iliyas.belliyaru@noorshukran.com"));
 });
 
 test("findLatestUploadedInvoiceMeta picks the newest uploaded invoice", async () => {

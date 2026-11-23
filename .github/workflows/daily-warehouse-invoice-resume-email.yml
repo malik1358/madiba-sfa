@@ -1,0 +1,82 @@
+name: Daily Warehouse Invoice Resume Email
+
+on:
+  schedule:
+    # 05:30 UTC = 08:30 KSA, Saturday–Thursday.
+    # Thursday's report still goes Saturday morning because Friday is the holiday.
+    - cron: "30 5 * * 0-4,6"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Optional KSA report date YYYY-MM-DD (previous working day when empty)"
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already claimed"
+        required: false
+        default: "false"
+      to:
+        description: "Optional test To override (comma-separated)"
+        required: false
+        default: ""
+      cc:
+        description: "Optional extra CC (comma-separated)"
+        required: false
+        default: ""
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily warehouse invoice resume email endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_CC: ${{ github.event.inputs.cc }}
+        run: |
+          DEFAULT_URL='https://madiba-sfa.vercel.app/api/cron/daily-warehouse-invoice-resume-email'
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          payload='{}'
+          if [[ -n "${INPUT_DATE}${INPUT_FORCE}${INPUT_TO}${INPUT_CC}" ]]; then
+            payload="$(python - <<'PY'
+import json, os
+body = {}
+date = (os.environ.get("INPUT_DATE") or "").strip()
+force = (os.environ.get("INPUT_FORCE") or "").strip().lower()
+to = (os.environ.get("INPUT_TO") or "").strip()
+cc = (os.environ.get("INPUT_CC") or "").strip()
+if date:
+  body["date"] = date
+if force in ("1", "true", "yes"):
+  body["force"] = True
+if to:
+  body["to"] = to
+if cc:
+  body["cc"] = cc
+print(json.dumps(body))
+PY
+)"
+          fi
+
+          status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$DEFAULT_URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+            -H "Content-Type: application/json" \
+            --data "$payload")"
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Daily warehouse invoice resume email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Daily warehouse invoice resume email succeeded with HTTP $status_code"
+          cat response.json

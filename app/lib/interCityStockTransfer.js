@@ -252,6 +252,7 @@ export function suggestTransferQty({
   const reserveDays = Math.max(0, Number(sourceReserveDays) || 0);
   const minUnsold = Math.max(0, roundEodQty(unsoldMinQty));
   const dailyDemand = roundEodQty(peakWeekly / 7);
+  const sourceDailyDemand = roundEodQty(sourcePeak / 7);
   // Ceil to whole units when demand is fractional so cover is at least the requested days.
   // Never-sold at destination still gets a starter stock of unsoldMinQty (default 5 CTN).
   let targetCoverQty = dailyDemand > 0 ? Math.ceil(dailyDemand * days - 1e-9) : 0;
@@ -260,27 +261,39 @@ export function suggestTransferQty({
   }
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destination));
 
-  // Source keeps ≥30 days of its own peak-week pace before anything is sent out.
-  const sourceMonthReserveQty = sourcePeak > 0 && reserveDays > 0
-    ? Math.ceil((sourcePeak / 7) * reserveDays - 1e-9)
+  // Source must keep ≥ reserveDays (30) of its own peak-week pace — never leave
+  // days-cover-after-at-source below that floor when source has sales pace.
+  const sourceMonthReserveQty = sourceDailyDemand > 0 && reserveDays > 0
+    ? Math.ceil(sourceDailyDemand * reserveDays - 1e-9)
     : 0;
   const maxTransferable = Math.max(0, roundEodQty(source - sourceMonthReserveQty));
-  const suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable));
-  const remainingAtSource = roundEodQty(source - suggestedQty);
+  let suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable));
+  let remainingAtSource = roundEodQty(source - suggestedQty);
+  let daysCoverAfterAtSource = sourceDailyDemand > 0
+    ? roundEodQty(remainingAtSource / sourceDailyDemand)
+    : null;
+  // Hard gate: if days left at source would be under the reserve, send nothing.
+  if (
+    sourceDailyDemand > 0
+    && reserveDays > 0
+    && suggestedQty > 0
+    && (daysCoverAfterAtSource == null || daysCoverAfterAtSource < reserveDays)
+  ) {
+    suggestedQty = 0;
+    remainingAtSource = source;
+    daysCoverAfterAtSource = roundEodQty(remainingAtSource / sourceDailyDemand);
+  }
   const afterAtDestination = roundEodQty(destination + suggestedQty);
-  const sourceDailyDemand = roundEodQty(sourcePeak / 7);
   const daysCoverAfterAtDestination = dailyDemand > 0
     ? roundEodQty(afterAtDestination / dailyDemand)
     : (afterAtDestination > 0 ? null : 0);
-  const daysCoverAfterAtSource = sourceDailyDemand > 0
-    ? roundEodQty(remainingAtSource / sourceDailyDemand)
-    : (remainingAtSource > 0 ? null : 0);
   // Keep legacy alias for destination cover.
   const daysCoverAfter = daysCoverAfterAtDestination;
   const blockedBySourceReserve = sourceMonthReserveQty > 0 && shortfall > 0 && maxTransferable <= 0;
   const cappedBySourceReserve = sourceMonthReserveQty > 0
     && shortfall > maxTransferable
-    && maxTransferable > 0;
+    && maxTransferable > 0
+    && suggestedQty > 0;
 
   return {
     peakWeeklyQty: peakWeekly,
@@ -299,7 +312,7 @@ export function suggestTransferQty({
     daysCoverAfter,
     daysCoverAfterAtDestination,
     daysCoverAfterAtSource,
-    cappedBySource: shortfall > source && shortfall > 0,
+    cappedBySource: shortfall > source && shortfall > 0 && suggestedQty > 0,
     cappedBySourceReserve,
     blockedBySourceReserve,
     usedUnsoldMinimum: peakWeekly <= 0 && minUnsold > 0 && suggestedQty > 0,
@@ -466,9 +479,10 @@ function convertInterCityQty(raw, stockUnit, master) {
 }
 
 /**
- * Unsold-min (5) is a display/carton floor. Re-apply after master-unit conversion so
+ * Unsold-min is a display/carton floor. Re-apply after master-unit conversion so
  * "Min 5" never becomes 1 CTN when conv turns 5 pcs into 1 carton.
  * Negative destination qty stays visible but is treated as 0 for cover math.
+ * Source days-cover after transfer must stay ≥ reserve days (30) when source has pace.
  */
 function finalizeInterCityDisplayRow(row = {}) {
   const source = Math.max(0, roundEodQty(row.sourceQty));
@@ -492,15 +506,25 @@ function finalizeInterCityDisplayRow(row = {}) {
   }
 
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destinationForCalc));
-  const suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable, source));
-  const remainingAtSource = roundEodQty(source - suggestedQty);
+  let suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable, source));
+  let remainingAtSource = roundEodQty(source - suggestedQty);
+  let daysCoverAfterAtSource = sourceDaily > 0
+    ? roundEodQty(remainingAtSource / sourceDaily)
+    : null;
+  if (
+    sourceDaily > 0
+    && reserveDays > 0
+    && suggestedQty > 0
+    && (daysCoverAfterAtSource == null || daysCoverAfterAtSource < reserveDays)
+  ) {
+    suggestedQty = 0;
+    remainingAtSource = source;
+    daysCoverAfterAtSource = roundEodQty(remainingAtSource / sourceDaily);
+  }
   const afterAtDestination = roundEodQty(destinationForCalc + suggestedQty);
   const daysCoverAfterAtDestination = destDaily > 0
     ? roundEodQty(afterAtDestination / destDaily)
     : (afterAtDestination > 0 ? null : 0);
-  const daysCoverAfterAtSource = sourceDaily > 0
-    ? roundEodQty(remainingAtSource / sourceDaily)
-    : (remainingAtSource > 0 ? null : 0);
 
   return {
     ...row,
@@ -515,8 +539,8 @@ function finalizeInterCityDisplayRow(row = {}) {
     daysCoverAfter: daysCoverAfterAtDestination,
     daysCoverAfterAtDestination,
     daysCoverAfterAtSource,
-    cappedBySource: shortfall > source && shortfall > 0 && maxTransferable >= source,
-    cappedBySourceReserve: sourceMonthReserveQty > 0 && shortfall > maxTransferable && maxTransferable > 0,
+    cappedBySource: shortfall > source && shortfall > 0 && maxTransferable >= source && suggestedQty > 0,
+    cappedBySourceReserve: sourceMonthReserveQty > 0 && shortfall > maxTransferable && maxTransferable > 0 && suggestedQty > 0,
     blockedBySourceReserve: sourceMonthReserveQty > 0 && shortfall > 0 && maxTransferable <= 0,
     usedUnsoldMinimum: usedUnsoldMinimum && suggestedQty > 0,
   };

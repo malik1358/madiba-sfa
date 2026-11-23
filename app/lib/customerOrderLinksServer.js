@@ -33,7 +33,10 @@ import {
   nextSalesmanOrderSequence,
   resolveSalesmanOrderPrefix,
 } from "./salesmanOrderNumber.js";
-import { ORDER_STATUS_PENDING_INVOICE_CREATION } from "./orderApproval.js";
+import {
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+  applyInvoiceStatusHistory,
+} from "./orderApproval.js";
 import { buildOrderCopyPdfAttachment } from "./invoiceUploadEmailServer.js";
 import { queueCustomerOrderLinkSubmitNotifications } from "./customerOrderLinkSubmitEmailServer.js";
 import {
@@ -176,7 +179,7 @@ async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
   if (String(existing.status || "").trim()) return;
 
   const nowIso = new Date().toISOString();
-  const updated = {
+  const updated = applyInvoiceStatusHistory({
     ...existing,
     orderId: String(orderId),
     status,
@@ -184,7 +187,7 @@ async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
     statusUpdatedAt: nowIso,
     statusUpdatedBy: userId || "",
     source: "customer_order_link",
-  };
+  }, existing, { mode: "customer-order-link" });
   const { error } = await admin.from("system_settings").upsert({
     setting_key: key,
     setting_value: JSON.stringify(updated),

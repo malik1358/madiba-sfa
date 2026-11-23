@@ -19,6 +19,9 @@ import {
   isPendingForApprovalStatus,
   isSubmittedWithoutUploadedInvoice,
   isValidRejectionReason,
+  MAX_INVOICE_STATUS_HISTORY,
+  appendInvoiceStatusHistory,
+  applyInvoiceStatusHistory,
   metaWithInvoiceMadeStatus,
   shouldAutoMarkInvoiceMade,
   shouldAutoMarkPendingApproval,
@@ -141,6 +144,60 @@ test("uploaded invoice also clears leftover pending invoice creation status", ()
   };
   assert.equal(displayInvoiceStatus(meta), ORDER_STATUS_INVOICE_MADE);
   assert.equal(shouldAutoMarkInvoiceMade(meta), true);
+});
+
+test("invoice statusHistory appends only when status changes", () => {
+  const previous = {
+    orderId: "G49",
+    status: ORDER_STATUS_PENDING_APPROVAL,
+    statusHistory: [{ at: "2026-11-04T07:00:00.000Z", by: "u1", from: "", to: ORDER_STATUS_PENDING_APPROVAL }],
+  };
+  const next = {
+    ...previous,
+    status: ORDER_STATUS_REJECTED,
+    statusUpdatedAt: "2026-11-04T09:25:00.000Z",
+    statusUpdatedBy: "u2",
+  };
+  const withHistory = applyInvoiceStatusHistory(next, previous, { mode: "reject-order" });
+  assert.equal(withHistory.statusHistory.length, 2);
+  assert.deepEqual(withHistory.statusHistory[1], {
+    at: "2026-11-04T09:25:00.000Z",
+    by: "u2",
+    from: ORDER_STATUS_PENDING_APPROVAL,
+    to: ORDER_STATUS_REJECTED,
+    mode: "reject-order",
+  });
+
+  const sameStatus = applyInvoiceStatusHistory({ ...withHistory }, withHistory, { mode: "compare" });
+  assert.equal(sameStatus.statusHistory.length, 2);
+
+  const withoutPrevious = applyInvoiceStatusHistory({
+    orderId: "G49",
+    status: ORDER_STATUS_REJECTED,
+    statusHistory: withHistory.statusHistory,
+  }, null);
+  assert.equal(withoutPrevious.statusHistory.length, 2);
+
+  const firstWrite = applyInvoiceStatusHistory({
+    orderId: "1",
+    status: ORDER_STATUS_PENDING_INVOICE_CREATION,
+    statusUpdatedAt: "2026-11-23T10:00:00.000Z",
+    statusUpdatedBy: "creator",
+  }, { orderId: "1" }, { mode: "order-create" });
+  assert.equal(firstWrite.statusHistory.length, 1);
+  assert.equal(firstWrite.statusHistory[0].from, "");
+  assert.equal(firstWrite.statusHistory[0].to, ORDER_STATUS_PENDING_INVOICE_CREATION);
+  assert.equal(firstWrite.statusHistory[0].mode, "order-create");
+
+  let capped = { status: "A", statusHistory: [] };
+  for (let i = 0; i < MAX_INVOICE_STATUS_HISTORY + 5; i += 1) {
+    capped = appendInvoiceStatusHistory(capped, {
+      fromStatus: `S${i}`,
+      toStatus: `S${i + 1}`,
+      nowIso: `2026-11-23T10:00:${String(i).padStart(2, "0")}.000Z`,
+    });
+  }
+  assert.equal(capped.statusHistory.length, MAX_INVOICE_STATUS_HISTORY);
 });
 
 test("pending for approval includes legacy credit status", () => {

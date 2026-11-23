@@ -134,6 +134,70 @@ export function shouldAutoMarkInvoiceMade(meta = null) {
   return !isInvoiceMadeStatus(meta?.status);
 }
 
+/** Cap invoice-status audit rows kept on `order_invoice_meta` JSON. */
+export const MAX_INVOICE_STATUS_HISTORY = 50;
+
+/**
+ * Append one invoice-status change onto meta.statusHistory when `toStatus`
+ * differs from the previous status. Used so escapes from chase queues can be
+ * audited later (who/when/from→to/mode).
+ */
+export function appendInvoiceStatusHistory(meta, {
+  fromStatus = "",
+  toStatus = "",
+  userId = "",
+  mode = "",
+  nowIso = new Date().toISOString(),
+  note = "",
+} = {}) {
+  const previous = normalizeInvoiceStatus(fromStatus);
+  const next = normalizeInvoiceStatus(toStatus);
+  if (!next || previous.toLowerCase() === next.toLowerCase()) {
+    return meta && typeof meta === "object" ? meta : {};
+  }
+
+  const existing = Array.isArray(meta?.statusHistory) ? meta.statusHistory : [];
+  const entry = {
+    at: String(nowIso || new Date().toISOString()),
+    by: String(userId || "").trim(),
+    from: previous,
+    to: next,
+    ...(String(mode || "").trim() ? { mode: String(mode).trim() } : {}),
+    ...(String(note || "").trim() ? { note: String(note).trim() } : {}),
+  };
+  const statusHistory = [...existing, entry].slice(-MAX_INVOICE_STATUS_HISTORY);
+  return {
+    ...(meta && typeof meta === "object" ? meta : {}),
+    statusHistory,
+  };
+}
+
+/**
+ * Merge next meta with previous meta and record a statusHistory entry when the
+ * invoice status string changes.
+ */
+export function applyInvoiceStatusHistory(nextMeta, previousMeta = null, {
+  mode = "",
+  note = "",
+} = {}) {
+  const next = nextMeta && typeof nextMeta === "object" ? { ...nextMeta } : {};
+  const previous = previousMeta && typeof previousMeta === "object" ? previousMeta : null;
+  if (!Array.isArray(next.statusHistory) && Array.isArray(previous?.statusHistory)) {
+    next.statusHistory = previous.statusHistory;
+  }
+  // Without a previous snapshot, treat status as unchanged so comparison /
+  // prospect backfills do not invent a "" → current transition.
+  const fromStatus = previous ? (previous.status || "") : (next.status || "");
+  return appendInvoiceStatusHistory(next, {
+    fromStatus,
+    toStatus: next.status || "",
+    userId: next.statusUpdatedBy || previous?.statusUpdatedBy || "",
+    mode,
+    nowIso: next.statusUpdatedAt || next.updatedAt || new Date().toISOString(),
+    note,
+  });
+}
+
 export function metaWithInvoiceMadeStatus(meta, {
   userId = "",
   nowIso = new Date().toISOString(),

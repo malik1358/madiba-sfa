@@ -1,3 +1,4 @@
+import { canonicalizeCategoryLabel } from "./categoryIdentity.js";
 import { isCatalogueProductCode, hasCataloguePrice, normalizeCatalogueCode } from "./productCatalogue.js";
 import {
   countryEodStockQty,
@@ -87,7 +88,8 @@ export function buildCustomerFacingCatalogItems({
       return {
         item_code: code,
         item_name: String(item?.item_name || code).trim() || code,
-        category: String(item?.category || "").trim(),
+        // Title-case + alias so guest dropdowns do not double-list casing variants.
+        category: canonicalizeCategoryLabel(item?.category),
         price,
         master_unit: String(master?.masterUom || "").trim(),
         base_unit: String(master?.baseUom || "").trim(),
@@ -124,7 +126,7 @@ export function sanitizeCustomerOrderLinkCatalogPayload(payload = {}) {
     return {
       item_code: String(item.item_code || "").trim().toUpperCase(),
       item_name: String(item.item_name || "").trim(),
-      category: String(item.category || "").trim(),
+      category: canonicalizeCategoryLabel(item.category),
       price: Number(item.price) || 0,
       master_unit: String(item.master_unit || "").trim(),
       base_unit: String(item.base_unit || "").trim(),

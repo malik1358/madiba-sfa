@@ -10,8 +10,10 @@ import {
   findImmediateCreditNoteReversals,
   isCashSalesVoucher,
   matchPaymentsFifo,
+  missingReferencedSalesVouchers,
   pairRefundsForReversedSales,
   parseCreditNoteReferences,
+  pickFullMissingReferencedSales,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 import { flattenLedgerLinesExcludingReversed } from "../app/lib/datewiseLines.js";
@@ -2631,5 +2633,98 @@ test("customer 1691 rebuilds missing JNFD/015 sale from CN 801 so the ledger sho
     ledgerLines.some((row) => row.kind === "Invoice" && row.voucher === "JNFD/015"),
     true,
   );
+});
+
+test("1258C NFD/107 uses full sales_raw voucher, not CN+outstanding residual", () => {
+  // Live batch kept CN 93 (2 TV returns) and sale 2772, but dropped NFD/107.
+  // CN-mirror + outstanding residual invented Sales excl ~303,775. Real invoice
+  // in sales_raw is 10 lines / 456,823 (matches Tally Excel export).
+  const activeRows = [
+    {
+      transaction_date: "2026-01-26",
+      voucher_number: "2772",
+      voucher_type: "Sales",
+      customer_code: "1258C",
+      item_code: "A004030",
+      quantity: 3,
+      sales_amount: 1764,
+    },
+    {
+      transaction_date: "2026-03-11",
+      voucher_number: "93",
+      voucher_type: "Credit Note",
+      reference: "NFD/107",
+      customer_code: "1258C",
+      item_code: "A004030",
+      quantity: -4,
+      sales_amount: -2352,
+    },
+    {
+      transaction_date: "2026-03-11",
+      voucher_number: "93",
+      voucher_type: "Credit Note",
+      reference: "NFD/107",
+      customer_code: "1258C",
+      item_code: "A004029",
+      quantity: -1,
+      sales_amount: -693,
+    },
+  ];
+  const historyRows = [
+    { import_batch_id: 64, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A004030", quantity: 148, sales_amount: 87024 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A004030", quantity: 148, sales_amount: 87024 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A004029", quantity: 99, sales_amount: 68607 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003944", quantity: 100, sales_amount: 52000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003281", quantity: 100, sales_amount: 49000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003942", quantity: 100, sales_amount: 39500 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003285", quantity: 100, sales_amount: 39100 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003291", quantity: 100, sales_amount: 35000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003945", quantity: 48, sales_amount: 34992 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003284", quantity: 100, sales_amount: 28100 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003943", quantity: 100, sales_amount: 23500 },
+    // Wrong customer on same voucher must not be pulled in.
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "9999C", item_code: "A004030", quantity: 10, sales_amount: 5000 },
+  ];
+
+  assert.deepEqual(missingReferencedSalesVouchers(activeRows), ["NFD/107"]);
+  const extra = pickFullMissingReferencedSales(activeRows, historyRows);
+  assert.equal(extra.length, 10);
+  assert.equal(
+    extra.reduce((total, row) => total + Number(row.sales_amount || 0), 0),
+    456823,
+  );
+  assert.equal(extra.every((row) => row.customer_code === "1258C"), true);
+
+  const residualOnly = augmentTransactionsWithMissingReferencedSales(activeRows, [
+    {
+      ref_no: "NFD/107",
+      invoice_date: "2026-02-12",
+      pending_amount: 345844.7,
+      customer_code: "1258C",
+    },
+  ]);
+  const residualLedger = buildPaymentSettlementLedger({
+    transactions: residualOnly,
+    receipts: [],
+    outstandingInvoices: [
+      { ref_no: "NFD/107", invoice_date: "2026-02-12", pending_amount: 345844.7, customer_code: "1258C" },
+    ],
+    todayIso: "2026-11-23",
+  });
+  const residualInvoice = residualLedger.invoices.find((row) => row.voucher_number === "NFD/107");
+  assert.ok(Math.abs(Number(residualInvoice.amount_excl_vat) - 303779.52) < 1);
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [...activeRows, ...extra],
+    receipts: [],
+    outstandingInvoices: [
+      { ref_no: "NFD/107", invoice_date: "2026-02-12", pending_amount: 345844.7, customer_code: "1258C" },
+    ],
+    todayIso: "2026-11-23",
+  });
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "NFD/107");
+  assert.ok(invoice);
+  assert.equal(Number(invoice.amount_excl_vat), 456823);
+  assert.ok(invoice.credit_notes?.length || invoice.credit_note_settled > 0);
 });
 

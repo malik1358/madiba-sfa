@@ -1,6 +1,5 @@
 import {
   buildInvoiceUploadEmail,
-  DEFAULT_INVOICE_UPLOAD_FIXED_RECIPIENTS,
   resolveInvoiceUploadEmailRecipients,
 } from "./invoiceUploadEmail.js";
 import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, parseEmailList, sendEmail } from "./mailer.js";
@@ -15,6 +14,10 @@ import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import { resolveUserReportEmail } from "./dailyVisitReportEmail.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { readOrderInvoiceFile } from "./storage/attachmentRecords.js";
+import {
+  resolveWarehouseInvoiceFixedRecipients,
+  warehouseInvoicePricingRegion,
+} from "./warehouseInvoiceRecipients.js";
 
 const META_PAGE = 1000;
 
@@ -92,6 +95,19 @@ function findSalesmanProfile(order, profiles = []) {
 function authUserEmail(authUsers, userId) {
   const user = (authUsers || []).find((entry) => String(entry.id) === String(userId || ""));
   return normalizeDeliverableEmail(user?.email);
+}
+
+async function loadOrderPricingRegion(admin, orderId) {
+  const id = String(orderId || "").trim();
+  if (!id) return warehouseInvoicePricingRegion("");
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", `order_pricing_meta:${id}`)
+    .maybeSingle();
+  if (error) throw error;
+  const meta = parseMeta(data?.setting_value);
+  return warehouseInvoicePricingRegion(meta?.pricingRegion || meta?.region || "");
 }
 
 export async function buildOrderCopyPdfAttachment(admin, orderId, {
@@ -256,11 +272,12 @@ export async function sendInvoiceUploadNotification(admin, {
     })[0] || null
     : null;
 
+  const pricingRegion = await loadOrderPricingRegion(admin, id);
   const recipients = resolveInvoiceUploadEmailRecipients({
     uploaderEmail: profileEmail(uploaderProfile) || authUserEmail(authUsers, uploaderUserId),
     salesmanEmail: profileEmail(salesmanProfile),
     directBossEmail: profileEmail(directBoss),
-    fixedEmails: DEFAULT_INVOICE_UPLOAD_FIXED_RECIPIENTS,
+    fixedEmails: resolveWarehouseInvoiceFixedRecipients(pricingRegion, env),
     extraTo: env.INVOICE_UPLOAD_EMAIL_TO,
     extraCc: extraCc || env.INVOICE_UPLOAD_EMAIL_CC,
   });

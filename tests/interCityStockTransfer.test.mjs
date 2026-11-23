@@ -253,9 +253,9 @@ test("builds both direction reports with suggested quantities", () => {
 
   assert.equal(report.stockDate, "2026-11-08");
   assert.equal(report.coverDays, 15);
-  // Unsold / no-source-pace rows are omitted; only A004400 remains for Riyadh → Dammam.
-  assert.equal(report.directions.riyadhToDammam.itemCount, 1);
+  assert.equal(report.directions.riyadhToDammam.itemCount, 2);
   const gloves = report.directions.riyadhToDammam.rows.find((row) => row.itemCode === "A004400");
+  const unsold = report.directions.riyadhToDammam.rows.find((row) => row.itemCode === "A004403");
   assert.equal(gloves.suggestedQty, 70);
   assert.equal(gloves.peakWeeklyQty, 35);
   assert.equal(gloves.destinationSalesQty, 39);
@@ -264,19 +264,21 @@ test("builds both direction reports with suggested quantities", () => {
   assert.equal(gloves.cappedBySourceReserve, true);
   assert.equal(gloves.blockedBySourceReserve, false);
   assert.ok(gloves.daysCoverAfterAtSource >= 30);
-  assert.equal(report.directions.riyadhToDammam.rows.some((row) => row.itemCode === "A004403"), false);
+  assert.equal(unsold.suggestedQty, 5);
+  assert.equal(unsold.usedUnsoldMinimum, true);
+  assert.equal(unsold.daysCoverAfterAtSource, null);
   assert.equal(report.directions.riyadhToDammam.rows.some((row) => row.itemCode === "NON FOOD DIVISION"), false);
   assert.equal(report.directions.dammamToRiyadh.itemCount, 1);
   assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 20);
   assert.ok(report.directions.dammamToRiyadh.rows[0].daysCoverAfterAtSource >= 30);
-  assert.equal(report.summary.riyadhToDammamSuggestedQty, 70);
+  assert.equal(report.summary.riyadhToDammamSuggestedQty, 75);
   assert.equal(report.summary.dammamToRiyadhSuggestedQty, 20);
-  // Warehouse stock with no Store qty also lands on Riyadh → Store when source cover holds.
-  assert.ok(report.directions.riyadhToStore.itemCount >= 1);
-  assert.equal(
-    report.directions.riyadhToStore.rows.some((row) => row.itemCode === "A004400"),
-    true,
-  );
+  // Riyadh → Store: Store has no voucher sales, so peak weekly dest is 0 (not Riyadh's peak).
+  const glovesToStore = report.directions.riyadhToStore.rows.find((row) => row.itemCode === "A004400");
+  assert.ok(glovesToStore);
+  assert.equal(glovesToStore.peakWeeklyQty, 0);
+  assert.equal(glovesToStore.suggestedQty, 5);
+  assert.equal(glovesToStore.usedUnsoldMinimum, true);
 });
 
 test("store-only Riyadh stock still counts as in Riyadh vs Dammam and Store → Riyadh", () => {
@@ -544,5 +546,5 @@ test("never leaves source under 30 days cover when source has sales pace", () =>
 
   assert.equal(isReportableInterCityTransferRow(ok), true);
   assert.equal(isReportableInterCityTransferRow(under), false);
-  assert.equal(isReportableInterCityTransferRow(noPace), false);
+  assert.equal(isReportableInterCityTransferRow(noPace), true);
 });

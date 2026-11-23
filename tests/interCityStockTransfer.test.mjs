@@ -151,7 +151,21 @@ test("suggested transfer covers 15 days from peak weekly demand and caps at sour
   });
   assert.equal(exact.suggestedQty, 150);
   assert.equal(exact.daysCoverAfter, 15);
+  assert.equal(exact.daysCoverAfterAtDestination, 15);
   assert.equal(exact.cappedBySource, false);
+
+  const withSourcePace = suggestTransferQty({
+    sourceQty: 200,
+    destinationQty: 0,
+    peakWeeklyQty: 70,
+    sourcePeakWeeklyQty: 35,
+    coverDays: 15,
+    sourceReserveDays: 28,
+  });
+  // Dest cover 150; source reserve ceil(35/7*28)=140; max transfer 60 → remaining 140 → source days 28
+  assert.equal(withSourcePace.suggestedQty, 60);
+  assert.equal(withSourcePace.daysCoverAfterAtSource, 28);
+  assert.equal(withSourcePace.daysCoverAfterAtDestination, 6);
 
   const noSales = suggestTransferQty({
     sourceQty: 25,
@@ -209,12 +223,12 @@ test("builds both direction reports with suggested quantities", () => {
       },
     ],
     saleRows: [
-      // Window for now=2026-11-09 is 2026-10-13 → 2026-11-09 (28 days).
+      // Window for now=2026-11-09 is 2026-10-06 → 2026-11-09 (35 days).
       // Dammam peak week for A004400: 35 → daily 5 → 15-day target 75
       { item_code: "A004400", quantity: 20, sales_amount: 200, transaction_date: "2026-10-19", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       { item_code: "A004400", quantity: 15, sales_amount: 150, transaction_date: "2026-10-21", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       { item_code: "A004400", quantity: 4, sales_amount: 40, transaction_date: "2026-10-28", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
-      // Outside the 28-day window: must be ignored (would otherwise raise the peak to 200)
+      // Outside the 35-day window: must be ignored (would otherwise raise the peak to 200)
       { item_code: "A004400", quantity: 200, sales_amount: 2000, transaction_date: "2026-10-05", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       // Riyadh peak week for A004401: 14 → daily 2 → 15-day target 30
       { item_code: "A004401", quantity: 14, sales_amount: 140, transaction_date: "2026-10-20", voucher_type: "RIYADH CASH SALES", category: "Office supplies" },
@@ -265,13 +279,13 @@ test("store-only Riyadh stock still counts as in Riyadh vs Dammam", () => {
   assert.deepEqual(riyadhToStore, []);
 });
 
-test("sales window is 28 days and the source reserve is 28 days", () => {
-  assert.equal(INTER_CITY_TRANSFER_SALES_DAYS, 28);
+test("sales window is 35 days and the source reserve is 28 days", () => {
+  assert.equal(INTER_CITY_TRANSFER_SALES_DAYS, 35);
   assert.equal(INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS, 28);
   const window = resolveInterCitySalesWindow({ now: new Date("2026-11-09T08:00:00+03:00") });
-  assert.equal(window.fromDate, "2026-10-13");
+  assert.equal(window.fromDate, "2026-10-06");
   assert.equal(window.toDate, "2026-11-09");
-  assert.equal(window.days, 28);
+  assert.equal(window.days, 35);
   assert.equal(window.sourceReserveDays, 28);
 });
 

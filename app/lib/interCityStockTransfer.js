@@ -7,8 +7,8 @@ import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString }
 
 export const INTER_CITY_TRANSFER_CITIES = ["riyadh", "dammam"];
 export const INTER_CITY_TRANSFER_COVER_DAYS = 15;
-/** Lookback for peak weekly sales (4 weeks). */
-export const INTER_CITY_TRANSFER_SALES_DAYS = 28;
+/** Lookback for peak weekly sales (5 weeks). */
+export const INTER_CITY_TRANSFER_SALES_DAYS = 35;
 /** Keep at least this many days of source-city sales stock before transferring. */
 export const INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS = 28;
 /** @deprecated Use INTER_CITY_TRANSFER_SALES_DAYS. Kept so older imports do not break. */
@@ -260,7 +260,7 @@ export function suggestTransferQty({
   }
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destination));
 
-  // Source keeps ~28 days of its own peak-week pace before anything is sent out.
+  // Source keeps ~1 month of its own peak-week pace before anything is sent out.
   const sourceMonthReserveQty = sourcePeak > 0 && reserveDays > 0
     ? Math.ceil((sourcePeak / 7) * reserveDays - 1e-9)
     : 0;
@@ -268,9 +268,15 @@ export function suggestTransferQty({
   const suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable));
   const remainingAtSource = roundEodQty(source - suggestedQty);
   const afterAtDestination = roundEodQty(destination + suggestedQty);
-  const daysCoverAfter = dailyDemand > 0
+  const sourceDailyDemand = roundEodQty(sourcePeak / 7);
+  const daysCoverAfterAtDestination = dailyDemand > 0
     ? roundEodQty(afterAtDestination / dailyDemand)
     : (afterAtDestination > 0 ? null : 0);
+  const daysCoverAfterAtSource = sourceDailyDemand > 0
+    ? roundEodQty(remainingAtSource / sourceDailyDemand)
+    : (remainingAtSource > 0 ? null : 0);
+  // Keep legacy alias for destination cover.
+  const daysCoverAfter = daysCoverAfterAtDestination;
   const blockedBySourceReserve = sourceMonthReserveQty > 0 && shortfall > 0 && maxTransferable <= 0;
   const cappedBySourceReserve = sourceMonthReserveQty > 0
     && shortfall > maxTransferable
@@ -283,6 +289,7 @@ export function suggestTransferQty({
     sourceMonthReserveQty,
     maxTransferable,
     dailyDemand,
+    sourceDailyDemand,
     coverDays: days,
     unsoldMinQty: minUnsold,
     targetCoverQty,
@@ -290,6 +297,8 @@ export function suggestTransferQty({
     remainingAtSource,
     afterAtDestination,
     daysCoverAfter,
+    daysCoverAfterAtDestination,
+    daysCoverAfterAtSource,
     cappedBySource: shortfall > source && shortfall > 0,
     cappedBySourceReserve,
     blockedBySourceReserve,
@@ -325,12 +334,15 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
       sourceMonthReserveQty: suggestion.sourceMonthReserveQty,
       maxTransferableQty: suggestion.maxTransferable,
       dailyDemand: suggestion.dailyDemand,
+      sourceDailyDemand: suggestion.sourceDailyDemand,
       coverDays: suggestion.coverDays,
       targetCoverQty: suggestion.targetCoverQty,
       suggestedQty: suggestion.suggestedQty,
       remainingAtSource: suggestion.remainingAtSource,
       afterAtDestination: suggestion.afterAtDestination,
       daysCoverAfter: suggestion.daysCoverAfter,
+      daysCoverAfterAtDestination: suggestion.daysCoverAfterAtDestination,
+      daysCoverAfterAtSource: suggestion.daysCoverAfterAtSource,
       cappedBySource: suggestion.cappedBySource,
       cappedBySourceReserve: suggestion.cappedBySourceReserve,
       blockedBySourceReserve: suggestion.blockedBySourceReserve,

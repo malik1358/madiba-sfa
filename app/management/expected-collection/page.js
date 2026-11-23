@@ -65,11 +65,11 @@ const TEXT = {
   nearTermExpected: { en: "Near-term (3 months)", ar: "القريب (3 أشهر)" },
   laterExpected: { en: "Later months", ar: "أشهر لاحقة" },
   excludedTotal: { en: "Not in month estimate", ar: "خارج تقدير الأشهر" },
-  neverPaidProxy: { en: "Never paid → months (company avg)", ar: "لم يسدد → أشهر (متوسط الشركة)" },
-  avgOver120Proxy: { en: "Avg >120 → months (company avg)", ar: "متوسط >120 → أشهر (متوسط الشركة)" },
+  neverPaidProxy: { en: "Never paid → months (Rest avg)", ar: "لم يسدد → أشهر (متوسط الباقي)" },
+  avgOver120Proxy: { en: "Avg >120 → months (Rest avg)", ar: "متوسط >120 → أشهر (متوسط الباقي)" },
   legalQueue: { en: "Legal queue (not in months)", ar: "الطابور القانوني (خارج الأشهر)" },
   electronicsNote: { en: "Electronics now included in month rows", ar: "الإلكترونيات مضمّنة الآن في صفوف الأشهر" },
-  companyAvg: { en: "Company avg days", ar: "متوسط أيام الشركة" },
+  companyAvg: { en: "Rest avg days", ar: "متوسط أيام الباقي" },
   accounted: { en: "Accounted (months + legal)", ar: "المحتسب (أشهر + قانوني)" },
   bucket: { en: "Bucket", ar: "البند" },
   noRows: {
@@ -83,8 +83,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Avg days used is max(lifetime, last paid), floored at 60 when both are under 60. Never-paid and avg >120 are scheduled with company avg into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
-    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). متوسط الأيام المستخدم هو الأعلى بين متوسط العمر وأيام آخر سداد، بحد أدنى 60 إذا كان كلاهما أقل من 60. من لم يسدد ومتوسط >120 يُجدولان بمتوسط الشركة في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
+    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Avg days used is max(lifetime, last paid), floored at 60 when both are under 60. Never-paid and avg >120 are scheduled with Rest-dominant company avg (BM and Electronics books excluded) into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
+    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). متوسط الأيام المستخدم هو الأعلى بين متوسط العمر وأيام آخر سداد، بحد أدنى 60 إذا كان كلاهما أقل من 60. من لم يسدد ومتوسط >120 يُجدولان بمتوسط عملاء الباقي (بدون مواد بناء والإلكترونيات) في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
   },
 };
 

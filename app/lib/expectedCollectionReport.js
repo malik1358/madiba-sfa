@@ -18,18 +18,42 @@ function money(n) {
 }
 
 /**
+ * True when Rest is the customer's dominant sales leaf (vs BM / Electronics).
+ * Used so never-paid / avg>120 proxies follow Rest payers, not BM or electronics.
+ */
+export function isRestDominantCustomerMix(mix = null) {
+  if (!mix) return false;
+  const rest = Number(mix.rest || 0);
+  const bm = Number(mix.buildingMaterial || 0);
+  const electronics = Number(mix.electronics || 0);
+  if (!(rest > 0)) return false;
+  return rest >= bm && rest >= electronics;
+}
+
+/**
  * Company avg collection days for proxy placement (never-paid / avg>120).
- * Mean of eligible customer avg days (≤120); optional fallback (e.g. rolling 3m DSO).
+ * Mean of eligible customer avg days (≤120). When customerMix is passed, only
+ * Rest-dominant customers count (BM / Electronics books are excluded).
+ * Optional fallback (e.g. rolling 3m DSO).
  */
 export function resolveCompanyAvgCollectionDays(avgDaysByCustomer = new Map(), {
   fallbackDays = null,
+  customerMix = null,
 } = {}) {
   const values = [];
-  const iterable = avgDaysByCustomer instanceof Map
-    ? avgDaysByCustomer.values()
-    : Object.values(avgDaysByCustomer || {});
-  for (const days of iterable) {
-    if (isExpectedCollectionAvgDaysEligible(days)) values.push(Number(days));
+  const filterByRest = customerMix != null;
+  const entries = avgDaysByCustomer instanceof Map
+    ? avgDaysByCustomer.entries()
+    : Object.entries(avgDaysByCustomer || {});
+  for (const [customerCode, days] of entries) {
+    if (!isExpectedCollectionAvgDaysEligible(days)) continue;
+    if (filterByRest) {
+      const mix = customerMix instanceof Map
+        ? customerMix.get(normalizeCode(customerCode))
+        : customerMix?.[customerCode] || customerMix?.[normalizeCode(customerCode)];
+      if (!isRestDominantCustomerMix(mix)) continue;
+    }
+    values.push(Number(days));
   }
   if (values.length) {
     return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
@@ -143,7 +167,7 @@ export function classifyExpectedCollectionOutstanding(invoices = [], {
   let latestMonthKey = currentMonthKey;
   const resolvedCompanyAvg = Number.isFinite(Number(companyAvgDays))
     ? Math.round(Number(companyAvgDays))
-    : resolveCompanyAvgCollectionDays(avgDaysByCustomer);
+    : resolveCompanyAvgCollectionDays(avgDaysByCustomer, { customerMix });
 
   const pushBucket = (bucket, customers, {
     pending,

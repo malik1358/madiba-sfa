@@ -186,6 +186,7 @@ export async function loadExpectedCollectionReport(admin, {
 
   const companyAvgDays = resolveCompanyAvgCollectionDays(avgDaysByCustomer, {
     fallbackDays: rolling3mDays,
+    customerMix,
   });
 
   const detail = buildExpectedCollectionHorizonReport(outstandingInvoices, {
@@ -202,7 +203,7 @@ export async function loadExpectedCollectionReport(admin, {
     asOf,
     monthEnd: detail.monthEnd,
     companyAvgDays: detail.companyAvgDays,
-    rule: "current month = strict BM+Rest (overdue counts); never-paid/avg>120 use company avg in forward months only; electronics in months but not current; legal excluded",
+    rule: "current month = strict BM+Rest (overdue counts); never-paid/avg>120 use Rest-dominant company avg in forward months only; electronics in months but not current; legal excluded",
     total: detail.total,
     bmTotal: detail.bmTotal,
     restTotal: detail.restTotal,

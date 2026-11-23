@@ -56,7 +56,6 @@ const TEXT = {
   horizon: { en: "Expected by month", ar: "المتوقع حسب الشهر" },
   month: { en: "Month", ar: "الشهر" },
   newInMonth: { en: "New in month", ar: "جديد في الشهر" },
-  byMonthEnd: { en: "By month-end", ar: "حتى نهاية الشهر" },
   currentMonth: { en: "Current", ar: "الحالي" },
   laterMonth: { en: "Later", ar: "لاحق" },
   detailFor: { en: "Detail for", ar: "التفاصيل لـ" },
@@ -229,7 +228,6 @@ export default function ExpectedCollectionPage() {
           bmTotal: month.bmTotal || 0,
           restTotal: month.restTotal || 0,
           total: month.total || 0,
-          cumulativeTotal: month.cumulativeTotal ?? month.total ?? 0,
           isCurrent: Boolean(month.isCurrent),
           isNearTerm: month.isNearTerm !== false,
         };
@@ -246,7 +244,6 @@ export default function ExpectedCollectionPage() {
       bmTotal: report.bmTotal || 0,
       restTotal: report.restTotal || 0,
       total: report.total || 0,
-      cumulativeTotal: report.total || 0,
       isCurrent: true,
       isNearTerm: true,
     }];
@@ -339,7 +336,6 @@ export default function ExpectedCollectionPage() {
     if (key === "bmTotal") return formatAmount(row.bmTotal);
     if (key === "restTotal") return formatAmount(row.restTotal);
     if (key === "total") return formatAmount(row.total);
-    if (key === "cumulativeTotal") return formatAmount(row.cumulativeTotal);
     return "";
   }, []);
   const {
@@ -349,7 +345,7 @@ export default function ExpectedCollectionPage() {
     setFilter: setHorizonFilter,
   } = useBiExcelFilters(
     horizonRows,
-    ["monthLabel", "monthEnd", "customerCount", "invoiceCount", "bmTotal", "restTotal", "total", "cumulativeTotal"],
+    ["monthLabel", "monthEnd", "customerCount", "invoiceCount", "bmTotal", "restTotal", "total"],
     horizonFilterValueOf,
   );
   const activeMonth = useMemo(() => {
@@ -535,16 +531,6 @@ export default function ExpectedCollectionPage() {
                         className="moduleBiTotalCol"
                         summary={formatAmount(horizonTotals.total)}
                       />
-                      <BiExcelHead
-                        label={t("byMonthEnd")}
-                        filterKey="cumulativeTotal"
-                        options={horizonOptions}
-                        filters={horizonFilters}
-                        onChange={setHorizonFilter}
-                        allLabel={t("all")}
-                        className="moduleBiTotalCol"
-                        summary={formatAmount(horizonTotals.total)}
-                      />
                     </tr>
                   </thead>
                   <tbody>
@@ -572,9 +558,6 @@ export default function ExpectedCollectionPage() {
                           <td>{formatAmount(month.bmTotal)}</td>
                           <td>{formatAmount(month.restTotal)}</td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(month.total)}</strong></td>
-                          <td className="moduleBiTotalCol">
-                            <strong>{formatAmount(month.cumulativeTotal ?? month.total)}</strong>
-                          </td>
                         </tr>
                       );
                     })}
@@ -584,7 +567,6 @@ export default function ExpectedCollectionPage() {
                       <td colSpan={4}><strong>{t("total")}</strong></td>
                       <td><strong>{formatAmount(horizonTotals.bmTotal)}</strong></td>
                       <td><strong>{formatAmount(horizonTotals.restTotal)}</strong></td>
-                      <td className="moduleBiTotalCol"><strong>{formatAmount(horizonTotals.total)}</strong></td>
                       <td className="moduleBiTotalCol"><strong>{formatAmount(horizonTotals.total)}</strong></td>
                     </tr>
                   </tfoot>

@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Peak weekly sales use the last 5 weeks. Suggested transfer covers ≥15 days at the destination, but the source city keeps ≥1 month of its own peak-week sales; never-sold items get a minimum of 5. Days cover after is shown for both source and destination. CBM = cartons × CBM/Ctn from the costing sheet. Building materials excluded.",
-    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. أعلى مبيعات أسبوعية خلال آخر 5 أسابيع. النقل المقترح يغطي 15 يوماً في الوجهة مع إبقاء شهر على الأقل من أعلى مبيعات أسبوعية في المصدر؛ غير المباعة حد أدنى 5. أيام التغطية بعد النقل للمصدر والوجهة. الحجم (CBM) = الكراتين × CBM/كرتون من ورقة التكاليف. مواد البناء مستثناة.",
+    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Peak weekly sales use the last 5 weeks. Suggested transfer covers ≥15 days at the destination, but the source city keeps ≥30 days of its own peak weekly sales (last 5 weeks); never-sold items get a minimum of 5. Days cover after is shown for both source and destination. CBM = cartons × CBM/Ctn from the costing sheet. Building materials excluded.",
+    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. أعلى مبيعات أسبوعية خلال آخر 5 أسابيع. النقل المقترح يغطي 15 يوماً في الوجهة مع إبقاء 30 يوماً على الأقل من أعلى مبيعات أسبوعية في المصدر (آخر 5 أسابيع)؛ غير المباعة حد أدنى 5. أيام التغطية بعد النقل للمصدر والوجهة. الحجم (CBM) = الكراتين × CBM/كرتون من ورقة التكاليف. مواد البناء مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -26,7 +26,8 @@ const TEXT = {
   unit: { en: "Unit", ar: "الوحدة" },
   sourceQty: { en: "{city} qty", ar: "كمية {city}" },
   destQty: { en: "{city} qty", ar: "كمية {city}" },
-  peakWeekly: { en: "Peak weekly sales", ar: "أعلى مبيعات أسبوعية" },
+  peakWeekly: { en: "Peak weekly (dest)", ar: "أعلى أسبوعي (وجهة)" },
+  sourcePeakWeekly: { en: "Peak weekly ({city})", ar: "أعلى أسبوعي ({city})" },
   peakWeek: { en: "Peak week", ar: "أسبوع الذروة" },
   dailyDemand: { en: "Daily demand", ar: "الطلب اليومي" },
   targetCover: { en: "15-day target", ar: "هدف 15 يوماً" },
@@ -65,8 +66,8 @@ const TEXT = {
     ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام. ارفع المتجر/الدكان عند توفره.",
   },
   capped: { en: "Capped by source stock", ar: "محدود بمخزون المصدر" },
-  reserveCapped: { en: "Capped: source keeps 1 month", ar: "محدود: المصدر يحتفظ بشهر" },
-  reserveBlocked: { en: "Blocked: need 1 month at source", ar: "ممنوع: يلزم شهر في المصدر" },
+  reserveCapped: { en: "Capped: source keeps 30 days", ar: "محدود: المصدر يحتفظ بـ 30 يوماً" },
+  reserveBlocked: { en: "Blocked: need 30 days at source", ar: "ممنوع: يلزم 30 يوماً في المصدر" },
   cbmPerCtn: { en: "CBM / Ctn", ar: "CBM / كرتون" },
   totalCbm: { en: "Total CBM", ar: "إجمالي CBM" },
   unsoldMin: { en: "Min 5 (not sold yet)", ar: "حد أدنى 5 (لم يُبع بعد)" },
@@ -95,6 +96,7 @@ const FILTER_KEYS = [
   "sourceQty",
   "destinationQty",
   "peakWeeklyQty",
+  "sourcePeakWeeklyQty",
   "peakWeekKey",
   "dailyDemand",
   "targetCoverQty",
@@ -113,9 +115,8 @@ function formatQty(value) {
 }
 
 function formatCbm(value) {
-  if (value == null || value === "") return "—";
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
+  if (!Number.isFinite(numeric) || numeric <= 0) return "0";
   return numeric.toLocaleString("en-SA", { maximumFractionDigits: 3 });
 }
 
@@ -152,6 +153,7 @@ function DirectionTable({
   const destQtyLabel = withCity(t("destQty"), destinationCityName);
   const afterDestLabel = withCity(t("afterDest"), destinationCityName);
   const remainSourceLabel = withCity(t("remainSource"), sourceCityName);
+  const sourcePeakLabel = withCity(t("sourcePeakWeekly"), sourceCityName);
   const daysCoverDestLabel = withCity(t("daysCoverDest"), destinationCityName);
   const daysCoverSourceLabel = withCity(t("daysCoverSource"), sourceCityName);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, cellValue);
@@ -192,6 +194,7 @@ function DirectionTable({
             <BiExcelHead label={sourceQtyLabel} filterKey="sourceQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={destQtyLabel} filterKey="destinationQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("peakWeekly")} filterKey="peakWeeklyQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={sourcePeakLabel} filterKey="sourcePeakWeeklyQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("peakWeek")} filterKey="peakWeekKey" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("dailyDemand")} filterKey="dailyDemand" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={t("targetCover")} filterKey="targetCoverQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
@@ -213,6 +216,7 @@ function DirectionTable({
               <td>{formatQty(row.sourceQty)}</td>
               <td>{formatQty(row.destinationQty)}</td>
               <td>{formatQty(row.peakWeeklyQty)}</td>
+              <td>{formatQty(row.sourcePeakWeeklyQty)}</td>
               <td>{row.peakWeekKey || "—"}</td>
               <td>{formatQty(row.dailyDemand)}</td>
               <td>{formatQty(row.targetCoverQty)}</td>
@@ -230,7 +234,7 @@ function DirectionTable({
                 {formatQty(row.remainingAtSource)}
               </td>
               <td className="moduleBiMonthCell--up">{formatDaysCover(row.daysCoverAfterAtDestination ?? row.daysCoverAfter)}</td>
-              <td className={Number(row.daysCoverAfterAtSource) < 28 ? "moduleBiMonthCell--down" : ""}>
+              <td className={Number(row.daysCoverAfterAtSource) < 30 ? "moduleBiMonthCell--down" : ""}>
                 {formatDaysCover(row.daysCoverAfterAtSource)}
               </td>
               <td>{formatCbm(row.cbmPerCtn)}</td>
@@ -246,6 +250,7 @@ function DirectionTable({
             <td>{formatQty(totals.sourceQty)}</td>
             <td />
             <td>{formatQty(totals.peakWeeklyQty)}</td>
+            <td />
             <td />
             <td />
             <td>{formatQty(totals.targetCoverQty)}</td>

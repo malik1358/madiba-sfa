@@ -23,6 +23,19 @@ function formatQty(value) {
   return amount.toLocaleString("en-US", { maximumFractionDigits: 3 });
 }
 
+function formatCbm(value) {
+  if (value == null || value === "") return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return amount.toLocaleString("en-US", { maximumFractionDigits: 3 });
+}
+
+function sectionTotalCbm(report, key, rows) {
+  const stored = Number(report?.directions?.[key]?.totalCbm);
+  if (Number.isFinite(stored)) return stored;
+  return rows.reduce((total, row) => total + Number(row?.totalCbm || 0), 0);
+}
+
 function formatDate(value) {
   const text = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text || "-";
@@ -73,7 +86,7 @@ function sectionRows(report, key) {
   return Array.isArray(rows) ? rows : [];
 }
 
-function renderSectionTable(section, rows) {
+function renderSectionTable(section, rows, totalCbm = 0) {
   const shown = rows.slice(0, MAX_ROWS_PER_SECTION);
   const omitted = Math.max(0, rows.length - shown.length);
   if (!shown.length) {
@@ -93,6 +106,7 @@ function renderSectionTable(section, rows) {
         <td style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;">${escapeHtml(formatQty(row.sourceQty))} ${escapeHtml(unit)}</td>
         <td style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;">${escapeHtml(formatQty(row.destinationQty))} ${escapeHtml(unit)}</td>
         <td style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;font-weight:600;">${escapeHtml(formatQty(row.suggestedQty))} ${escapeHtml(unit)}</td>
+        <td style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;">${escapeHtml(formatCbm(row.totalCbm))}</td>
       </tr>
     `;
   }).join("");
@@ -107,9 +121,16 @@ function renderSectionTable(section, rows) {
           <th align="right" style="padding:8px;border:1px solid ${HEADER_BG};">${escapeHtml(section.sourceLabel)}</th>
           <th align="right" style="padding:8px;border:1px solid ${HEADER_BG};">${escapeHtml(section.destLabel)}</th>
           <th align="right" style="padding:8px;border:1px solid ${HEADER_BG};">Suggested CTN</th>
+          <th align="right" style="padding:8px;border:1px solid ${HEADER_BG};">Total CBM</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
+      <tfoot>
+        <tr style="background:#e6f0f2;font-weight:600;">
+          <td colspan="5" style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;">Section total CBM</td>
+          <td style="padding:6px 8px;border:1px solid #dbe4ea;text-align:right;">${escapeHtml(formatCbm(totalCbm))}</td>
+        </tr>
+      </tfoot>
     </table>
     ${omitted > 0
       ? `<p style="margin:6px 0 0;color:#64748b;font-size:12px;">Showing first ${MAX_ROWS_PER_SECTION} of ${rows.length}. Open the report for the full list.</p>`
@@ -131,7 +152,11 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
   ].join(" · ");
 
   const sectionsHtml = SECTIONS.map((section) => (
-    renderSectionTable(section, sectionRows(report, section.key))
+    renderSectionTable(
+      section,
+      sectionRows(report, section.key),
+      sectionTotalCbm(report, section.key, sectionRows(report, section.key)),
+    )
   )).join("");
 
   const textLines = [
@@ -140,6 +165,9 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
     `In Dammam not Riyadh: ${Number(summary.dammamToRiyadhItems || 0)} items`,
     `In Riyadh not Dammam: ${Number(summary.riyadhToDammamItems || 0)} items`,
     `In Riyadh warehouse not Store: ${Number(summary.riyadhToStoreItems || 0)} items`,
+    ...SECTIONS.map((section) => (
+      `${section.title} total CBM: ${formatCbm(sectionTotalCbm(report, section.key, sectionRows(report, section.key)))}`
+    )),
     `Quantities are cartons (master units) when a conversion exists.`,
     `Open report: ${reportUrl}`,
   ];

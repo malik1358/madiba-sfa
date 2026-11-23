@@ -7,8 +7,13 @@ import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString }
 
 export const INTER_CITY_TRANSFER_CITIES = ["riyadh", "dammam"];
 export const INTER_CITY_TRANSFER_COVER_DAYS = 15;
-export const INTER_CITY_TRANSFER_SALES_MONTHS = 6;
-/** Minimum destination stock (cartons/units) when the destination has no sales in the 6-month window. */
+/** Lookback for peak weekly sales (5 weeks). */
+export const INTER_CITY_TRANSFER_SALES_DAYS = 35;
+/** Keep at least this many days of source-city sales stock before transferring. */
+export const INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS = 28;
+/** @deprecated Use INTER_CITY_TRANSFER_SALES_DAYS. Kept so older imports do not break. */
+export const INTER_CITY_TRANSFER_SALES_MONTHS = 1;
+/** Minimum destination stock (cartons/units) when the destination has no sales in the sales window. */
 export const INTER_CITY_TRANSFER_UNSOLD_MIN_QTY = 5;
 export const INTER_CITY_TRANSFER_DIRECTIONS = {
   riyadhToDammam: { key: "riyadhToDammam", source: "riyadh", destination: "dammam" },
@@ -74,17 +79,20 @@ export function categoryByItemCodeFromSales(saleRows = []) {
   return byCode;
 }
 
-export function resolveInterCitySalesWindow({ now = new Date(), months = INTER_CITY_TRANSFER_SALES_MONTHS } = {}) {
+export function resolveInterCitySalesWindow({
+  now = new Date(),
+  days = INTER_CITY_TRANSFER_SALES_DAYS,
+} = {}) {
   const toDate = getKsaDateString(now);
-  const monthCount = Math.max(1, Math.floor(Number(months) || INTER_CITY_TRANSFER_SALES_MONTHS));
-  // Approximate 6 months as ~183 calendar days so the window stays inclusive and stable.
-  const daySpan = Math.max(28, Math.round(monthCount * 30.5));
+  const daySpan = Math.max(1, Math.floor(Number(days) || INTER_CITY_TRANSFER_SALES_DAYS));
   const fromDate = addKsaCalendarDays(toDate, -(daySpan - 1));
   return {
     fromDate,
     toDate,
-    months: monthCount,
+    days: daySpan,
+    months: 1,
     coverDays: INTER_CITY_TRANSFER_COVER_DAYS,
+    sourceReserveDays: INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS,
   };
 }
 
@@ -231,13 +239,17 @@ export function suggestTransferQty({
   sourceQty = 0,
   destinationQty = 0,
   peakWeeklyQty = 0,
+  sourcePeakWeeklyQty = 0,
   coverDays = INTER_CITY_TRANSFER_COVER_DAYS,
+  sourceReserveDays = INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS,
   unsoldMinQty = INTER_CITY_TRANSFER_UNSOLD_MIN_QTY,
 } = {}) {
   const source = Math.max(0, roundEodQty(sourceQty));
   const destination = Math.max(0, roundEodQty(destinationQty));
   const peakWeekly = Math.max(0, roundEodQty(peakWeeklyQty));
+  const sourcePeak = Math.max(0, roundEodQty(sourcePeakWeeklyQty));
   const days = Math.max(1, Number(coverDays) || INTER_CITY_TRANSFER_COVER_DAYS);
+  const reserveDays = Math.max(0, Number(sourceReserveDays) || 0);
   const minUnsold = Math.max(0, roundEodQty(unsoldMinQty));
   const dailyDemand = roundEodQty(peakWeekly / 7);
   // Ceil to whole units when demand is fractional so cover is at least the requested days.
@@ -247,16 +259,37 @@ export function suggestTransferQty({
     targetCoverQty = Math.max(targetCoverQty, minUnsold);
   }
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destination));
-  const suggestedQty = roundEodQty(Math.min(source, shortfall));
+
+  // Source keeps ~1 month of its own peak-week pace before anything is sent out.
+  const sourceMonthReserveQty = sourcePeak > 0 && reserveDays > 0
+    ? Math.ceil((sourcePeak / 7) * reserveDays - 1e-9)
+    : 0;
+  const maxTransferable = Math.max(0, roundEodQty(source - sourceMonthReserveQty));
+  const suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable));
   const remainingAtSource = roundEodQty(source - suggestedQty);
   const afterAtDestination = roundEodQty(destination + suggestedQty);
-  const daysCoverAfter = dailyDemand > 0
+  const sourceDailyDemand = roundEodQty(sourcePeak / 7);
+  const daysCoverAfterAtDestination = dailyDemand > 0
     ? roundEodQty(afterAtDestination / dailyDemand)
     : (afterAtDestination > 0 ? null : 0);
+  const daysCoverAfterAtSource = sourceDailyDemand > 0
+    ? roundEodQty(remainingAtSource / sourceDailyDemand)
+    : (remainingAtSource > 0 ? null : 0);
+  // Keep legacy alias for destination cover.
+  const daysCoverAfter = daysCoverAfterAtDestination;
+  const blockedBySourceReserve = sourceMonthReserveQty > 0 && shortfall > 0 && maxTransferable <= 0;
+  const cappedBySourceReserve = sourceMonthReserveQty > 0
+    && shortfall > maxTransferable
+    && maxTransferable > 0;
 
   return {
     peakWeeklyQty: peakWeekly,
+    sourcePeakWeeklyQty: sourcePeak,
+    sourceReserveDays: reserveDays,
+    sourceMonthReserveQty,
+    maxTransferable,
     dailyDemand,
+    sourceDailyDemand,
     coverDays: days,
     unsoldMinQty: minUnsold,
     targetCoverQty,
@@ -264,7 +297,11 @@ export function suggestTransferQty({
     remainingAtSource,
     afterAtDestination,
     daysCoverAfter,
+    daysCoverAfterAtDestination,
+    daysCoverAfterAtSource,
     cappedBySource: shortfall > source && shortfall > 0,
+    cappedBySourceReserve,
+    blockedBySourceReserve,
     usedUnsoldMinimum: peakWeekly <= 0 && minUnsold > 0 && suggestedQty > 0,
   };
 }
@@ -275,25 +312,40 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
     const peakCity = row.destinationCity === "store" ? "riyadh" : row.destinationCity;
     const peakKey = `${row.itemCode}|${peakCity}`;
     const peak = peakMap.get(peakKey) || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
+    const sourcePeak = peakMap.get(`${row.itemCode}|${row.sourceCity}`)
+      || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
     const suggestion = suggestTransferQty({
       sourceQty: row.sourceQty,
       destinationQty: row.destinationQty,
       peakWeeklyQty: peak.peakWeeklyQty,
+      sourcePeakWeeklyQty: sourcePeak.peakWeeklyQty,
       coverDays: INTER_CITY_TRANSFER_COVER_DAYS,
+      sourceReserveDays: INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS,
     });
+    const destinationSalesQty = roundEodQty(peak.totalQty || 0);
     return {
       ...row,
       peakWeeklyQty: suggestion.peakWeeklyQty,
       peakWeekKey: peak.peakWeekKey || "",
-      destinationSalesQty6m: roundEodQty(peak.totalQty || 0),
+      destinationSalesQty,
+      destinationSalesQty6m: destinationSalesQty,
+      sourcePeakWeeklyQty: suggestion.sourcePeakWeeklyQty,
+      sourceReserveDays: suggestion.sourceReserveDays,
+      sourceMonthReserveQty: suggestion.sourceMonthReserveQty,
+      maxTransferableQty: suggestion.maxTransferable,
       dailyDemand: suggestion.dailyDemand,
+      sourceDailyDemand: suggestion.sourceDailyDemand,
       coverDays: suggestion.coverDays,
       targetCoverQty: suggestion.targetCoverQty,
       suggestedQty: suggestion.suggestedQty,
       remainingAtSource: suggestion.remainingAtSource,
       afterAtDestination: suggestion.afterAtDestination,
       daysCoverAfter: suggestion.daysCoverAfter,
+      daysCoverAfterAtDestination: suggestion.daysCoverAfterAtDestination,
+      daysCoverAfterAtSource: suggestion.daysCoverAfterAtSource,
       cappedBySource: suggestion.cappedBySource,
+      cappedBySourceReserve: suggestion.cappedBySourceReserve,
+      blockedBySourceReserve: suggestion.blockedBySourceReserve,
       usedUnsoldMinimum: suggestion.usedUnsoldMinimum,
       sourceLabel: interCityTransferCityLabel(row.sourceCity),
       destinationLabel: interCityTransferCityLabel(row.destinationCity),
@@ -343,9 +395,13 @@ export function buildInterCityStockTransferReport({
 } = {}) {
   const window = resolveInterCitySalesWindow({ now });
   const categoryByCode = categoryByItemCodeFromSales(saleRows);
+  const windowSaleRows = (saleRows || []).filter((row) => {
+    const date = String(row?.transaction_date || "").trim().slice(0, 10);
+    return date && date >= window.fromDate && date <= window.toDate;
+  });
   const coverage = summarizeInterCityStockCoverage(stockRows);
   const imbalances = findInterCityStockImbalances(stockRows, { categoryByCode });
-  const peaks = buildPeakWeeklySalesByItemCity(saleRows);
+  const peaks = buildPeakWeeklySalesByItemCity(windowSaleRows);
   const riyadhToDammam = decorateInterCityTransferRows(imbalances.riyadhToDammam, peaks);
   const dammamToRiyadh = decorateInterCityTransferRows(imbalances.dammamToRiyadh, peaks);
   const riyadhToStore = decorateInterCityTransferRows(imbalances.riyadhToStore, peaks);
@@ -434,6 +490,10 @@ function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
       storeQty: convertInterCityQty(row.storeQty, unit, master),
       riyadhWarehouseQty: convertInterCityQty(row.riyadhWarehouseQty, unit, master),
       peakWeeklyQty: convertInterCityQty(row.peakWeeklyQty, unit, master),
+      sourcePeakWeeklyQty: convertInterCityQty(row.sourcePeakWeeklyQty, unit, master),
+      sourceMonthReserveQty: convertInterCityQty(row.sourceMonthReserveQty, unit, master),
+      maxTransferableQty: convertInterCityQty(row.maxTransferableQty, unit, master),
+      destinationSalesQty: convertInterCityQty(row.destinationSalesQty, unit, master),
       destinationSalesQty6m: convertInterCityQty(row.destinationSalesQty6m, unit, master),
       dailyDemand: convertInterCityQty(row.dailyDemand, unit, master),
       targetCoverQty: convertInterCityQty(row.targetCoverQty, unit, master),
@@ -490,6 +550,69 @@ export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
       dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
       riyadhToStoreSuggestedQty: sumSuggested(riyadhToStore),
       riyadhToStoreItems: riyadhToStore.length,
+    },
+  };
+}
+
+function roundCbm(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
+}
+
+function lookupCbmPerCtn(cbmPerCtnMap, itemCode) {
+  if (!cbmPerCtnMap || typeof cbmPerCtnMap !== "object") return null;
+  const code = normalizeInterCityItemCode(itemCode);
+  if (!code) return null;
+  const direct = cbmPerCtnMap[code] ?? cbmPerCtnMap[String(itemCode || "").trim()];
+  const value = Number(direct);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Add CBM per carton (from the costing sheet "CBM/Ctn" column) and total CBM
+ * (suggested cartons × CBM/Ctn) to each row. Call after master-unit conversion so
+ * suggestedQty is in cartons.
+ */
+export function applyCbmToInterCityReport(report, cbmPerCtnMap = {}) {
+  if (!report || typeof report !== "object") return report;
+  const decorate = (rows) => (rows || []).map((row) => {
+    const cbmPerCtn = lookupCbmPerCtn(cbmPerCtnMap, row.itemCode);
+    return {
+      ...row,
+      cbmPerCtn,
+      totalCbm: cbmPerCtn == null ? null : roundCbm(Number(row.suggestedQty || 0) * cbmPerCtn),
+    };
+  });
+  const sumCbm = (rows) => roundCbm(
+    rows.reduce((total, row) => total + Number(row.totalCbm || 0), 0),
+  );
+  const riyadhToDammam = decorate(report.directions?.riyadhToDammam?.rows);
+  const dammamToRiyadh = decorate(report.directions?.dammamToRiyadh?.rows);
+  const riyadhToStore = decorate(report.directions?.riyadhToStore?.rows);
+  return {
+    ...report,
+    directions: {
+      ...report.directions,
+      riyadhToDammam: {
+        ...report.directions?.riyadhToDammam,
+        rows: riyadhToDammam,
+        totalCbm: sumCbm(riyadhToDammam),
+      },
+      dammamToRiyadh: {
+        ...report.directions?.dammamToRiyadh,
+        rows: dammamToRiyadh,
+        totalCbm: sumCbm(dammamToRiyadh),
+      },
+      riyadhToStore: {
+        ...report.directions?.riyadhToStore,
+        rows: riyadhToStore,
+        totalCbm: sumCbm(riyadhToStore),
+      },
+    },
+    summary: {
+      ...report.summary,
+      riyadhToDammamTotalCbm: sumCbm(riyadhToDammam),
+      dammamToRiyadhTotalCbm: sumCbm(dammamToRiyadh),
+      riyadhToStoreTotalCbm: sumCbm(riyadhToStore),
     },
   };
 }

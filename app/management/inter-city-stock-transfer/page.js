@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Suggested transfer covers ≥15 days from destination peak weekly sales; never-sold items get a minimum of 5. Building materials excluded.",
-    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. النقل المقترح يغطي 15 يوماً؛ غير المباعة حد أدنى 5. مواد البناء مستثناة.",
+    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Peak weekly sales use the last 5 weeks. Suggested transfer covers ≥15 days at the destination, but the source city keeps ≥1 month of its own peak-week sales; never-sold items get a minimum of 5. Days cover after is shown for both source and destination. CBM = cartons × CBM/Ctn from the costing sheet. Building materials excluded.",
+    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. أعلى مبيعات أسبوعية خلال آخر 5 أسابيع. النقل المقترح يغطي 15 يوماً في الوجهة مع إبقاء شهر على الأقل من أعلى مبيعات أسبوعية في المصدر؛ غير المباعة حد أدنى 5. أيام التغطية بعد النقل للمصدر والوجهة. الحجم (CBM) = الكراتين × CBM/كرتون من ورقة التكاليف. مواد البناء مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -33,7 +33,8 @@ const TEXT = {
   suggested: { en: "Suggested transfer", ar: "النقل المقترح" },
   afterDest: { en: "After at {city}", ar: "بعد النقل في {city}" },
   remainSource: { en: "Left at {city}", ar: "المتبقي في {city}" },
-  daysCover: { en: "Days cover after", ar: "أيام التغطية بعد النقل" },
+  daysCoverDest: { en: "Days cover after at {city}", ar: "أيام التغطية بعد النقل في {city}" },
+  daysCoverSource: { en: "Days cover left at {city}", ar: "أيام التغطية المتبقية في {city}" },
   total: { en: "Total", ar: "الإجمالي" },
   stockDate: { en: "Stock date", ar: "تاريخ المخزون" },
   salesWindow: { en: "Sales window", ar: "فترة المبيعات" },
@@ -64,6 +65,10 @@ const TEXT = {
     ar: "ارفع أولاً مخزون نهاية اليوم للرياض والدمام. ارفع المتجر/الدكان عند توفره.",
   },
   capped: { en: "Capped by source stock", ar: "محدود بمخزون المصدر" },
+  reserveCapped: { en: "Capped: source keeps 1 month", ar: "محدود: المصدر يحتفظ بشهر" },
+  reserveBlocked: { en: "Blocked: need 1 month at source", ar: "ممنوع: يلزم شهر في المصدر" },
+  cbmPerCtn: { en: "CBM / Ctn", ar: "CBM / كرتون" },
+  totalCbm: { en: "Total CBM", ar: "إجمالي CBM" },
   unsoldMin: { en: "Min 5 (not sold yet)", ar: "حد أدنى 5 (لم يُبع بعد)" },
   accessDenied: {
     en: "Only admin, manager, or invoice maker can open this report.",
@@ -96,12 +101,22 @@ const FILTER_KEYS = [
   "suggestedQty",
   "afterAtDestination",
   "remainingAtSource",
-  "daysCoverAfter",
+  "daysCoverAfterAtDestination",
+  "daysCoverAfterAtSource",
+  "cbmPerCtn",
+  "totalCbm",
 ];
 
 function formatQty(value) {
   if (value == null || value === "") return "—";
   return formatEodQty(value);
+}
+
+function formatCbm(value) {
+  if (value == null || value === "") return "—";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  return numeric.toLocaleString("en-SA", { maximumFractionDigits: 3 });
 }
 
 function formatDaysCover(value) {
@@ -116,7 +131,10 @@ function cellValue(row, key) {
   if (key === "itemName") return row.itemName || "";
   if (key === "unit") return row.unit || "";
   if (key === "peakWeekKey") return row.peakWeekKey || "";
-  if (key === "daysCoverAfter") return formatDaysCover(row.daysCoverAfter);
+  if (key === "daysCoverAfterAtDestination" || key === "daysCoverAfterAtSource" || key === "daysCoverAfter") {
+    return formatDaysCover(row[key]);
+  }
+  if (key === "cbmPerCtn" || key === "totalCbm") return formatCbm(row[key]);
   return formatQty(row[key]);
 }
 
@@ -134,23 +152,28 @@ function DirectionTable({
   const destQtyLabel = withCity(t("destQty"), destinationCityName);
   const afterDestLabel = withCity(t("afterDest"), destinationCityName);
   const remainSourceLabel = withCity(t("remainSource"), sourceCityName);
+  const daysCoverDestLabel = withCity(t("daysCoverDest"), destinationCityName);
+  const daysCoverSourceLabel = withCity(t("daysCoverSource"), sourceCityName);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, FILTER_KEYS, cellValue);
   const totals = useMemo(() => {
     let sourceQty = 0;
     let suggestedQty = 0;
     let targetCoverQty = 0;
     let peakWeeklyQty = 0;
+    let totalCbm = 0;
     visibleRows.forEach((row) => {
       sourceQty += Number(row.sourceQty || 0);
       suggestedQty += Number(row.suggestedQty || 0);
       targetCoverQty += Number(row.targetCoverQty || 0);
       peakWeeklyQty += Number(row.peakWeeklyQty || 0);
+      totalCbm += Number(row.totalCbm || 0);
     });
     return {
       sourceQty,
       suggestedQty,
       targetCoverQty,
       peakWeeklyQty,
+      totalCbm,
     };
   }, [visibleRows]);
 
@@ -175,7 +198,10 @@ function DirectionTable({
             <BiExcelHead label={t("suggested")} filterKey="suggestedQty" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
             <BiExcelHead label={afterDestLabel} filterKey="afterAtDestination" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
             <BiExcelHead label={remainSourceLabel} filterKey="remainingAtSource" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
-            <BiExcelHead label={t("daysCover")} filterKey="daysCoverAfter" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={daysCoverDestLabel} filterKey="daysCoverAfterAtDestination" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={daysCoverSourceLabel} filterKey="daysCoverAfterAtSource" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={t("cbmPerCtn")} filterKey="cbmPerCtn" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} />
+            <BiExcelHead label={t("totalCbm")} filterKey="totalCbm" options={options} filters={filters} onChange={setFilter} allLabel={t("all")} className="moduleBiTotalCol" />
           </tr>
         </thead>
         <tbody>
@@ -193,15 +219,22 @@ function DirectionTable({
               <td className="moduleBiTotalCol moduleBiMonthCell--current">
                 <div className="moduleBiAmountDelta">
                   <span>{formatQty(row.suggestedQty)}</span>
-                  {row.cappedBySource ? <em>{t("capped")}</em> : null}
-                  {!row.cappedBySource && row.usedUnsoldMinimum ? <em>{t("unsoldMin")}</em> : null}
+                  {row.blockedBySourceReserve ? <em>{t("reserveBlocked")}</em> : null}
+                  {!row.blockedBySourceReserve && row.cappedBySourceReserve ? <em>{t("reserveCapped")}</em> : null}
+                  {!row.blockedBySourceReserve && !row.cappedBySourceReserve && row.cappedBySource ? <em>{t("capped")}</em> : null}
+                  {!row.blockedBySourceReserve && !row.cappedBySourceReserve && !row.cappedBySource && row.usedUnsoldMinimum ? <em>{t("unsoldMin")}</em> : null}
                 </div>
               </td>
               <td className="moduleBiMonthCell--up">{formatQty(row.afterAtDestination)}</td>
               <td className={Number(row.remainingAtSource) < Number(row.sourceQty) ? "moduleBiMonthCell--down" : ""}>
                 {formatQty(row.remainingAtSource)}
               </td>
-              <td>{formatDaysCover(row.daysCoverAfter)}</td>
+              <td className="moduleBiMonthCell--up">{formatDaysCover(row.daysCoverAfterAtDestination ?? row.daysCoverAfter)}</td>
+              <td className={Number(row.daysCoverAfterAtSource) < 28 ? "moduleBiMonthCell--down" : ""}>
+                {formatDaysCover(row.daysCoverAfterAtSource)}
+              </td>
+              <td>{formatCbm(row.cbmPerCtn)}</td>
+              <td className="moduleBiTotalCol moduleBiMonthCell--current">{formatCbm(row.totalCbm)}</td>
             </tr>
           ))}
         </tbody>
@@ -220,6 +253,9 @@ function DirectionTable({
             <td />
             <td />
             <td />
+            <td />
+            <td />
+            <td className="moduleBiTotalCol">{formatCbm(totals.totalCbm)}</td>
           </tr>
         </tfoot>
       </table>
@@ -351,9 +387,9 @@ export default function InterCityStockTransferPage() {
             </p>
             <p className="moduleHint">
               {`${t("stockCoverage")}: ${t("riyadh")} ${summary.riyadhStockItems || 0} · ${t("dammam")} ${summary.dammamStockItems || 0} · ${t("store")} ${summary.storeStockItems || 0}`}
-              {` · ${t("riyadhToDammam")}: ${summary.riyadhToDammamItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToDammamSuggestedQty || 0)})`}
-              {` · ${t("dammamToRiyadh")}: ${summary.dammamToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.dammamToRiyadhSuggestedQty || 0)})`}
-              {` · ${t("riyadhToStore")}: ${summary.riyadhToStoreItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToStoreSuggestedQty || 0)})`}
+              {` · ${t("riyadhToDammam")}: ${summary.riyadhToDammamItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToDammamSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.riyadhToDammamTotalCbm || 0)})`}
+              {` · ${t("dammamToRiyadh")}: ${summary.dammamToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.dammamToRiyadhSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.dammamToRiyadhTotalCbm || 0)})`}
+              {` · ${t("riyadhToStore")}: ${summary.riyadhToStoreItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToStoreSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.riyadhToStoreTotalCbm || 0)})`}
             </p>
             {thinSourceHint && !loading ? <p className="moduleHint">{thinSourceHint}</p> : null}
 

@@ -24,6 +24,8 @@ on:
         required: false
         default: ""
 
+permissions: {}
+
 jobs:
   email:
     runs-on: ubuntu-latest

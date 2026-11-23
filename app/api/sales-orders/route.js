@@ -20,6 +20,7 @@ import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
+  applyInvoiceStatusHistory,
   hasUploadedInvoice,
 } from "../../lib/orderApproval.js";
 import { canManageOrderInvoice } from "../../lib/moduleAccess.js";
@@ -80,14 +81,14 @@ async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
   }
 
   const nowIso = new Date().toISOString();
-  const updated = {
+  const updated = applyInvoiceStatusHistory({
     ...existing,
     orderId: String(orderId),
     status,
     updatedAt: nowIso,
     statusUpdatedAt: nowIso,
     statusUpdatedBy: userId || "",
-  };
+  }, existing, { mode: "order-create" });
 
   const { error } = await admin.from("system_settings").upsert({
     setting_key: key,

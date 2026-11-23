@@ -30,6 +30,7 @@ import {
   isSubmittedWithoutUploadedInvoice,
   isSupportedInvoiceStatus,
   isValidRejectionReason,
+  applyInvoiceStatusHistory,
   metaWithInvoiceMadeStatus,
   shouldAutoMarkInvoiceMade,
   shouldAutoMarkPendingApproval,
@@ -244,22 +245,27 @@ function toClientInvoiceMeta(meta) {
   return rest;
 }
 
-async function upsertMeta(admin, meta) {
+async function upsertMeta(admin, meta, { previousMeta = null, mode = "" } = {}) {
+  const withHistory = applyInvoiceStatusHistory(meta, previousMeta, { mode });
   const payload = {
-    setting_key: metaKey(meta.orderId),
-    setting_value: JSON.stringify(meta),
+    setting_key: metaKey(withHistory.orderId || meta?.orderId),
+    setting_value: JSON.stringify(withHistory),
   };
 
   const { error } = await admin.from("system_settings").upsert(payload, { onConflict: "setting_key" });
   if (error) throw error;
+  return withHistory;
 }
 
 /** Persist Invoice made when an upload exists but status was left on a queue label. */
 async function ensureInvoiceMadeWhenUploaded(admin, meta, userId = "") {
   if (!shouldAutoMarkInvoiceMade(meta)) return meta;
   const updated = metaWithInvoiceMadeStatus(meta, { userId });
-  await upsertMeta(admin, updated);
-  return updated;
+  const saved = await upsertMeta(admin, updated, {
+    previousMeta: meta,
+    mode: "auto-invoice-made",
+  });
+  return saved;
 }
 
 export async function GET(request) {
@@ -439,13 +445,16 @@ export async function POST(request) {
         updated.invoiceBuildSeconds = diffSeconds;
       }
 
-      await upsertMeta(admin, updated);
+      const savedUpload = await upsertMeta(admin, updated, {
+        previousMeta: existing,
+        mode: "invoice-upload",
+      });
 
-      let enriched = updated;
+      let enriched = savedUpload;
       let prospectLink = null;
       try {
         const comparison = await compareInvoiceBufferWithOrder(admin, orderId, arrayBuffer);
-        enriched = attachComparisonToMeta(updated, comparison);
+        enriched = attachComparisonToMeta(savedUpload, comparison);
       } catch {
         // Keep upload successful even if PDF text extraction fails.
       }
@@ -460,8 +469,8 @@ export async function POST(request) {
         }
       }
 
-      if (enriched !== updated) {
-        await upsertMeta(admin, enriched);
+      if (enriched !== savedUpload) {
+        await upsertMeta(admin, enriched, { previousMeta: savedUpload });
       }
       const hydrated = toClientInvoiceMeta(enriched);
 
@@ -668,8 +677,11 @@ export async function POST(request) {
           statusUpdatedBy: scope.userId,
         };
 
-        await upsertMeta(admin, updated);
-        items[orderId] = toClientInvoiceMeta(updated);
+        const saved = await upsertMeta(admin, updated, {
+          previousMeta: existing,
+          mode: "auto-reject-legacy",
+        });
+        items[orderId] = toClientInvoiceMeta(saved);
         marked += 1;
       }
 
@@ -769,8 +781,11 @@ export async function POST(request) {
           updated.approvedBy = "";
         }
 
-        await upsertMeta(admin, updated);
-        items[orderId] = toClientInvoiceMeta(updated);
+        const saved = await upsertMeta(admin, updated, {
+          previousMeta: existing,
+          mode,
+        });
+        items[orderId] = toClientInvoiceMeta(saved);
         marked += 1;
       }
 
@@ -824,8 +839,11 @@ export async function POST(request) {
         statusUpdatedBy: scope.userId,
       };
 
-      await upsertMeta(admin, updated);
-      const hydrated = toClientInvoiceMeta(updated);
+      const saved = await upsertMeta(admin, updated, {
+        previousMeta: existing,
+        mode: "approve-order",
+      });
+      const hydrated = toClientInvoiceMeta(saved);
       return NextResponse.json({ success: true, item: hydrated });
     }
 
@@ -863,8 +881,11 @@ export async function POST(request) {
         statusUpdatedBy: scope.userId,
       };
 
-      await upsertMeta(admin, updated);
-      const hydrated = toClientInvoiceMeta(updated);
+      const saved = await upsertMeta(admin, updated, {
+        previousMeta: existing,
+        mode: "reject-order",
+      });
+      const hydrated = toClientInvoiceMeta(saved);
       return NextResponse.json({ success: true, item: hydrated });
     }
 
@@ -884,8 +905,11 @@ export async function POST(request) {
         workingDays,
       });
 
-      await upsertMeta(admin, quotationMeta);
-      const hydrated = toClientInvoiceMeta(quotationMeta);
+      const saved = await upsertMeta(admin, quotationMeta, {
+        previousMeta: existing,
+        mode: "make-quotation",
+      });
+      const hydrated = toClientInvoiceMeta(saved);
       return NextResponse.json({ success: true, item: hydrated });
     }
 
@@ -933,8 +957,11 @@ export async function POST(request) {
       updated.status = ORDER_STATUS_PENDING_INVOICE_CREATION;
     }
 
-    await upsertMeta(admin, updated);
-    const hydrated = toClientInvoiceMeta(updated);
+    const saved = await upsertMeta(admin, updated, {
+      previousMeta: existing,
+      mode: "set-status",
+    });
+    const hydrated = toClientInvoiceMeta(saved);
 
     return NextResponse.json({ success: true, item: hydrated });
   } catch (error) {

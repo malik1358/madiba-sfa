@@ -44,3 +44,49 @@ export function keepPositiveRegionPriceMaps(regionPriceMaps) {
 
   return next;
 }
+
+function addPositiveCodesFromMap(target, priceMap) {
+  Object.entries(priceMap || {}).forEach(([rawCode, rate]) => {
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code) return;
+    if (toPositiveNumber(rate) > 0) target.add(code);
+  });
+}
+
+/**
+ * Codes that the raw Apps Script / sheet payload actually priced (positive only).
+ * Used as a hard allow-list so aliases or stale parsers cannot publish extra SKUs.
+ */
+export function collectSourcePricedCodes(payload) {
+  const codes = new Set();
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return codes;
+
+  addPositiveCodesFromMap(codes, payload.priceMap || payload.prices);
+  const regionMaps = payload.regionPriceMaps || payload.priceMaps || payload.pricesByRegion || {};
+  Object.values(regionMaps).forEach((map) => addPositiveCodesFromMap(codes, map));
+  const retailMaps = payload.retailRegionPriceMaps || {};
+  Object.values(retailMaps).forEach((map) => addPositiveCodesFromMap(codes, map));
+  return codes;
+}
+
+export function retainOnlySourcePricedCodes(priceMap, allowedCodes) {
+  if (!(allowedCodes instanceof Set) || allowedCodes.size === 0) {
+    return keepPositivePublishedPrices(priceMap);
+  }
+  const next = {};
+  Object.entries(keepPositivePublishedPrices(priceMap)).forEach(([code, rate]) => {
+    if (allowedCodes.has(code)) next[code] = rate;
+  });
+  return next;
+}
+
+export function retainOnlySourceRegionPriceMaps(regionPriceMaps, allowedCodes) {
+  const source = regionPriceMaps && typeof regionPriceMaps === "object" ? regionPriceMaps : {};
+  const next = {};
+  Object.entries(source).forEach(([region, map]) => {
+    const regionKey = String(region || "").trim().toLowerCase();
+    if (!regionKey) return;
+    next[regionKey] = retainOnlySourcePricedCodes(map, allowedCodes);
+  });
+  return next;
+}

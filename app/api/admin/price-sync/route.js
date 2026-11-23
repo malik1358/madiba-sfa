@@ -7,8 +7,11 @@ import { recordItemPriceHistory } from "../../../lib/itemPriceHistory.js";
 import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import {
+  collectSourcePricedCodes,
   keepPositivePublishedPrices,
   keepPositiveRegionPriceMaps,
+  retainOnlySourcePricedCodes,
+  retainOnlySourceRegionPriceMaps,
 } from "../../../lib/priceSyncPublish.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
 
@@ -354,6 +357,7 @@ async function runSync(sourcePayload = null) {
   }
 
   let parsed = parsePricePayload(payload || {});
+  const sourcePricedCodes = collectSourcePricedCodes(payload || {});
 
   const missingSchemes = Object.keys(parsed.cashDiscountMap || {}).length === 0
     && Object.keys(parsed.valueDiscountMap || {}).length === 0;
@@ -363,7 +367,14 @@ async function runSync(sourcePayload = null) {
     try {
       const sheetRows = await fetchCostingSheetPayload();
       if (sheetRows) {
-        parsed = mergeParsedCatalog(parsed, parsePricePayload(sheetRows));
+        const enriched = parsePricePayload(sheetRows);
+        parsed = mergeParsedCatalog(parsed, enriched);
+        // CSV enrichment may price codes the Apps Script feed omitted; allow those too.
+        collectSourcePricedCodes({
+          priceMap: enriched.priceMap,
+          regionPriceMaps: enriched.regionPriceMaps,
+          retailRegionPriceMaps: enriched.retailRegionPriceMaps,
+        }).forEach((code) => sourcePricedCodes.add(code));
       }
     } catch (error) {
       console.error("Costing sheet enrichment failed:", error.message);
@@ -379,10 +390,20 @@ async function runSync(sourcePayload = null) {
   });
 
   // Publish only Google Sheet / costing-workbook rates. Never invent prices from
-  // active_sales history or the previous cache for codes missing from the sheet.
-  parsed.priceMap = keepPositivePublishedPrices(parsed.priceMap);
-  parsed.regionPriceMaps = keepPositiveRegionPriceMaps(parsed.regionPriceMaps);
-  parsed.retailRegionPriceMaps = keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps);
+  // active_sales history, previous cache, or PRICE_CODE_ALIASES for codes the
+  // source payload did not price (e.g. stock-out A003946 must not inherit A006297).
+  parsed.priceMap = retainOnlySourcePricedCodes(
+    keepPositivePublishedPrices(parsed.priceMap),
+    sourcePricedCodes,
+  );
+  parsed.regionPriceMaps = retainOnlySourceRegionPriceMaps(
+    keepPositiveRegionPriceMaps(parsed.regionPriceMaps),
+    sourcePricedCodes,
+  );
+  parsed.retailRegionPriceMaps = retainOnlySourceRegionPriceMaps(
+    keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps),
+    sourcePricedCodes,
+  );
 
   const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
   const metadataByCode = await loadItemMetadata(admin, codes);
@@ -401,9 +422,18 @@ async function runSync(sourcePayload = null) {
     }
   });
 
-  parsed.priceMap = keepPositivePublishedPrices(parsed.priceMap);
-  parsed.regionPriceMaps = keepPositiveRegionPriceMaps(parsed.regionPriceMaps);
-  parsed.retailRegionPriceMaps = keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps);
+  parsed.priceMap = retainOnlySourcePricedCodes(
+    keepPositivePublishedPrices(parsed.priceMap),
+    sourcePricedCodes,
+  );
+  parsed.regionPriceMaps = retainOnlySourceRegionPriceMaps(
+    keepPositiveRegionPriceMaps(parsed.regionPriceMaps),
+    sourcePricedCodes,
+  );
+  parsed.retailRegionPriceMaps = retainOnlySourceRegionPriceMaps(
+    keepPositiveRegionPriceMaps(parsed.retailRegionPriceMaps),
+    sourcePricedCodes,
+  );
 
   const enrichedSheetItems = buildEnrichedSheetItems(parsed, metadataByCode);
 

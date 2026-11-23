@@ -377,12 +377,16 @@ function normalizeCatalogResult(
   quantityControls,
   eodStock,
 ) {
-  const aliasedRegions = {};
+  // Publish only codes that carry their own positive sheet rate. Do not copy
+  // PRICE_CODE_ALIASES sibling rates into the catalogue maps (e.g. stock-out
+  // A003946 must not inherit A006297). Order-time lookupPositiveRate still
+  // resolves family rates for existing lines / history.
+  const publishedRegions = {};
   PRICING_REGIONS.forEach((region) => {
-    aliasedRegions[region] = applyPriceCodeAliases(regionPriceMaps?.[region] || {});
+    publishedRegions[region] = regionPriceMaps?.[region] || {};
   });
 
-  const resolvedRegions = withRegionFallbacks(aliasedRegions, applyPriceCodeAliases(priceMap));
+  const resolvedRegions = withRegionFallbacks(publishedRegions, priceMap || {});
   const resolvedPriceMap = resolvedRegions.riyadh;
   const excludedCodes = new Set();
   const keptSheetItems = [];
@@ -396,13 +400,24 @@ function normalizeCatalogResult(
     keptSheetItems.push(item);
   });
 
-  function stripExcludedPrices(target) {
+  function stripExcludedCodes(target) {
     const next = { ...(target || {}) };
     Object.keys(next).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
       if (excludedCodes.has(code) || isExcludedItemCode(code)) {
         delete next[rawCode];
       }
+    });
+    return next;
+  }
+
+  function stripExcludedPositivePrices(target) {
+    const next = {};
+    Object.entries(stripExcludedCodes(target)).forEach(([rawCode, rate]) => {
+      const positive = toNumber(rate);
+      // Catalogue / sync publish only finite positive sheet rates.
+      if (!(positive > 0)) return;
+      next[rawCode] = positive;
     });
     return next;
   }
@@ -414,17 +429,17 @@ function normalizeCatalogResult(
     );
 
   return {
-    priceMap: stripExcludedPrices(resolvedPriceMap),
+    priceMap: stripExcludedPositivePrices(resolvedPriceMap),
     regionPriceMaps: {
-      riyadh: stripExcludedPrices(resolvedRegions.riyadh),
-      dammam: stripExcludedPrices(resolvedRegions.dammam),
-      jeddah: stripExcludedPrices(resolvedRegions.jeddah),
+      riyadh: stripExcludedPositivePrices(resolvedRegions.riyadh),
+      dammam: stripExcludedPositivePrices(resolvedRegions.dammam),
+      jeddah: stripExcludedPositivePrices(resolvedRegions.jeddah),
     },
     retailRegionPriceMaps: Object.fromEntries(PRICING_REGIONS.map((region) => [
-      region, stripExcludedPrices(applyPriceCodeAliases(retailRegionPriceMaps?.[region] || {})),
+      region, stripExcludedPositivePrices(retailRegionPriceMaps?.[region] || {}),
     ])),
-    cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
-    valueDiscountMap: stripExcludedPrices(applyValueDiscountAliases(valueDiscountMap)),
+    cashDiscountMap: stripExcludedCodes(applyDiscountCodeAliases(cashDiscountMap)),
+    valueDiscountMap: stripExcludedCodes(applyValueDiscountAliases(valueDiscountMap)),
     sheetItems: keptSheetItems,
     schemes: resolveStoredOrderSchemes({ schemes }),
     quantityControls: resolvedQuantityControls,

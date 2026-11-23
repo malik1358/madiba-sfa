@@ -322,7 +322,7 @@ test('parsePricePayload reads the three value slabs and the fixed city price col
 });
 
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {
-  const cacheKey = 'madiba.pricePayload.v3';
+  const cacheKey = 'madiba.pricePayload.v4';
   const storage = new Map();
   let cleared = false;
 

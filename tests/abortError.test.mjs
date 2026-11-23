@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  NETWORK_FETCH_MESSAGE,
   REQUEST_TIMEOUT_MESSAGE,
   friendlyErrorMessage,
   isAbortError,
@@ -28,4 +29,11 @@ test("friendlyErrorMessage keeps non-abort errors", () => {
     friendlyErrorMessage({ message: "signal is aborted without reason" }),
     REQUEST_TIMEOUT_MESSAGE,
   );
+});
+
+test("friendlyErrorMessage maps Failed to fetch and TypeError strings", () => {
+  assert.equal(friendlyErrorMessage({ message: "Failed to fetch" }), NETWORK_FETCH_MESSAGE);
+  assert.equal(friendlyErrorMessage(new TypeError("Failed to fetch")), NETWORK_FETCH_MESSAGE);
+  assert.equal(friendlyErrorMessage("TypeError: Failed to fetch"), NETWORK_FETCH_MESSAGE);
+  assert.equal(friendlyErrorMessage({ message: "NetworkError when attempting to fetch resource." }), NETWORK_FETCH_MESSAGE);
 });

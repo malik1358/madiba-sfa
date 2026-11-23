@@ -10,6 +10,7 @@ import {
   classifyKpiUploadSummaryCategory,
   insertKpiUploadSummaryCategoryRows,
   isOpenInvoiceExpectedThisMonth,
+  KPI_UPLOAD_SUMMARY_MIN_AVG_DAYS,
   KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS,
   buildKpiUploadSummaryExcludedCustomerSet,
   pickCustomerAvgDaysToPay,
@@ -319,14 +320,20 @@ test("resolveLastPaidInvoiceDays takes days from the latest paid invoice", () =>
   ]), null);
 });
 
-test("estimate avg days uses max(lifetime, last paid invoice) and 120 when never paid", () => {
+test("estimate avg days uses max(lifetime, last paid invoice), floors at 60, and 120 when never paid", () => {
   assert.equal(KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS, 120);
+  assert.equal(KPI_UPLOAD_SUMMARY_MIN_AVG_DAYS, 60);
   assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: 19,
     avg_days_to_pay_6m: 10,
     last_paid_invoice_days: 45,
     last_receipt_date: "2026-10-13",
-  }), 45);
+  }), 60);
+  assert.equal(pickCustomerAvgDaysToPay({
+    avg_days_to_pay: 47,
+    last_paid_invoice_days: 44,
+    last_receipt_date: "2026-10-13",
+  }), 60);
   assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: 79,
     avg_days_to_pay_6m: 10,
@@ -337,7 +344,7 @@ test("estimate avg days uses max(lifetime, last paid invoice) and 120 when never
     avg_days_to_pay: 40,
     avg_days_to_pay_6m: 12,
     avg_days_paid_only: 40,
-  }), 40);
+  }), 60);
   assert.equal(pickCustomerAvgDaysToPay({
     avg_days_to_pay: 120,
     last_paid_invoice_days: 104,

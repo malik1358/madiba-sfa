@@ -84,8 +84,8 @@ const TEXT = {
   signIn: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
   all: { en: "All", ar: "الكل" },
   hint: {
-    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Never-paid and avg >120 are scheduled with company avg into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
-    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). من لم يسدد ومتوسط >120 يُجدولان بمتوسط الشركة في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
+    en: "November/current month is the strict expected-collection estimate (BM+Rest, avg ≤120, overdue still open). Avg days used is max(lifetime, last paid), floored at 60 when both are under 60. Never-paid and avg >120 are scheduled with company avg into forward months so they do not inflate the current estimate. Electronics appears in months but is pushed forward when it would otherwise sit in the current month. Legal queue stays outside.",
+    ar: "شهر نوفمبر/الحالي هو تقدير التحصيل الصارم (مواد بناء+الباقي، متوسط ≤120، المتأخر المفتوح). متوسط الأيام المستخدم هو الأعلى بين متوسط العمر وأيام آخر سداد، بحد أدنى 60 إذا كان كلاهما أقل من 60. من لم يسدد ومتوسط >120 يُجدولان بمتوسط الشركة في أشهر لاحقة حتى لا يضخّما التقدير الحالي. الإلكترونيات تظهر في الأشهر وتُدفع لاحقاً إن كانت ستقع في الشهر الحالي. الطابور القانوني خارج الشبكة.",
   },
 };
 

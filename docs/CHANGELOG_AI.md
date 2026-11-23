@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-23** — Store↔Riyadh inter-city digest To uses `vilayathulla.malpe@noorshukran.com` (was guessed `vilyath@`). No migration.
 - **2026-11-23** — Inter-city stock email splits into two digests with full-column Excel: Dammam↔Riyadh → Iliyas+DWH; Store↔Riyadh → Iliyas+Vilyath; CC Fazlur/Soyeb/Sohail/Malik. No migration.
 - **2026-11-23** — Outstanding Compare reconcile also pulls full missing CN-referenced vouchers from `sales_raw` (same helper as Payment Settlement). Stale **1258C** Difference **−176,000** was CN-residual understated sales + receipt **275** (176k); with full **NFD/107** sales that receipt correctly leaves Open Δ **0**. Recalculate Outstanding Compare after deploy. No migration. See `docs/BUSINESS_RULES.md`.
 - **2026-11-23** — Expected Collection never-paid / avg>120 proxy days use **Rest-dominant** company avg only (BM and Electronics books excluded via `customerMix` / `isRestDominantCustomerMix`). Horizon UI also drops the redundant **By month-end** column. No migration. See `docs/BUSINESS_RULES.md`.

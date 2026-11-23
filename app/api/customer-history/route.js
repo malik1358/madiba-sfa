@@ -7,6 +7,10 @@ import {
 } from "../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../lib/salesHistory";
 import {
+  missingReferencedSalesVouchers,
+  pickFullMissingReferencedSales,
+} from "../../lib/paymentBehavior.js";
+import {
   customerHasMatchingSalesman,
   exactSalesmanCodesFromPairs,
   identitySearchPatternsFor,
@@ -52,7 +56,10 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 23;
+// 24: pull full missing CN-referenced vouchers from sales_raw (1258C NFD/107).
+const CACHE_VERSION = 24;
+const MISSING_VOUCHER_CHUNK = 80;
+const MISSING_VOUCHER_PAGE = 1000;
 const RECEIPT_DATASET_MEMORY_TTL_MS = 60_000;
 
 let receiptDatasetMemory = {
@@ -676,6 +683,66 @@ async function loadMasterCustomerName(admin, customerCode) {
   return data?.customer_name || "";
 }
 
+function chunkList(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/**
+ * When active_sales dropped a voucher that a credit note still names, pull the
+ * full historic invoice from sales_raw (newest batch) so settlement Sales excl
+ * VAT matches Tally (1258C NFD/107 = 456,823, not the CN+residual estimate).
+ */
+async function fetchMissingReferencedSalesFromRaw(admin, customerCode, voucherNumbers) {
+  const vouchers = (Array.isArray(voucherNumbers) ? voucherNumbers : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (!vouchers.length) return [];
+
+  const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
+  const rows = [];
+  for (const chunk of chunkList(vouchers, MISSING_VOUCHER_CHUNK)) {
+    let from = 0;
+    while (true) {
+      let query = admin
+        .from("sales_raw")
+        .select(HISTORY_ROW_SELECT)
+        .in("voucher_number", chunk)
+        .order("id", { ascending: true })
+        .range(from, from + MISSING_VOUCHER_PAGE - 1);
+      if (codeCandidates.length === 1) {
+        query = query.eq("customer_code", codeCandidates[0]);
+      } else if (codeCandidates.length > 1) {
+        query = query.in("customer_code", codeCandidates);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < MISSING_VOUCHER_PAGE) break;
+      from += MISSING_VOUCHER_PAGE;
+    }
+  }
+  return rows;
+}
+
+async function attachMissingReferencedSalesFromRaw(admin, customerCode, transactions) {
+  const source = Array.isArray(transactions) ? transactions : [];
+  const missing = missingReferencedSalesVouchers(source);
+  if (!missing.length) return source;
+  try {
+    const historyRows = await fetchMissingReferencedSalesFromRaw(admin, customerCode, missing);
+    const extra = pickFullMissingReferencedSales(source, historyRows);
+    if (!extra.length) return source;
+    return mergeSalesSnapshots([...source, ...extra]);
+  } catch {
+    // sales_raw may be unavailable; CN-mirror fallback in paymentBehavior still runs.
+    return source;
+  }
+}
+
 async function fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory = false } = {}) {
   const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
   const masterCustomerName = await loadMasterCustomerName(admin, customerCode);
@@ -771,6 +838,10 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
 
   // Settlement / full ledger: keep every sales month for this customer (day 1 → now).
   // Customer Audit performance window still uses the last 6 historic months + current.
+  let baseTransactions;
+  let monthKeys;
+  let fromDate;
+
   if (fullHistory) {
     const allMonthKeys = [];
     const seenAll = new Set();
@@ -781,41 +852,61 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
       allMonthKeys.push(key);
     }
     allMonthKeys.sort();
-    const oldestKey = allMonthKeys[0] || "";
+    monthKeys = allMonthKeys;
+    fromDate = monthStartFromKey(allMonthKeys[0] || "");
+    baseTransactions = sortedRows.map(({ __stamp, ...row }) => row);
+  } else {
+    const uniqueNewestFirst = [];
+    const seenMonths = new Set();
+    let historicCount = 0;
+
+    for (const row of sortedRows) {
+      const key = monthKey(row.transaction_date);
+      if (!key || seenMonths.has(key)) continue;
+
+      seenMonths.add(key);
+      uniqueNewestFirst.push(key);
+      if (key !== currentKey && key < currentKey) historicCount += 1;
+      if (historicCount >= HISTORIC_PERFORMANCE_MONTHS) break;
+    }
+
+    const selectedMonthKeys = selectMonthlyPerformanceMonths([...uniqueNewestFirst].reverse(), currentKey);
+    const selectedMonthSet = new Set(selectedMonthKeys);
+
+    monthKeys = selectedMonthKeys;
+    fromDate = monthStartFromKey(selectedMonthKeys[0] || "");
+    baseTransactions = sortedRows
+      .filter((row) => selectedMonthSet.has(monthKey(row.transaction_date)))
+      .map(({ __stamp, ...row }) => row);
+  }
+
+  const transactions = await attachMissingReferencedSalesFromRaw(
+    admin,
+    customerCode,
+    baseTransactions,
+  );
+
+  if (fullHistory && transactions !== baseTransactions) {
+    const allMonthKeys = [];
+    const seenAll = new Set();
+    for (const row of transactions) {
+      const key = monthKey(row.transaction_date);
+      if (!key || seenAll.has(key)) continue;
+      seenAll.add(key);
+      allMonthKeys.push(key);
+    }
+    allMonthKeys.sort();
     return {
-      fromDate: monthStartFromKey(oldestKey),
+      fromDate: monthStartFromKey(allMonthKeys[0] || ""),
       monthKeys: allMonthKeys,
-      transactions: sortedRows.map(({ __stamp, ...row }) => row),
+      transactions,
     };
   }
 
-  const uniqueNewestFirst = [];
-  const seenMonths = new Set();
-  let historicCount = 0;
-
-  for (const row of sortedRows) {
-    const key = monthKey(row.transaction_date);
-    if (!key || seenMonths.has(key)) continue;
-
-    seenMonths.add(key);
-    uniqueNewestFirst.push(key);
-    if (key !== currentKey && key < currentKey) historicCount += 1;
-    if (historicCount >= HISTORIC_PERFORMANCE_MONTHS) break;
-  }
-
-  const selectedMonthKeys = selectMonthlyPerformanceMonths([...uniqueNewestFirst].reverse(), currentKey);
-  const selectedMonthSet = new Set(selectedMonthKeys);
-
-  const filtered = sortedRows
-    .filter((row) => selectedMonthSet.has(monthKey(row.transaction_date)))
-    .map(({ __stamp, ...row }) => row);
-
-  const lastMonthKey = selectedMonthKeys[0] || "";
-
   return {
-    fromDate: monthStartFromKey(lastMonthKey),
-    monthKeys: selectedMonthKeys,
-    transactions: filtered,
+    fromDate,
+    monthKeys,
+    transactions,
   };
 }
 

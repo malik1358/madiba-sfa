@@ -1,7 +1,10 @@
 import { canWriteHr } from "../../../lib/hr/hrAccess.js";
 import {
+  applyMasterPayAndAbsence,
   canOverwriteMonthlyRecord,
+  canPrefillHrPayrollMonth,
   defaultMonthlyRecordForEmployee,
+  hrPayrollPeriodForMonth,
   isValidHrMonth,
   mergeMonthlyRecord,
   monthlyRecordToRow,
@@ -28,10 +31,9 @@ function requireMonth(value) {
   return month;
 }
 
-function monthBounds(month) {
-  const [year, mon] = month.split("-").map(Number);
-  const last = new Date(Date.UTC(year, mon, 0)).getUTCDate();
-  return { fromDate: `${month}-01`, toDate: `${month}-${String(last).padStart(2, "0")}` };
+function payrollLeaveBounds(month) {
+  const period = hrPayrollPeriodForMonth(month);
+  return { fromDate: period.fromDate, toDate: period.toDate };
 }
 
 export async function GET(request) {
@@ -100,10 +102,13 @@ async function actionSave(ctx, body) {
   const { value, errors } = normalizeMonthlyRecordInput(body.record || {});
   if (errors.length) throw new HrHttpError(400, errors.join(" "));
 
+  // Pin basic + transport from master; recompute absence from absent/half days.
+  const patch = applyMasterPayAndAbsence(employee, value);
+
   const saved = await persistRows(admin, {
     month,
     existingByEmployee: map,
-    entries: [{ employee, patch: value, source: "MANUAL" }],
+    entries: [{ employee, patch, source: "MANUAL" }],
     actorId: user.id,
   });
   if (!saved) throw new HrHttpError(409, "Record changed to FINAL. Reload and reopen it first.");
@@ -140,12 +145,15 @@ async function actionImport(ctx, body) {
 async function actionPrefill(ctx, body) {
   const { admin, user } = ctx;
   const month = requireMonth(body.month);
+  const gate = canPrefillHrPayrollMonth(month);
+  if (!gate.ok) throw new HrHttpError(400, gate.reason);
+
   const wanted = Array.isArray(body.employeeIds) ? new Set(body.employeeIds.map(String)) : null;
 
   const employees = (await loadHrEmployees(admin, { includeInactive: false }))
     .filter((employee) => !wanted || wanted.has(employee.id));
   const map = existingMap(await loadHrMonthlyRecords(admin, { month }));
-  const leaveEntries = await loadHrLeaveEntries(admin, monthBounds(month));
+  const leaveEntries = await loadHrLeaveEntries(admin, payrollLeaveBounds(month));
 
   const entries = [];
   const skipped = [];
@@ -172,7 +180,11 @@ async function actionPrefill(ctx, body) {
     });
   }
   const saved = await persistRows(admin, { month, existingByEmployee: map, entries, actorId: user.id });
-  return { saved, skipped };
+  return {
+    saved,
+    skipped,
+    period: { fromDate: gate.fromDate, toDate: gate.toDate },
+  };
 }
 
 async function actionSetStatus(ctx, body, status) {

@@ -390,3 +390,35 @@ test('parsePricePayload keeps jumbo tissue sheet rows for ordering', () => {
   assert.ok(item);
   assert.match(item.item_name, /JUMBO TISSUE ROLL/i);
 });
+
+test('parsePricePayload reads CBM/Ctn into cbmPerCtnMap from the matching header', () => {
+  const parsed = parsePricePayload([
+    ['', 'Item Code', 'Item Name', 'Wholesale Price Riyadh', 'CBM/Ctn'],
+    ['', 'A004801', 'Gloves carton', '10', '0.0425'],
+    ['', 'A004802', 'Tape carton', '12', '1,250'],
+    ['', 'A004803', 'No cbm carton', '14', ''],
+    ['', 'A004804', 'Zero cbm carton', '15', '0'],
+  ]);
+
+  assert.deepEqual(parsed.cbmPerCtnMap, { A004801: 0.0425, A004802: 1250 });
+  assert.equal(parsed.priceMap.A004803, 14);
+});
+
+test('parsePricePayload does not guess a CBM column when no CBM header exists', () => {
+  // Column F (index 5) holds numbers but has no CBM header — it must not be used.
+  const parsed = parsePricePayload([
+    ['', 'Item Code', 'Item Name', 'Wholesale Price Riyadh', 'Other', 'Weight'],
+    ['', 'A004811', 'Gloves carton', '10', '3', '0.5'],
+  ]);
+
+  assert.deepEqual(parsed.cbmPerCtnMap, {});
+});
+
+test('parsePricePayload keeps cbmPerCtnMap through object payloads and excludes building materials', () => {
+  const parsed = parsePricePayload({
+    priceMap: { A004821: 5, LP00190: 9 },
+    cbmPerCtnMap: { a004821: '0.2', LP00190: 3, A004822: -1 },
+  });
+
+  assert.deepEqual(parsed.cbmPerCtnMap, { A004821: 0.2 });
+});

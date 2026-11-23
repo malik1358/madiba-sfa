@@ -234,7 +234,13 @@ function DirectionTable({
                 {formatQty(row.remainingAtSource)}
               </td>
               <td className="moduleBiMonthCell--up">{formatDaysCover(row.daysCoverAfterAtDestination ?? row.daysCoverAfter)}</td>
-              <td className={Number(row.daysCoverAfterAtSource) < 30 ? "moduleBiMonthCell--down" : ""}>
+              <td className={
+                row.daysCoverAfterAtSource != null
+                && Number.isFinite(Number(row.daysCoverAfterAtSource))
+                && Number(row.daysCoverAfterAtSource) < 30
+                  ? "moduleBiMonthCell--down"
+                  : ""
+              }>
                 {formatDaysCover(row.daysCoverAfterAtSource)}
               </td>
               <td>{formatCbm(row.cbmPerCtn)}</td>

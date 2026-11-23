@@ -474,3 +474,39 @@ test("negative destination qty is shown but treated as zero for suggestions", ()
   assert.equal(row.suggestedQty, 30);
   assert.equal(row.afterAtDestination, 30);
 });
+
+test("never leaves source under 30 days cover when source has sales pace", () => {
+  // Source peak 70/week → daily 10 → must keep 300; stock 320 → max transfer 20.
+  // Dest needs 150, but after any send source days cover must stay ≥ 30.
+  const ok = suggestTransferQty({
+    sourceQty: 320,
+    destinationQty: 0,
+    peakWeeklyQty: 70,
+    sourcePeakWeeklyQty: 70,
+  });
+  assert.equal(ok.sourceMonthReserveQty, 300);
+  assert.equal(ok.suggestedQty, 20);
+  assert.ok(ok.daysCoverAfterAtSource >= 30);
+
+  // Already under 30 days at source (200 < 300 reserve) → send nothing.
+  const under = suggestTransferQty({
+    sourceQty: 200,
+    destinationQty: 0,
+    peakWeeklyQty: 70,
+    sourcePeakWeeklyQty: 70,
+  });
+  assert.equal(under.suggestedQty, 0);
+  assert.equal(under.blockedBySourceReserve, true);
+  assert.equal(under.remainingAtSource, 200);
+  assert.ok(under.daysCoverAfterAtSource < 30);
+
+  // No source sales pace → days cover is blank (not 0).
+  const noPace = suggestTransferQty({
+    sourceQty: 50,
+    destinationQty: 0,
+    peakWeeklyQty: 70,
+    sourcePeakWeeklyQty: 0,
+  });
+  assert.equal(noPace.suggestedQty, 50);
+  assert.equal(noPace.daysCoverAfterAtSource, null);
+});

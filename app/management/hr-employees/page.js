@@ -12,16 +12,20 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { canWriteHr } from "../../lib/hr/hrAccess";
-import { employeeMonthlyPackage } from "../../lib/hr/hrEmployees";
+import {
+  employeeMonthlyPackage,
+  filterActiveFieldStaff,
+  isHrHierarchySyncRole,
+} from "../../lib/hr/hrEmployees";
 import { formatHrAmount, hrFetch } from "../../lib/hr/hrClient";
 
-const FILTER_KEYS = ["code", "name", "department", "designation", "status", "linked", "monthlyPackage"];
+const FILTER_KEYS = ["code", "name", "department", "designation", "iqamaExpiry", "linked", "monthlyPackage"];
 
 const TEXT = {
   title: { en: "HR Employees", ar: "موظفو الموارد البشرية" },
   subtitle: {
-    en: "All company staff. Use Pull from Salesman Hierarchy to import logins (already linked), or Edit → Linked login to attach a profile for My Day prefill.",
-    ar: "جميع موظفي الشركة. استخدم السحب من هيكل المندوبين لاستيراد الحسابات مرتبطة، أو عدّل → الحساب المرتبط لربط ملف لتغذية الحضور من يومي.",
+    en: "Active Salesmen, Collectors and Promoters. Pull from Salesman Hierarchy imports those roles (already linked). Iqama expiry emails Soyeb, Sohail and Malik 30 days before expiry.",
+    ar: "المندوبون والمحصّلون والمروّجون النشطون. السحب من هيكل المندوبين يستورد هذه الأدوار مرتبطة. تنبيه الإقامة يُرسل لسويب وسهيل ومالك قبل 30 يوماً من الانتهاء.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading staff...", ar: "جاري تحميل الموظفين..." },
@@ -37,8 +41,8 @@ const TEXT = {
   pullHierarchy: { en: "Pull from Salesman Hierarchy", ar: "سحب من هيكل المندوبين" },
   pulling: { en: "Pulling...", ar: "جاري السحب..." },
   pullHint: {
-    en: "Creates or updates one HR staff row per salesman code and links that login so Monthly Feed can Prefill from My Day. Salaries are left blank for you to fill.",
-    ar: "ينشئ أو يحدّث صف موظف لكل كود مندوب ويربط حساب الدخول لتعبئة الحضور من يومي. الرواتب تبقى فارغة لتدخلها أنت.",
+    en: "Creates or updates Salesman / Collector / Promoter rows from hierarchy (active only) and links logins for Prefill. Salaries stay blank for you to fill.",
+    ar: "ينشئ أو يحدّث صفوف المندوب/المحصّل/المروّج من الهيكل (النشطين فقط) ويربط الحسابات للتعبئة. الرواتب تبقى فارغة لتدخلها أنت.",
   },
   editEmployee: { en: "Edit employee", ar: "تعديل موظف" },
   code: { en: "Employee code", ar: "رقم الموظف" },
@@ -48,17 +52,17 @@ const TEXT = {
   designation: { en: "Designation", ar: "المسمى الوظيفي" },
   nationality: { en: "Nationality", ar: "الجنسية" },
   iqama: { en: "Iqama / ID no.", ar: "رقم الإقامة / الهوية" },
+  iqamaExpiry: { en: "Iqama expiry", ar: "انتهاء الإقامة" },
   phone: { en: "Phone", ar: "الهاتف" },
-  joinDate: { en: "Join date", ar: "تاريخ الالتحاق" },
+  joinDate: { en: "Joining date", ar: "تاريخ الالتحاق" },
+  holidaysPerYear: { en: "Holidays per year", ar: "الإجازات السنوية" },
   status: { en: "Status", ar: "الحالة" },
   active: { en: "Active", ar: "نشط" },
   inactive: { en: "Inactive", ar: "غير نشط" },
   linked: { en: "Linked login", ar: "الحساب المرتبط" },
   notLinked: { en: "— Not linked —", ar: "— غير مرتبط —" },
   basic: { en: "Basic salary", ar: "الراتب الأساسي" },
-  housing: { en: "Housing", ar: "بدل السكن" },
   transport: { en: "Transport", ar: "بدل النقل" },
-  otherAllowance: { en: "Other allowance", ar: "بدلات أخرى" },
   monthlyPackage: { en: "Monthly package", ar: "الباقة الشهرية" },
   notes: { en: "Notes", ar: "ملاحظات" },
   save: { en: "Save", ar: "حفظ" },
@@ -69,7 +73,7 @@ const TEXT = {
   yes: { en: "Linked", ar: "مرتبط" },
   no: { en: "No", ar: "لا" },
   totalFooter: { en: "Total", ar: "الإجمالي" },
-  empty: { en: "No staff yet.", ar: "لا يوجد موظفون بعد." },
+  empty: { en: "No active field staff yet.", ar: "لا يوجد موظفون ميدانيون نشطون بعد." },
 };
 
 const EMPTY_FORM = {
@@ -78,12 +82,14 @@ const EMPTY_FORM = {
   fullName: "",
   fullNameAr: "",
   profileId: "",
-  designation: "",
-  department: "",
+  designation: "Salesman",
+  department: "Sales",
   nationality: "",
   iqamaNo: "",
+  iqamaExpiry: "",
   phone: "",
   joinDate: "",
+  holidaysPerYear: "",
   status: "ACTIVE",
   basicSalary: "",
   housingAllowance: "",
@@ -136,6 +142,11 @@ export default function HrEmployeesPage() {
     load();
   }, [accessLoading, allowed, load]);
 
+  const listEmployees = useMemo(() => filterActiveFieldStaff(employees), [employees]);
+  const linkableProfiles = useMemo(
+    () => profiles.filter((profile) => isHrHierarchySyncRole(profile.role) && profile.isActive !== false),
+    [profiles],
+  );
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
 
   const filterValue = useCallback((employee, key) => {
@@ -143,24 +154,21 @@ export default function HrEmployeesPage() {
     if (key === "name") return employee.fullName;
     if (key === "department") return employee.department || "-";
     if (key === "designation") return employee.designation || "-";
-    if (key === "status") return employee.status === "ACTIVE" ? t("active") : t("inactive");
+    if (key === "iqamaExpiry") return employee.iqamaExpiry || "-";
     if (key === "linked") return employee.profileId ? t("yes") : t("no");
     if (key === "monthlyPackage") return formatHrAmount(employeeMonthlyPackage(employee));
     return "";
   }, [t]);
 
-  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(employees, FILTER_KEYS, filterValue);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(listEmployees, FILTER_KEYS, filterValue);
   const headProps = { options, filters, onChange: setFilter, allLabel: t("all") };
 
   const totalPackage = useMemo(
     () => visibleRows.reduce((sum, employee) => sum + employeeMonthlyPackage(employee), 0),
     [visibleRows],
   );
-  const activeCount = employees.filter((employee) => employee.status === "ACTIVE").length;
-  const linkedCount = employees.filter((employee) => employee.profileId).length;
-  const activePackage = employees
-    .filter((employee) => employee.status === "ACTIVE")
-    .reduce((sum, employee) => sum + employeeMonthlyPackage(employee), 0);
+  const linkedCount = listEmployees.filter((employee) => employee.profileId).length;
+  const activePackage = listEmployees.reduce((sum, employee) => sum + employeeMonthlyPackage(employee), 0);
 
   function setField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -172,6 +180,10 @@ export default function HrEmployeesPage() {
       ...employee,
       profileId: employee.profileId || "",
       joinDate: employee.joinDate || "",
+      iqamaExpiry: employee.iqamaExpiry || "",
+      holidaysPerYear: employee.holidaysPerYear ?? "",
+      housingAllowance: employee.housingAllowance || 0,
+      otherAllowance: employee.otherAllowance || 0,
     });
   }
 
@@ -183,7 +195,12 @@ export default function HrEmployeesPage() {
     try {
       await hrFetch(supabaseClient, "/api/hr/employees", {
         method: form.id ? "PUT" : "POST",
-        body: { ...form, profileId: form.profileId || null },
+        body: {
+          ...form,
+          profileId: form.profileId || null,
+          housingAllowance: form.housingAllowance || 0,
+          otherAllowance: form.otherAllowance || 0,
+        },
       });
       setMessage(t("saved"));
       setForm(null);
@@ -250,8 +267,8 @@ export default function HrEmployeesPage() {
           {allowed && !loading ? (
             <>
               <div className="moduleMetricGrid">
-                <section className="moduleMetricCard"><span>{t("totalStaff")}</span><strong>{employees.length}</strong></section>
-                <section className="moduleMetricCard"><span>{t("activeStaff")}</span><strong>{activeCount}</strong></section>
+                <section className="moduleMetricCard"><span>{t("totalStaff")}</span><strong>{listEmployees.length}</strong></section>
+                <section className="moduleMetricCard"><span>{t("activeStaff")}</span><strong>{listEmployees.length}</strong></section>
                 <section className="moduleMetricCard"><span>{t("linkedStaff")}</span><strong>{linkedCount}</strong></section>
                 <section className="moduleMetricCard"><span>{t("packageTotal")}</span><strong>{formatHrAmount(activePackage)}</strong></section>
               </div>
@@ -285,7 +302,12 @@ export default function HrEmployeesPage() {
                       <input className="moduleInput" value={form.department} onChange={(e) => setField("department", e.target.value)} />
                     </label>
                     <label>{t("designation")}
-                      <input className="moduleInput" value={form.designation} onChange={(e) => setField("designation", e.target.value)} />
+                      <select className="moduleInput" value={form.designation} onChange={(e) => setField("designation", e.target.value)}>
+                        <option value="Salesman">Salesman</option>
+                        <option value="Collector">Collector</option>
+                        <option value="Product promoter">Product promoter</option>
+                        <option value="Promoter">Promoter</option>
+                      </select>
                     </label>
                     <label>{t("nationality")}
                       <input className="moduleInput" value={form.nationality} onChange={(e) => setField("nationality", e.target.value)} />
@@ -293,11 +315,17 @@ export default function HrEmployeesPage() {
                     <label>{t("iqama")}
                       <input className="moduleInput" value={form.iqamaNo} onChange={(e) => setField("iqamaNo", e.target.value)} />
                     </label>
+                    <label>{t("iqamaExpiry")}
+                      <input className="moduleInput" type="date" value={form.iqamaExpiry} onChange={(e) => setField("iqamaExpiry", e.target.value)} />
+                    </label>
                     <label>{t("phone")}
                       <input className="moduleInput" value={form.phone} onChange={(e) => setField("phone", e.target.value)} />
                     </label>
                     <label>{t("joinDate")}
                       <input className="moduleInput" type="date" value={form.joinDate} onChange={(e) => setField("joinDate", e.target.value)} />
+                    </label>
+                    <label>{t("holidaysPerYear")}
+                      <input className="moduleInput" type="number" min="0" step="0.5" value={form.holidaysPerYear} onChange={(e) => setField("holidaysPerYear", e.target.value)} />
                     </label>
                     <label>{t("status")}
                       <select className="moduleInput" value={form.status} onChange={(e) => setField("status", e.target.value)}>
@@ -308,7 +336,7 @@ export default function HrEmployeesPage() {
                     <label>{t("linked")}
                       <select className="moduleInput" value={form.profileId} onChange={(e) => setField("profileId", e.target.value)}>
                         <option value="">{t("notLinked")}</option>
-                        {profiles.map((profile) => (
+                        {linkableProfiles.map((profile) => (
                           <option key={profile.id} value={profile.id}>
                             {profile.name}{profile.salesmanCode ? ` (${profile.salesmanCode})` : ""} — {profile.role}
                           </option>
@@ -318,14 +346,8 @@ export default function HrEmployeesPage() {
                     <label>{t("basic")}
                       <input className="moduleInput" type="number" min="0" step="0.01" value={form.basicSalary} onChange={(e) => setField("basicSalary", e.target.value)} />
                     </label>
-                    <label>{t("housing")}
-                      <input className="moduleInput" type="number" min="0" step="0.01" value={form.housingAllowance} onChange={(e) => setField("housingAllowance", e.target.value)} />
-                    </label>
                     <label>{t("transport")}
                       <input className="moduleInput" type="number" min="0" step="0.01" value={form.transportAllowance} onChange={(e) => setField("transportAllowance", e.target.value)} />
-                    </label>
-                    <label>{t("otherAllowance")}
-                      <input className="moduleInput" type="number" min="0" step="0.01" value={form.otherAllowance} onChange={(e) => setField("otherAllowance", e.target.value)} />
                     </label>
                     <label className="moduleFieldFull">{t("notes")}
                       <input className="moduleInput" value={form.notes} onChange={(e) => setField("notes", e.target.value)} />
@@ -339,7 +361,7 @@ export default function HrEmployeesPage() {
               ) : null}
 
               <section className="moduleSection">
-                <p className="moduleHint">{t("showing")} {visibleRows.length} / {employees.length}</p>
+                <p className="moduleHint">{t("showing")} {visibleRows.length} / {listEmployees.length}</p>
                 <ExportableTable filename="hr-employees" sheetName="HR Employees" className="moduleTableWrap moduleBiTableWrap">
                   <table className="moduleTable moduleBiTable">
                     <thead>
@@ -348,7 +370,7 @@ export default function HrEmployeesPage() {
                         <BiExcelHead {...headProps} label={t("name")} filterKey="name" />
                         <BiExcelHead {...headProps} label={t("department")} filterKey="department" />
                         <BiExcelHead {...headProps} label={t("designation")} filterKey="designation" />
-                        <BiExcelHead {...headProps} label={t("status")} filterKey="status" />
+                        <BiExcelHead {...headProps} label={t("iqamaExpiry")} filterKey="iqamaExpiry" />
                         <BiExcelHead {...headProps} label={t("linked")} filterKey="linked" />
                         <BiExcelHead {...headProps} label={t("monthlyPackage")} filterKey="monthlyPackage" className="moduleBiTotalCol" />
                         {canWrite ? <th>{t("actions")}</th> : null}
@@ -361,9 +383,7 @@ export default function HrEmployeesPage() {
                           <td>{language === "ar" && employee.fullNameAr ? employee.fullNameAr : employee.fullName}</td>
                           <td>{employee.department || "-"}</td>
                           <td>{employee.designation || "-"}</td>
-                          <td className={employee.status === "ACTIVE" ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down"}>
-                            {employee.status === "ACTIVE" ? t("active") : t("inactive")}
-                          </td>
+                          <td>{employee.iqamaExpiry || "-"}</td>
                           <td>{employee.profileId ? (profileById.get(employee.profileId)?.name || t("yes")) : "-"}</td>
                           <td className="moduleBiTotalCol">{formatHrAmount(employeeMonthlyPackage(employee))}</td>
                           {canWrite ? (

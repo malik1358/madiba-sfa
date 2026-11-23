@@ -44,13 +44,30 @@ export function countLeaveDays(startDate, endDate) {
   return listLeaveDates(startDate, endDate).filter((date) => !isKsaFriday(date)).length;
 }
 
+/** Coerce Excel serials / Date objects / strings into YYYY-MM-DD. */
+export function coerceLeaveDate(value) {
+  if (value == null || value === "") return "";
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const utc = Date.UTC(1899, 11, 30) + Math.round(value) * 86400000;
+    return new Date(utc).toISOString().slice(0, 10);
+  }
+  const text = String(value).trim();
+  if (DATE_PATTERN.test(text.slice(0, 10))) return text.slice(0, 10);
+  const parsed = Date.parse(text);
+  if (Number.isFinite(parsed)) return new Date(parsed).toISOString().slice(0, 10);
+  return text.slice(0, 10);
+}
+
 export function normalizeLeaveInput(input = {}) {
   const errors = [];
   const value = {
     employeeId: String(input.employeeId ?? input.employee_id ?? "").trim(),
     leaveType: String(input.leaveType ?? input.leave_type ?? "ANNUAL").trim().toUpperCase(),
-    startDate: String(input.startDate ?? input.start_date ?? "").trim().slice(0, 10),
-    endDate: String(input.endDate ?? input.end_date ?? "").trim().slice(0, 10),
+    startDate: coerceLeaveDate(input.startDate ?? input.start_date),
+    endDate: coerceLeaveDate(input.endDate ?? input.end_date),
     status: String(input.status || "APPROVED").trim().toUpperCase(),
     notes: String(input.notes ?? "").trim(),
     days: 0,
@@ -119,8 +136,144 @@ export function approvedLeaveDatesInMonth(entries = [], month) {
   return dates;
 }
 
+/** Approved leave dates (non-Friday) inside an inclusive from/to range (26th–25th cycle). */
+export function approvedLeaveDatesInRange(entries = [], fromDate, toDate) {
+  const start = String(fromDate || "").trim().slice(0, 10);
+  const end = String(toDate || "").trim().slice(0, 10);
+  const dates = new Set();
+  if (!DATE_PATTERN.test(start) || !DATE_PATTERN.test(end)) return dates;
+  for (const entry of entries || []) {
+    if (entry.status !== "APPROVED") continue;
+    for (const date of listLeaveDates(entry.startDate, entry.endDate)) {
+      if (date >= start && date <= end && !isKsaFriday(date)) dates.add(date);
+    }
+  }
+  return dates;
+}
+
 export function leaveDaysInMonth(entries = [], month) {
   return approvedLeaveDatesInMonth(entries, month).size;
+}
+
+export const HR_LEAVE_TEMPLATE_HEADERS = [
+  "Employee Code",
+  "Type",
+  "Start Date",
+  "End Date",
+  "Status",
+  "Notes",
+];
+
+function leaveHeaderToken(value) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, "");
+}
+
+const LEAVE_FIELD_ALIASES = new Map([
+  ["employeecode", "employeeCode"],
+  ["empcode", "employeeCode"],
+  ["code", "employeeCode"],
+  ["staffcode", "employeeCode"],
+  ["رقمالموظف", "employeeCode"],
+  ["type", "leaveType"],
+  ["leavetype", "leaveType"],
+  ["نوع", "leaveType"],
+  ["startdate", "startDate"],
+  ["from", "startDate"],
+  ["fromdate", "startDate"],
+  ["start", "startDate"],
+  ["enddate", "endDate"],
+  ["to", "endDate"],
+  ["todate", "endDate"],
+  ["end", "endDate"],
+  ["status", "status"],
+  ["notes", "notes"],
+  ["remarks", "notes"],
+  ["ملاحظات", "notes"],
+]);
+
+export function resolveHrLeaveImportHeader(header) {
+  return LEAVE_FIELD_ALIASES.get(leaveHeaderToken(header)) || null;
+}
+
+export function buildHrLeaveTemplateRows(employees = []) {
+  return (employees || []).slice(0, 3).map((employee) => ({
+    "Employee Code": employee.employeeCode,
+    Type: "ANNUAL",
+    "Start Date": "",
+    "End Date": "",
+    Status: "APPROVED",
+    Notes: "",
+  }));
+}
+
+export function hrLeaveTemplateListOptions(employees = []) {
+  return {
+    employeeCodes: (employees || []).map((employee) => employee.employeeCode).filter(Boolean),
+    types: [...HR_LEAVE_TYPES],
+    statuses: [...HR_LEAVE_STATUSES],
+  };
+}
+
+/**
+ * Parse historic leave spreadsheet rows into validated leave payloads.
+ * Returns { items, errors }. Employee Code must match the staff list.
+ */
+export function parseHrLeaveImportRows(rows = [], { employees = [] } = {}) {
+  const byCode = new Map(
+    (employees || []).map((employee) => [String(employee.employeeCode || "").trim().toUpperCase(), employee]),
+  );
+  const items = [];
+  const errors = [];
+
+  (rows || []).forEach((rawRow, index) => {
+    const rowNumber = index + 2;
+    if (!rawRow || typeof rawRow !== "object") return;
+    const mapped = {};
+    for (const [header, cell] of Object.entries(rawRow)) {
+      const key = resolveHrLeaveImportHeader(header);
+      if (key) mapped[key] = cell;
+    }
+    const code = String(mapped.employeeCode ?? "").trim().toUpperCase();
+    const hasData = Object.entries(mapped).some(([key, cell]) => key !== "employeeCode" && String(cell ?? "").trim() !== "");
+    if (!code && !hasData) return;
+    if (!code) {
+      errors.push({ rowNumber, message: "Employee code is missing." });
+      return;
+    }
+    const employee = byCode.get(code);
+    if (!employee) {
+      errors.push({ rowNumber, employeeCode: code, message: `Employee ${code} is not in the staff list.` });
+      return;
+    }
+
+    let leaveType = String(mapped.leaveType ?? "ANNUAL").trim().toUpperCase();
+    const typeMatch = HR_LEAVE_TYPES.find((type) => type === leaveType
+      || HR_LEAVE_TYPE_LABELS[type].en.toUpperCase() === leaveType
+      || HR_LEAVE_TYPE_LABELS[type].ar === String(mapped.leaveType ?? "").trim());
+    if (typeMatch) leaveType = typeMatch;
+
+    let status = String(mapped.status ?? "APPROVED").trim().toUpperCase();
+    const statusMatch = HR_LEAVE_STATUSES.find((item) => item === status
+      || HR_LEAVE_STATUS_LABELS[item].en.toUpperCase() === status
+      || HR_LEAVE_STATUS_LABELS[item].ar === String(mapped.status ?? "").trim());
+    if (statusMatch) status = statusMatch;
+
+    const { value, errors: fieldErrors } = normalizeLeaveInput({
+      employeeId: employee.id,
+      leaveType,
+      startDate: mapped.startDate,
+      endDate: mapped.endDate,
+      status,
+      notes: mapped.notes,
+    });
+    if (fieldErrors.length) {
+      errors.push({ rowNumber, employeeCode: code, message: fieldErrors.join(" ") });
+      return;
+    }
+    items.push({ rowNumber, employeeCode: code, value });
+  });
+
+  return { items, errors };
 }
 
 /** Leave balance helper for the leave screen: approved days per type. */

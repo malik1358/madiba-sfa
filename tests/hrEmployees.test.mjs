@@ -84,7 +84,7 @@ test("employee validation rejects missing code/name, bad money, status and dates
   assert.ok(errors.some((message) => message.startsWith("basicSalary")));
   assert.ok(errors.some((message) => message.startsWith("housingAllowance")));
   assert.ok(errors.some((message) => /ACTIVE or INACTIVE/.test(message)));
-  assert.ok(errors.some((message) => /Join date/.test(message)));
+  assert.ok(errors.some((message) => /Joining date/.test(message)));
   assert.ok(errors.some((message) => /profile/i.test(message)));
 });
 
@@ -146,12 +146,14 @@ test("hierarchy profile maps to linked HR staff with role department", () => {
   assert.equal(draft.basicSalary, 0);
 });
 
-test("planHierarchyStaffSync creates, links, and skips conflicts without wiping salaries", () => {
+test("planHierarchyStaffSync keeps salesman/collector/promoter only and skips office roles", () => {
   const profiles = [
     { id: "p1", salesmanCode: "SM001", name: "Ali", role: "salesman", isActive: true },
     { id: "p2", salesmanCode: "CL01", name: "Omar", role: "collector", isActive: true },
     { id: "p3", salesmanCode: "", name: "No code", role: "admin", isActive: true },
     { id: "p4", salesmanCode: "SM009", name: "Taken", role: "salesman", isActive: true },
+    { id: "p5", salesmanCode: "IV005", name: "Japan", role: "invoice-maker", isActive: true },
+    { id: "p6", salesmanCode: "PP01", name: "Prom", role: "product-promoter", isActive: true },
   ];
   const employees = [
     {
@@ -184,16 +186,15 @@ test("planHierarchyStaffSync creates, links, and skips conflicts without wiping 
     },
   ];
   const plan = planHierarchyStaffSync(profiles, employees);
-  assert.equal(plan.creates.length, 1);
-  assert.equal(plan.creates[0].employeeCode, "CL01");
-  assert.equal(plan.creates[0].profileId, "p2");
+  assert.equal(plan.creates.length, 2);
+  assert.deepEqual(plan.creates.map((row) => row.employeeCode).sort(), ["CL01", "PP01"]);
   assert.equal(plan.updates.length, 1);
   assert.equal(plan.updates[0].employeeCode, "SM001");
   assert.equal(plan.updates[0].profileId, "p1");
   assert.equal(plan.updates[0].fullName, "Ali");
   assert.equal(plan.updates[0].status, "ACTIVE");
   assert.equal(plan.updates[0].basicSalary, 4000);
-  assert.ok(plan.skipped.some((row) => row.reason === "missing_code"));
+  assert.ok(plan.skipped.some((row) => row.reason === "not_field_staff_role"));
   assert.ok(plan.skipped.some((row) => row.reason === "profile_linked_elsewhere"));
 });
 

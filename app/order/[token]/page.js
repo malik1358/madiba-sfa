@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import { translate } from "../../lib/appLanguage.js";
+import {
+  canonicalizeCategoryLabel,
+  categoryArabicLabel,
+  formatCategoryBilingual,
+} from "../../lib/categoryIdentity.js";
+import {
+  CATALOGUE_CAROUSEL_MS,
+  nextCataloguePhotoIndex,
+} from "../../lib/catalogueShareCard.js";
 import {
   catalogueCardPrice,
 } from "../../lib/productCatalogue.js";
@@ -62,6 +71,9 @@ const TEXT = {
   },
   noMatch: { en: "No items match your search.", ar: "لا توجد أصناف مطابقة لبحثك." },
   noPhoto: { en: "No photo", ar: "لا توجد صورة" },
+  photosAria: { en: "Photos", ar: "صور" },
+  previousPhoto: { en: "Previous photo", ar: "الصورة السابقة" },
+  nextPhoto: { en: "Next photo", ar: "الصورة التالية" },
   general: { en: "General", ar: "عام" },
   packing: { en: "Packing", ar: "التعبئة" },
   per: { en: "per", ar: "لكل" },
@@ -80,6 +92,12 @@ const TEXT = {
   qty: { en: "Qty", ar: "الكمية" },
   submit: { en: "Submit order", ar: "إرسال الطلب" },
   submitting: { en: "Submitting…", ar: "جاري الإرسال…" },
+  downloadPdf: { en: "Download order PDF", ar: "تحميل PDF الطلب" },
+  downloadingPdf: { en: "Preparing PDF…", ar: "جاري تجهيز PDF…" },
+  pdfFailed: {
+    en: "Unable to download the order PDF.",
+    ar: "تعذر تحميل PDF الطلب.",
+  },
   needQty: {
     en: "Enter a quantity for at least one item.",
     ar: "أدخل كمية لصنف واحد على الأقل.",
@@ -113,6 +131,96 @@ function fillTemplate(template, values = {}) {
   ));
 }
 
+/** Same auto-rotate carousel pattern as Product Catalogue (guest: token photo URLs only). */
+function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
+  const [index, setIndex] = useState(0);
+  const [failedId, setFailedId] = useState("");
+  const [paused, setPaused] = useState(false);
+  const [inView, setInView] = useState(true);
+  const [timerGeneration, setTimerGeneration] = useState(0);
+  const frameRef = useRef(null);
+  const safePhotos = (Array.isArray(photos) ? photos : [])
+    .map((photo) => ({ id: String(photo?.id || "").trim() }))
+    .filter((photo) => photo.id);
+  const photoKey = safePhotos.map((photo) => photo.id).join("|");
+  const current = safePhotos[index % Math.max(safePhotos.length, 1)] || null;
+
+  useEffect(() => {
+    setIndex((value) => (safePhotos.length ? value % safePhotos.length : 0));
+  }, [photoKey, safePhotos.length]);
+
+  useEffect(() => {
+    const node = frameRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return undefined;
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.35 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (safePhotos.length < 2 || paused || !inView) return undefined;
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setIndex((value) => nextCataloguePhotoIndex(value, safePhotos.length));
+    }, CATALOGUE_CAROUSEL_MS);
+    return () => window.clearInterval(timer);
+  }, [safePhotos.length, paused, inView, timerGeneration]);
+
+  return (
+    <div
+      ref={frameRef}
+      className={styles.gallery}
+      aria-label={`${labels.photosAria}: ${name}`}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
+      }}
+    >
+      {current && failedId !== current.id ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={current.id}
+          src={`/api/customer-order-links/${encodeURIComponent(token)}/photo?photoId=${encodeURIComponent(current.id)}`}
+          alt={name}
+          loading="lazy"
+          onError={() => setFailedId(current.id)}
+        />
+      ) : (
+        <div className={styles.placeholder}>{labels.noPhoto}</div>
+      )}
+      {safePhotos.length > 1 ? (
+        <div className={styles.carouselControls}>
+          <button
+            type="button"
+            aria-label={labels.previousPhoto}
+            onClick={() => {
+              setTimerGeneration((value) => value + 1);
+              setIndex((value) => (value - 1 + safePhotos.length) % safePhotos.length);
+            }}
+          >
+            {language === "ar" ? ">" : "<"}
+          </button>
+          <span>{(index % safePhotos.length) + 1} / {safePhotos.length}</span>
+          <button
+            type="button"
+            aria-label={labels.nextPhoto}
+            onClick={() => {
+              setTimerGeneration((value) => value + 1);
+              setIndex((value) => (value + 1) % safePhotos.length);
+            }}
+          >
+            {language === "ar" ? "<" : ">"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CustomerOrderLinkPage() {
   const params = useParams();
   const token = String(params?.token || "").trim();
@@ -128,6 +236,7 @@ export default function CustomerOrderLinkPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [requestId] = useState(() => (
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -245,21 +354,25 @@ export default function CustomerOrderLinkPage() {
   const categories = useMemo(() => {
     const set = new Set();
     for (const item of items) {
-      const category = String(item.category || "").trim();
-      if (category) set.add(category);
+      set.add(canonicalizeCategoryLabel(item.category));
     }
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [items]);
 
   const filteredItems = useMemo(() => {
     const q = String(search || "").trim().toLowerCase();
-    const selectedCategory = String(categoryFilter || "").trim();
+    const selectedCategory = categoryFilter
+      ? canonicalizeCategoryLabel(categoryFilter)
+      : "";
     return items.filter((item) => {
-      if (selectedCategory && String(item.category || "").trim() !== selectedCategory) return false;
+      const category = canonicalizeCategoryLabel(item.category);
+      if (selectedCategory && category !== selectedCategory) return false;
       if (!q) return true;
+      const arabic = categoryArabicLabel(category).toLowerCase();
       return String(item.item_code || "").toLowerCase().includes(q)
         || String(item.item_name || "").toLowerCase().includes(q)
-        || String(item.category || "").toLowerCase().includes(q);
+        || category.toLowerCase().includes(q)
+        || (arabic && arabic.includes(q));
     });
   }, [items, search, categoryFilter]);
 
@@ -267,6 +380,37 @@ export default function CustomerOrderLinkPage() {
     if (readOnly) return;
     const qty = Math.max(0, Math.floor(Number(next) || 0));
     setQuantities((current) => ({ ...current, [code]: qty }));
+  }
+
+  async function downloadOrderPdf(pdfPath = "") {
+    if (!token || downloadingPdf) return;
+    setDownloadingPdf(true);
+    try {
+      const path = String(pdfPath || "").trim()
+        || `/api/customer-order-links/${encodeURIComponent(token)}/pdf`;
+      const response = await fetch(path, { method: "GET", headers: { Accept: "application/pdf" } });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || t("pdfFailed"));
+      }
+      const blob = await response.blob();
+      const disposition = String(response.headers.get("Content-Disposition") || "");
+      const matched = disposition.match(/filename="?([^"]+)"?/i);
+      const fileName = matched?.[1] || `order-${Date.now()}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || t("pdfFailed"));
+    } finally {
+      setDownloadingPdf(false);
+    }
   }
 
   async function submitOrder() {
@@ -314,6 +458,7 @@ export default function CustomerOrderLinkPage() {
           })),
         },
       } : current);
+      void downloadOrderPdf(payload.pdfPath);
     } catch (err) {
       setError(err.message || t("submitFailed"));
     } finally {
@@ -372,8 +517,16 @@ export default function CustomerOrderLinkPage() {
         {message ? <div className={`${styles.banner} ${styles.bannerOk}`}>{message}</div> : null}
         {error ? <div className={`${styles.banner} ${styles.bannerError}`}>{error}</div> : null}
         {readOnly ? (
-          <div className={`${styles.banner} ${styles.bannerWarn}`}>
-            {t("alreadySubmitted")}
+          <div className={`${styles.banner} ${styles.bannerWarn} ${styles.submittedActions}`}>
+            <span>{t("alreadySubmitted")}</span>
+            <button
+              type="button"
+              className={styles.pdfButton}
+              onClick={() => { void downloadOrderPdf(); }}
+              disabled={downloadingPdf}
+            >
+              {downloadingPdf ? t("downloadingPdf") : t("downloadPdf")}
+            </button>
           </div>
         ) : null}
 
@@ -407,7 +560,7 @@ export default function CustomerOrderLinkPage() {
             >
               <option value="">{t("allCategories")}</option>
               {categories.map((category) => (
-                <option key={category} value={category}>{category}</option>
+                <option key={category} value={category}>{formatCategoryBilingual(category)}</option>
               ))}
             </select>
           </label>
@@ -442,7 +595,6 @@ export default function CustomerOrderLinkPage() {
                 .map((threshold) => ({ threshold, rate: Number(valueSlabs[String(threshold)] || 0) }))
                 .filter((slab) => slab.rate > 0);
               const discounted = priced.rate < item.price - 0.000001;
-              const photoId = item.photos?.[0]?.id;
               const unitLabel = item.master_unit || t("masterUnit");
               const unitConv = Number(item.unit_conv) || 0;
               const baseUnitLabel = item.base_unit || t("baseUnit");
@@ -454,19 +606,22 @@ export default function CustomerOrderLinkPage() {
                 : 0;
               return (
                 <article key={item.item_code} className={`${styles.card} ${qty > 0 ? styles.selected : ""}`}>
-                  <div className={styles.gallery}>
-                    {photoId ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/customer-order-links/${encodeURIComponent(token)}/photo?photoId=${encodeURIComponent(photoId)}`}
-                        alt={item.item_name}
-                      />
-                    ) : (
-                      <div className={styles.placeholder}>{t("noPhoto")}</div>
-                    )}
-                  </div>
+                  <GuestPhotoCarousel
+                    photos={item.photos}
+                    name={item.item_name}
+                    token={token}
+                    language={language}
+                    labels={{
+                      noPhoto: t("noPhoto"),
+                      photosAria: t("photosAria"),
+                      previousPhoto: t("previousPhoto"),
+                      nextPhoto: t("nextPhoto"),
+                    }}
+                  />
                   <div className={styles.cardBody}>
-                    <span className={styles.category}>{item.category || t("general")}</span>
+                    <span className={styles.category}>
+                      {item.category ? formatCategoryBilingual(item.category) : t("general")}
+                    </span>
                     <h3>{item.item_name}</h3>
                     <div className={styles.code}>{item.item_code}</div>
                     {item.packing ? (

@@ -332,6 +332,14 @@ export function suggestTransferQty({
   };
 }
 
+/** Report/email rows: only positive suggestions that leave the source with a known ≥30 days cover. */
+export function isReportableInterCityTransferRow(row = {}) {
+  const suggested = Number(row.suggestedQty || 0);
+  if (!(suggested > 0)) return false;
+  const cover = Number(row.daysCoverAfterAtSource);
+  return Number.isFinite(cover) && cover >= INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS;
+}
+
 export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new Map()) {
   return (imbalanceRows || []).map((row) => {
     // Store has no voucher city — use Riyadh sales pace as demand/reserve proxy.
@@ -377,7 +385,7 @@ export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new 
       sourceLabel: interCityTransferCityLabel(row.sourceCity),
       destinationLabel: interCityTransferCityLabel(row.destinationCity),
     };
-  }).sort((a, b) => {
+  }).filter(isReportableInterCityTransferRow).sort((a, b) => {
     const qtyDiff = Number(b.suggestedQty || 0) - Number(a.suggestedQty || 0);
     if (qtyDiff) return qtyDiff;
     return String(a.itemCode).localeCompare(String(b.itemCode));
@@ -607,7 +615,7 @@ function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
       };
     }
     return finalizeInterCityDisplayRow(next);
-  });
+  }).filter(isReportableInterCityTransferRow);
 }
 
 /** Convert stock/sales qty columns to master units (cartons when Master UOM is CTN). */
@@ -640,11 +648,13 @@ export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
       riyadhToDammam: {
         ...report.directions?.riyadhToDammam,
         rows: riyadhToDammam,
+        itemCount: riyadhToDammam.length,
         suggestedTotalQty: sumSuggested(riyadhToDammam),
       },
       dammamToRiyadh: {
         ...report.directions?.dammamToRiyadh,
         rows: dammamToRiyadh,
+        itemCount: dammamToRiyadh.length,
         suggestedTotalQty: sumSuggested(dammamToRiyadh),
       },
       riyadhToStore: {
@@ -662,6 +672,8 @@ export function applyMasterUnitsToInterCityReport(report, masterUnits = {}) {
     },
     summary: {
       ...report.summary,
+      riyadhToDammamItems: riyadhToDammam.length,
+      dammamToRiyadhItems: dammamToRiyadh.length,
       riyadhToDammamSuggestedQty: sumSuggested(riyadhToDammam),
       dammamToRiyadhSuggestedQty: sumSuggested(dammamToRiyadh),
       riyadhToStoreSuggestedQty: sumSuggested(riyadhToStore),

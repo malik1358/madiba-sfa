@@ -11,6 +11,7 @@ import {
   findInterCityStockImbalances,
   interCityWeekKey,
   isInterCityExcludedItem,
+  isReportableInterCityTransferRow,
   resolveInterCitySalesWindow,
   salesCityFromVoucherType,
   suggestTransferQty,
@@ -236,11 +237,15 @@ test("builds both direction reports with suggested quantities", () => {
       { item_code: "A004400", quantity: 20, sales_amount: 200, transaction_date: "2026-10-19", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       { item_code: "A004400", quantity: 15, sales_amount: 150, transaction_date: "2026-10-21", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       { item_code: "A004400", quantity: 4, sales_amount: 40, transaction_date: "2026-10-28", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      // Riyadh source pace 7/week → reserve 30; stock 100 → max 70; after send cover = 30.
+      { item_code: "A004400", quantity: 7, sales_amount: 70, transaction_date: "2026-10-20", voucher_type: "RIYADH W/S CREDIT", category: "Personal Care" },
       // Outside the 35-day window: must be ignored (would otherwise raise the peak to 200)
       { item_code: "A004400", quantity: 200, sales_amount: 2000, transaction_date: "2026-10-05", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
       // Riyadh peak week for A004401: 14 → daily 2 → 15-day target 30
       { item_code: "A004401", quantity: 14, sales_amount: 140, transaction_date: "2026-10-20", voucher_type: "RIYADH CASH SALES", category: "Office supplies" },
       { item_code: "A004401", quantity: 3, sales_amount: 30, transaction_date: "2026-11-03", voucher_type: "RIYADH W/S CREDIT", category: "Office supplies" },
+      // Dammam source pace 7/week → reserve 30; stock 50 → max 20; after send cover = 30.
+      { item_code: "A004401", quantity: 7, sales_amount: 70, transaction_date: "2026-10-21", voucher_type: "DAMMAM W/S CREDIT", category: "Office supplies" },
       // Building material sales must not create a transfer row
       { item_code: "A004402", quantity: 40, sales_amount: 400, transaction_date: "2026-10-21", voucher_type: "DAMMAM W/S CREDIT", category: "Building Material" },
     ],
@@ -248,25 +253,26 @@ test("builds both direction reports with suggested quantities", () => {
 
   assert.equal(report.stockDate, "2026-11-08");
   assert.equal(report.coverDays, 15);
-  assert.equal(report.directions.riyadhToDammam.itemCount, 2);
+  // Unsold / no-source-pace rows are omitted; only A004400 remains for Riyadh → Dammam.
+  assert.equal(report.directions.riyadhToDammam.itemCount, 1);
   const gloves = report.directions.riyadhToDammam.rows.find((row) => row.itemCode === "A004400");
-  const unsold = report.directions.riyadhToDammam.rows.find((row) => row.itemCode === "A004403");
-  assert.equal(gloves.suggestedQty, 75);
+  assert.equal(gloves.suggestedQty, 70);
   assert.equal(gloves.peakWeeklyQty, 35);
   assert.equal(gloves.destinationSalesQty, 39);
   assert.equal(gloves.destinationSalesQty6m, 39);
-  assert.equal(gloves.sourceMonthReserveQty, 0);
-  assert.equal(gloves.cappedBySourceReserve, false);
+  assert.equal(gloves.sourceMonthReserveQty, 30);
+  assert.equal(gloves.cappedBySourceReserve, true);
   assert.equal(gloves.blockedBySourceReserve, false);
-  assert.equal(unsold.suggestedQty, 5);
-  assert.equal(unsold.usedUnsoldMinimum, true);
+  assert.ok(gloves.daysCoverAfterAtSource >= 30);
+  assert.equal(report.directions.riyadhToDammam.rows.some((row) => row.itemCode === "A004403"), false);
   assert.equal(report.directions.riyadhToDammam.rows.some((row) => row.itemCode === "NON FOOD DIVISION"), false);
   assert.equal(report.directions.dammamToRiyadh.itemCount, 1);
-  assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 30);
-  assert.equal(report.summary.riyadhToDammamSuggestedQty, 80);
-  assert.equal(report.summary.dammamToRiyadhSuggestedQty, 30);
-  // Warehouse stock with no Store qty also lands on Riyadh → Store.
-  assert.ok(report.directions.riyadhToStore.itemCount >= 2);
+  assert.equal(report.directions.dammamToRiyadh.rows[0].suggestedQty, 20);
+  assert.ok(report.directions.dammamToRiyadh.rows[0].daysCoverAfterAtSource >= 30);
+  assert.equal(report.summary.riyadhToDammamSuggestedQty, 70);
+  assert.equal(report.summary.dammamToRiyadhSuggestedQty, 20);
+  // Warehouse stock with no Store qty also lands on Riyadh → Store when source cover holds.
+  assert.ok(report.directions.riyadhToStore.itemCount >= 1);
   assert.equal(
     report.directions.riyadhToStore.rows.some((row) => row.itemCode === "A004400"),
     true,
@@ -377,10 +383,10 @@ test("report applies the source-city reserve from the source peak week", () => {
   assert.equal(limited.suggestedQty, 10);
   assert.equal(limited.remainingAtSource, 90);
   assert.equal(limited.cappedBySourceReserve, true);
+  assert.ok(limited.daysCoverAfterAtSource >= 30);
 
-  const blocked = report.directions.riyadhToDammam.rows.find((row) => row.itemCode === "A004601");
-  assert.equal(blocked.suggestedQty, 0);
-  assert.equal(blocked.blockedBySourceReserve, true);
+  // Blocked (source already under 30 days) is omitted from the report.
+  assert.equal(report.directions.riyadhToDammam.rows.some((row) => row.itemCode === "A004601"), false);
   assert.equal(report.summary.riyadhToDammamSuggestedQty, 10);
 });
 
@@ -404,7 +410,9 @@ test("CBM per carton multiplies suggested cartons and totals per direction", () 
     ],
     saleRows: [
       { item_code: "A004700", quantity: 14, sales_amount: 140, transaction_date: "2026-10-20", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      { item_code: "A004700", quantity: 7, sales_amount: 70, transaction_date: "2026-10-21", voucher_type: "RIYADH W/S CREDIT", category: "Personal Care" },
       { item_code: "A004701", quantity: 14, sales_amount: 140, transaction_date: "2026-10-20", voucher_type: "DAMMAM W/S CREDIT", category: "Personal Care" },
+      { item_code: "A004701", quantity: 7, sales_amount: 70, transaction_date: "2026-10-21", voucher_type: "RIYADH W/S CREDIT", category: "Personal Care" },
     ],
   });
   const withCbm = applyCbmToInterCityReport(
@@ -415,6 +423,7 @@ test("CBM per carton multiplies suggested cartons and totals per direction", () 
   const priced = rows.find((row) => row.itemCode === "A004700");
   const unpriced = rows.find((row) => row.itemCode === "A004701");
   assert.equal(priced.suggestedQty, 30);
+  assert.ok(priced.daysCoverAfterAtSource >= 30);
   assert.equal(priced.cbmPerCtn, 0.125);
   assert.equal(priced.totalCbm, 3.75);
   assert.equal(unpriced.cbmPerCtn, null);
@@ -423,19 +432,22 @@ test("CBM per carton multiplies suggested cartons and totals per direction", () 
   assert.equal(withCbm.summary.riyadhToDammamTotalCbm, 3.75);
 });
 
-test("unsold min stays 5 cartons after master-unit conversion", () => {
+test("unsold min stays 5 cartons after master-unit conversion when source cover holds", () => {
   const report = buildInterCityStockTransferReport({
     stockDate: "2026-11-08",
     now: new Date("2026-11-09T08:00:00+03:00"),
     stockRows: [
       {
         itemCode: "A004800",
-        itemName: "Never sold pcs",
+        itemName: "Never sold at dest pcs",
         unit: "PCS",
-        cities: { riyadh: { qty: 100 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+        cities: { riyadh: { qty: 500 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
       },
     ],
-    saleRows: [],
+    saleRows: [
+      // Source pace only — dest never sold → unsold min 5 (after master conversion).
+      { item_code: "A004800", quantity: 35, sales_amount: 350, transaction_date: "2026-10-20", voucher_type: "RIYADH W/S CREDIT", category: "Personal Care" },
+    ],
   });
   const converted = applyMasterUnitsToInterCityReport(report, {
     A004800: { masterUom: "CTN", baseUom: "PCS", conv: 5 },
@@ -445,6 +457,7 @@ test("unsold min stays 5 cartons after master-unit conversion", () => {
   assert.equal(row.suggestedQty, 5);
   assert.equal(row.usedUnsoldMinimum, true);
   assert.equal(row.targetCoverQty, 5);
+  assert.ok(row.daysCoverAfterAtSource >= 30);
 });
 
 test("negative destination qty is shown but treated as zero for suggestions", () => {
@@ -474,6 +487,14 @@ test("negative destination qty is shown but treated as zero for suggestions", ()
         sales_amount: 140,
         transaction_date: "2026-10-20",
         voucher_type: "DAMMAM W/S CREDIT",
+        category: "Personal Care",
+      },
+      {
+        item_code: "A004801",
+        quantity: 7,
+        sales_amount: 70,
+        transaction_date: "2026-10-21",
+        voucher_type: "RIYADH W/S CREDIT",
         category: "Personal Care",
       },
     ],
@@ -520,4 +541,8 @@ test("never leaves source under 30 days cover when source has sales pace", () =>
   });
   assert.equal(noPace.suggestedQty, 50);
   assert.equal(noPace.daysCoverAfterAtSource, null);
+
+  assert.equal(isReportableInterCityTransferRow(ok), true);
+  assert.equal(isReportableInterCityTransferRow(under), false);
+  assert.equal(isReportableInterCityTransferRow(noPace), false);
 });

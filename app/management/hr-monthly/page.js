@@ -15,10 +15,13 @@ import { canWriteHr } from "../../lib/hr/hrAccess";
 import {
   HR_ATTENDANCE_FIELDS,
   HR_DEDUCTION_FIELDS,
-  HR_EARNING_FIELDS,
   HR_FIELD_LABELS,
+  HR_VISIBLE_EARNING_FIELDS,
+  canPrefillHrPayrollMonth,
+  computeAbsenceDeduction,
   computeMonthlyTotals,
   defaultMonthlyRecordForEmployee,
+  hrPayrollPeriodForMonth,
   isValidHrMonth,
   listHrMonthsBack,
   mergeMonthlyRecord,
@@ -32,13 +35,13 @@ import {
   readHrExcelFile,
 } from "../../lib/hr/hrClient";
 
-const FILTER_KEYS = ["code", "name", "status", "workingDays", "presentDays", "absentDays", "leaveDays", "gross", "deductions", "net"];
+const FILTER_KEYS = ["code", "name", "status", "workingDays", "presentDays", "absentDays", "halfDays", "leaveDays", "gross", "deductions", "net"];
 
 const TEXT = {
   title: { en: "HR Monthly Feed", ar: "بيانات الرواتب الشهرية" },
   subtitle: {
-    en: "Monthly earnings, deductions and attendance per employee. Net pay = earnings − deductions.",
-    ar: "الاستحقاقات والخصومات والحضور الشهري لكل موظف. صافي الراتب = الاستحقاقات − الخصومات.",
+    en: "Salary cycle is 26th–25th. Net pay = basic + transport + other earnings − deductions (including advance). Prefill after the 25th.",
+    ar: "دورة الراتب من 26 إلى 25. الصافي = الأساسي + النقل + استحقاقات أخرى − الخصومات (بما فيها السلفة). التعبئة بعد يوم 25.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading month...", ar: "جاري تحميل الشهر..." },
@@ -53,9 +56,11 @@ const TEXT = {
   finalizeAll: { en: "Finalize all drafts", ar: "اعتماد كل المسودات" },
   confirmFinalize: { en: "Finalize every DRAFT for this month? FINAL rows are locked until reopened.", ar: "اعتماد كل المسودات لهذا الشهر؟ الصفوف النهائية مقفلة حتى إعادة فتحها." },
   hint: {
-    en: "Fridays are holidays. Prefill works for staff linked to a salesman/collector login; others are entered manually. FINAL rows are protected from import and prefill until reopened.",
-    ar: "أيام الجمعة عطلة. التعبئة التلقائية للموظفين المرتبطين بحساب مندوب/محصل، والبقية يدوياً. الصفوف النهائية محمية من الاستيراد والتعبئة حتى إعادة فتحها.",
+    en: "Cycle 26→25. Prefill only on/after the 25th. Edit absent/half days to recalculate absence deduction. Advance deduction is editable. Payable includes master transport. Fridays are holidays.",
+    ar: "الدورة 26→25. التعبئة من يوم 25 فصاعداً. عدّل الغياب/نصف اليوم لإعادة حساب خصم الغياب. خصم السلفة قابل للتعديل. المستحق يشمل بدل النقل من الملف الأساسي. الجمعة عطلة.",
   },
+  periodLabel: { en: "Attendance period", ar: "فترة الحضور" },
+  prefillLocked: { en: "Prefill opens on/after the 25th of this month.", ar: "التعبئة تُفتح في/بعد يوم 25 من هذا الشهر." },
   code: { en: "Code", ar: "الرقم" },
   name: { en: "Employee", ar: "الموظف" },
   status: { en: "Status", ar: "الحالة" },
@@ -164,6 +169,7 @@ export default function HrMonthlyPage() {
     if (key === "workingDays") return String(record?.workingDays ?? 0);
     if (key === "presentDays") return String(record?.presentDays ?? 0);
     if (key === "absentDays") return String(record?.absentDays ?? 0);
+    if (key === "halfDays") return String(record?.halfDays ?? 0);
     if (key === "leaveDays") return String(record?.leaveDays ?? 0);
     if (key === "gross") return formatHrAmount(record?.grossEarnings);
     if (key === "deductions") return formatHrAmount(record?.totalDeductions);
@@ -201,9 +207,28 @@ export default function HrMonthlyPage() {
     ];
   }
 
+  const period = useMemo(() => {
+    try {
+      return isValidHrMonth(month) ? hrPayrollPeriodForMonth(month) : null;
+    } catch {
+      return null;
+    }
+  }, [month]);
+  const prefillGate = useMemo(
+    () => (isValidHrMonth(month) ? canPrefillHrPayrollMonth(month) : { ok: false, reason: t("prefillLocked") }),
+    [month, t],
+  );
+
   function handlePrefill() {
+    if (!prefillGate.ok) {
+      setError(prefillGate.reason || t("prefillLocked"));
+      return;
+    }
     runAction({ action: "prefill" }, (payload) => {
-      setMessage(`${t("prefilledSummary")}: ${payload.saved} ${t("saved_n")}, ${payload.skipped?.length || 0} ${t("skipped_n")}.`);
+      const range = payload.period
+        ? ` (${payload.period.fromDate} → ${payload.period.toDate})`
+        : "";
+      setMessage(`${t("prefilledSummary")}: ${payload.saved} ${t("saved_n")}, ${payload.skipped?.length || 0} ${t("skipped_n")}.${range}`);
       setReport(describeSkips(payload.skipped));
     });
   }
@@ -249,16 +274,32 @@ export default function HrMonthlyPage() {
   }
 
   function setEditorField(key, value) {
-    setEditor((current) => ({ ...current, draft: { ...current.draft, [key]: value } }));
+    setEditor((current) => {
+      if (!current) return current;
+      const draft = { ...current.draft, [key]: value };
+      if (key === "absentDays" || key === "halfDays" || key === "workingDays" || key === "basicSalary") {
+        draft.absenceDeduction = computeAbsenceDeduction({
+          basicSalary: draft.basicSalary,
+          workingDays: draft.workingDays,
+          absentDays: draft.absentDays,
+          halfDays: draft.halfDays,
+        });
+      }
+      return { ...current, draft };
+    });
   }
 
   const editorTotals = useMemo(() => {
     if (!editor) return null;
     const numeric = {};
-    for (const key of [...HR_EARNING_FIELDS, ...HR_DEDUCTION_FIELDS]) {
+    for (const key of [...HR_VISIBLE_EARNING_FIELDS, ...HR_DEDUCTION_FIELDS]) {
       numeric[key] = Number(editor.draft[key] || 0);
     }
-    return computeMonthlyTotals(numeric);
+    return computeMonthlyTotals({
+      ...numeric,
+      housingAllowance: 0,
+      otherAllowance: 0,
+    });
   }, [editor]);
 
   function saveEditor(event) {
@@ -312,7 +353,15 @@ export default function HrMonthlyPage() {
               </label>
               {canWrite ? (
                 <>
-                  <button type="button" className="moduleInlineButton" disabled={busy || loading} onClick={handlePrefill}>{t("prefill")}</button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    disabled={busy || loading || !prefillGate.ok}
+                    title={prefillGate.ok ? undefined : (prefillGate.reason || t("prefillLocked"))}
+                    onClick={handlePrefill}
+                  >
+                    {t("prefill")}
+                  </button>
                   <button type="button" className="moduleInlineButton" disabled={busy || loading} onClick={() => downloadHrMonthlyTemplate(employees.filter((e) => e.status === "ACTIVE"), month)}>{t("template")}</button>
                   <label className="moduleInlineButton">
                     {t("importExcel")}
@@ -324,6 +373,12 @@ export default function HrMonthlyPage() {
             </div>
           ) : null}
 
+          {allowed && period ? (
+            <p className="moduleHint">
+              {t("periodLabel")}: <strong>{period.fromDate}</strong> → <strong>{period.toDate}</strong>
+              {!prefillGate.ok ? ` · ${prefillGate.reason || t("prefillLocked")}` : null}
+            </p>
+          ) : null}
           {allowed ? <p className="moduleHint">{t("hint")}</p> : null}
 
           {report.length ? (
@@ -340,7 +395,7 @@ export default function HrMonthlyPage() {
               <h2>{editor.employee.employeeCode} — {editor.employee.fullName} ({month})</h2>
               <form onSubmit={saveEditor}>
                 <h3>{t("earningsGroup")}</h3>
-                <div className="moduleFormGrid">{HR_EARNING_FIELDS.map(renderNumberField)}</div>
+                <div className="moduleFormGrid">{HR_VISIBLE_EARNING_FIELDS.map(renderNumberField)}</div>
                 <h3>{t("deductionsGroup")}</h3>
                 <div className="moduleFormGrid">{HR_DEDUCTION_FIELDS.map(renderNumberField)}</div>
                 <h3>{t("attendanceGroup")}</h3>
@@ -380,6 +435,7 @@ export default function HrMonthlyPage() {
                       <BiExcelHead {...headProps} label={HR_FIELD_LABELS.workingDays[language === "ar" ? "ar" : "en"]} filterKey="workingDays" />
                       <BiExcelHead {...headProps} label={HR_FIELD_LABELS.presentDays[language === "ar" ? "ar" : "en"]} filterKey="presentDays" />
                       <BiExcelHead {...headProps} label={HR_FIELD_LABELS.absentDays[language === "ar" ? "ar" : "en"]} filterKey="absentDays" />
+                      <BiExcelHead {...headProps} label={HR_FIELD_LABELS.halfDays[language === "ar" ? "ar" : "en"]} filterKey="halfDays" />
                       <BiExcelHead {...headProps} label={HR_FIELD_LABELS.leaveDays[language === "ar" ? "ar" : "en"]} filterKey="leaveDays" />
                       <BiExcelHead {...headProps} label={t("gross")} filterKey="gross" />
                       <BiExcelHead {...headProps} label={t("deductions")} filterKey="deductions" />
@@ -401,6 +457,7 @@ export default function HrMonthlyPage() {
                           <td>{record?.workingDays ?? 0}</td>
                           <td>{record?.presentDays ?? 0}</td>
                           <td className={Number(record?.absentDays || 0) > 0 ? "moduleBiMonthCell--down" : ""}>{record?.absentDays ?? 0}</td>
+                          <td className={Number(record?.halfDays || 0) > 0 ? "moduleBiMonthCell--down" : ""}>{record?.halfDays ?? 0}</td>
                           <td>{record?.leaveDays ?? 0}</td>
                           <td className={compareTone(record?.grossEarnings, previous?.grossEarnings)}>{formatHrAmount(record?.grossEarnings)}</td>
                           <td className={compareTone(previous?.totalDeductions, record?.totalDeductions)}>{formatHrAmount(record?.totalDeductions)}</td>
@@ -419,11 +476,11 @@ export default function HrMonthlyPage() {
                         </tr>
                       );
                     })}
-                    {!visibleRows.length ? <tr><td colSpan={11}>{t("empty")}</td></tr> : null}
+                    {!visibleRows.length ? <tr><td colSpan={12}>{t("empty")}</td></tr> : null}
                   </tbody>
                   <tfoot>
                     <tr className="moduleBiTotalRow">
-                      <td colSpan={7}><strong>{t("totalFooter")}</strong></td>
+                      <td colSpan={8}><strong>{t("totalFooter")}</strong></td>
                       <td><strong>{formatHrAmount(totals.gross)}</strong></td>
                       <td><strong>{formatHrAmount(totals.deductions)}</strong></td>
                       <td className="moduleBiTotalCol"><strong>{formatHrAmount(totals.net)}</strong></td>

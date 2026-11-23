@@ -1,5 +1,6 @@
 import { EOD_STOCK_DATASET_KEY, readEodStockDataset } from "./eodStock.js";
 import {
+  applyCbmToInterCityReport,
   applyMasterUnitsToInterCityReport,
   buildInterCityStockTransferReport,
   findInterCityStockImbalances,
@@ -7,6 +8,8 @@ import {
   resolveInterCitySalesWindow,
 } from "./interCityStockTransfer.js";
 import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
+import { PRICE_SHEET_GID, PRICE_SHEET_ID } from "./priceApiConfig.js";
+import { parseCsvToRows, parsePricePayload } from "./pricePayload.js";
 import { loadCatalogueSheetPacking } from "./productCatalogueServer.js";
 
 const PAGE_SIZE = 1000;
@@ -82,6 +85,58 @@ async function loadCitySalesForItems(admin, { fromDate, toDate }, itemCodes = []
   return rows;
 }
 
+function cleanCbmMap(source) {
+  const next = {};
+  if (!source || typeof source !== "object" || Array.isArray(source)) return next;
+  Object.entries(source).forEach(([rawCode, rawCbm]) => {
+    const code = normalizeInterCityItemCode(rawCode);
+    const cbm = Number(rawCbm);
+    if (code && Number.isFinite(cbm) && cbm > 0) next[code] = cbm;
+  });
+  return next;
+}
+
+async function loadCbmFromPricingRulesCache(admin) {
+  const { data, error } = await admin
+    .from("price_catalog_cache")
+    .select("price_map")
+    .eq("cache_key", "pricing_rules")
+    .maybeSingle();
+  if (error) throw error;
+  return cleanCbmMap(data?.price_map?.cbmPerCtnMap);
+}
+
+async function loadCbmFromCostingSheet() {
+  const sheetId = String(PRICE_SHEET_ID || "").trim();
+  const sheetGid = String(PRICE_SHEET_GID || "").trim();
+  if (!sheetId) return {};
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${sheetGid || "0"}`;
+  const response = await fetch(exportUrl, { cache: "no-store", redirect: "follow" });
+  if (!response.ok) throw new Error(`Costing sheet request failed (${response.status}).`);
+  const text = await response.text();
+  if (!text || /<!DOCTYPE html|<html/i.test(text.slice(0, 200))) {
+    throw new Error("Costing sheet returned no CSV data.");
+  }
+  const rows = parseCsvToRows(text);
+  if (rows.length < 2) return {};
+  return cleanCbmMap(parsePricePayload(rows).cbmPerCtnMap);
+}
+
+/** CBM per carton: pricing_rules cache (written by price sync) first, else the costing sheet CSV. */
+export async function loadCbmPerCtnMap(admin) {
+  try {
+    const cached = await loadCbmFromPricingRulesCache(admin);
+    if (Object.keys(cached).length) return cached;
+  } catch {
+    // Cache table/key missing — fall through to the sheet.
+  }
+  try {
+    return await loadCbmFromCostingSheet();
+  } catch {
+    return {};
+  }
+}
+
 export async function loadInterCityStockTransferReport(admin, { now = new Date() } = {}) {
   const dataset = await loadEodStockDataset(admin);
   const stockRows = Array.isArray(dataset?.rows) ? dataset.rows : [];
@@ -107,5 +162,9 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
   const masterUnits = await loadMasterUnitConvMap(admin, {
     loadSheetPacking: loadCatalogueSheetPacking,
   }).catch(() => ({}));
-  return applyMasterUnitsToInterCityReport(report, masterUnits);
+  const cbmPerCtnMap = await loadCbmPerCtnMap(admin).catch(() => ({}));
+  return applyCbmToInterCityReport(
+    applyMasterUnitsToInterCityReport(report, masterUnits),
+    cbmPerCtnMap,
+  );
 }

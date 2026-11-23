@@ -2,9 +2,9 @@ name: Daily Warehouse Invoice Resume Email
 
 on:
   schedule:
-    # 05:30 UTC = 08:30 KSA, Saturday–Thursday.
+    # 05:35 UTC = 08:35 KSA, Saturday–Thursday (offset from the 08:30 pile-up).
     # Thursday's report still goes Saturday morning because Friday is the holiday.
-    - cron: "30 5 * * 0-4,6"
+    - cron: "35 5 * * 0-4,6"
   workflow_dispatch:
     inputs:
       date:
@@ -69,10 +69,27 @@ jobs:
           )"
           fi
 
-          status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$DEFAULT_URL" \
-            -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
-            -H "Content-Type: application/json" \
-            --data "$payload")"
+          post_report() {
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$DEFAULT_URL" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data "$payload"
+          }
+
+          status_code=""
+          for attempt in 1 2 3; do
+            status_code="$(post_report)"
+            if [[ "$status_code" -ge 200 && "$status_code" -lt 300 ]]; then
+              break
+            fi
+            if [[ "$status_code" != "502" && "$status_code" != "503" && "$status_code" != "504" ]]; then
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "Warehouse resume email got HTTP $status_code; retrying in 15s (attempt $attempt/3)." >&2
+              sleep 15
+            fi
+          done
 
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
             echo "Daily warehouse invoice resume email failed with HTTP $status_code"

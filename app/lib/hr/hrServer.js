@@ -1,11 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { isMissingRelationError } from "../schemaGuards.js";
 import { buildMonthlyAttendanceReportForUser } from "../monthlyAttendanceReportServer.js";
-import { getKsaDateString } from "../workdayActivity.js";
 import { checkHrAccess } from "./hrAccess.js";
 import { rowToEmployee } from "./hrEmployees.js";
-import { approvedLeaveDatesInMonth, rowToLeave } from "./hrLeave.js";
-import { buildAttendanceFromLedger, rowToMonthlyRecord } from "./hrMonthlyFeed.js";
+import { approvedLeaveDatesInRange, rowToLeave } from "./hrLeave.js";
+import {
+  applyMasterPayAndAbsence,
+  buildAttendanceFromLedger,
+  hrPayrollPeriodForMonth,
+  rowToMonthlyRecord,
+} from "./hrMonthlyFeed.js";
 
 export class HrHttpError extends Error {
   constructor(status, message) {
@@ -15,7 +19,7 @@ export class HrHttpError extends Error {
 }
 
 export const HR_MIGRATION_MESSAGE =
-  "HR tables are not migrated yet. Apply supabase/migrations/20261120120000_hr_management.sql.";
+  "HR tables are not migrated yet. Apply supabase/migrations/20261120120000_hr_management.sql (and 20261123140000_hr_employee_iqama_holidays.sql for iqama expiry / half days).";
 
 export function createHrAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -116,24 +120,38 @@ export async function loadLinkableProfiles(admin) {
 }
 
 /**
- * Attendance numbers for a linked employee from My Day's monthly attendance report.
- * Returns { ok: true, attendance } or { ok: false, reason } (not linked, not a field user,
- * or a future month) so one employee never blocks a bulk prefill.
+ * Attendance + master pay for a linked employee over the 26th–25th payroll period.
+ * Returns { ok: true, attendance } (includes basic/transport/absenceDeduction) or
+ * { ok: false, reason } so one employee never blocks a bulk prefill.
  */
 export async function buildHrAttendancePrefill(admin, employee, month, leaveEntries = []) {
   if (!employee?.profileId) return { ok: false, reason: "No linked profile." };
   try {
-    const report = await buildMonthlyAttendanceReportForUser(admin, {
-      userId: employee.profileId,
-      month,
-      today: getKsaDateString(),
-    });
+    const period = hrPayrollPeriodForMonth(month);
+    const monthKeys = [...new Set([period.fromDate.slice(0, 7), period.toDate.slice(0, 7)])];
+    const reportRows = [];
+    for (const calendarMonth of monthKeys) {
+      const report = await buildMonthlyAttendanceReportForUser(admin, {
+        userId: employee.profileId,
+        month: calendarMonth,
+        today: period.toDate,
+      });
+      for (const row of report.rows || []) {
+        const date = String(row?.date || "");
+        if (date >= period.fromDate && date <= period.toDate) reportRows.push(row);
+      }
+    }
     const attendance = buildAttendanceFromLedger({
-      month,
-      reportRows: report.rows,
-      leaveDates: approvedLeaveDatesInMonth(leaveEntries, month),
+      fromDate: period.fromDate,
+      toDate: period.toDate,
+      reportRows,
+      leaveDates: approvedLeaveDatesInRange(leaveEntries, period.fromDate, period.toDate),
     });
-    return { ok: true, attendance };
+    return {
+      ok: true,
+      attendance: applyMasterPayAndAbsence(employee, attendance),
+      period,
+    };
   } catch (error) {
     return { ok: false, reason: error?.message || "Attendance is not available." };
   }

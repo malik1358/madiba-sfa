@@ -6,10 +6,14 @@ import {
   buildAttendanceFromLedger,
   buildHrMonthlyTemplateRows,
   canOverwriteMonthlyRecord,
+  canPrefillHrPayrollMonth,
+  computeAbsenceDeduction,
   computeMonthlyTotals,
   defaultMonthlyRecordForEmployee,
+  hrPayrollPeriodForMonth,
   isValidHrMonth,
   listHrMonthsBack,
+  listHrPayrollPeriodDates,
   mergeMonthlyRecord,
   monthlyRecordToRow,
   normalizeMonthlyRecordInput,
@@ -20,6 +24,11 @@ import {
   summarizePayrollByMonth,
 } from "../app/lib/hr/hrMonthlyFeed.js";
 import { listKsaMonthDates } from "../app/lib/monthlyAttendanceReport.js";
+import {
+  daysUntilIqamaExpiry,
+  listIqamaExpiringWithinDays,
+} from "../app/lib/hr/hrIqamaExpiryEmail.js";
+import { parseHrLeaveImportRows } from "../app/lib/hr/hrLeave.js";
 
 const employees = [
   { id: "e1", employeeCode: "E001", fullName: "Ahmed", basicSalary: 4000, housingAllowance: 1000, transportAllowance: 500, otherAllowance: 0, department: "Sales" },
@@ -46,14 +55,33 @@ test("net pay can go negative when deductions exceed earnings (no statutory engi
   assert.equal(computeMonthlyTotals({ basicSalary: 100, loanDeduction: 250 }).netPay, -150);
 });
 
-test("a new month defaults earnings from the employee master", () => {
+test("a new month defaults basic + transport from master (no housing/other)", () => {
   const record = defaultMonthlyRecordForEmployee(employees[0]);
   assert.equal(record.basicSalary, 4000);
-  assert.equal(record.housingAllowance, 1000);
+  assert.equal(record.transportAllowance, 500);
+  assert.equal(record.housingAllowance, 0);
+  assert.equal(record.otherAllowance, 0);
   assert.equal(record.status, "DRAFT");
-  assert.equal(record.grossEarnings, 5500);
-  assert.equal(record.netPay, 5500);
+  assert.equal(record.grossEarnings, 4500);
+  assert.equal(record.netPay, 4500);
   assert.equal(record.workingDays, 0);
+});
+
+test("payroll month is 26th of previous month through 25th; prefill only after 25th", () => {
+  assert.deepEqual(hrPayrollPeriodForMonth("2026-11"), {
+    month: "2026-11",
+    fromDate: "2026-10-26",
+    toDate: "2026-11-25",
+  });
+  assert.equal(listHrPayrollPeriodDates("2026-10-26", "2026-11-25").length, 31);
+  assert.equal(canPrefillHrPayrollMonth("2026-11", "2026-11-24").ok, false);
+  assert.equal(canPrefillHrPayrollMonth("2026-11", "2026-11-25").ok, true);
+  assert.equal(computeAbsenceDeduction({
+    basicSalary: 3100,
+    workingDays: 26,
+    absentDays: 2,
+    halfDays: 2,
+  }), 357.69); // (2 + 1) * (3100/26)
 });
 
 test("record input rejects negative and non-numeric amounts; partial keeps only given keys", () => {
@@ -72,9 +100,10 @@ test("merge recomputes totals and keeps untouched fields", () => {
   const base = defaultMonthlyRecordForEmployee(employees[0]);
   const merged = mergeMonthlyRecord(base, { loanDeduction: 500, presentDays: 25 });
   assert.equal(merged.basicSalary, 4000);
+  assert.equal(merged.transportAllowance, 500);
   assert.equal(merged.presentDays, 25);
   assert.equal(merged.totalDeductions, 500);
-  assert.equal(merged.netPay, 5000);
+  assert.equal(merged.netPay, 4000);
 });
 
 test("FINAL rows are protected from overwrite until reopened", () => {
@@ -93,10 +122,10 @@ test("monthly row mapping round-trips and stores computed totals", () => {
   assert.equal(row.status, "DRAFT");
   assert.equal(row.source, "IMPORT");
   assert.equal(row.advance_deduction, 750);
-  assert.equal(row.gross_earnings, 7750);
-  assert.equal(row.net_pay, 7000);
+  assert.equal(row.gross_earnings, 6000);
+  assert.equal(row.net_pay, 5250);
   const back = rowToMonthlyRecord({ ...row, id: "r1" });
-  assert.equal(back.netPay, 7000);
+  assert.equal(back.netPay, 5250);
   assert.equal(back.advanceDeduction, 750);
   assert.equal(back.employeeId, "e2");
 });
@@ -161,7 +190,7 @@ test("imported patch only changes provided columns when merged onto a draft", ()
   assert.equal(merged.loanDeduction, 200);
   assert.equal(merged.presentDays, 20);
   assert.equal(merged.bonusAmount, 300);
-  assert.equal(merged.netPay, 5500 + 300 - 200);
+  assert.equal(merged.netPay, 4500 + 300 - 200);
 });
 
 test("Fridays are holidays in the attendance ledger (Nov 2026 has 4 Fridays)", () => {
@@ -172,7 +201,50 @@ test("Fridays are holidays in the attendance ledger (Nov 2026 has 4 Fridays)", (
   assert.equal(attendance.workingDays, 26);
   assert.equal(attendance.presentDays, 0);
   assert.equal(attendance.absentDays, 26);
+  assert.equal(attendance.halfDays, 0);
   assert.equal(attendance.leaveDays, 0);
+});
+
+test("26–25 attendance period uses custom from/to dates", () => {
+  const attendance = buildAttendanceFromLedger({
+    fromDate: "2026-10-26",
+    toDate: "2026-11-25",
+    reportRows: [
+      { date: "2026-10-26", attended: true },
+      { date: "2026-10-27", attended: false },
+      { date: "2026-11-25", attended: false },
+      { date: "2026-11-26", attended: true }, // outside period
+    ],
+    leaveDates: new Set(["2026-10-27"]),
+  });
+  assert.equal(attendance.presentDays, 1);
+  assert.equal(attendance.leaveDays, 1);
+  assert.equal(attendance.absentDays, 1);
+  assert.ok(attendance.workingDays > 20);
+});
+
+test("iqama expiry warning lists active staff within 30 days including overdue", () => {
+  assert.equal(daysUntilIqamaExpiry("2026-12-01", "2026-11-21"), 10);
+  const { rows } = listIqamaExpiringWithinDays([
+    { employeeCode: "A", fullName: "Soon", status: "ACTIVE", iqamaExpiry: "2026-12-01", iqamaNo: "1" },
+    { employeeCode: "B", fullName: "Far", status: "ACTIVE", iqamaExpiry: "2027-06-01" },
+    { employeeCode: "C", fullName: "Late", status: "ACTIVE", iqamaExpiry: "2026-11-01" },
+    { employeeCode: "D", fullName: "Off", status: "INACTIVE", iqamaExpiry: "2026-11-22" },
+  ], { asOfDate: "2026-11-21", warningDays: 30 });
+  assert.deepEqual(rows.map((row) => row.employeeCode), ["C", "A"]);
+  assert.equal(rows[0].overdue, true);
+});
+
+test("historic leave import maps codes, types and Excel-friendly dates", () => {
+  const { items, errors } = parseHrLeaveImportRows([
+    { "Employee Code": "E001", Type: "Sick", "Start Date": "2026-11-15", "End Date": "2026-11-16", Status: "Approved", Notes: "flu" },
+    { "Employee Code": "E999", Type: "ANNUAL", "Start Date": "2026-11-15", "End Date": "2026-11-16", Status: "APPROVED" },
+  ], { employees });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].value.leaveType, "SICK");
+  assert.equal(items[0].value.status, "APPROVED");
+  assert.equal(items[0].value.days, 2);
+  assert.ok(errors.some((error) => /E999/.test(error.message)));
 });
 
 test("attendance ledger: present days, approved leave and absence; Friday logins do not count", () => {

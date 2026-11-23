@@ -1,4 +1,9 @@
 export const HR_EMPLOYEE_STATUSES = ["ACTIVE", "INACTIVE"];
+export const HR_SALESMAN_DESIGNATION = "Salesman";
+/** Designations kept on the HR Employees list (active only). */
+export const HR_FIELD_STAFF_DESIGNATIONS = ["Salesman", "Collector", "Product promoter", "Promoter"];
+/** Hierarchy roles pulled into HR (salesman / collector / promoter). */
+export const HR_HIERARCHY_SYNC_ROLES = ["salesman", "collector", "product-promoter"];
 
 const MONEY_FIELDS = ["basicSalary", "housingAllowance", "transportAllowance", "otherAllowance"];
 
@@ -28,6 +33,49 @@ function dateOrNull(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
 }
 
+function nonNegativeNumber(value, { allowEmpty = true } = {}) {
+  if (value === "" || value == null) return allowEmpty ? 0 : NaN;
+  const amount = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(amount) ? roundHrMoney(amount) : NaN;
+}
+
+function normalizeRoleKey(role) {
+  return String(role || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+/** True when an app role is salesman (hyphen/underscore/case insensitive). */
+export function isSalesmanRole(role) {
+  return normalizeRoleKey(role) === "salesman";
+}
+
+/** Hierarchy roles that belong on the HR field-staff ledger. */
+export function isHrHierarchySyncRole(role) {
+  return HR_HIERARCHY_SYNC_ROLES.includes(normalizeRoleKey(role));
+}
+
+/** True when an HR staff row is Salesman / Collector / Promoter. */
+export function isHrFieldStaff(employee = {}) {
+  const designation = text(employee.designation).toLowerCase();
+  return HR_FIELD_STAFF_DESIGNATIONS.some((label) => label.toLowerCase() === designation);
+}
+
+/** Active field staff only — what the HR Employees list shows. */
+export function filterActiveFieldStaff(employees = []) {
+  return (employees || []).filter(
+    (employee) => employee.status === "ACTIVE" && isHrFieldStaff(employee),
+  );
+}
+
+/** @deprecated Use filterActiveFieldStaff — kept for older call sites. */
+export function filterActiveSalesmen(employees = []) {
+  return filterActiveFieldStaff(employees);
+}
+
+/** @deprecated Use isHrFieldStaff. */
+export function isHrSalesmanStaff(employee = {}) {
+  return isHrFieldStaff(employee);
+}
+
 /** Validate/normalise employee form or API input. Returns { value, errors }. */
 export function normalizeEmployeeInput(input = {}) {
   const errors = [];
@@ -36,13 +84,15 @@ export function normalizeEmployeeInput(input = {}) {
     fullName: text(input.fullName ?? input.full_name),
     fullNameAr: text(input.fullNameAr ?? input.full_name_ar),
     profileId: text(input.profileId ?? input.profile_id) || null,
-    designation: text(input.designation),
+    designation: text(input.designation) || HR_SALESMAN_DESIGNATION,
     department: text(input.department),
     nationality: text(input.nationality),
     iqamaNo: text(input.iqamaNo ?? input.iqama_no),
+    iqamaExpiry: dateOrNull(input.iqamaExpiry ?? input.iqama_expiry),
     phone: text(input.phone),
     joinDate: dateOrNull(input.joinDate ?? input.join_date),
     status: text(input.status || "ACTIVE").toUpperCase(),
+    holidaysPerYear: nonNegativeNumber(input.holidaysPerYear ?? input.holidays_per_year),
     notes: text(input.notes),
   };
 
@@ -61,8 +111,16 @@ export function normalizeEmployeeInput(input = {}) {
   if (!value.fullName) errors.push("Employee name is required.");
   if (!HR_EMPLOYEE_STATUSES.includes(value.status)) errors.push("Status must be ACTIVE or INACTIVE.");
   if (value.joinDate === undefined) {
-    errors.push("Join date must be YYYY-MM-DD.");
+    errors.push("Joining date must be YYYY-MM-DD.");
     value.joinDate = null;
+  }
+  if (value.iqamaExpiry === undefined) {
+    errors.push("Iqama expiry must be YYYY-MM-DD.");
+    value.iqamaExpiry = null;
+  }
+  if (Number.isNaN(value.holidaysPerYear) || value.holidaysPerYear < 0) {
+    errors.push("Holidays per year must be a non-negative number.");
+    value.holidaysPerYear = 0;
   }
   if (value.profileId && !/^[0-9a-f-]{32,36}$/i.test(value.profileId)) {
     errors.push("Linked profile is not a valid id.");
@@ -81,6 +139,7 @@ export function employeeToRow(employee = {}) {
     department: employee.department || "",
     nationality: employee.nationality || "",
     iqama_no: employee.iqamaNo || "",
+    iqama_expiry: employee.iqamaExpiry || null,
     phone: employee.phone || "",
     join_date: employee.joinDate || null,
     status: employee.status || "ACTIVE",
@@ -88,6 +147,7 @@ export function employeeToRow(employee = {}) {
     housing_allowance: employee.housingAllowance || 0,
     transport_allowance: employee.transportAllowance || 0,
     other_allowance: employee.otherAllowance || 0,
+    holidays_per_year: employee.holidaysPerYear || 0,
     notes: employee.notes || "",
   };
 }
@@ -103,6 +163,7 @@ export function rowToEmployee(row = {}) {
     department: row.department || "",
     nationality: row.nationality || "",
     iqamaNo: row.iqama_no || "",
+    iqamaExpiry: row.iqama_expiry || null,
     phone: row.phone || "",
     joinDate: row.join_date || null,
     status: row.status || "ACTIVE",
@@ -110,6 +171,7 @@ export function rowToEmployee(row = {}) {
     housingAllowance: roundHrMoney(row.housing_allowance),
     transportAllowance: roundHrMoney(row.transport_allowance),
     otherAllowance: roundHrMoney(row.other_allowance),
+    holidaysPerYear: roundHrMoney(row.holidays_per_year),
     notes: row.notes || "",
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
@@ -195,6 +257,7 @@ export function employeeFromHierarchyProfile(profile = {}) {
     department: departmentForHierarchyRole(role),
     nationality: "",
     iqamaNo: "",
+    iqamaExpiry: null,
     phone: "",
     joinDate: null,
     status: isActive ? "ACTIVE" : "INACTIVE",
@@ -202,16 +265,15 @@ export function employeeFromHierarchyProfile(profile = {}) {
     housingAllowance: 0,
     transportAllowance: 0,
     otherAllowance: 0,
+    holidaysPerYear: 0,
     notes: "Imported from Salesman Hierarchy",
   };
 }
 
 /**
  * Plan create/update/skip actions to pull Salesman Hierarchy profiles into HR Employees.
- * - Creates a staff row per salesman_code when missing, already linked to that profile.
- * - Updates existing rows: refresh name/status/designation/department; link profile when free.
- * - Never overwrites salary/allowance fields on an existing row.
- * - Skips profiles without a salesman code, and profile links already owned by another code.
+ * Only salesman / collector / product-promoter roles. Creates a staff row per salesman_code
+ * when missing (linked). Updates keep salary/iqama/holidays. Skips other roles and link clashes.
  */
 export function planHierarchyStaffSync(profiles = [], employees = []) {
   const existingByCode = new Map(
@@ -230,6 +292,16 @@ export function planHierarchyStaffSync(profiles = [], employees = []) {
   const seenCodes = new Set();
 
   for (const profile of profiles || []) {
+    if (!isHrHierarchySyncRole(profile.role)) {
+      skipped.push({
+        reason: "not_field_staff_role",
+        profileId: profile.id || null,
+        role: profile.role || "",
+        name: text(profile.name ?? profile.salesman_name ?? profile.email),
+      });
+      continue;
+    }
+
     const draft = employeeFromHierarchyProfile(profile);
     if (!draft.employeeCode) {
       skipped.push({ reason: "missing_code", profileId: profile.id || null, name: draft.fullName });
@@ -258,6 +330,10 @@ export function planHierarchyStaffSync(profiles = [], employees = []) {
 
     const existing = existingByCode.get(draft.employeeCode);
     if (!existing) {
+      if (draft.status !== "ACTIVE") {
+        skipped.push({ reason: "inactive_profile", profileId: draft.profileId, employeeCode: draft.employeeCode });
+        continue;
+      }
       creates.push(draft);
       if (draft.profileId) linkedProfileIds.set(draft.profileId, draft.employeeCode);
       continue;
@@ -284,6 +360,7 @@ export function planHierarchyStaffSync(profiles = [], employees = []) {
       department: existing.department || draft.department,
       nationality: existing.nationality || "",
       iqamaNo: existing.iqamaNo || "",
+      iqamaExpiry: existing.iqamaExpiry || null,
       phone: existing.phone || "",
       joinDate: existing.joinDate || null,
       status: draft.status,
@@ -291,6 +368,7 @@ export function planHierarchyStaffSync(profiles = [], employees = []) {
       housingAllowance: existing.housingAllowance || 0,
       transportAllowance: existing.transportAllowance || 0,
       otherAllowance: existing.otherAllowance || 0,
+      holidaysPerYear: existing.holidaysPerYear || 0,
       notes: existing.notes || draft.notes,
     };
 

@@ -18,6 +18,54 @@ export function laterTransactionDate(existingDate, incomingDate) {
 }
 
 /**
+ * Prefer the newest transaction_date, then the highest source_row_number on a tie.
+ * Used when collapsing many sales lines into one customer-master upsert row.
+ */
+export function pickLatestCustomerRow(existing, candidate) {
+  if (!existing) return candidate;
+  if (!candidate) return existing;
+
+  const existingDate = String(existing.transaction_date || "");
+  const candidateDate = String(candidate.transaction_date || "");
+
+  if (candidateDate && (!existingDate || candidateDate > existingDate)) {
+    return candidate;
+  }
+
+  if (
+    candidateDate
+    && existingDate
+    && candidateDate === existingDate
+    && Number(candidate.source_row_number || 0) > Number(existing.source_row_number || 0)
+  ) {
+    return candidate;
+  }
+
+  return existing;
+}
+
+/**
+ * Build the per-customer latest sales row map from in-memory import rows.
+ * Prefer this over re-querying sales_raw: PostgREST silently truncates large
+ * `.in(customer_code, …)` result sets, which left new parties (e.g. 1704)
+ * out of the customer master after a successful sales merge.
+ */
+export function buildLatestCustomerMapFromRows(rows) {
+  const latestCustomer = new Map();
+
+  for (const row of rows || []) {
+    const customerCode = String(row?.customer_code || "").trim();
+    if (!customerCode) continue;
+    latestCustomer.set(
+      customerCode,
+      pickLatestCustomerRow(latestCustomer.get(customerCode), row),
+    );
+  }
+
+  return latestCustomer;
+}
+
+/**
  * @param {object} input
  * @param {string} [input.existingSalesman] current book owner already stored
  * @param {string} [input.invoiceSalesman] salesman on the imported voucher

@@ -22,10 +22,11 @@ Standalone Node scripts under `scripts/backup/` run in a gated, main-only GitHub
 Browser (app/page.js, app/management/*, app/components/*, app/order/[token])
   -> getSupabaseClient() for login and a few direct reads
   -> fetch /api/* with the user access token
-  -> public /order/<token> talks only to /api/customer-order-links/[token] (no JWT)
+  -> public /order/<token> talks only to /api/customer-order-links/[token] (+ photo + pdf; no JWT)
 API route (app/api/**/route.js)
   -> verify JWT with the service-role client, or verify CRON_SECRET
-  -> customer order links: create requires JWT + sales scope; redeem/submit validate opaque token + expiry
+  -> customer order links: create requires JWT + sales scope; redeem/submit/pdf validate opaque token + expiry
+  -> guest submit queues salesman+hierarchy email (order PDF) and hierarchy push
   -> enforce sales scope in application code
   -> read/write Postgres and Storage
 Postgres
@@ -187,7 +188,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 4. API routes expect `Authorization: Bearer <access token>`, then `auth.getUser`.
 5. Cron routes use `app/lib/cronAuth.js`: `Authorization: Bearer <CRON_SECRET>` or header `x-cron-secret`. If `CRON_SECRET` is empty, cron calls are rejected.
 6. Android login can be blocked by a minimum APK version (`app/lib/androidAppVersionPolicy.js`, setting `android_apk_min_version_v1`, env `MIN_ANDROID_APK_VERSION_CODE`).
-7. Android also gates login/morning attendance on unrestricted battery (`app/lib/androidBatteryOptimization.js`, details in `ANDROID_APK.md`).
+7. Android also gates morning attendance / field use on unrestricted battery (`app/lib/androidBatteryOptimization.js`, details in `ANDROID_APK.md`). Password sign-in itself no longer calls `signOut` when battery is restricted or GPS is unavailable: the Auth session stays, and `MorningAttendanceGate` shows the Battery / Location Retry UI so users are not bounced back to the password form.
 8. Browser GPS capture lives in `app/lib/geo.js`. Collectors punch morning attendance from `MorningAttendanceRedirect` on Payment Collections; that path uses progressive `probeGpsLocationWithRetries` and `formatGpsFailureMessage` so Safari site-permission failures are not mislabeled as “phone GPS off.”
 9. After a successful password sign-in, non-admin users keep one Auth session per platform (`POST /api/auth/session-limit`, `enforce_single_platform_session`). The Android app is the WebView platform; browsers share one web session. Admin is exempt. Production already has the function at ledger version `20261016080833`, aliased to repo file `20261016120000_single_platform_session.sql`. Do not apply that file again.
 10. Active admins can use the global **Login as** control. `/api/admin/login-as` revalidates the admin profile and target profile, then uses Supabase Admin `generateLink` plus browser `verifyOtp` to create a real target-user session without handling passwords. The admin access/refresh tokens plus `targetId` are kept in tab `sessionStorage` for the **Return to admin** control. The “Viewing as” banner only appears when the live Auth user id equals that `targetId` (stale storage with an admin JWT is cleared). App APIs and audit fields see the selected user; there is no separate impersonation audit record. No schema migration is required.
@@ -224,7 +225,7 @@ New field orders go to `sales_orders`. Invoice status is not a column on that ta
 
 ## Imports and the active batch
 
-`/api/import-sales` loads an Excel sales file into `sales_raw` under a new `import_batches` row, then activates it. `activate_sales_batch` archives the previous `ACTIVE` batch and sets `system_settings.active_sales_batch_id`. The view `public.active_sales` is that batch only.
+`/api/import-sales` loads an Excel sales file into `sales_raw` under a new `import_batches` row, then activates it. `activate_sales_batch` archives the previous `ACTIVE` batch and sets `system_settings.active_sales_batch_id`. The view `public.active_sales` is that batch only. After the date merge, the route upserts the customer master from the **in-memory upload rows** (`buildLatestCustomerMapFromRows` → `upsertCustomersFromLatestMap`). Do not rebuild that map by re-querying `sales_raw` with a large `.in(customer_code, …)`: PostgREST silently truncates the result set and new parties (e.g. **1704** for Thamer) never appear on My Day / New Order even though they exist in `active_sales`.
 
 Outstanding customer sheets, the receipt register, and end-of-day city stock are parsed and stored as JSON settings (`outstanding_customerwise_dataset_v1`, `receipt_register_dataset_v1`, `eod_stock_citywise_v1`). `/api/eod-stock` accepts an Excel closing-stock file for Riyadh, Dammam, and Jeddah and `/management/eod-stock` shows that snapshot against the previous stock date. The original file is stored like the other uploads (`kind=eod-stock`), and `cityUploads` keeps the last path per city so `/api/upload-files?kind=eod-stock&city=…` can download Riyadh after a Dammam upload. GET `/api/eod-stock` rediscovers those storage files and can re-merge a thin city from its last Excel. When that outstanding workbook has invoice or row data, Payment Collections uses it and does **not** merge `public.invoices` (that merge reloaded every open invoice on each queue fetch). `readOutstandingInvoicesFromTable` in `app/api/payment-collections/route.js` runs only when no workbook has been uploaded. Receipt uploads accept an optional `includePaymentVouchers` flag so Payment Register rows (Dr) for dual customer/supplier parties merge as **negative** receipt amounts into the same dataset used by FIFO settlement.
 

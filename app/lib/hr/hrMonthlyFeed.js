@@ -1,8 +1,18 @@
+import { addKsaCalendarDays, getKsaDateString } from "../workdayActivity.js";
 import { isKsaFriday, listKsaMonthDates } from "../monthlyAttendanceReport.js";
 import { normalizeEmployeeCode, roundHrMoney } from "./hrEmployees.js";
 
 export const HR_RECORD_STATUSES = ["DRAFT", "FINAL"];
 export const HR_RECORD_SOURCES = ["MANUAL", "IMPORT", "PREFILL"];
+
+/** Earnings shown on the monthly editor (housing / other allowance are not used). */
+export const HR_VISIBLE_EARNING_FIELDS = [
+  "basicSalary",
+  "transportAllowance",
+  "overtimeAmount",
+  "bonusAmount",
+  "commissionAmount",
+];
 
 export const HR_EARNING_FIELDS = [
   "basicSalary",
@@ -26,6 +36,7 @@ export const HR_ATTENDANCE_FIELDS = [
   "workingDays",
   "presentDays",
   "absentDays",
+  "halfDays",
   "leaveDays",
   "holidayDays",
   "overtimeHours",
@@ -50,10 +61,73 @@ export const HR_FIELD_LABELS = {
   workingDays: { en: "Working days", ar: "أيام العمل" },
   presentDays: { en: "Present days", ar: "أيام الحضور" },
   absentDays: { en: "Absent days", ar: "أيام الغياب" },
+  halfDays: { en: "Half days", ar: "أيام نصف دوام" },
   leaveDays: { en: "Leave days", ar: "أيام الإجازة" },
   holidayDays: { en: "Holidays (Fri)", ar: "العطلات (الجمعة)" },
   overtimeHours: { en: "Overtime hours", ar: "ساعات إضافية" },
 };
+
+/**
+ * Payroll month YYYY-MM uses attendance from previous-month 26th through this-month 25th.
+ * Example: 2026-11 → 2026-10-26 … 2026-11-25.
+ */
+export function hrPayrollPeriodForMonth(month) {
+  if (!isValidHrMonth(month)) throw new Error("Invalid month. Use YYYY-MM.");
+  const [year, mon] = month.split("-").map(Number);
+  const prev = new Date(Date.UTC(year, mon - 2, 26));
+  const fromDate = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}-26`;
+  const toDate = `${month}-25`;
+  return { month, fromDate, toDate };
+}
+
+/** Prefill is allowed only on/after the period end date (25th of the payroll month). */
+export function canPrefillHrPayrollMonth(month, today = getKsaDateString()) {
+  const period = hrPayrollPeriodForMonth(month);
+  const asOf = String(today || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    return { ok: false, reason: "Invalid today date.", ...period, today: asOf };
+  }
+  if (asOf < period.toDate) {
+    return {
+      ok: false,
+      reason: `Prefill opens on/after ${period.toDate} (salary cycle ${period.fromDate}–${period.toDate}).`,
+      ...period,
+      today: asOf,
+    };
+  }
+  return { ok: true, reason: "", ...period, today: asOf };
+}
+
+/** Every KSA calendar date from fromDate to toDate inclusive. */
+export function listHrPayrollPeriodDates(fromDate, toDate) {
+  const start = String(fromDate || "").trim().slice(0, 10);
+  const end = String(toDate || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return [];
+  const dates = [];
+  let cursor = start;
+  while (cursor <= end && dates.length < 62) {
+    dates.push(cursor);
+    cursor = addKsaCalendarDays(cursor, 1);
+  }
+  return dates;
+}
+
+/**
+ * Absence deduction = (absentDays + halfDays×0.5) × (basicSalary / workingDays).
+ * Transport stays in earnings; it is not part of the daily charge rate.
+ */
+export function computeAbsenceDeduction({
+  basicSalary = 0,
+  workingDays = 0,
+  absentDays = 0,
+  halfDays = 0,
+} = {}) {
+  const work = Number(workingDays) || 0;
+  if (work <= 0) return 0;
+  const charged = Number(absentDays || 0) + Number(halfDays || 0) * 0.5;
+  if (charged <= 0) return 0;
+  return roundHrMoney((Number(basicSalary || 0) / work) * charged);
+}
 
 const SNAKE = (key) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
@@ -88,14 +162,36 @@ export function emptyMonthlyRecord() {
   return { ...record, ...computeMonthlyTotals(record) };
 }
 
-/** New month defaults: earnings come from the employee master, everything else is zero. */
+/** New month defaults: basic + transport from master (housing/other are not used). */
 export function defaultMonthlyRecordForEmployee(employee = {}) {
   const record = emptyMonthlyRecord();
   record.basicSalary = roundHrMoney(employee.basicSalary);
-  record.housingAllowance = roundHrMoney(employee.housingAllowance);
+  record.housingAllowance = 0;
   record.transportAllowance = roundHrMoney(employee.transportAllowance);
-  record.otherAllowance = roundHrMoney(employee.otherAllowance);
+  record.otherAllowance = 0;
   return { ...record, ...computeMonthlyTotals(record) };
+}
+
+/** Apply master basic+transport and auto absence deduction onto a prefill/save patch. */
+export function applyMasterPayAndAbsence(employee = {}, attendanceOrPatch = {}) {
+  const workingDays = Number(attendanceOrPatch.workingDays ?? 0);
+  const absentDays = Number(attendanceOrPatch.absentDays ?? 0);
+  const halfDays = Number(attendanceOrPatch.halfDays ?? 0);
+  const basicSalary = roundHrMoney(employee.basicSalary);
+  const transportAllowance = roundHrMoney(employee.transportAllowance);
+  return {
+    ...attendanceOrPatch,
+    basicSalary,
+    transportAllowance,
+    housingAllowance: 0,
+    otherAllowance: 0,
+    absenceDeduction: computeAbsenceDeduction({
+      basicSalary,
+      workingDays,
+      absentDays,
+      halfDays,
+    }),
+  };
 }
 
 /**
@@ -285,23 +381,35 @@ export function parseHrMonthlyImportRows(rows = [], { employees = [] } = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Own HR ledger numbers from My Day monthly attendance rows (linked profiles).
- * Fridays are holidays: never working, present, absent or leave days.
- * Absence is only counted for days already elapsed in the report; approved leave dates
- * (see hrLeave.approvedLeaveDatesInMonth) turn a no-login day into leave instead of absence.
+ * Own HR ledger numbers from My Day attendance rows for the 26th–25th payroll period.
+ * Fridays are holidays. Approved leave turns a no-login day into leave instead of absence.
+ * Half days start at 0 (editable after Prefill). Pass fromDate/toDate for the cycle;
+ * `month` alone still uses the calendar month for older callers.
  */
-export function buildAttendanceFromLedger({ month, reportRows = [], leaveDates = new Set() } = {}) {
-  if (!isValidHrMonth(month)) throw new Error("Invalid month. Use YYYY-MM.");
-  const allDates = listKsaMonthDates(month);
+export function buildAttendanceFromLedger({
+  month = "",
+  fromDate = "",
+  toDate = "",
+  reportRows = [],
+  leaveDates = new Set(),
+} = {}) {
+  let allDates;
+  if (fromDate && toDate) {
+    allDates = listHrPayrollPeriodDates(fromDate, toDate);
+  } else {
+    if (!isValidHrMonth(month)) throw new Error("Invalid month. Use YYYY-MM.");
+    allDates = listKsaMonthDates(month);
+  }
   const holidayDays = allDates.filter((date) => isKsaFriday(date)).length;
   const workingDays = allDates.length - holidayDays;
+  const periodSet = new Set(allDates);
 
   let presentDays = 0;
   let absentDays = 0;
   const leaveCounted = new Set();
   for (const row of reportRows || []) {
     const date = String(row?.date || "");
-    if (!date || isKsaFriday(date)) continue;
+    if (!date || !periodSet.has(date) || isKsaFriday(date)) continue;
     if (row.attended) {
       presentDays += 1;
     } else if (leaveDates.has(date)) {
@@ -310,16 +418,15 @@ export function buildAttendanceFromLedger({ month, reportRows = [], leaveDates =
       absentDays += 1;
     }
   }
-  // Future approved leave days (not in the elapsed report rows) still count as leave.
-  const elapsed = new Set((reportRows || []).map((row) => String(row?.date || "")));
   for (const date of leaveDates) {
-    if (!elapsed.has(date) && !isKsaFriday(date)) leaveCounted.add(date);
+    if (periodSet.has(date) && !isKsaFriday(date)) leaveCounted.add(date);
   }
 
   return {
     workingDays,
     presentDays,
     absentDays,
+    halfDays: 0,
     leaveDays: leaveCounted.size,
     holidayDays,
   };

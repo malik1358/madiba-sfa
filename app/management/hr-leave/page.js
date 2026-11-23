@@ -21,7 +21,12 @@ import {
   summarizeLeaveByType,
 } from "../../lib/hr/hrLeave";
 import { isValidHrMonth } from "../../lib/hr/hrMonthlyFeed";
-import { currentHrMonth, hrFetch } from "../../lib/hr/hrClient";
+import {
+  currentHrMonth,
+  downloadHrLeaveTemplate,
+  hrFetch,
+  readHrExcelFile,
+} from "../../lib/hr/hrClient";
 
 const FILTER_KEYS = ["code", "name", "type", "start", "end", "days", "status"];
 
@@ -60,6 +65,17 @@ const TEXT = {
   totalFooter: { en: "Total days", ar: "إجمالي الأيام" },
   empty: { en: "No leave in this month.", ar: "لا توجد إجازات في هذا الشهر." },
   daysPreview: { en: "Working days in range", ar: "أيام العمل في الفترة" },
+  template: { en: "Download historic template", ar: "تنزيل قالب البيانات التاريخية" },
+  importExcel: { en: "Upload historic Excel", ar: "رفع Excel التاريخي" },
+  importHint: {
+    en: "Template includes dropdown lists for Employee Code, Type and Status. Fill Start/End as YYYY-MM-DD then upload.",
+    ar: "القالب يتضمن قوائم منسدلة لكود الموظف والنوع والحالة. عبّئ من/إلى بصيغة YYYY-MM-DD ثم ارفع الملف.",
+  },
+  importedSummary: { en: "Historic import finished", ar: "انتهى استيراد السجل التاريخي" },
+  saved_n: { en: "saved", ar: "تم حفظ" },
+  skipped_n: { en: "skipped", ar: "تم تخطي" },
+  errors_n: { en: "rows with errors", ar: "صفوف بها أخطاء" },
+  details: { en: "Details", ar: "التفاصيل" },
 };
 
 const EMPTY_FORM = {
@@ -80,8 +96,10 @@ export default function HrLeavePage() {
   const { access, loading: accessLoading } = useModuleAccess();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [report, setReport] = useState([]);
   const [month, setMonth] = useState(() => currentHrMonth());
   const [employees, setEmployees] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -169,6 +187,34 @@ export default function HrLeavePage() {
     }
   }
 
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !canWrite) return;
+    setBusy(true);
+    setError("");
+    setReport([]);
+    try {
+      const rowsFromFile = await readHrExcelFile(file);
+      const payload = await hrFetch(supabaseClient, "/api/hr/leave", {
+        method: "POST",
+        body: { action: "import", rows: rowsFromFile },
+      });
+      setMessage(
+        `${t("importedSummary")}: ${payload.saved || 0} ${t("saved_n")}, ${payload.skipped?.length || 0} ${t("skipped_n")}, ${payload.errors?.length || 0} ${t("errors_n")}.`,
+      );
+      setReport([
+        ...(payload.skipped || []).map((item) => `#${item.rowNumber} ${item.employeeCode || ""}: ${item.reason}`),
+        ...(payload.errors || []).map((item) => `#${item.rowNumber} ${item.message}`),
+      ]);
+      await load();
+    } catch (err) {
+      setError(err.message || "Unable to import historic leave.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!supabaseClient) return <SupabaseUnavailable />;
 
   return (
@@ -193,9 +239,32 @@ export default function HrLeavePage() {
                 <input type="month" className="moduleInput" value={month} onChange={(event) => setMonth(event.target.value)} />
               </label>
               {canWrite && !form ? (
-                <button type="button" className="moduleInlineButton" onClick={() => setForm({ ...EMPTY_FORM })}>{t("addLeave")}</button>
+                <>
+                  <button type="button" className="moduleInlineButton" onClick={() => setForm({ ...EMPTY_FORM })}>{t("addLeave")}</button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    disabled={busy || loading}
+                    onClick={() => downloadHrLeaveTemplate(employees.filter((employee) => employee.status === "ACTIVE"))}
+                  >
+                    {t("template")}
+                  </button>
+                  <label className="moduleInlineButton">
+                    {t("importExcel")}
+                    <input type="file" accept=".xlsx,.xls,.csv" hidden disabled={busy || loading} onChange={handleImportFile} />
+                  </label>
+                </>
               ) : null}
             </div>
+          ) : null}
+
+          {allowed && canWrite ? <p className="moduleHint">{t("importHint")}</p> : null}
+
+          {report.length ? (
+            <details className="moduleSection" open>
+              <summary>{t("details")} ({report.length})</summary>
+              <ul>{report.slice(0, 50).map((line, index) => <li key={index}>{line}</li>)}</ul>
+            </details>
           ) : null}
 
           {allowed && !loading ? (

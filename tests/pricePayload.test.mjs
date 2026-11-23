@@ -150,15 +150,52 @@ test('parsePricePayload reads wholesale price headers from pricing sheets', () =
   assert.equal(priceMap.A005425, 52.83);
 });
 
-test('parsePricePayload applies alias fallback for missing target code', () => {
+test('parsePricePayload does not invent catalogue prices from PRICE_CODE_ALIASES', () => {
   const payload = {
     A004555: 51.3,
     A000057: 71.74,
+    // Replacement gloves priced; old 100-pcs codes have no numeric sheet rate.
+    A006297: 60,
+    A006298: 60,
+    A006299: 60,
+    A006300: 60,
   };
 
-  const { priceMap } = parsePricePayload(payload);
-  assert.equal(priceMap.A005425, 51.3);
-  assert.equal(priceMap.A003234, 51.3);
+  const { priceMap, regionPriceMaps, retailRegionPriceMaps } = parsePricePayload(payload);
+  assert.equal(priceMap.A004555, 51.3);
+  assert.equal(priceMap.A000057, 71.74);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A005425'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A003234'), false);
+  assert.equal(priceMap.A006297, 60);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A003946'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A003947'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A003948'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(priceMap, 'A003949'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(regionPriceMaps.riyadh, 'A003946'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(retailRegionPriceMaps.riyadh || {}, 'A003946'), false);
+});
+
+test('parsePricePayload keeps stock-out glove codes unpriced when Apps Script omits rates', () => {
+  const payload = {
+    success: true,
+    priceMap: { A006297: 60, A006298: 60 },
+    regionPriceMaps: {
+      riyadh: { A006297: 60, A006298: 60 },
+      dammam: { A006297: 61, A006298: 61 },
+      jeddah: { A006297: 62, A006298: 62 },
+    },
+    sheetItems: [
+      { item_code: 'A003946', item_name: 'Gloves, clear vinyl, S 100 pcs', source: 'GOOGLE_SHEET' },
+      { item_code: 'A006297', item_name: 'MADIBA VINYL GLOVES SIZE SMALL', source: 'GOOGLE_SHEET' },
+      { item_code: 'A006298', item_name: 'MADIBA VINYL GLOVES SIZE MEDIUM', source: 'GOOGLE_SHEET' },
+    ],
+  };
+
+  const { priceMap, sheetItems } = parsePricePayload(payload);
+  assert.equal(priceMap.A006297, 60);
+  assert.equal(priceMap.A003946, undefined);
+  assert.equal(Number(priceMap.A003946 || 0) > 0, false);
+  assert.equal(sheetItems.some((item) => item.item_code === 'A003946'), true);
 });
 
 test('parsePricePayload reads nested priceMap objects from source payload', () => {

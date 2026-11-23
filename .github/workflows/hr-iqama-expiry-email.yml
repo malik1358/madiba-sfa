@@ -1,0 +1,110 @@
+name: HR Iqama Expiry Email
+
+on:
+  schedule:
+    # 05:50 UTC = 08:50 KSA, Saturday–Thursday — Iqama expiry within 30 days.
+    - cron: "50 5 * * 0-4,6"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (KSA). Empty = today KSA."
+        required: false
+        default: ""
+      to:
+        description: "Test-only recipient override (skips default Soyeb/Sohail/Malik list)."
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already marked sent / empty list"
+        required: false
+        default: "true"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger HR Iqama expiry email endpoint
+        env:
+          HR_IQAMA_EXPIRY_EMAIL_URL: ${{ secrets.HR_IQAMA_EXPIRY_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          DEFAULT_HR_IQAMA_EXPIRY_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/hr-iqama-expiry-email'
+          HR_IQAMA_EXPIRY_EMAIL_URL_TRIMMED="$(printf '%s' "$HR_IQAMA_EXPIRY_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE="$HR_IQAMA_EXPIRY_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "HR_IQAMA_EXPIRY_EMAIL_URL secret is missing; falling back to default endpoint."
+            HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE="$DEFAULT_HR_IQAMA_EXPIRY_EMAIL_URL"
+          elif [[ ! "$HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE" =~ /api/cron/hr-iqama-expiry-email([/?].*)?$ ]]; then
+            echo "HR_IQAMA_EXPIRY_EMAIL_URL secret does not point to /api/cron/hr-iqama-expiry-email; falling back to default endpoint."
+            HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE="$DEFAULT_HR_IQAMA_EXPIRY_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          export EVENT_NAME
+          export FORCE_VALUE="${INPUT_FORCE:-}"
+          export DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          python3 - <<'PY' > payload.json
+          import json, os
+          event_name = os.environ.get("EVENT_NAME", "").strip()
+          force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
+          if event_name == "schedule":
+            force = False
+            trigger = "cron"
+          elif force_raw:
+            force = force_raw not in ("0", "false", "no")
+            trigger = "manual"
+          else:
+            force = True
+            trigger = "manual"
+          payload = {"force": force, "trigger": trigger}
+          date = os.environ.get("DATE_VALUE", "").strip()
+          to = os.environ.get("TO_VALUE", "").strip()
+          if date:
+            payload["date"] = date
+          if to:
+            payload["to"] = to
+          print(json.dumps(payload))
+          PY
+
+          echo "Request payload:"
+          cat payload.json
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data @payload.json
+          }
+
+          status_code="$(post_report "$HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE" != "$DEFAULT_HR_IQAMA_EXPIRY_EMAIL_URL" ]]; then
+            echo "Primary HR_IQAMA_EXPIRY_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE="$DEFAULT_HR_IQAMA_EXPIRY_EMAIL_URL"
+            status_code="$(post_report "$HR_IQAMA_EXPIRY_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "HR Iqama expiry email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "HR Iqama expiry email succeeded with HTTP $status_code"
+          cat response.json

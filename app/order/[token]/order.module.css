@@ -139,7 +139,18 @@
   justify-content: center;
 }
 
-.gallery img {
+.photoOpen {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.gallery img,
+.photoOpen img {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -156,6 +167,7 @@
   justify-content: space-between;
   gap: 8px;
   pointer-events: none;
+  z-index: 1;
 }
 
 .carouselControls span {
@@ -184,13 +196,83 @@
   padding: 16px;
 }
 
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b1f26f2;
+  touch-action: pan-y;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.lightboxImage {
+  max-width: min(100vw, 1100px);
+  max-height: 92vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: orderPhotoFade 0.25s ease;
+}
+
+.lightboxClose {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  inset-inline-end: max(12px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff22;
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightboxNav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff22;
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.lightboxPrev { inset-inline-start: max(10px, env(safe-area-inset-left)); }
+.lightboxNext { inset-inline-end: max(10px, env(safe-area-inset-right)); }
+
+.lightboxCounter {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffffff22;
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 @keyframes orderPhotoFade {
   from { opacity: 0.35; }
   to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gallery img {
+  .gallery img,
+  .photoOpen img,
+  .lightboxImage {
     animation: none;
   }
 }

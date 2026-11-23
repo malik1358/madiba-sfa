@@ -15,8 +15,8 @@ import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHea
 const TEXT = {
   title: { en: "Inter-city Stock Transfer", ar: "نقل المخزون بين المدن" },
   subtitle: {
-    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse stock missing from the Store (Dukan). Quantities show in cartons (master units) when a conversion exists. Peak weekly sales use the last 5 weeks. Suggested transfer covers ≥15 days at the destination, but the source city keeps ≥30 days of its own peak weekly sales (last 5 weeks); never-sold items get a minimum of 5. Days cover after is shown for both source and destination. CBM = cartons × CBM/Ctn from the costing sheet. Building materials excluded.",
-    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى مخزون مستودع الرياض غير الموجود في المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. أعلى مبيعات أسبوعية خلال آخر 5 أسابيع. النقل المقترح يغطي 15 يوماً في الوجهة مع إبقاء 30 يوماً على الأقل من أعلى مبيعات أسبوعية في المصدر (آخر 5 أسابيع)؛ غير المباعة حد أدنى 5. أيام التغطية بعد النقل للمصدر والوجهة. الحجم (CBM) = الكراتين × CBM/كرتون من ورقة التكاليف. مواد البناء مستثناة.",
+    en: "Catalogue items with stock in Riyadh but not Dammam (and vice versa), plus Riyadh warehouse ↔ Store (Dukan) gaps. Quantities show in cartons (master units) when a conversion exists. Peak weekly sales use the last 5 weeks. Suggested transfer covers ≥15 days at the destination, but the source keeps ≥30 days of its own peak weekly sales (last 5 weeks); never-sold items get a minimum of 5. Days cover after is shown for both source and destination. CBM = cartons × CBM/Ctn (costing sheet column F). Building materials excluded.",
+    ar: "أصناف الكتالوج المتوفرة في الرياض وغير المتوفرة في الدمام (والعكس)، بالإضافة إلى فجوات مستودع الرياض ↔ المتجر (الدكان). الكميات بالكراتين عند توفر التحويل. أعلى مبيعات أسبوعية خلال آخر 5 أسابيع. النقل المقترح يغطي 15 يوماً في الوجهة مع إبقاء 30 يوماً على الأقل من أعلى مبيعات أسبوعية في المصدر (آخر 5 أسابيع)؛ غير المباعة حد أدنى 5. أيام التغطية بعد النقل للمصدر والوجهة. الحجم (CBM) = الكراتين × CBM/كرتون (عمود F في ورقة التكاليف). مواد البناء مستثناة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
@@ -45,6 +45,7 @@ const TEXT = {
   riyadhToDammam: { en: "Riyadh → Dammam", ar: "الرياض ← الدمام" },
   dammamToRiyadh: { en: "Dammam → Riyadh", ar: "الدمام ← الرياض" },
   riyadhToStore: { en: "Riyadh → Store", ar: "الرياض ← المتجر" },
+  storeToRiyadh: { en: "Store → Riyadh", ar: "المتجر ← الرياض" },
   items: { en: "Items", ar: "الأصناف" },
   suggestedTotal: { en: "Suggested qty", ar: "الكمية المقترحة" },
   noRows: {
@@ -83,6 +84,7 @@ const DIRECTION_CITIES = {
   riyadhToDammam: { source: "riyadh", destination: "dammam" },
   dammamToRiyadh: { source: "dammam", destination: "riyadh" },
   riyadhToStore: { source: "riyadh", destination: "store" },
+  storeToRiyadh: { source: "store", destination: "riyadh" },
 };
 
 function withCity(template, cityName) {
@@ -353,14 +355,15 @@ export default function InterCityStockTransferPage() {
   const cities = DIRECTION_CITIES[direction] || DIRECTION_CITIES.riyadhToDammam;
   const sourceStockCount = direction === "dammamToRiyadh"
     ? Number(summary.dammamStockItems || 0)
-    : direction === "riyadhToStore"
-      ? Number(summary.riyadhStockItems || 0)
+    : direction === "storeToRiyadh"
+      ? Number(summary.storeStockItems || 0)
       : Number(summary.riyadhStockItems || 0);
-  const thinThreshold = direction === "riyadhToStore" ? 1 : 20;
+  const thinThreshold = direction === "riyadhToStore" || direction === "storeToRiyadh" ? 1 : 20;
   const thinSourceHint = sourceStockCount < thinThreshold
     ? withCity(t("thinSource"), t(cities.source)).replace("{count}", String(sourceStockCount))
     : "";
-  const emptyStoreHint = direction === "riyadhToStore" && Number(summary.storeStockItems || 0) === 0
+  const emptyStoreHint = (direction === "riyadhToStore" || direction === "storeToRiyadh")
+    && Number(summary.storeStockItems || 0) === 0
     ? withCity(t("thinSource"), t("store")).replace("{count}", "0")
     : "";
   const emptyHint = thinSourceHint || emptyStoreHint || t("noRows");
@@ -401,6 +404,7 @@ export default function InterCityStockTransferPage() {
               {` · ${t("riyadhToDammam")}: ${summary.riyadhToDammamItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToDammamSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.riyadhToDammamTotalCbm || 0)})`}
               {` · ${t("dammamToRiyadh")}: ${summary.dammamToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.dammamToRiyadhSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.dammamToRiyadhTotalCbm || 0)})`}
               {` · ${t("riyadhToStore")}: ${summary.riyadhToStoreItems || 0} (${t("suggestedTotal")} ${formatQty(summary.riyadhToStoreSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.riyadhToStoreTotalCbm || 0)})`}
+              {` · ${t("storeToRiyadh")}: ${summary.storeToRiyadhItems || 0} (${t("suggestedTotal")} ${formatQty(summary.storeToRiyadhSuggestedQty || 0)} · ${t("totalCbm")} ${formatCbm(summary.storeToRiyadhTotalCbm || 0)})`}
             </p>
             {thinSourceHint && !loading ? <p className="moduleHint">{thinSourceHint}</p> : null}
 
@@ -425,6 +429,13 @@ export default function InterCityStockTransferPage() {
                 onClick={() => setDirection("riyadhToStore")}
               >
                 {t("riyadhToStore")} ({summary.riyadhToStoreItems || 0})
+              </button>
+              <button
+                type="button"
+                className={`moduleInlineButton${direction === "storeToRiyadh" ? " moduleInlineButton--active" : ""}`}
+                onClick={() => setDirection("storeToRiyadh")}
+              >
+                {t("storeToRiyadh")} ({summary.storeToRiyadhItems || 0})
               </button>
             </div>
 

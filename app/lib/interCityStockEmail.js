@@ -79,6 +79,12 @@ const SECTIONS = [
     sourceLabel: "Riyadh WH CTN",
     destLabel: "Store CTN",
   },
+  {
+    key: "storeToRiyadh",
+    title: "In Store, not in Riyadh warehouse",
+    sourceLabel: "Store CTN",
+    destLabel: "Riyadh WH CTN",
+  },
 ];
 
 function sectionRows(report, key) {
@@ -149,6 +155,7 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
     `D→R ${Number(summary.dammamToRiyadhItems || 0)}`,
     `R→D ${Number(summary.riyadhToDammamItems || 0)}`,
     `R→Store ${Number(summary.riyadhToStoreItems || 0)}`,
+    `Store→R ${Number(summary.storeToRiyadhItems || 0)}`,
   ].join(" · ");
 
   const sectionsHtml = SECTIONS.map((section) => (
@@ -165,6 +172,7 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
     `In Dammam not Riyadh: ${Number(summary.dammamToRiyadhItems || 0)} items`,
     `In Riyadh not Dammam: ${Number(summary.riyadhToDammamItems || 0)} items`,
     `In Riyadh warehouse not Store: ${Number(summary.riyadhToStoreItems || 0)} items`,
+    `In Store not Riyadh warehouse: ${Number(summary.storeToRiyadhItems || 0)} items`,
     ...SECTIONS.map((section) => (
       `${section.title} total CBM: ${formatCbm(sectionTotalCbm(report, section.key, sectionRows(report, section.key)))}`
     )),
@@ -179,13 +187,14 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
         EOD stock date ${escapeHtml(formatDate(stockDate))} · Report date ${escapeHtml(formatDate(date || stockDate))} (KSA)
       </p>
       <p style="margin:0 0 16px;color:#475569;font-size:13px;">
-        Three gaps: Dammam not in Riyadh, Riyadh not in Dammam, and Riyadh warehouse not in Store (Dukan).
+        Four gaps: Dammam not in Riyadh, Riyadh not in Dammam, Riyadh warehouse not in Store (Dukan), and Store not in Riyadh warehouse.
         Qty columns use cartons / master units when Item Master conversion exists.
       </p>
       <p style="margin:0 0 16px;font-size:13px;">
         <strong>Dammam→Riyadh:</strong> ${Number(summary.dammamToRiyadhItems || 0)}
         · <strong>Riyadh→Dammam:</strong> ${Number(summary.riyadhToDammamItems || 0)}
         · <strong>Riyadh→Store:</strong> ${Number(summary.riyadhToStoreItems || 0)}
+        · <strong>Store→Riyadh:</strong> ${Number(summary.storeToRiyadhItems || 0)}
         · Store stock items: ${Number(summary.storeStockItems || 0)}
       </p>
       ${sectionsHtml}
@@ -203,6 +212,7 @@ export function buildInterCityStockEmail(report = {}, { date = "", env = process
       dammamToRiyadhItems: Number(summary.dammamToRiyadhItems || 0),
       riyadhToDammamItems: Number(summary.riyadhToDammamItems || 0),
       riyadhToStoreItems: Number(summary.riyadhToStoreItems || 0),
+      storeToRiyadhItems: Number(summary.storeToRiyadhItems || 0),
       storeStockItems: Number(summary.storeStockItems || 0),
       stockDate,
     },

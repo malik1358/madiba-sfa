@@ -147,6 +147,7 @@ export async function loadInterCityStockTransferReport(admin, { now = new Date()
       ...imbalances.riyadhToDammam.map((row) => normalizeInterCityItemCode(row.itemCode)),
       ...imbalances.dammamToRiyadh.map((row) => normalizeInterCityItemCode(row.itemCode)),
       ...(imbalances.riyadhToStore || []).map((row) => normalizeInterCityItemCode(row.itemCode)),
+      ...(imbalances.storeToRiyadh || []).map((row) => normalizeInterCityItemCode(row.itemCode)),
     ].filter(Boolean)),
   ];
 

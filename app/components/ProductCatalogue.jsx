@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppPopup } from "./AppPopupProvider";
+import { friendlyErrorMessage } from "../lib/abortError";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
 import { buildCatalogueShareFiles } from "../lib/catalogueShareCanvas";
 import {
@@ -444,7 +445,10 @@ export default function ProductCatalogue({
     } catch (err) {
       notice = {
         variant: "error",
-        message: err.message || (ar ? "تعذر تجهيز صورة المشاركة." : "Unable to prepare the share image."),
+        message: friendlyErrorMessage(
+          err,
+          ar ? "تعذر تجهيز صورة المشاركة." : "Unable to prepare the share image.",
+        ),
       };
     } finally {
       setSharingCode("");
@@ -625,7 +629,10 @@ export default function ProductCatalogue({
     } catch (err) {
       notice = {
         variant: "error",
-        message: err.message || (ar ? "تعذر تجهيز صور الكتالوج." : "Unable to prepare the catalogue photos."),
+        message: friendlyErrorMessage(
+          err,
+          ar ? "تعذر تجهيز صور الكتالوج." : "Unable to prepare the catalogue photos.",
+        ),
       };
     } finally {
       setExporting(false);

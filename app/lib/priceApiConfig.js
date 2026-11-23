@@ -4,7 +4,9 @@ const FALLBACK_PRICE_SOURCE_URL =
 export const PRICE_SOURCE_URL =
   process.env.PRICE_SOURCE_URL || FALLBACK_PRICE_SOURCE_URL;
 
-export const PRICE_CACHE_KEY = "madiba.pricePayload.v3";
+// Bump when published price rules change so phones drop stale localStorage
+// (e.g. v3 still held alias-invented A003946–A003949 rates after server purge).
+export const PRICE_CACHE_KEY = "madiba.pricePayload.v4";
 
 export const PRICE_SHEET_ID =
   process.env.PRICE_SHEET_ID || "15DFVFiwKkv3rNdHZkxYzOpGdfFgpc7AkyQGUq6QIzJc";

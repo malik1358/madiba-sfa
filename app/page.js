@@ -277,57 +277,64 @@ export default function Home() {
 
     if (data?.user) {
       const profileData = await loadProfile(data.user.id);
+      let signedInAtHome = false;
+      let gpsBlocked = false;
+      let batteryBlocked = false;
+
       if (
         profileData
         && shouldRequireTransactionGps(profileData.role)
       ) {
+        // Keep the Auth session. MorningAttendanceGate already blocks with Retry UI
+        // for battery/GPS — signing out here looked like a failed login and forced
+        // repeated password entry (e.g. Parvez-style re-auth loops).
         if (await isAndroidBatteryRestricted()) {
-          await supabase.auth.signOut();
-          setUser(null);
-          setProfile(null);
-          showPopup({
-            message: ar
-              ? "يجب ضبط بطارية MADIBA على غير مقيد قبل تسجيل الدخول. افتح الإعدادات واضبط Battery إلى Unrestricted."
-              : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted.",
-            variant: "warning",
-          });
-          setLoginLoading(false);
-          return;
-        }
-
-        let signedInAtHome = false;
-        try {
-          const location = await probeGpsLocationWithRetries({ attempts: 3 });
-          signedInAtHome = isAtHomeDeskLocation(location, {
-            latitude: profileData.home_latitude,
-            longitude: profileData.home_longitude,
-          });
-          if (signedInAtHome) {
-            // Auth session only — does not create MORNING_ATTENDANCE (field Login).
-            writeDeskModeState(data.user.id, { atHome: true, fromSignIn: true });
-          } else {
+          batteryBlocked = true;
+          clearDeskModeState(data.user.id);
+        } else {
+          try {
+            const location = await probeGpsLocationWithRetries({ attempts: 3 });
+            signedInAtHome = isAtHomeDeskLocation(location, {
+              latitude: profileData.home_latitude,
+              longitude: profileData.home_longitude,
+            });
+            if (signedInAtHome) {
+              // Auth session only — does not create MORNING_ATTENDANCE (field Login).
+              writeDeskModeState(data.user.id, { atHome: true, fromSignIn: true });
+            } else {
+              clearDeskModeState(data.user.id);
+            }
+          } catch {
+            gpsBlocked = true;
             clearDeskModeState(data.user.id);
           }
-        } catch {
-          await supabase.auth.signOut();
-          setUser(null);
-          setProfile(null);
-          showPopup({
-            message: ar
-              ? "لا يمكن استخدام MADIBA بدون GPS. اسمح بالوصول إلى الموقع ثم سجّل الدخول مرة أخرى."
-              : "MADIBA cannot be used without GPS. Allow location access, then sign in again.",
-            variant: "warning",
-          });
-          setLoginLoading(false);
-          return;
         }
+      }
 
-        setUser(data.user);
-        const sessionLimit = await postSinglePlatformSession({
-          accessToken: data.session?.access_token,
-          platform: (await isNativeAndroidPlatform()) ? "android" : "web",
-        }).catch(() => ({ revoked: 0 }));
-        const signedOutOthers = Number(sessionLimit?.revoked || 0) > 0;
+      setUser(data.user);
+      const sessionLimit = await postSinglePlatformSession({
+        accessToken: data.session?.access_token,
+        platform: (await isNativeAndroidPlatform()) ? "android" : "web",
+      }).catch(() => ({ revoked: 0 }));
+      const signedOutOthers = Number(sessionLimit?.revoked || 0) > 0;
+
+      if (batteryBlocked) {
+        showPopup({
+          title: ar ? "تم تسجيل الدخول" : "Signed in",
+          message: ar
+            ? "اضبط بطارية MADIBA على غير مقيد (Battery → Unrestricted) ثم اضغط تحقق مرة أخرى على الشاشة التالية."
+            : "Set MADIBA battery to Unrestricted (Battery → Unrestricted), then tap Check again on the next screen.",
+          variant: "warning",
+        });
+      } else if (gpsBlocked) {
+        showPopup({
+          title: ar ? "تم تسجيل الدخول" : "Signed in",
+          message: ar
+            ? "اسمح بالوصول إلى الموقع لهذا التطبيق ثم اضغط تحقق مرة أخرى على الشاشة التالية. لا حاجة لإعادة إدخال كلمة المرور."
+            : "Allow location access for this app, then tap Check again on the next screen. You do not need to re-enter your password.",
+          variant: "warning",
+        });
+      } else {
         showPopup({
           title: signedInAtHome
             ? (ar ? "تم الدخول للعمل من المنزل" : "Signed in for desk work")
@@ -349,29 +356,7 @@ export default function Home() {
           ].filter(Boolean).join(" "),
           variant: "success",
         });
-        setLoginLoading(false);
-        return;
       }
-      setUser(data.user);
-      const sessionLimit = await postSinglePlatformSession({
-        accessToken: data.session?.access_token,
-        platform: (await isNativeAndroidPlatform()) ? "android" : "web",
-      }).catch(() => ({ revoked: 0 }));
-      const signedOutOthers = Number(sessionLimit?.revoked || 0) > 0;
-      showPopup({
-        title: ar ? "تم تسجيل الدخول" : "Signed in",
-        message: [
-          ar
-            ? `مرحباً ${profileData?.salesman_name || data.user.email || ""}`.trim()
-            : `Welcome, ${profileData?.salesman_name || data.user.email || "back"}!`,
-          signedOutOthers
-            ? (ar
-              ? "تم إنهاء تسجيلات الدخول الأخرى على نفس نوع الجهاز."
-              : "Other sign-ins on this same platform were signed out.")
-            : "",
-        ].filter(Boolean).join(" "),
-        variant: "success",
-      });
     }
 
     setLoginLoading(false);

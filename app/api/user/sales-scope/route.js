@@ -15,6 +15,7 @@ import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
 import { loadSharedCustomerCodesForViewer } from "../../../lib/customerShares.js";
 import { pricingRegionsFromMetadata } from "../../../lib/regionalPricing.js";
 import { profileHasCompanyWideSalesScope } from "../../../lib/salesScopeAccess.js";
+import { withSalesScopeResolveCache } from "../../../lib/salesScopeResolveCache.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -75,7 +76,7 @@ function fuzzyMatchedProfileCodes(allProfiles, authUser) {
     .flatMap((profile) => profileCodeCandidates(profile));
 }
 
-export async function resolveSalesScopeForUserId(admin, userId) {
+async function resolveSalesScopeForUserIdUncached(admin, userId) {
   const { data: authData, error: authError } = await admin.auth.admin.getUserById(userId);
   if (authError || !authData?.user) {
     throw new Error("User not found.");
@@ -200,6 +201,10 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     pricingRegions: pricingRegionsFromMetadata(currentMetadata),
     pricingRegionBySalesmanCode,
   };
+}
+
+export async function resolveSalesScopeForUserId(admin, userId) {
+  return withSalesScopeResolveCache(userId, () => resolveSalesScopeForUserIdUncached(admin, userId));
 }
 
 export async function GET(request) {

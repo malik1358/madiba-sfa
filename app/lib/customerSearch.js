@@ -4,6 +4,8 @@ import {
   applyCustomerSalesmanScopeFilter,
   customerAssignmentMatchesScope,
 } from "./customerSalesmanAssignment.js";
+import { isSoyebProfile } from "./mutualSalesmanGroups.js";
+import { profileHasCompanyWideSalesScope } from "./salesScopeAccess.js";
 
 const SEARCH_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,is_active";
 const SEARCH_LIMIT = 20;
@@ -54,6 +56,55 @@ async function readCustomerRows(request) {
   const { data, error } = await request;
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * Typeahead lookup only needs hasAllAccess / salesman codes / shared codes.
+ * Company-wide callers skip Auth listUsers + full hierarchy (the slow part of
+ * resolveSalesScopeForUserId) and go straight to the customers ILIKE query.
+ */
+export async function resolveCustomerLookupScope(admin, user, resolveFullScope) {
+  const userId = String(user?.id || "").trim();
+  if (!admin || !userId) throw new Error("User not found.");
+  if (typeof resolveFullScope !== "function") {
+    throw new Error("Sales scope resolver is required.");
+  }
+
+  const { data: profile, error } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name")
+    .eq("id", userId)
+    .single();
+
+  if (error || !profile) throw new Error("Profile not found.");
+
+  const metadata = user.user_metadata || user.app_metadata || {};
+  const hasAllAccess = profileHasCompanyWideSalesScope({
+    role: profile.role,
+    salesmanCode: profile.salesman_code,
+    collectionOnlyMetadata: Boolean(metadata.collection_only),
+  }) || isSoyebProfile(profile);
+
+  if (hasAllAccess) {
+    return {
+      success: true,
+      role: String(profile.role || "").trim().toLowerCase(),
+      currentUserId: profile.id,
+      currentSalesmanCode: String(profile.salesman_code || "").trim().toUpperCase().replace(/\s+/g, " "),
+      hasAllAccess: true,
+      mutualSalesmanCodes: [],
+      visibleSalesmanCodes: [],
+      sharedCustomerCodes: [],
+      visibleUserIds: [profile.id].filter(Boolean),
+      visibleMembers: [],
+      hasSubordinates: false,
+      pricingRegion: undefined,
+      pricingRegions: [],
+      pricingRegionBySalesmanCode: {},
+    };
+  }
+
+  return resolveFullScope(admin, userId);
 }
 
 export async function findCustomersForSettlementSearch(admin, scope, query) {

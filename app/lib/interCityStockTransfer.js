@@ -332,22 +332,30 @@ export function suggestTransferQty({
   };
 }
 
-/** Report/email rows: only positive suggestions that leave the source with a known ≥30 days cover. */
+/**
+ * Report/email rows: positive suggestions only.
+ * Known source cover must stay ≥30 days; blank cover (no source sales pace) is still allowed
+ * so never-sold / no-pace stock gaps remain visible.
+ */
 export function isReportableInterCityTransferRow(row = {}) {
   const suggested = Number(row.suggestedQty || 0);
   if (!(suggested > 0)) return false;
-  const cover = Number(row.daysCoverAfterAtSource);
-  return Number.isFinite(cover) && cover >= INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS;
+  const cover = row.daysCoverAfterAtSource;
+  if (cover == null || cover === "") return true;
+  const numeric = Number(cover);
+  if (!Number.isFinite(numeric)) return true;
+  return numeric >= INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS;
 }
 
 export function decorateInterCityTransferRows(imbalanceRows = [], peakMap = new Map()) {
   return (imbalanceRows || []).map((row) => {
-    // Store has no voucher city — use Riyadh sales pace as demand/reserve proxy.
-    const peakCity = row.destinationCity === "store" ? "riyadh" : row.destinationCity;
-    const sourcePeakCity = row.sourceCity === "store" ? "riyadh" : row.sourceCity;
-    const peakKey = `${row.itemCode}|${peakCity}`;
-    const peak = peakMap.get(peakKey) || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
-    const sourcePeak = peakMap.get(`${row.itemCode}|${sourcePeakCity}`)
+    // Store has no sales vouchers — do not borrow Riyadh peak as Store demand/reserve.
+    const peakCity = row.destinationCity === "store" ? "" : row.destinationCity;
+    const sourcePeakCity = row.sourceCity === "store" ? "" : row.sourceCity;
+    const peakKey = peakCity ? `${row.itemCode}|${peakCity}` : "";
+    const peak = (peakKey && peakMap.get(peakKey)) || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
+    const sourcePeakKey = sourcePeakCity ? `${row.itemCode}|${sourcePeakCity}` : "";
+    const sourcePeak = (sourcePeakKey && peakMap.get(sourcePeakKey))
       || { peakWeeklyQty: 0, peakWeekKey: "", totalQty: 0 };
     const suggestion = suggestTransferQty({
       sourceQty: row.sourceQty,

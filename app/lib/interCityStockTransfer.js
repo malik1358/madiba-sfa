@@ -10,7 +10,7 @@ export const INTER_CITY_TRANSFER_COVER_DAYS = 15;
 /** Lookback for peak weekly sales (5 weeks). */
 export const INTER_CITY_TRANSFER_SALES_DAYS = 35;
 /** Keep at least this many days of source-city sales stock before transferring. */
-export const INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS = 28;
+export const INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS = 30;
 /** @deprecated Use INTER_CITY_TRANSFER_SALES_DAYS. Kept so older imports do not break. */
 export const INTER_CITY_TRANSFER_SALES_MONTHS = 1;
 /** Minimum destination stock (cartons/units) when the destination has no sales in the sales window. */
@@ -260,7 +260,7 @@ export function suggestTransferQty({
   }
   const shortfall = Math.max(0, roundEodQty(targetCoverQty - destination));
 
-  // Source keeps ~1 month of its own peak-week pace before anything is sent out.
+  // Source keeps ≥30 days of its own peak-week pace before anything is sent out.
   const sourceMonthReserveQty = sourcePeak > 0 && reserveDays > 0
     ? Math.ceil((sourcePeak / 7) * reserveDays - 1e-9)
     : 0;
@@ -465,42 +465,100 @@ function convertInterCityQty(raw, stockUnit, master) {
   }).qty;
 }
 
+/**
+ * Unsold-min (5) is a display/carton floor. Re-apply after master-unit conversion so
+ * "Min 5" never becomes 1 CTN when conv turns 5 pcs into 1 carton.
+ * Negative destination qty stays visible but is treated as 0 for cover math.
+ */
+function finalizeInterCityDisplayRow(row = {}) {
+  const source = Math.max(0, roundEodQty(row.sourceQty));
+  const destinationDisplayed = roundEodQty(row.destinationQty);
+  const destinationForCalc = Math.max(0, destinationDisplayed);
+  const sourcePeak = Math.max(0, roundEodQty(row.sourcePeakWeeklyQty));
+  const peakWeekly = Math.max(0, roundEodQty(row.peakWeeklyQty));
+  const reserveDays = Math.max(0, Number(row.sourceReserveDays) || INTER_CITY_TRANSFER_SOURCE_RESERVE_DAYS);
+  const sourceDaily = roundEodQty(sourcePeak / 7);
+  const destDaily = roundEodQty(peakWeekly / 7);
+  let sourceMonthReserveQty = sourceDaily > 0 && reserveDays > 0
+    ? Math.ceil(sourceDaily * reserveDays - 1e-9)
+    : 0;
+  sourceMonthReserveQty = roundEodQty(sourceMonthReserveQty);
+  const maxTransferable = Math.max(0, roundEodQty(source - sourceMonthReserveQty));
+
+  let targetCoverQty = roundEodQty(row.targetCoverQty);
+  const usedUnsoldMinimum = Boolean(row.usedUnsoldMinimum) || (peakWeekly <= 0 && INTER_CITY_TRANSFER_UNSOLD_MIN_QTY > 0);
+  if (usedUnsoldMinimum) {
+    targetCoverQty = Math.max(targetCoverQty, INTER_CITY_TRANSFER_UNSOLD_MIN_QTY);
+  }
+
+  const shortfall = Math.max(0, roundEodQty(targetCoverQty - destinationForCalc));
+  const suggestedQty = roundEodQty(Math.min(shortfall, maxTransferable, source));
+  const remainingAtSource = roundEodQty(source - suggestedQty);
+  const afterAtDestination = roundEodQty(destinationForCalc + suggestedQty);
+  const daysCoverAfterAtDestination = destDaily > 0
+    ? roundEodQty(afterAtDestination / destDaily)
+    : (afterAtDestination > 0 ? null : 0);
+  const daysCoverAfterAtSource = sourceDaily > 0
+    ? roundEodQty(remainingAtSource / sourceDaily)
+    : (remainingAtSource > 0 ? null : 0);
+
+  return {
+    ...row,
+    // Keep signed destination for display; math above used destinationForCalc.
+    destinationQty: destinationDisplayed,
+    sourceMonthReserveQty,
+    maxTransferableQty: maxTransferable,
+    targetCoverQty,
+    suggestedQty,
+    remainingAtSource,
+    afterAtDestination,
+    daysCoverAfter: daysCoverAfterAtDestination,
+    daysCoverAfterAtDestination,
+    daysCoverAfterAtSource,
+    cappedBySource: shortfall > source && shortfall > 0 && maxTransferable >= source,
+    cappedBySourceReserve: sourceMonthReserveQty > 0 && shortfall > maxTransferable && maxTransferable > 0,
+    blockedBySourceReserve: sourceMonthReserveQty > 0 && shortfall > 0 && maxTransferable <= 0,
+    usedUnsoldMinimum: usedUnsoldMinimum && suggestedQty > 0,
+  };
+}
+
 function applyMasterUnitsToInterCityRows(rows = [], masterUnits = {}) {
   return (rows || []).map((row) => {
     const master = lookupMasterUnitConv(masterUnits, row.itemCode);
+    let next = row;
     if (!master) {
-      // Prefer an explicit carton unit label when already in CTN.
       const unit = String(row.unit || "").trim();
       if (/^(ctn|carton|cartons|cx)$/i.test(unit)) {
-        return { ...row, unit: "CTN" };
+        next = { ...row, unit: "CTN" };
       }
-      return row;
+    } else {
+      const unit = row.unit || "";
+      const masterUnit = /^(ctn|carton|cartons|cx|box|boxes)$/i.test(master.masterUom)
+        ? "CTN"
+        : (master.masterUom || unit);
+      next = {
+        ...row,
+        unit: masterUnit,
+        sourceQty: convertInterCityQty(row.sourceQty, unit, master),
+        destinationQty: convertInterCityQty(row.destinationQty, unit, master),
+        riyadhQty: convertInterCityQty(row.riyadhQty, unit, master),
+        dammamQty: convertInterCityQty(row.dammamQty, unit, master),
+        storeQty: convertInterCityQty(row.storeQty, unit, master),
+        riyadhWarehouseQty: convertInterCityQty(row.riyadhWarehouseQty, unit, master),
+        peakWeeklyQty: convertInterCityQty(row.peakWeeklyQty, unit, master),
+        sourcePeakWeeklyQty: convertInterCityQty(row.sourcePeakWeeklyQty, unit, master),
+        sourceMonthReserveQty: convertInterCityQty(row.sourceMonthReserveQty, unit, master),
+        maxTransferableQty: convertInterCityQty(row.maxTransferableQty, unit, master),
+        destinationSalesQty: convertInterCityQty(row.destinationSalesQty, unit, master),
+        destinationSalesQty6m: convertInterCityQty(row.destinationSalesQty6m, unit, master),
+        dailyDemand: convertInterCityQty(row.dailyDemand, unit, master),
+        targetCoverQty: convertInterCityQty(row.targetCoverQty, unit, master),
+        suggestedQty: convertInterCityQty(row.suggestedQty, unit, master),
+        remainingAtSource: convertInterCityQty(row.remainingAtSource, unit, master),
+        afterAtDestination: convertInterCityQty(row.afterAtDestination, unit, master),
+      };
     }
-    const unit = row.unit || "";
-    const masterUnit = /^(ctn|carton|cartons|cx|box|boxes)$/i.test(master.masterUom)
-      ? "CTN"
-      : (master.masterUom || unit);
-    return {
-      ...row,
-      unit: masterUnit,
-      sourceQty: convertInterCityQty(row.sourceQty, unit, master),
-      destinationQty: convertInterCityQty(row.destinationQty, unit, master),
-      riyadhQty: convertInterCityQty(row.riyadhQty, unit, master),
-      dammamQty: convertInterCityQty(row.dammamQty, unit, master),
-      storeQty: convertInterCityQty(row.storeQty, unit, master),
-      riyadhWarehouseQty: convertInterCityQty(row.riyadhWarehouseQty, unit, master),
-      peakWeeklyQty: convertInterCityQty(row.peakWeeklyQty, unit, master),
-      sourcePeakWeeklyQty: convertInterCityQty(row.sourcePeakWeeklyQty, unit, master),
-      sourceMonthReserveQty: convertInterCityQty(row.sourceMonthReserveQty, unit, master),
-      maxTransferableQty: convertInterCityQty(row.maxTransferableQty, unit, master),
-      destinationSalesQty: convertInterCityQty(row.destinationSalesQty, unit, master),
-      destinationSalesQty6m: convertInterCityQty(row.destinationSalesQty6m, unit, master),
-      dailyDemand: convertInterCityQty(row.dailyDemand, unit, master),
-      targetCoverQty: convertInterCityQty(row.targetCoverQty, unit, master),
-      suggestedQty: convertInterCityQty(row.suggestedQty, unit, master),
-      remainingAtSource: convertInterCityQty(row.remainingAtSource, unit, master),
-      afterAtDestination: convertInterCityQty(row.afterAtDestination, unit, master),
-    };
+    return finalizeInterCityDisplayRow(next);
   });
 }
 

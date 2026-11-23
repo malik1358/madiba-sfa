@@ -2728,3 +2728,79 @@ test("1258C NFD/107 uses full sales_raw voucher, not CN+outstanding residual", (
   assert.ok(invoice.credit_notes?.length || invoice.credit_note_settled > 0);
 });
 
+test("1258C receipt 275 settles the NFD/107 gap; CN-residual rebuild invents −176k", () => {
+  // Tally still open 345,844.7. Receipt 275 (176,000 on the sale day) is real cash.
+  // Full sales 456,823 + CN 93 + that receipt → Machine Open matches Tally (Open Δ ~0).
+  // CN-mirror + outstanding residual understates sales; the same receipt then leaves
+  // SFA 176k low — the stale Outstanding Compare Difference for Sheem Al Majd.
+  const activeRows = [
+    {
+      transaction_date: "2026-01-26",
+      voucher_number: "2772",
+      voucher_type: "Sales",
+      customer_code: "1258C",
+      item_code: "A004030",
+      quantity: 3,
+      sales_amount: 14727,
+    },
+    {
+      transaction_date: "2026-03-11",
+      voucher_number: "93",
+      voucher_type: "Credit Note",
+      reference: "NFD/107",
+      customer_code: "1258C",
+      item_code: "A004030",
+      quantity: -4,
+      sales_amount: -2352,
+    },
+    {
+      transaction_date: "2026-03-11",
+      voucher_number: "93",
+      voucher_type: "Credit Note",
+      reference: "NFD/107",
+      customer_code: "1258C",
+      item_code: "A004029",
+      quantity: -1,
+      sales_amount: -693,
+    },
+  ];
+  const historyRows = [
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A004030", quantity: 148, sales_amount: 87024 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A004029", quantity: 99, sales_amount: 68607 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003944", quantity: 100, sales_amount: 52000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003281", quantity: 100, sales_amount: 49000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003942", quantity: 100, sales_amount: 39500 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003285", quantity: 100, sales_amount: 39100 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003291", quantity: 100, sales_amount: 35000 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003945", quantity: 48, sales_amount: 34992 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003284", quantity: 100, sales_amount: 28100 },
+    { import_batch_id: 116, transaction_date: "2026-02-12", voucher_number: "NFD/107", customer_code: "1258C", item_code: "A003943", quantity: 100, sales_amount: 23500 },
+  ];
+  const receipts = [
+    { receipt_date: "2026-01-26", amount: 16936, vch_no: "147", vch_type: "Receipt" },
+    { receipt_date: "2026-02-12", amount: 176000, vch_no: "275", vch_type: "Receipt" },
+    { receipt_date: "2026-10-09", amount: 0.05, vch_no: "RO", vch_type: "Receipt" },
+  ];
+  const outstandingInvoices = [
+    { ref_no: "NFD/107", invoice_date: "2026-02-12", pending_amount: 345844.7, customer_code: "1258C" },
+  ];
+
+  const residualLedger = buildPaymentSettlementLedger({
+    transactions: activeRows,
+    receipts,
+    outstandingInvoices,
+    todayIso: "2026-11-23",
+  });
+  assert.ok(Math.abs(Number(residualLedger.outstandingCompareTotals.open_delta) - -176000) < 1);
+
+  const fullRows = [...activeRows, ...pickFullMissingReferencedSales(activeRows, historyRows)];
+  const fullLedger = buildPaymentSettlementLedger({
+    transactions: fullRows,
+    receipts,
+    outstandingInvoices,
+    todayIso: "2026-11-23",
+  });
+  assert.equal(Number(fullLedger.invoices.find((row) => row.voucher_number === "NFD/107").amount_excl_vat), 456823);
+  assert.ok(Math.abs(Number(fullLedger.outstandingCompareTotals.open_delta)) < 1);
+});
+

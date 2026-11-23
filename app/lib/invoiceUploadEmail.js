@@ -1,10 +1,17 @@
 import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { normalizeDeliverableEmail, parseEmailList } from "./mailer.js";
+import {
+  resolveWarehouseInvoiceFixedRecipients,
+  WAREHOUSE_INVOICE_ILIYAS_EMAIL,
+} from "./warehouseInvoiceRecipients.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 
+/** @deprecated Prefer resolveWarehouseInvoiceFixedRecipients(pricingRegion). Kept for tests/docs. */
 export const DEFAULT_INVOICE_UPLOAD_FIXED_RECIPIENTS = [
-  "iliyas.belliyaru@noorshukran.com",
+  WAREHOUSE_INVOICE_ILIYAS_EMAIL,
 ];
+
+export { resolveWarehouseInvoiceFixedRecipients };
 
 function pushUniqueEmail(list, value) {
   const email = normalizeDeliverableEmail(value);

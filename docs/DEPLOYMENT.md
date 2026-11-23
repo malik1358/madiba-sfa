@@ -217,7 +217,9 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_SALESMAN_RESUME_TO` | Resume digest recipients |
 | `MATCHED_RECEIPT_EMAIL_ENABLED` | Set `true` in Vercel production to send daily salesman mail and consolidated hierarchy-boss digests after the preview is approved; remains false by default in local/dev |
 | `MISSING_INVOICE_EMAIL_TO`, `MISSING_INVOICE_EMAIL_CC`, `MISSING_INVOICE_EMAIL_DAILY_SUMMARY` | Extra invoice-chase To/CC (15-minute list) and optional extra end-of-day summary addresses (defaults Soyeb + Fazlur) |
-| `INVOICE_UPLOAD_EMAIL_TO`, `INVOICE_UPLOAD_EMAIL_CC` | Optional extra To/CC when an invoice PDF is uploaded (always includes uploader, salesman, direct boss, and `iliyas.belliyaru@noorshukran.com`) |
+| `INVOICE_UPLOAD_EMAIL_TO`, `INVOICE_UPLOAD_EMAIL_CC` | Optional extra To/CC when an invoice PDF is uploaded (always includes uploader, salesman, direct boss, and warehouse fixed To by city: Riyadh/Jeddah → Iliyas, Dammam → `dwh@noorshukran.com`) |
+| `INVOICE_UPLOAD_WAREHOUSE_TO_RIYADH_JEDDAH`, `INVOICE_UPLOAD_WAREHOUSE_TO_DAMMAM` | Optional overrides for the warehouse fixed To on upload |
+| `DAILY_WAREHOUSE_INVOICE_RESUME_TO_RIYADH_JEDDAH`, `DAILY_WAREHOUSE_INVOICE_RESUME_TO_DAMMAM`, `DAILY_WAREHOUSE_INVOICE_RESUME_CC`, `DAILY_WAREHOUSE_INVOICE_RESUME_EXTRA_CC`, `DAILY_WAREHOUSE_INVOICE_RESUME_TEST_TO` | Daily warehouse invoice resume recipients / test override |
 | `DAILY_SUPPLIER_ORDER_EMAIL_TO`, `DAILY_SUPPLIER_ORDER_EMAIL_CC` | Extra company order digest (invoice-ops); hierarchy bosses get separate team digests |
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` skips salesman and hierarchy-boss digests; sends only the company digest |
 | `OUTSTANDING_NO_GPS_EMAIL_TO`, `OUTSTANDING_NO_GPS_EMAIL_CC` | Optional management digest |
@@ -265,6 +267,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA build snapshot. Email, if enabled, waits for 08:30–22:00 KSA Sat–Thu | `/api/cron/salesman-visit-plan-email` |
 | `daily-visit-report-email.yml` | `45 5 * * 0-4,6` | 08:45 KSA Sat–Thu (staggered past the 08:30 pile-up); Thursday report Saturday morning. Sends boss/company digests before personal salesman SMTP. `maxDuration` 300s; workflow curl `--max-time` 360; one 90s retry on 502/503/504 | `/api/cron/daily-visit-report-email` (manual `date` + optional `digestOnlyTo` for company-digest-only resend) |
 | `daily-salesman-resume-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; Thursday report Saturday morning | `/api/cron/daily-salesman-resume-email` |
+| `daily-warehouse-invoice-resume-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu; previous day’s Invoice made uploads by city (Riyadh/Jeddah → Iliyas, Dammam → Javed/`dwh@`); CC Jenil + Shreyans. Dispatch accepts `date` / `force` / `to` / `cc`. | `/api/cron/daily-warehouse-invoice-resume-email` |
 | `daily-supplier-order-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `30 5 * * 0-4,6` | 08:30 KSA Sat–Thu | `/api/cron/collection-stale-overdue-email` |

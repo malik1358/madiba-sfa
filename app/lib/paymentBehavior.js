@@ -533,11 +533,98 @@ function syntheticSalesVoucherType(voucherNumber = "") {
 }
 
 /**
+ * Credit-note Ref. No. values that name a sales voucher absent from the live
+ * transaction list (customer 1258C CN 93 → NFD/107 when the live batch kept
+ * only the credit notes).
+ */
+export function missingReferencedSalesVouchers(transactions = []) {
+  const present = new Set();
+  const needed = new Set();
+  (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    if (isCreditNoteTransaction(row)) {
+      parseCreditNoteReferences(row?.reference).forEach((ref) => {
+        if (ref) needed.add(ref);
+      });
+      return;
+    }
+    const voucher = normalizeRef(row?.voucher_number || row?.reference);
+    if (voucher) present.add(voucher);
+  });
+  return [...needed].filter((ref) => !present.has(ref));
+}
+
+/**
+ * Prefer the full historic sales voucher from `sales_raw` when the live batch
+ * dropped it but a credit note still names it. Returns every line from the
+ * newest import batch for each missing voucher (not only the CN's item codes).
+ * Customer 1258C NFD/107: CN 93 returns two TVs; the real invoice is 10 lines
+ * / 456,823 excl VAT in later batches.
+ */
+export function pickFullMissingReferencedSales(activeRows = [], historyRows = []) {
+  const source = Array.isArray(activeRows) ? activeRows : [];
+  const missing = new Set(missingReferencedSalesVouchers(source));
+  if (!missing.size) return [];
+
+  /** @type {Map<string, Set<string>>} */
+  const customersByRef = new Map();
+  source.forEach((row) => {
+    if (!isCreditNoteTransaction(row)) return;
+    const customer = normalizeRef(row?.customer_code);
+    if (!customer) return;
+    parseCreditNoteReferences(row?.reference).forEach((ref) => {
+      if (!ref || !missing.has(ref)) return;
+      const set = customersByRef.get(ref) || new Set();
+      set.add(customer);
+      customersByRef.set(ref, set);
+    });
+  });
+
+  /** @type {Map<string, { batch: number, rows: object[] }>} */
+  const chosen = new Map();
+  (Array.isArray(historyRows) ? historyRows : []).forEach((row) => {
+    if (isCreditNoteTransaction(row)) return;
+    const voucher = normalizeRef(row?.voucher_number);
+    if (!voucher || !missing.has(voucher)) return;
+    const customer = normalizeRef(row?.customer_code);
+    const allowedCustomers = customersByRef.get(voucher);
+    if (allowedCustomers?.size && customer && !allowedCustomers.has(customer)) return;
+    const key = `${customer}\u0000${voucher}`;
+    const batch = Number(row?.import_batch_id) || 0;
+    const current = chosen.get(key);
+    if (!current || batch > current.batch) {
+      chosen.set(key, { batch, rows: [row] });
+      return;
+    }
+    if (batch === current.batch) current.rows.push(row);
+  });
+
+  const extra = [];
+  chosen.forEach((group) => {
+    const seen = new Set();
+    group.rows.forEach((row) => {
+      const lineKey = [
+        dateOnly(row?.transaction_date) || "",
+        normalizeRef(row?.item_code || row?.item_name),
+        Number(row?.quantity) || 0,
+        Number(row?.sales_amount) || 0,
+      ].join("|");
+      if (seen.has(lineKey)) return;
+      seen.add(lineKey);
+      extra.push(row);
+    });
+  });
+  return extra;
+}
+
+/**
  * When a credit note names a sales voucher that never landed in `active_sales`
  * (Jeddah JNFD uploads often ship CNs only), rebuild that sale so the customer
  * ledger / settlement can show it. Lines mirror the CN items; any Tally open
  * residual from the outstanding file is added so Machine Open matches pending
  * after the named CN settles (customer 1691 JNFD/015 + CN 801).
+ * Prefer `pickFullMissingReferencedSales` from `sales_raw` first when the full
+ * voucher exists in a later batch — CN mirroring understates Sales (1258C
+ * NFD/107 was ~303,775 from CN+outstanding residual vs real 456,823).
  */
 export function augmentTransactionsWithMissingReferencedSales(
   transactions = [],

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams } from "next/navigation";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import { translate } from "../../lib/appLanguage.js";
@@ -74,6 +75,9 @@ const TEXT = {
   photosAria: { en: "Photos", ar: "صور" },
   previousPhoto: { en: "Previous photo", ar: "الصورة السابقة" },
   nextPhoto: { en: "Next photo", ar: "الصورة التالية" },
+  openFullscreen: { en: "Open full screen photo of {name}", ar: "عرض صورة {name} بملء الشاشة" },
+  fullscreenPhoto: { en: "Full screen photo: {name}", ar: "عرض صورة {name}" },
+  closePhoto: { en: "Close", ar: "إغلاق" },
   general: { en: "General", ar: "عام" },
   packing: { en: "Packing", ar: "التعبئة" },
   per: { en: "per", ar: "لكل" },
@@ -131,6 +135,129 @@ function fillTemplate(template, values = {}) {
   ));
 }
 
+const SWIPE_THRESHOLD_PX = 48;
+
+function guestPhotoUrl(token, photoId) {
+  return `/api/customer-order-links/${encodeURIComponent(token)}/photo?photoId=${encodeURIComponent(photoId)}`;
+}
+
+/** Full-screen swipe viewer for guest catalogue photos (same behavior as Product Catalogue). */
+function GuestPhotoLightbox({ photos, index, name, token, language, labels, onClose, onIndexChange }) {
+  const touchStartX = useRef(null);
+  const current = photos[index % Math.max(photos.length, 1)] || null;
+  const hasMany = photos.length > 1;
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKey(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (!hasMany) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onIndexChange((value) => (value + 1) % photos.length);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [hasMany, onClose, onIndexChange, photos.length]);
+
+  function onTouchStart(event) {
+    touchStartX.current = event.changedTouches?.[0]?.clientX ?? null;
+  }
+
+  function onTouchEnd(event) {
+    const startX = touchStartX.current;
+    touchStartX.current = null;
+    if (startX == null || !hasMany) return;
+    const endX = event.changedTouches?.[0]?.clientX;
+    if (endX == null) return;
+    const delta = endX - startX;
+    if (Math.abs(delta) < SWIPE_THRESHOLD_PX) return;
+    if (delta < 0) onIndexChange((value) => (value + 1) % photos.length);
+    else onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+  }
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className={styles.lightbox}
+      role="dialog"
+      aria-modal="true"
+      aria-label={fillTemplate(labels.fullscreenPhoto, { name })}
+      onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      <button
+        type="button"
+        className={styles.lightboxClose}
+        aria-label={labels.closePhoto}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        ×
+      </button>
+      {hasMany ? (
+        <button
+          type="button"
+          className={`${styles.lightboxNav} ${styles.lightboxPrev}`}
+          aria-label={labels.previousPhoto}
+          onClick={(event) => {
+            event.stopPropagation();
+            onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+          }}
+        >
+          {language === "ar" ? ">" : "<"}
+        </button>
+      ) : null}
+      {current ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={current.id}
+          className={styles.lightboxImage}
+          src={guestPhotoUrl(token, current.id)}
+          alt={name}
+          onClick={(event) => event.stopPropagation()}
+          draggable={false}
+        />
+      ) : null}
+      {hasMany ? (
+        <button
+          type="button"
+          className={`${styles.lightboxNav} ${styles.lightboxNext}`}
+          aria-label={labels.nextPhoto}
+          onClick={(event) => {
+            event.stopPropagation();
+            onIndexChange((value) => (value + 1) % photos.length);
+          }}
+        >
+          {language === "ar" ? "<" : ">"}
+        </button>
+      ) : null}
+      {hasMany ? (
+        <span className={styles.lightboxCounter} onClick={(event) => event.stopPropagation()}>
+          {(index % photos.length) + 1} / {photos.length}
+        </span>
+      ) : null}
+    </div>,
+    document.body,
+  );
+}
+
 /** Same auto-rotate carousel pattern as Product Catalogue (guest: token photo URLs only). */
 function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
   const [index, setIndex] = useState(0);
@@ -138,16 +265,22 @@ function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
   const [paused, setPaused] = useState(false);
   const [inView, setInView] = useState(true);
   const [timerGeneration, setTimerGeneration] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const frameRef = useRef(null);
   const safePhotos = (Array.isArray(photos) ? photos : [])
     .map((photo) => ({ id: String(photo?.id || "").trim() }))
     .filter((photo) => photo.id);
   const photoKey = safePhotos.map((photo) => photo.id).join("|");
   const current = safePhotos[index % Math.max(safePhotos.length, 1)] || null;
+  const canOpenLightbox = Boolean(current && failedId !== current.id);
 
   useEffect(() => {
     setIndex((value) => (safePhotos.length ? value % safePhotos.length : 0));
   }, [photoKey, safePhotos.length]);
+
+  useEffect(() => {
+    if (!safePhotos.length && lightboxOpen) setLightboxOpen(false);
+  }, [safePhotos.length, lightboxOpen]);
 
   useEffect(() => {
     const node = frameRef.current;
@@ -158,7 +291,7 @@ function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
   }, []);
 
   useEffect(() => {
-    if (safePhotos.length < 2 || paused || !inView) return undefined;
+    if (safePhotos.length < 2 || paused || lightboxOpen || !inView) return undefined;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       return undefined;
     }
@@ -166,7 +299,7 @@ function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
       setIndex((value) => nextCataloguePhotoIndex(value, safePhotos.length));
     }, CATALOGUE_CAROUSEL_MS);
     return () => window.clearInterval(timer);
-  }, [safePhotos.length, paused, inView, timerGeneration]);
+  }, [safePhotos.length, paused, lightboxOpen, inView, timerGeneration]);
 
   return (
     <div
@@ -180,15 +313,22 @@ function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
         if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
       }}
     >
-      {current && failedId !== current.id ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={current.id}
-          src={`/api/customer-order-links/${encodeURIComponent(token)}/photo?photoId=${encodeURIComponent(current.id)}`}
-          alt={name}
-          loading="lazy"
-          onError={() => setFailedId(current.id)}
-        />
+      {canOpenLightbox ? (
+        <button
+          type="button"
+          className={styles.photoOpen}
+          aria-label={fillTemplate(labels.openFullscreen, { name })}
+          onClick={() => setLightboxOpen(true)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            key={current.id}
+            src={guestPhotoUrl(token, current.id)}
+            alt=""
+            loading="lazy"
+            onError={() => setFailedId(current.id)}
+          />
+        </button>
       ) : (
         <div className={styles.placeholder}>{labels.noPhoto}</div>
       )}
@@ -216,6 +356,18 @@ function GuestPhotoCarousel({ photos = [], name, token, language, labels }) {
             {language === "ar" ? "<" : ">"}
           </button>
         </div>
+      ) : null}
+      {lightboxOpen && canOpenLightbox ? (
+        <GuestPhotoLightbox
+          photos={safePhotos}
+          index={index % safePhotos.length}
+          name={name}
+          token={token}
+          language={language}
+          labels={labels}
+          onClose={() => setLightboxOpen(false)}
+          onIndexChange={setIndex}
+        />
       ) : null}
     </div>
   );
@@ -616,6 +768,9 @@ export default function CustomerOrderLinkPage() {
                       photosAria: t("photosAria"),
                       previousPhoto: t("previousPhoto"),
                       nextPhoto: t("nextPhoto"),
+                      openFullscreen: t("openFullscreen"),
+                      fullscreenPhoto: t("fullscreenPhoto"),
+                      closePhoto: t("closePhoto"),
                     }}
                   />
                   <div className={styles.cardBody}>

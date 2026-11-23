@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAppPopup } from "./AppPopupProvider";
 import { friendlyErrorMessage } from "../lib/abortError";
 import { fetchJsonWithTimeout, getSessionWithTimeout } from "../lib/authSession";
@@ -47,6 +48,125 @@ import { shareTextAndFilesOnWhatsapp } from "../lib/whatsappShare";
 import styles from "./ProductCatalogue.module.css";
 
 const PAGE_SIZE = 24;
+const SWIPE_THRESHOLD_PX = 48;
+
+function PhotoLightbox({ photos, index, name, language, onClose, onIndexChange }) {
+  const ar = language === "ar";
+  const touchStartX = useRef(null);
+  const current = photos[index % Math.max(photos.length, 1)];
+  const hasMany = photos.length > 1;
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKey(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (!hasMany) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onIndexChange((value) => (value + 1) % photos.length);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [hasMany, onClose, onIndexChange, photos.length]);
+
+  function onTouchStart(event) {
+    touchStartX.current = event.changedTouches?.[0]?.clientX ?? null;
+  }
+
+  function onTouchEnd(event) {
+    const startX = touchStartX.current;
+    touchStartX.current = null;
+    if (startX == null || !hasMany) return;
+    const endX = event.changedTouches?.[0]?.clientX;
+    if (endX == null) return;
+    const delta = endX - startX;
+    if (Math.abs(delta) < SWIPE_THRESHOLD_PX) return;
+    // Finger moving left → next; right → previous (same in LTR/RTL viewers).
+    if (delta < 0) onIndexChange((value) => (value + 1) % photos.length);
+    else onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+  }
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className={styles.lightbox}
+      role="dialog"
+      aria-modal="true"
+      aria-label={ar ? `عرض صورة ${name}` : `Full screen photo: ${name}`}
+      onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      <button
+        type="button"
+        className={styles.lightboxClose}
+        aria-label={ar ? "إغلاق" : "Close"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        ×
+      </button>
+      {hasMany && (
+        <button
+          type="button"
+          className={`${styles.lightboxNav} ${styles.lightboxPrev}`}
+          aria-label={ar ? "الصورة السابقة" : "Previous photo"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onIndexChange((value) => (value - 1 + photos.length) % photos.length);
+          }}
+        >
+          {ar ? ">" : "<"}
+        </button>
+      )}
+      {current?.url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={current.url}
+          className={styles.lightboxImage}
+          src={current.url}
+          alt={name}
+          onClick={(event) => event.stopPropagation()}
+          draggable={false}
+        />
+      ) : null}
+      {hasMany && (
+        <button
+          type="button"
+          className={`${styles.lightboxNav} ${styles.lightboxNext}`}
+          aria-label={ar ? "الصورة التالية" : "Next photo"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onIndexChange((value) => (value + 1) % photos.length);
+          }}
+        >
+          {ar ? "<" : ">"}
+        </button>
+      )}
+      {hasMany && (
+        <span className={styles.lightboxCounter} onClick={(event) => event.stopPropagation()}>
+          {(index % photos.length) + 1} / {photos.length}
+        </span>
+      )}
+    </div>,
+    document.body,
+  );
+}
 
 function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
   const [index, setIndex] = useState(0);
@@ -54,14 +174,20 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
   const [paused, setPaused] = useState(false);
   const [inView, setInView] = useState(true);
   const [timerGeneration, setTimerGeneration] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const frameRef = useRef(null);
   const photoKey = photos.map((photo) => photo.id).join("|");
   const current = photos[index % Math.max(photos.length, 1)];
   const ar = language === "ar";
+  const canOpenLightbox = Boolean(current?.url && failedUrl !== current.url);
 
   useEffect(() => {
     setIndex((value) => (photos.length ? value % photos.length : 0));
   }, [photoKey, photos.length]);
+
+  useEffect(() => {
+    if (!photos.length && lightboxOpen) setLightboxOpen(false);
+  }, [photos.length, lightboxOpen]);
 
   useEffect(() => {
     const node = frameRef.current;
@@ -72,13 +198,13 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
   }, []);
 
   useEffect(() => {
-    if (photos.length < 2 || paused || !inView) return undefined;
+    if (photos.length < 2 || paused || lightboxOpen || !inView) return undefined;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return undefined;
     const timer = window.setInterval(() => {
       setIndex((value) => nextCataloguePhotoIndex(value, photos.length));
     }, CATALOGUE_CAROUSEL_MS);
     return () => window.clearInterval(timer);
-  }, [photos.length, paused, inView, timerGeneration]);
+  }, [photos.length, paused, lightboxOpen, inView, timerGeneration]);
 
   return (
     <div
@@ -92,8 +218,16 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
         if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
       }}
     >
-      {current?.url && failedUrl !== current.url ? (
-        <img key={current.url} src={current.url} alt={name} loading="lazy" onError={() => setFailedUrl(current.url)} />
+      {canOpenLightbox ? (
+        <button
+          type="button"
+          className={styles.photoOpen}
+          aria-label={ar ? `عرض صورة ${name} بملء الشاشة` : `Open full screen photo of ${name}`}
+          onClick={() => setLightboxOpen(true)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img key={current.url} src={current.url} alt="" loading="lazy" onError={() => setFailedUrl(current.url)} />
+        </button>
       ) : (
         <div className={styles.placeholder}>
           <svg width="52" height="52" viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -119,6 +253,16 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
       )}
       {current && onRemove && (
         <button type="button" className={styles.removePhoto} disabled={busy} onClick={() => onRemove(current.id)}>{ar ? "حذف الصورة" : "Remove photo"}</button>
+      )}
+      {lightboxOpen && canOpenLightbox && (
+        <PhotoLightbox
+          photos={photos}
+          index={index % photos.length}
+          name={name}
+          language={language}
+          onClose={() => setLightboxOpen(false)}
+          onIndexChange={setIndex}
+        />
       )}
     </div>
   );

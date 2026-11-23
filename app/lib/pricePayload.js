@@ -359,7 +359,7 @@ function findValueSlabIndex(rows, threshold, fallbackColumn, maxRows = 8) {
 
 /**
  * Column index for the costing-sheet "CBM/Ctn" header (cubic metres per carton).
- * Binds only when a header cell matches — there is no fixed-column fallback.
+ * Prefers a matching header; falls back to column F (Saudi Costing Sheet).
  */
 function findCbmPerCtnIndex(rows, maxRows = 8) {
   if (!Array.isArray(rows) || rows.length === 0) return -1;
@@ -374,7 +374,10 @@ function findCbmPerCtnIndex(rows, maxRows = 8) {
       if (/(ctn|carton|\bper\b|\/)/.test(header)) return columnIndex;
     }
   }
-  return -1;
+  const fallbackIndex = sheetColumnIndex("F");
+  if (fallbackIndex < 0) return -1;
+  const wideEnough = (rows || []).some((row) => Array.isArray(row) && row.length > fallbackIndex);
+  return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
 function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {

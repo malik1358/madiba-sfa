@@ -404,14 +404,15 @@ test('parsePricePayload reads CBM/Ctn into cbmPerCtnMap from the matching header
   assert.equal(parsed.priceMap.A004803, 14);
 });
 
-test('parsePricePayload does not guess a CBM column when no CBM header exists', () => {
-  // Column F (index 5) holds numbers but has no CBM header — it must not be used.
+test('parsePricePayload falls back to costing-sheet column F for CBM/Ctn', () => {
+  // Saudi Costing Sheet: CBM/Ctn is column F (index 5) even when the header label differs.
   const parsed = parsePricePayload([
-    ['', 'Item Code', 'Item Name', 'Wholesale Price Riyadh', 'Other', 'Weight'],
-    ['', 'A004811', 'Gloves carton', '10', '3', '0.5'],
+    ['', 'Item Code', 'Item Name', 'Wholesale Price Riyadh', 'Other', 'CBM'],
+    ['', 'A004811', 'Gloves carton', '10', '3', '0.042'],
+    ['', 'A004812', 'No cbm', '11', '1', ''],
   ]);
 
-  assert.deepEqual(parsed.cbmPerCtnMap, {});
+  assert.deepEqual(parsed.cbmPerCtnMap, { A004811: 0.042 });
 });
 
 test('parsePricePayload keeps cbmPerCtnMap through object payloads and excludes building materials', () => {

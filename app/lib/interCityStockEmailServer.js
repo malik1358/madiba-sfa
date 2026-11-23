@@ -66,6 +66,7 @@ export async function finishInterCityStockEmail(admin, claim, counts = {}) {
         dammamToRiyadhItems: counts.dammamToRiyadhItems || 0,
         riyadhToDammamItems: counts.riyadhToDammamItems || 0,
         riyadhToStoreItems: counts.riyadhToStoreItems || 0,
+        storeToRiyadhItems: counts.storeToRiyadhItems || 0,
         storeStockItems: counts.storeStockItems || 0,
         stockDate: counts.stockDate || "",
       }),

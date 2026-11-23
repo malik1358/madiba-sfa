@@ -241,6 +241,8 @@ function estimateFromParentShare(categoryActual, parentActual, parentEstimate) {
 
 /** Fallback when the customer has never paid (no receipt) or lifetime avg is missing. */
 export const KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS = 120;
+/** Floor for estimate avg days when lifetime / last-paid figures are faster than this. */
+export const KPI_UPLOAD_SUMMARY_MIN_AVG_DAYS = 60;
 
 export function customerHasPaidReceipt(row = {}) {
   const lastReceipt = String(row?.last_receipt_date || row?.lastReceiptDate || "").slice(0, 10);
@@ -285,9 +287,10 @@ export function resolveLastPaidInvoiceDays(allocations = []) {
 }
 
 /**
- * Avg days for Collection month-end expected remaining:
- * max(lifetime blended avg, days on last paid invoice). Ignores 6m.
- * Never-paid (or no usable days) → 120.
+ * Avg days for Collection month-end expected remaining / Expected Collection:
+ * max(lifetime blended avg, days on last paid invoice), floored at 60.
+ * When both lifetime and last-paid are under 60 (e.g. 47 / 44), estimate uses 60.
+ * Ignores 6m. Never-paid (or no usable days) → 120.
  */
 export function pickCustomerAvgDaysToPay(row = {}) {
   if (!customerHasPaidReceipt(row)) {
@@ -298,7 +301,9 @@ export function pickCustomerAvgDaysToPay(row = {}) {
   const candidates = [];
   if (Number.isFinite(lifetime) && lifetime >= 0) candidates.push(lifetime);
   if (Number.isFinite(lastPaid) && lastPaid >= 0) candidates.push(lastPaid);
-  if (candidates.length) return Math.max(...candidates);
+  if (candidates.length) {
+    return Math.max(...candidates, KPI_UPLOAD_SUMMARY_MIN_AVG_DAYS);
+  }
   return KPI_UPLOAD_SUMMARY_NEVER_PAID_AVG_DAYS;
 }
 

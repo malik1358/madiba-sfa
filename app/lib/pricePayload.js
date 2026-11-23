@@ -357,6 +357,26 @@ function findValueSlabIndex(rows, threshold, fallbackColumn, maxRows = 8) {
   return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
+/**
+ * Column index for the costing-sheet "CBM/Ctn" header (cubic metres per carton).
+ * Binds only when a header cell matches — there is no fixed-column fallback.
+ */
+function findCbmPerCtnIndex(rows, maxRows = 8) {
+  if (!Array.isArray(rows) || rows.length === 0) return -1;
+  const limit = Math.min(maxRows, rows.length);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row)) continue;
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const header = normalizeHeaderCell(row[columnIndex]);
+      if (!header || header.includes("total")) continue;
+      if (!/\bcbm\b/.test(header)) continue;
+      if (/(ctn|carton|\bper\b|\/)/.test(header)) return columnIndex;
+    }
+  }
+  return -1;
+}
+
 function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   const headerIndex = findHeaderIndex(rows, aliases, maxRows);
   if (headerIndex >= 0) return headerIndex;
@@ -376,6 +396,7 @@ function normalizeCatalogResult(
   retailRegionPriceMaps,
   quantityControls,
   eodStock,
+  cbmPerCtnMap,
 ) {
   const aliasedRegions = {};
   PRICING_REGIONS.forEach((region) => {
@@ -407,6 +428,15 @@ function normalizeCatalogResult(
     return next;
   }
 
+  const resolvedCbmPerCtnMap = {};
+  Object.entries(cbmPerCtnMap && typeof cbmPerCtnMap === "object" && !Array.isArray(cbmPerCtnMap) ? cbmPerCtnMap : {})
+    .forEach(([rawCode, rawCbm]) => {
+      const code = normalizeCode(rawCode);
+      const cbm = toNumber(rawCbm);
+      if (!code || !(cbm > 0) || excludedCodes.has(code) || isExcludedItemCode(code)) return;
+      resolvedCbmPerCtnMap[code] = cbm;
+    });
+
   const resolvedQuantityControls = quantityControls === undefined
     ? resolveStoredOrderQuantityControls(null)
     : resolveStoredOrderQuantityControls(
@@ -429,6 +459,7 @@ function normalizeCatalogResult(
     schemes: resolveStoredOrderSchemes({ schemes }),
     quantityControls: resolvedQuantityControls,
     eodStock: normalizeEodStockAvailability(eodStock),
+    cbmPerCtnMap: resolvedCbmPerCtnMap,
   };
 }
 
@@ -543,6 +574,7 @@ export function parsePricePayload(payload) {
   const retailRegionPriceMaps = emptyRegionPriceMaps();
   const cashDiscountMap = {};
   const valueDiscountMap = {};
+  const cbmPerCtnMap = {};
   const sheetItems = [];
   const seen = new Set();
 
@@ -600,6 +632,13 @@ export function parsePricePayload(payload) {
     if (nextRate > 0) {
       targetMap[code] = nextRate;
     }
+  }
+
+  function addCbmPerCtn(rawCode, rawCbm) {
+    const code = normalizeCode(rawCode);
+    if (!code || isExcludedItemCode(code)) return;
+    const cbm = toNumber(rawCbm);
+    if (cbm > 0) cbmPerCtnMap[code] = cbm;
   }
 
   function addValueSlab(rawCode, threshold, rawDiscount) {
@@ -695,6 +734,7 @@ export function parsePricePayload(payload) {
           "cash discount",
           "cash disc",
         ], SCHEME_COLUMNS.cashDiscount, 8);
+        const cbmPerCtnIndex = findCbmPerCtnIndex(value, 8);
         const valueSlabIndexes = VALUE_DISCOUNT_SLABS.map((threshold) => ({
           threshold,
           index: findValueSlabIndex(value, threshold, SCHEME_COLUMNS[`valueDiscount${threshold}`]),
@@ -758,6 +798,7 @@ export function parsePricePayload(payload) {
             if (toNumber(retailRate) > 0) addMappedRate(retailRegionPriceMaps[region], code, retailRate);
           });
           if (cashDiscountIndex >= 0) addDiscount(cashDiscountMap, code, sheetCell(row, cashDiscountIndex));
+          if (cbmPerCtnIndex >= 0) addCbmPerCtn(code, sheetCell(row, cbmPerCtnIndex));
           valueSlabIndexes.forEach(({ threshold, index }) => {
             if (index >= 0) addValueSlab(code, threshold, sheetCell(row, index));
           });
@@ -787,6 +828,7 @@ export function parsePricePayload(payload) {
           addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
           addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
           addDiscount(cashDiscountMap, code, cashDiscount);
+          addCbmPerCtn(code, readAny(value, ["cbmPerCtn", "cbm_per_ctn", "CBM/Ctn", "CBM / Ctn", "CBM/CTN"]));
           addValueSlab(code, 2000, value2000);
           addValueSlab(code, 5000, value5000);
           addValueSlab(code, 10000, value10000);
@@ -825,6 +867,13 @@ export function parsePricePayload(payload) {
         return;
       }
 
+      if (key === "cbmPerCtnMap") {
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          Object.entries(entry).forEach(([code, cbm]) => addCbmPerCtn(code, cbm));
+        }
+        return;
+      }
+
       if (["data", "rows", "result", "items", "sheetItems", "sheetData", "values"].includes(key)) {
         walk(entry);
         return;
@@ -848,6 +897,7 @@ export function parsePricePayload(payload) {
       retailRegionPriceMaps,
       undefined,
       undefined,
+      cbmPerCtnMap,
     );
   }
 
@@ -870,6 +920,7 @@ export function parsePricePayload(payload) {
       retailRegionPriceMaps,
       payload.quantityControls,
       payload.eodStock,
+      cbmPerCtnMap,
     );
   }
 
@@ -883,6 +934,7 @@ export function parsePricePayload(payload) {
     retailRegionPriceMaps,
     undefined,
     undefined,
+    cbmPerCtnMap,
   );
 }
 
@@ -904,6 +956,7 @@ function readCached(cacheKey) {
       parsed.retailRegionPriceMaps,
       parsed.quantityControls,
       parsed.eodStock,
+      parsed.cbmPerCtnMap,
     );
   } catch {
     return null;
@@ -960,6 +1013,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
             data.retailRegionPriceMaps,
             data.quantityControls,
             data.eodStock,
+            data.cbmPerCtnMap,
           )
         : parsePricePayload(data || {});
 

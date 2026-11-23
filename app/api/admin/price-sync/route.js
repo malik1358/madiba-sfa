@@ -319,6 +319,7 @@ function mergeParsedCatalog(base, extra) {
     },
     cashDiscountMap: { ...(base.cashDiscountMap || {}), ...(extra.cashDiscountMap || {}) },
     valueDiscountMap: { ...(base.valueDiscountMap || {}), ...(extra.valueDiscountMap || {}) },
+    cbmPerCtnMap: { ...(base.cbmPerCtnMap || {}), ...(extra.cbmPerCtnMap || {}) },
     sheetItems: [
       ...(Array.isArray(extra.sheetItems) ? extra.sheetItems : []),
       ...(Array.isArray(base.sheetItems) ? base.sheetItems : []),
@@ -359,7 +360,8 @@ async function runSync(sourcePayload = null) {
     && Object.keys(parsed.valueDiscountMap || {}).length === 0;
 
   const missingRetail = Object.values(parsed.retailRegionPriceMaps || {}).every((map) => Object.keys(map).length === 0);
-  if (missingSchemes || missingRetail) {
+  const missingCbm = Object.keys(parsed.cbmPerCtnMap || {}).length === 0;
+  if (missingSchemes || missingRetail || missingCbm) {
     try {
       const sheetRows = await fetchCostingSheetPayload();
       if (sheetRows) {
@@ -455,6 +457,7 @@ async function runSync(sourcePayload = null) {
         retailRegionPriceMaps: parsed.retailRegionPriceMaps || {},
         cashDiscountMap: parsed.cashDiscountMap || {},
         valueDiscountMap: parsed.valueDiscountMap || {},
+        cbmPerCtnMap: parsed.cbmPerCtnMap || {},
       },
       sheet_items: [],
       source_synced_at: nowIso,
@@ -486,6 +489,7 @@ async function runSync(sourcePayload = null) {
     sheetItemCount: enrichedSheetItems.length,
     cashDiscountCount: Object.keys(parsed.cashDiscountMap || {}).length,
     valueDiscountCount: Object.keys(parsed.valueDiscountMap || {}).length,
+    cbmPerCtnCount: Object.keys(parsed.cbmPerCtnMap || {}).length,
     historyInserted,
     sourceUrlUsed: PRICE_SOURCE_URL,
     sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
@@ -496,6 +500,7 @@ async function runSync(sourcePayload = null) {
       retailRegionPriceMaps: parsed.retailRegionPriceMaps || {},
       cashDiscountMap: parsed.cashDiscountMap || {},
       valueDiscountMap: parsed.valueDiscountMap || {},
+      cbmPerCtnMap: parsed.cbmPerCtnMap || {},
     }),
   };
 }

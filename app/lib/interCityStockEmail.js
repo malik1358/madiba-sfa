@@ -6,7 +6,7 @@ import { WAREHOUSE_INVOICE_ILIYAS_EMAIL, WAREHOUSE_INVOICE_JAVED_EMAIL } from ".
 export const INTER_CITY_STOCK_EMAIL_KEY_PREFIX = "inter_city_stock_email:";
 
 /** Store / Dukan contact for warehouse↔Store digests (override with INTER_CITY_STOCK_EMAIL_STORE_TO). */
-export const INTER_CITY_STOCK_EMAIL_VILYATH = "vilyath@noorshukran.com";
+export const INTER_CITY_STOCK_EMAIL_VILYATH = "vilayathulla.malpe@noorshukran.com";
 
 export const DEFAULT_INTER_CITY_STOCK_EMAIL_CC = [
   "fazlur.rahiman@noorshukran.com",

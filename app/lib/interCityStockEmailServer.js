@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  INTER_CITY_STOCK_EMAIL_GROUPS,
   INTER_CITY_STOCK_EMAIL_KEY_PREFIX,
-  buildInterCityStockEmail,
+  buildInterCityStockEmailMessages,
   interCityStockEmailCc,
   interCityStockEmailClaimKey,
-  interCityStockEmailRecipients,
+  interCityStockEmailGroupRecipients,
 } from "./interCityStockEmail.js";
 import { loadInterCityStockTransferReport } from "./interCityStockTransferServer.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
@@ -69,6 +70,7 @@ export async function finishInterCityStockEmail(admin, claim, counts = {}) {
         storeToRiyadhItems: counts.storeToRiyadhItems || 0,
         storeStockItems: counts.storeStockItems || 0,
         stockDate: counts.stockDate || "",
+        sentMessages: counts.sentMessages || 0,
       }),
     })
     .eq("setting_key", claim.settingKey)
@@ -98,11 +100,18 @@ export async function runInterCityStockEmailCycle(admin, {
 
   const forceSend = truthyFlag(force) || truthyFlag(env.INTER_CITY_STOCK_EMAIL_FORCE);
   const isTestSend = Boolean(String(env.INTER_CITY_STOCK_EMAIL_TEST_TO || "").trim());
-  const recipients = interCityStockEmailRecipients(env);
-  const cc = interCityStockEmailCc(env).filter((email) => !recipients.includes(email));
-  if (!recipients.length) throw new Error("No inter-city stock email recipients configured.");
+  const cc = interCityStockEmailCc(env);
   if (!isEmailConfigured(getMailerConfig(env))) {
     throw new Error("Email is not configured on the server.");
+  }
+
+  const groupKeys = Object.keys(INTER_CITY_STOCK_EMAIL_GROUPS);
+  const groupRoutes = groupKeys.map((groupKey) => ({
+    groupKey,
+    to: interCityStockEmailGroupRecipients(groupKey, env),
+  }));
+  if (groupRoutes.some((route) => !route.to.length)) {
+    throw new Error("No inter-city stock email recipients configured for one or more digests.");
   }
 
   let claim = null;
@@ -121,24 +130,44 @@ export async function runInterCityStockEmailCycle(admin, {
 
   try {
     const report = await loadReport(admin, { now: now instanceof Date ? now : new Date(now) });
-    const mail = buildInterCityStockEmail(report, { date: schedule.date, env });
-    if (forceSend || isTestSend) mail.subject = `[TEST] ${mail.subject}`;
-    await send({
-      to: recipients,
-      ...(cc.length ? { cc } : {}),
-      subject: mail.subject,
-      text: mail.text,
-      html: mail.html,
-    }, env);
-    if (claim) await finishInterCityStockEmail(admin, claim, mail.counts);
+    const messages = buildInterCityStockEmailMessages(report, { date: schedule.date, env });
+    const deliveries = [];
+
+    for (const mail of messages) {
+      const route = groupRoutes.find((entry) => entry.groupKey === mail.groupKey);
+      const to = route?.to || [];
+      if (!to.length) continue;
+      const messageCc = cc.filter((email) => !to.includes(email));
+      const subject = (forceSend || isTestSend) ? `[TEST] ${mail.subject}` : mail.subject;
+      await send({
+        to,
+        ...(messageCc.length ? { cc: messageCc } : {}),
+        subject,
+        text: mail.text,
+        html: mail.html,
+        ...(mail.attachments?.length ? { attachments: mail.attachments } : {}),
+      }, env);
+      deliveries.push({
+        groupKey: mail.groupKey,
+        groupLabel: mail.groupLabel,
+        to,
+        cc: messageCc,
+        attachmentNames: (mail.attachments || []).map((entry) => entry.filename),
+      });
+    }
+
+    const counts = {
+      ...(messages[0]?.counts || {}),
+      sentMessages: deliveries.length,
+    };
+    if (claim) await finishInterCityStockEmail(admin, claim, counts);
     return {
       skipped: false,
       date: schedule.date,
-      sentCount: 1,
-      to: recipients,
-      cc,
+      sentCount: deliveries.length,
+      deliveries,
       forced: forceSend || isTestSend,
-      ...mail.counts,
+      ...counts,
     };
   } catch (error) {
     if (claim) await releaseInterCityStockEmailClaim(admin, claim);

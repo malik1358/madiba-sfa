@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   formatDayActivityWhatsappLines,
+  loadDayActivityTillMessage,
   patchWhatsappSummaryDayActivity,
   resolveDayActivityTillMessage,
 } from "../app/lib/dayActivityWhatsapp.js";
@@ -40,6 +41,58 @@ test("formatDayActivityWhatsappLines shows dashes when unknown", () => {
       "",
     ],
   );
+});
+
+test("loadDayActivityTillMessage shows unknown when the day timeline never loaded", async () => {
+  const stats = await loadDayActivityTillMessage({
+    supabase: null,
+    userId: "user-1",
+    savedAt: "2026-11-24T12:29:00.000Z",
+    skipTimeline: true,
+    timelineTimeoutMs: 0,
+    currentEntry: {
+      transactionType: "PROSPECT_FOLLOW_UP",
+      customerCode: "PROSPECT-OFF-2ee7cdfd2acd447c",
+      savedAt: "2026-11-24T12:29:00.000Z",
+    },
+  });
+
+  assert.equal(stats.known, false);
+  assert.deepEqual(
+    formatDayActivityWhatsappLines(stats),
+    [
+      "",
+      "Visits with order: -",
+      "Visits without order: -",
+      "Collections: -",
+      "",
+    ],
+  );
+});
+
+test("loadDayActivityTillMessage still counts from a prefetched timeline", async () => {
+  const stats = await loadDayActivityTillMessage({
+    supabase: null,
+    userId: "user-1",
+    savedAt: "2026-11-24T11:52:00.000Z",
+    skipTimeline: true,
+    timelineTimeoutMs: 0,
+    localEntries: [
+      { transactionType: "VISIT_REPORT", customerCode: "V1", savedAt: "2026-11-24T08:00:00.000Z" },
+      { transactionType: "ORDER_SUBMITTED", customerCode: "V2", savedAt: "2026-11-24T10:00:00.000Z" },
+    ],
+    localOrderStats: { orderCount: 1, orderValue: 1254.04 },
+    currentEntry: {
+      transactionType: "PROSPECT_FOLLOW_UP",
+      customerCode: "PROSPECT-OFF-afe48ddf22b14d9f",
+      savedAt: "2026-11-24T11:52:00.000Z",
+    },
+  });
+
+  assert.equal(stats.known, true);
+  assert.equal(stats.orderCount, 1);
+  assert.equal(stats.orderValue, 1254.04);
+  assert.equal(stats.visitWithoutOrderCount, 2);
 });
 
 test("formatDayActivityWhatsappLines omits the block when stats were not loaded", () => {

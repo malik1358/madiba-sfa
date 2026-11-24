@@ -5,6 +5,7 @@ import {
   applyCustomerFarFlags,
   buildCurrentWorkingHoursEntry,
   formatWorkingHoursWhatsappLines,
+  loadWorkingHoursTillMessage,
   patchWhatsappSummaryWorkingHours,
   resolveWorkingHoursTillMessage,
 } from "../app/lib/workingHoursWhatsapp.js";
@@ -162,6 +163,63 @@ test("resolveWorkingHoursTillMessage returns 0h when login is missing", () => {
   assert.equal(hours.known, true);
   assert.equal(hours.minutes, 0);
   assert.equal(hours.value, "0h");
+});
+
+test("loadWorkingHoursTillMessage shows unknown when the day timeline never loaded", async () => {
+  // skipTimeline + timeout 0 skips the fetch; with no localEntries this used to
+  // invent "0h" from currentEntry alone (Basheer Al ajwa WhatsApp mid-day).
+  const hours = await loadWorkingHoursTillMessage({
+    supabase: null,
+    userId: "user-1",
+    savedAt: "2026-11-24T12:29:00.000Z",
+    skipTimeline: true,
+    timelineTimeoutMs: 0,
+    currentEntry: {
+      savedAt: "2026-11-24T12:29:00.000Z",
+      transactionType: "VISIT_REPORT",
+      isFarFromCustomer: false,
+    },
+  });
+
+  assert.equal(hours.known, false);
+  assert.equal(hours.value, "-");
+});
+
+test("loadWorkingHoursTillMessage still computes from a prefetched timeline", async () => {
+  const hours = await loadWorkingHoursTillMessage({
+    supabase: null,
+    userId: "user-1",
+    savedAt: "2026-11-24T11:52:00.000Z",
+    skipTimeline: true,
+    timelineTimeoutMs: 0,
+    // Intermediate stops keep each gap under the 2h unlogged-idle cut.
+    localEntries: [
+      {
+        savedAt: "2026-11-24T07:05:00.000Z",
+        transactionType: "VISIT_REPORT",
+        isFarFromCustomer: false,
+      },
+      {
+        savedAt: "2026-11-24T08:30:00.000Z",
+        transactionType: "VISIT_REPORT",
+        isFarFromCustomer: false,
+      },
+      {
+        savedAt: "2026-11-24T10:00:00.000Z",
+        transactionType: "ORDER_SUBMITTED",
+        isFarFromCustomer: false,
+      },
+    ],
+    currentEntry: {
+      savedAt: "2026-11-24T11:52:00.000Z",
+      transactionType: "VISIT_REPORT",
+      isFarFromCustomer: false,
+    },
+  });
+
+  assert.equal(hours.known, true);
+  assert.equal(hours.minutes, 287);
+  assert.match(hours.value, /^4h 47m \(/);
 });
 
 test("applyCustomerFarFlags uses the customer pin and keeps an accepted GPS update near", () => {

@@ -320,8 +320,10 @@ async function loadCustomerPins(supabase, entries = []) {
 
 /**
  * Load the Daily Visit Report working-hours total up to the WhatsApp message.
- * On timeout/offline, still compute from whatever entries are available
- * (including currentEntry) so queueFirst WhatsApp shows "0h" instead of "-".
+ * On timeout/offline with a prefetched timeline, still compute from those stops
+ * (including currentEntry). With no timeline at all, return unknown ("-") —
+ * do not invent "0h" from the current stop alone (that falsely wipes hours
+ * mid-day when mobile data is slow).
  */
 export async function loadWorkingHoursTillMessage({
   supabase,
@@ -337,6 +339,8 @@ export async function loadWorkingHoursTillMessage({
 
   const cachedEntries = Array.isArray(localEntries) ? localEntries : null;
   let entries = cachedEntries;
+  // Only treat the day as known when we have a real timeline (fetch or cache).
+  let timelineReady = cachedEntries != null;
 
   if (!offline && (!skipTimeline || timelineTimeoutMs > 0)) {
     try {
@@ -350,9 +354,15 @@ export async function loadWorkingHoursTillMessage({
         ]);
         // Prefer a completed fetch; on timeout keep any prefetched stops so
         // queueFirst WhatsApp still shows the near-stop total instead of "-".
-        entries = loaded.ok ? loaded.rows : (cachedEntries || []);
+        if (loaded.ok) {
+          entries = loaded.rows;
+          timelineReady = true;
+        } else {
+          entries = cachedEntries || [];
+        }
       } else {
         entries = await timelinePromise;
+        timelineReady = true;
       }
     } catch {
       entries = cachedEntries || [];
@@ -360,6 +370,17 @@ export async function loadWorkingHoursTillMessage({
   }
 
   if (!entries) entries = [];
+
+  // Timeout / offline / skipped fetch with no cache: do not report 0h from
+  // currentEntry alone — managers read that as "hours disappeared".
+  if (!timelineReady) {
+    return {
+      known: false,
+      minutes: 0,
+      value: "-",
+      ranges: [],
+    };
+  }
 
   return resolveWorkingHoursTillMessage({
     entries,

@@ -332,7 +332,7 @@ These are large or shared. Read them fully enough to see callers before editing:
 - `app/lib/outstanding.js`
 - `app/lib/workdayActivity.js`
 - `app/lib/moduleAccess.js`
-- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` / `customerLedgerPdf.js` (Arabic-then-English Noor Shukran balance-confirmation PDF via `pdfArabicText.js`; per-year tables + month gaps + Machine Open aging tied to closing; leftover non-voiding CNs kept on the ledger; reversed invoices excluded)
+- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` / `customerLedgerPdf.js` (Arabic-then-English Noor Shukran balance-confirmation PDF via `pdfArabicText.js`; letterhead includes street, Jeddah national address, and VAT like the Tally statement; per-year tables + month gaps + Machine Open aging tied to closing; leftover non-voiding CNs kept on the ledger; reversed invoices excluded)
 - `app/management/pending-orders/page.js`
 - `app/management/new-order/page.js`
 - `app/management/payment-collections/PaymentCollectionsView.jsx`

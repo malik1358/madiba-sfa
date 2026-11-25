@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-25, Ahmedabad office follow-up #4): customer `1498` (Sajida Ali Saad Foundation) sales voucher `RNFD/524` (requested `RNFD-524`; 2026-10-04, RIYADH W/S CREDIT, item `A004232`, 2,180.00 ex-VAT / ~2,507.00 incl-VAT, `sales_raw` id 560629) removed from active batch 10. Not in outstanding. `customer_history_cache:1498%` cleared.
+
 One-off production delete (2026-11-25, Ahmedabad office follow-up #3):
 
 - Customer `1126C` (Five Trend; office said `1126`) credit note `69` removed for both `2026-02-22` (requested; 24 lines, −8,220.40 ex-VAT, ref `2637`) and identical twin `2026-02-16` (same lines/amounts/ref — duplicate import).

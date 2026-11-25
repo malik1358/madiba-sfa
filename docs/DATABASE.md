@@ -43,6 +43,15 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-25, Ahmedabad office): three invoices removed and one not found.
+
+- Customer `1708` (King Perfumes Trading Establishment) sales voucher `JNFD/021` (2026-11-18, JEDDAH W/S CREDIT, 53 lines, 27,060.47 ex-VAT / ~31,119.54 incl-VAT) removed from active batch 10 (`sales_raw` ids 507823–508065). Not in outstanding (open bill remains `JNFD/022`), `sales_transactions`, `invoices`, or receipt register.
+- Customer `1035C` (AL GIHAZ CONTRACTING; office said `1035`) sales voucher `NFD/1862` / requested as `INV/NFD1862` (2026-08-22, SALES-NON FOOD DIVISION, item `PVC`, 13,520.00 ex-VAT / ~15,548.00 incl-VAT) removed from active batch 10 (`sales_raw` id 559352). Not in outstanding (other NFD bills remain), `sales_transactions`, `invoices`, or receipt register.
+- Customer `1140` (Hamsat Khayal Trading Company) outstanding invoice `RNFD/0696` (2026-11-24, pending 7,576.78) removed from `outstanding_customerwise_dataset_v1`. No matching sales voucher (live same-day sale is `RNFD/774`); customer was sole open bill so the customer row was dropped. Re-uploading an outstanding file that still lists `RNFD/0696` will restore it.
+- Customer `1261` / `1261C` (Skyfront Trading Company) invoice `3128` was **not** in `sales_raw`, outstanding, `invoices`, receipt register, or `sales_transactions`. Credit note `192` (2026-05-05) still references `3128` and was left in place.
+
+`customer_history_cache` cleared for `1708%`, `1035C%`, `1140%`, and `1261C%`. Re-importing a sales date that still has `JNFD/021` or `NFD/1862` will restore those vouchers.
+
 One-off production delete (2026-11-08): customer `1573` (Lamsat Durat Wajid Electric Est) sales voucher `RNFD/651` (2026-11-01, RIYADH W/S CREDIT, item `A005355`, 2 × 1040 = 2,080.00 ex-VAT / 2,392.00 incl-VAT) was removed from active batch 10 (`sales_raw` id 468431). It was not in `sales_transactions`, `invoices`, outstanding, or `receipt_register_dataset_v1`. `customer_history_cache:1573%` was cleared. Re-importing that date from a file that still has the voucher will restore it.
 
 One-off production delete (2026-11-06): customer `1231` credit notes `739` (−67.60 ex-VAT) and `740` (−64.90 ex-VAT), both 2026-10-31, were removed from active batch 10 (`sales_raw` ids 465597, 465599, 465598, 465600). They are not in `sales_transactions`, `invoices`, or `receipt_register_dataset_v1`. `customer_history_cache:1231%` was cleared. Re-importing that date from a file that still has them will restore them.

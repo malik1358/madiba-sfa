@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-11-25** — Ahmedabad office follow-up #9: removed **1431** sales `NFD/796` + `NFD/797` and matching CNs **233**/**234** (refs `NFD796`/`NFD797`, 16 May). Cleared `customer_history_cache:1431%`. No code or migration. See `docs/DATABASE.md`.
 - **2026-11-25** — Ahmedabad office follow-up #8: removed CN **197** on **1441** (8 May + duplicate 3 May, −1,680, ref `NFD/622`). Cleared `customer_history_cache:1441%`. No code or migration. See `docs/DATABASE.md`.
 - **2026-11-25** — Ahmedabad office follow-up #7: removed **1438** sales `NFD/767` + matching CN **225** (ref `767`, 14 May, ±1,860). Cleared `customer_history_cache:1438%`. No code or migration. See `docs/DATABASE.md`.
 - **2026-11-25** — Ahmedabad office follow-up #6: **1455** “invoice NED/1893” was CN **618** typo Ref (sale is `NFD/1893`) — retargeted to `NFD/1893`. Removed CN **178** on **1231** (28 Apr + duplicate 25 Apr). Cleared caches. No code or migration. See `docs/DATABASE.md`.

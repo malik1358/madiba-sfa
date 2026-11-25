@@ -276,7 +276,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   visitedUniqueCustomers: "Visited {count} unique customer(s).",
   collectionByCustomer: "{customer}: {amount} ﷼ collected.",
   collectionByCustomerNone: "{customer}: no collection.",
-  workingHours: "Working hours: {value}.",
+  workingHours: "Time on field: {value}.",
 };
 
 function fill(template, values) {
@@ -683,7 +683,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
   );
   const workingHoursItem = makeSummaryItem(
     "working_hours",
-    fill(labels.workingHours || "Working hours: {value}.", { value: workingHours.value || "0h" }),
+    fill(labels.workingHours || "Time on field: {value}.", { value: workingHours.value || "0h" }),
   );
 
   const hasFieldDay = Boolean(sorted.length || fieldVisitStats?.uniqueCustomers);

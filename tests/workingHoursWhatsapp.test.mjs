@@ -13,22 +13,22 @@ import {
 test("formatWorkingHoursWhatsappLines shows dash when unknown", () => {
   assert.deepEqual(
     formatWorkingHoursWhatsappLines(null),
-    ["", "Working hours: -", ""],
+    ["", "Time on field: -", ""],
   );
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: false }),
-    ["", "Working hours: -", ""],
+    ["", "Time on field: -", ""],
   );
 });
 
 test("formatWorkingHoursWhatsappLines pads blank lines before and after", () => {
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: true, value: "3h 26m", minutes: 206 }),
-    ["", "Working hours: 3h 26m", ""],
+    ["", "Time on field: 3h 26m", ""],
   );
   assert.deepEqual(
     formatWorkingHoursWhatsappLines({ known: true, value: "0h", minutes: 0 }),
-    ["", "Working hours: 0h", ""],
+    ["", "Time on field: 0h", ""],
   );
 });
 
@@ -294,17 +294,27 @@ test("patchWhatsappSummaryWorkingHours inserts above day totals at the end", () 
 
   assert.match(
     patched,
-    /Working hours: 2h 10m\n\nVisits with order: 0 \/ 0 ﷼\nVisits without order: 0\nCollections: 1 \/ 0 ﷼/,
+    /Time on field: 2h 10m\n\nVisits with order: 0 \/ 0 ﷼\nVisits without order: 0\nCollections: 1 \/ 0 ﷼/,
   );
-  assert.doesNotMatch(patched, /Visit date\/time:[\s\S]*Working hours:[\s\S]*Outcome:/);
+  assert.doesNotMatch(patched, /Visit date\/time:[\s\S]*Time on field:[\s\S]*Outcome:/);
 });
 
 test("patchWhatsappSummaryWorkingHours replaces an existing working hours dash", () => {
+  const patched = patchWhatsappSummaryWorkingHours(
+    "Visit date/time: 07/09/2026 10:34\n\nTime on field: -\n\nOutcome: Paid",
+    { known: true, value: "3h 5m", minutes: 185 },
+  );
+
+  assert.match(patched, /\n\nTime on field: 3h 5m\n\n/);
+  assert.doesNotMatch(patched, /Time on field: -/);
+});
+
+test("patchWhatsappSummaryWorkingHours renames legacy Working hours label", () => {
   const patched = patchWhatsappSummaryWorkingHours(
     "Visit date/time: 07/09/2026 10:34\n\nWorking hours: -\n\nOutcome: Paid",
     { known: true, value: "3h 5m", minutes: 185 },
   );
 
-  assert.match(patched, /\n\nWorking hours: 3h 5m\n\n/);
-  assert.doesNotMatch(patched, /Working hours: -/);
+  assert.match(patched, /\n\nTime on field: 3h 5m\n\n/);
+  assert.doesNotMatch(patched, /Working hours:/);
 });

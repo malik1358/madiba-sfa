@@ -426,8 +426,9 @@ export async function loadTodayDayActivityEntries(supabase, userId) {
 
 /**
  * Load today's visit/order/collection totals up to the WhatsApp message.
- * Soft-timeout / offline still includes currentEntry so queueFirst shares show
- * at least this stop instead of dashes.
+ * Soft-timeout / offline with a prefetched timeline still includes currentEntry.
+ * With no timeline at all, return unknown dashes — do not invent "1 visit / 0
+ * orders" from the current stop alone when mobile data timed out mid-day.
  */
 export async function loadDayActivityTillMessage({
   supabase,
@@ -442,10 +443,12 @@ export async function loadDayActivityTillMessage({
   const capturedAt = savedAt || new Date().toISOString();
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
 
-  let entries = Array.isArray(localEntries) ? localEntries : null;
+  const cachedEntries = Array.isArray(localEntries) ? localEntries : null;
+  let entries = cachedEntries;
   let orderStats = localOrderStats && typeof localOrderStats === "object"
     ? localOrderStats
     : null;
+  let timelineReady = cachedEntries != null;
 
   if (!offline && (!skipTimeline || timelineTimeoutMs > 0)) {
     try {
@@ -460,23 +463,37 @@ export async function loadDayActivityTillMessage({
         if (loaded.ok && loaded.payload) {
           entries = loaded.payload.entries;
           orderStats = loaded.payload.orderStats;
+          timelineReady = true;
         } else {
-          entries = entries || [];
+          entries = cachedEntries || [];
           orderStats = orderStats || emptyOrderStats();
         }
       } else {
         const payload = await timelinePromise;
         entries = payload.entries;
         orderStats = payload.orderStats;
+        timelineReady = true;
       }
     } catch {
-      entries = entries || [];
+      entries = cachedEntries || [];
       orderStats = orderStats || emptyOrderStats();
     }
   }
 
   if (!entries) entries = [];
   if (!orderStats) orderStats = emptyOrderStats();
+
+  if (!timelineReady) {
+    return {
+      known: false,
+      visitWithoutOrderCount: 0,
+      orderCount: 0,
+      orderValue: 0,
+      collectionCount: 0,
+      collectionValue: 0,
+      collectionVisitWithoutPaymentCount: 0,
+    };
+  }
 
   return resolveDayActivityTillMessage({
     entries,

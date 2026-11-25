@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-25, Ahmedabad office follow-up #7): customer `1438` (ADHWAN MOHAMMED AL-AHMARI TRADING ESTABLISHMENT) invoice `767` dated 2026-05-14 — removed sales `NFD/767` (item `A004075`, 1,860.00 ex-VAT, id 560810) and same-day reverse CN `225` (ref bare `767`, −1,860.00, id 575751) so Settlement would not re-synthesize phantom `767`. Not in outstanding. `customer_history_cache:1438%` cleared.
+
 One-off production fix (2026-11-25, Ahmedabad office follow-up #6):
 
 - Customer `1455` (Zawya Jawharat Al Asaar): office asked to delete invoice `NED/1893` dated 2026-10-08. Sale is `NFD/1893` (2026-10-01, 5,130.00 ex-VAT); CN `618` (2026-10-08, −2,092.50) had typo Ref `NED/1893`, which synthesized a phantom. Updated CN `618` reference to `NFD/1893` (5 lines). Outstanding `NFD/1893` left in place.

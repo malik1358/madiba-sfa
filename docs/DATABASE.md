@@ -43,6 +43,15 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-25, Ahmedabad office follow-up #3):
+
+- Customer `1126C` (Five Trend; office said `1126`) credit note `69` removed for both `2026-02-22` (requested; 24 lines, −8,220.40 ex-VAT, ref `2637`) and identical twin `2026-02-16` (same lines/amounts/ref — duplicate import).
+- Customer `1171C` (Larsen & Toubro; office said `1171`) sales `NFD/1533` and `NFD/1534` (2026-08-25, 2 lines each, 1,820.00 ex-VAT) removed from active batch 10.
+- Customer `1114C` credit note requested as `37` dated 2025-10-11: voucher was `25` with Ref. No. `37` (−2,347.50 ex-VAT); that CN row removed. Same-day sale `1371` (2,347.50) left in place.
+- Credit note `560` dated 2026-09-14 for customer `1126`/**`1126C` was not present** (a CN `560` that day exists only on customer `1571`).
+
+`customer_history_cache` cleared for `1126C%`, `1171C%`, `1114C%`.
+
 One-off production delete (2026-11-25, Ahmedabad office follow-up #2): customer `1159` sales voucher `BR2/NFD/425` (requested as `BR/2/NFD/425`; 2026-04-13, 2 lines, 870.00 ex-VAT / ~1,000.50 incl-VAT, ids 562983, 563930) removed from active batch 10. Same items reissued as `BR2/NFD/431` (still open in outstanding); CN `155` refs `BR/2/NFD/425` (slash variant) so it did not exact-match the sale. Also removed credit note `664` (2026-10-22, −800.00, ref `#MEK05-864`) — invoice `#MEK05-864` was never in `sales_raw`/outstanding; Settlement synthesized it from this CN. `customer_history_cache:1159%` cleared.
 
 One-off production delete (2026-11-25, Ahmedabad office follow-up): customer `1159` (JV MAG-MAN Al Majal Al Arabi Grp and MAN Entpr KSA) sales vouchers `BR1/2728` (2026-01-22, item `LP00192`, 522.00 ex-VAT / ~600.30 incl-VAT, `sales_raw` id 562952) and `BR1/2729` (2026-01-22, item `LP00190`, 1,250.00 ex-VAT / ~1,437.50 incl-VAT, `sales_raw` id 561341) removed from active batch 10. Not in outstanding, `sales_transactions`, or `invoices`. `customer_history_cache:1159%` cleared. Re-importing that date from a file that still has these vouchers will restore them.

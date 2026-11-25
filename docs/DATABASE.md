@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production fix (2026-11-25, Ahmedabad office follow-up #5): customer `1541` — office asked to delete invoice `1541` dated 2026-08-25. No sales voucher `1541` on that customer; same-day CN `496` (14 lines, −2,153.15 ex-VAT) exact-mirrors sale `RNFD/313` but Ref. No. was bare `1541`, so Payment Settlement synthesized phantom invoice `1541`. Updated CN `496` reference to `RNFD/313` (ids 573974–575013). Left untouched: `NFD/1541` on customer `1431` (different party). `customer_history_cache:1541%` cleared.
+
 One-off production delete (2026-11-25, Ahmedabad office follow-up #4): customer `1498` (Sajida Ali Saad Foundation) sales voucher `RNFD/524` (requested `RNFD-524`; 2026-10-04, RIYADH W/S CREDIT, item `A004232`, 2,180.00 ex-VAT / ~2,507.00 incl-VAT, `sales_raw` id 560629) removed from active batch 10. Not in outstanding. `customer_history_cache:1498%` cleared.
 
 One-off production delete (2026-11-25, Ahmedabad office follow-up #3):

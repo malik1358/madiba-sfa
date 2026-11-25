@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-25, Ahmedabad office follow-up): customer `1159` (JV MAG-MAN Al Majal Al Arabi Grp and MAN Entpr KSA) sales vouchers `BR1/2728` (2026-01-22, item `LP00192`, 522.00 ex-VAT / ~600.30 incl-VAT, `sales_raw` id 562952) and `BR1/2729` (2026-01-22, item `LP00190`, 1,250.00 ex-VAT / ~1,437.50 incl-VAT, `sales_raw` id 561341) removed from active batch 10. Not in outstanding, `sales_transactions`, or `invoices`. `customer_history_cache:1159%` cleared. Re-importing that date from a file that still has these vouchers will restore them.
+
 One-off production delete (2026-11-25, Ahmedabad office): three invoices removed and one not found.
 
 - Customer `1708` (King Perfumes Trading Establishment) sales voucher `JNFD/021` (2026-11-18, JEDDAH W/S CREDIT, 53 lines, 27,060.47 ex-VAT / ~31,119.54 incl-VAT) removed from active batch 10 (`sales_raw` ids 507823–508065). Not in outstanding (open bill remains `JNFD/022`), `sales_transactions`, `invoices`, or receipt register.

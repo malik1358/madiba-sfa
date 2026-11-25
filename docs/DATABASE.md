@@ -43,6 +43,21 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production batch (2026-11-25, Ahmedabad office follow-up #10):
+
+- `1281` “invoice ABA122” (15 Nov): no sale; CN `824` mirrored `RNFD/740` with Ref `ABA122` — retargeted to `RNFD/740`.
+- `1087C` `NFD-176` (1 Mar): removed sale `NFD/176` (921.80) + CN `79` (ref `NFD-176`, −921.80).
+- `1235` CN `196` (8 May): removed + twin 2 May (−840, ref `NFD/612`).
+- `1520` “invoice 41” (31 Aug): phantom from CN `527` — retargeted Ref `41` → `DNFD/081`.
+- `1577` “invoice 5455” (21 Nov): no sale; removed CN `842` (ref `54,55`, −615.37) that synthesized phantoms.
+- `1444` CN `198` (8 May): removed + twin 4 May (−610, ref `NFD/627`).
+- `1566` CN `534` (6 Sep): removed + twin 5 Sep (−466, ref `RNFD/372`).
+- `1533` CN `515` (31 Aug): removed + twin 10 Aug (−466, ref `RNFD/221`).
+- `1130C` “invoice 1784/2541” (10 May): no compound sale; removed CN `210` (ref `1784/2541`, −379.90).
+- `1059` CN `199` (8 May): removed + twin 6 May (−320, ref `NFD/648`).
+
+History caches cleared for those codes.
+
 One-off production delete (2026-11-25, Ahmedabad office follow-up #9): customer `1431` (Blocks Creative Group) invoices `NFD796` / `NFD797` dated 2026-05-16 — removed sales `NFD/796` (1 line, 300.00 ex-VAT, id 564417) and `NFD/797` (6 lines, 1,292.50 ex-VAT) plus same-day reverse CNs `233` (ref `NFD796`, −300.00) and `234` (ref `NFD797`, −1,292.50) so Settlement would not re-synthesize phantoms from the slash-less refs. Not in outstanding. `customer_history_cache:1431%` cleared.
 
 One-off production delete (2026-11-25, Ahmedabad office follow-up #8): customer `1441` (Jazeerat Al-Tawfeer) credit note `197` removed for requested `2026-05-08` (2 lines, −1,680.00 ex-VAT, ref `NFD/622`, ids 434377, 434379) and identical twin `2026-05-03` (ids 575328, 575656). `customer_history_cache:1441%` cleared.

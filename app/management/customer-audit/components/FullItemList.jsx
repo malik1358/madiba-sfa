@@ -44,6 +44,7 @@ export default function FullItemList({
   paymentType = "credit",
   schemeApplications = {},
   eodStock = null,
+  enforceEodStockCap = true,
   pricingRegion = "riyadh",
   language = "en",
 }) {
@@ -144,6 +145,7 @@ export default function FullItemList({
                     const availableDisplay = countryEodStockDisplayQty(eodStock, code);
                     const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, code);
                     const overStock = isEodStockQtyOverAvailable(orderQty, availableDisplay);
+                    const stockCap = enforceEodStockCap ? availableDisplay : null;
                     return (
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>
@@ -151,8 +153,8 @@ export default function FullItemList({
                         <td>
                           <div className="moduleQtyControl">
                             <button type="button" onClick={() => decreaseOrderQty(code)}>−</button>
-                            <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
-                            <button type="button" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(code)}>+</button>
+                            <input type="number" min="0" max={stockCap == null ? undefined : stockCap} step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
+                            <button type="button" disabled={stockCap != null && orderQty >= stockCap} onClick={() => increaseOrderQty(code)}>+</button>
                           </div>
                           {availableLabel ? (
                             <div className={`moduleCode moduleStockAvailable${overStock ? " moduleStockAvailable--over" : ""}`}>

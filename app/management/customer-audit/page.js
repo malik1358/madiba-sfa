@@ -225,6 +225,7 @@ function CustomerAuditPageContent() {
     deleteDraft,
     draftOrderId,
     loadedOrderStatus,
+    enforceEodStockCap,
   } = useOrder({
     analytics,
     quickOrderAllItems: [
@@ -865,6 +866,7 @@ function CustomerAuditPageContent() {
               paymentType={paymentType}
               schemeApplications={schemeApplications}
               eodStock={eodStock}
+              enforceEodStockCap={enforceEodStockCap}
             />
 
             <QuickOrder
@@ -879,6 +881,7 @@ function CustomerAuditPageContent() {
               paymentType={paymentType}
               schemeApplications={schemeApplications}
               eodStock={eodStock}
+              enforceEodStockCap={enforceEodStockCap}
               pricingRegion={pricingRegion}
               language={language}
             />
@@ -896,6 +899,7 @@ function CustomerAuditPageContent() {
               paymentType={paymentType}
               schemeApplications={schemeApplications}
               eodStock={eodStock}
+              enforceEodStockCap={enforceEodStockCap}
               pricingRegion={pricingRegion}
               language={language}
             />

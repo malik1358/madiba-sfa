@@ -69,7 +69,7 @@ export function buildFieldVisitWhatsappSummary({
     code: "Code",
     salesman: "Salesman",
     visitDateTime: "Visit date/time",
-    workingHours: "Working hours",
+    workingHours: "Time on field",
     outcome: "Outcome",
     nextVisit: "Next visit",
     notes: "Notes",
@@ -138,7 +138,7 @@ export function buildFieldVisitWhatsappSummary({
     lines.push("", `${labels.lastVisitDate}: ${lastVisitDate}.`);
   }
 
-  // Working hours sits above the day totals block at the end of the share.
+  // Time on field sits above the day totals block at the end of the share.
   appendWorkingHoursAndDayActivityLines(
     lines,
     formatWorkingHoursWhatsappLines(workingHours, { workingHours: labels.workingHours }),

@@ -266,7 +266,7 @@ export function formatDayActivityWhatsappLines(stats = null, labels = {}) {
 }
 
 /**
- * Append Working hours then day totals at the end of a WhatsApp summary.
+ * Append Time on field then day totals at the end of a WhatsApp summary.
  * Collapses the shared blank padding so there is one blank between the blocks.
  */
 export function appendWorkingHoursAndDayActivityLines(

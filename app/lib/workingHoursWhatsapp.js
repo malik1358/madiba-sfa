@@ -15,8 +15,13 @@ import {
 import { normalizeWhatsappSummaryText } from "./whatsappText.js";
 
 export const WORKING_HOURS_WHATSAPP_LABELS = {
-  workingHours: "Working hours",
+  workingHours: "Time on field",
 };
+
+/** Legacy English label kept so sync can still patch older stored WhatsApp text. */
+export const WORKING_HOURS_WHATSAPP_LEGACY_LABELS = [
+  "Working hours",
+];
 
 /** Soft deadline for offline-first WhatsApp builds; still falls back to attendance punches already loaded. */
 export const WORKING_HOURS_WHATSAPP_TIMEOUT_MS = 8000;
@@ -68,7 +73,7 @@ function entryType(entry) {
 }
 
 /**
- * Format WhatsApp lines for cumulative working hours until the message time.
+ * Format WhatsApp lines for cumulative time on field until the message time.
  * Always pads with a blank line before and after so the value stands out.
  * Unknown (not loaded) shows "-"; computed zero shows "0h".
  */
@@ -112,7 +117,7 @@ function idleGapsForDayRouteEntries(entries = []) {
 }
 
 /**
- * Working hours till the WhatsApp message = the Daily Visit Report total
+ * Time on field till the WhatsApp message = the Daily Visit Report total
  * (`resolveDayRouteWorkingHours`) using only punches and near customer stops
  * at or before that time. Login-to-now attendance is not used.
  */
@@ -408,7 +413,9 @@ export function patchWhatsappSummaryWorkingHours(
   const labelVariants = [
     labels.workingHours,
     WORKING_HOURS_WHATSAPP_LABELS.workingHours,
+    ...WORKING_HOURS_WHATSAPP_LEGACY_LABELS,
     "ساعات العمل",
+    "الوقت في الميدان",
   ].filter(Boolean);
 
   for (const label of labelVariants) {
@@ -418,7 +425,7 @@ export function patchWhatsappSummaryWorkingHours(
     }
   }
 
-  // Prefer placing Working hours just above the day-totals block at the end.
+  // Prefer placing Time on field just above the day-totals block at the end.
   const dayTotalsPatterns = [
     /^(Visits with order:\s*.+)$/m,
     /^(زيارات مع طلب:\s*.+)$/m,

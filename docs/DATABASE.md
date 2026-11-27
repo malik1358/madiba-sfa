@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production fix (2026-11-27): customer `1114C` (DURRAT AL-YASMEEN STATIONERY) credit note `25` (2025-10-11, −2,347.50) had `reference = 37` while the real same-day sale is voucher `1371` (2,347.50). Updated active batch 10 `sales_raw` id 593170 reference to `1371` and cleared `customer_history_cache:1114C%` so Payment Settlement no longer synthesizes phantom Invoice 37. Re-importing a CN file that still lists Ref 37 will restore the bad reference until the code skip (`resolveMisnamedCreditNoteSale`) is deployed.
+
 One-off production delete (2026-11-25, Ahmedabad office): three invoices removed and one not found.
 
 - Customer `1708` (King Perfumes Trading Establishment) sales voucher `JNFD/021` (2026-11-18, JEDDAH W/S CREDIT, 53 lines, 27,060.47 ex-VAT / ~31,119.54 incl-VAT) removed from active batch 10 (`sales_raw` ids 507823–508065). Not in outstanding (open bill remains `JNFD/022`), `sales_transactions`, `invoices`, or receipt register.

@@ -8,6 +8,7 @@ import {
   OUTSTANDING_DATASET_KEY,
   RECEIPT_DATASET_KEY,
   RECEIPT_DATASET_STAMP_KEY,
+  RECEIPT_DELETE_KINDS,
   SETTLEMENT_DELETION_LOG_KEY,
   appendSettlementDeletionLog,
   buildSettlementDeletionEntry,
@@ -156,6 +157,50 @@ async function loadMatchingSalesRows(admin, {
   ));
 }
 
+async function findCreditNotesReferencingVoucher(admin, {
+  batchId,
+  customerCode,
+  customerName,
+  voucher,
+}) {
+  const code = normalizeCustomerCode(customerCode);
+  const select = "id,voucher_number,voucher_type,reference,transaction_date,customer_code,customer_name,sales_amount";
+  const [exact, prefixed] = await Promise.all([
+    admin
+      .from("sales_raw")
+      .select(select)
+      .eq("import_batch_id", batchId)
+      .eq("customer_code", code)
+      .ilike("voucher_type", "%credit%")
+      .limit(2000),
+    admin
+      .from("sales_raw")
+      .select(select)
+      .eq("import_batch_id", batchId)
+      .ilike("customer_code", `${code} %`)
+      .ilike("voucher_type", "%credit%")
+      .limit(2000),
+  ]);
+  if (exact.error) throw exact.error;
+  if (prefixed.error) throw prefixed.error;
+
+  const byId = new Map();
+  [...(exact.data || []), ...(prefixed.data || [])].forEach((row) => {
+    if (!row?.id) return;
+    byId.set(row.id, row);
+  });
+
+  const target = String(voucher || "").trim();
+  return [...byId.values()].filter((row) => {
+    if (!salesRowMatchesCustomer(row, customerCode, customerName)) return false;
+    const refs = String(row.reference || "")
+      .split(/[,;&]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return refs.some((ref) => vouchersMatch(ref, target));
+  });
+}
+
 async function loadMatchingSalesRowsWithoutDate(admin, {
   batchId,
   customerCode,
@@ -245,12 +290,21 @@ async function deleteSalesVoucher(admin, profile, body) {
   }
 
   const outstanding = await readSettingObject(admin, OUTSTANDING_DATASET_KEY);
+  const outstandingDate = salesSummary.transactionDate || transactionDate;
   outstandingRemoval = removeOutstandingInvoiceFromDataset(outstanding, {
     customerCode,
     customerName,
     voucher,
-    transactionDate: salesSummary.transactionDate || transactionDate,
+    transactionDate: outstandingDate,
   });
+  // Soft date: outstanding may store a different/blank invoice_date than datewise.
+  if (!outstandingRemoval.removedCount && /^\d{4}-\d{2}-\d{2}$/.test(outstandingDate)) {
+    outstandingRemoval = removeOutstandingInvoiceFromDataset(outstanding, {
+      customerCode,
+      customerName,
+      voucher,
+    });
+  }
 
   if (outstandingRemoval.removedCount) {
     await upsertSettings(admin, [{
@@ -263,7 +317,7 @@ async function deleteSalesVoucher(admin, profile, body) {
         lastDeletedVoucher: {
           customerCode: normalizeCustomerCode(customerCode),
           voucher,
-          transactionDate: salesSummary.transactionDate || transactionDate,
+          transactionDate: outstandingDate,
           removedCount: outstandingRemoval.removedCount,
         },
       }),
@@ -271,6 +325,45 @@ async function deleteSalesVoucher(admin, profile, body) {
   }
 
   if (!matched.length && !outstandingRemoval.removedCount) {
+    // Mis-routed Receipt/Payment/Purchase, or a phantom invoice from a bad CN Ref.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(transactionDate)) {
+      const receiptDataset = await readSettingObject(admin, RECEIPT_DATASET_KEY);
+      const receiptProbe = removeReceiptRowsFromDataset(
+        Array.isArray(receiptDataset.rows) ? receiptDataset.rows : [],
+        {
+          customerCode,
+          customerName,
+          receiptDate: transactionDate,
+          vchNo: voucher,
+        },
+      );
+      if (receiptProbe.removedCount) {
+        return deleteReceiptRegisterVoucher(admin, profile, {
+          ...body,
+          kind: RECEIPT_DELETE_KINDS.has(normalizeSettlementDeleteKind(kind)) ? kind : "Receipt",
+          voucher,
+          transactionDate,
+        });
+      }
+    }
+
+    const referringNotes = await findCreditNotesReferencingVoucher(admin, {
+      batchId,
+      customerCode,
+      customerName,
+      voucher,
+    });
+    if (referringNotes.length) {
+      const noteList = referringNotes
+        .slice(0, 5)
+        .map((row) => `${row.voucher_number || "—"}${row.transaction_date ? ` on ${String(row.transaction_date).slice(0, 10)}` : ""}`)
+        .join(", ");
+      return NextResponse.json({
+        success: false,
+        error: `Voucher ${voucher} is not in sales or outstanding for this customer. Credit Note ${noteList} references it — that invoice is reconstructed only. Delete the credit note, or fix its Ref. No. to the real sales voucher.`,
+      }, { status: 404 });
+    }
+
     return NextResponse.json({
       success: false,
       error: `Voucher ${voucher} was not found in sales or outstanding for this customer.`,

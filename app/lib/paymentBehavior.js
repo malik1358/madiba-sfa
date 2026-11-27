@@ -554,6 +554,50 @@ export function missingReferencedSalesVouchers(transactions = []) {
 }
 
 /**
+ * When a credit note names a voucher that is not in sales (e.g. Ref "37") but a
+ * unique same-customer sale of the same excl amount sits on the CN date (±1 day),
+ * treat that sale as the real target and skip inventing a synthetic invoice.
+ * Customer 1114C: CN 25 Ref 37 vs sale 1371 (both 2,347.50 on 2025-10-11).
+ */
+export function resolveMisnamedCreditNoteSale(bundle = {}, transactions = []) {
+  const lines = Array.isArray(bundle?.lines) ? bundle.lines : [];
+  if (!lines.length) return "";
+  const creditDate = dateOnly(bundle.creditDate || lines[0]?.transaction_date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(creditDate)) return "";
+
+  const customerCode = normalizeRef(lines[0]?.customer_code);
+  let mirroredExcl = 0;
+  lines.forEach((row) => {
+    mirroredExcl = roundMoney(mirroredExcl + Math.abs(toNumber(row?.sales_amount)));
+  });
+  if (mirroredExcl <= AMOUNT_TOLERANCE) return "";
+
+  /** @type {Map<string, { date: string, amount: number }>} */
+  const salesByVoucher = new Map();
+  (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    if (isCreditNoteTransaction(row)) return;
+    if (customerCode && normalizeRef(row?.customer_code) !== customerCode) return;
+    const voucher = String(row?.voucher_number || "").trim();
+    if (!voucher) return;
+    const date = dateOnly(row?.transaction_date);
+    if (!date) return;
+    const current = salesByVoucher.get(voucher) || { date, amount: 0 };
+    if (!current.date || date < current.date) current.date = date;
+    current.amount = roundMoney(current.amount + Math.abs(toNumber(row?.sales_amount)));
+    salesByVoucher.set(voucher, current);
+  });
+
+  const matches = [];
+  salesByVoucher.forEach((entry, voucher) => {
+    const offset = isoDayOffset(entry.date, creditDate);
+    if (offset == null || Math.abs(offset) > IMMEDIATE_REVERSAL_MAX_DAYS) return;
+    if (!amountsMatch(entry.amount, mirroredExcl)) return;
+    matches.push(voucher);
+  });
+  return matches.length === 1 ? matches[0] : "";
+}
+
+/**
  * Prefer the full historic sales voucher from `sales_raw` when the live batch
  * dropped it but a credit note still names it. Returns every line from the
  * newest import batch for each missing voucher (not only the CN's item codes).
@@ -705,6 +749,10 @@ export function augmentTransactionsWithMissingReferencedSales(
     // Only rebuild when a CN names the missing voucher. Bare outstanding-only
     // bills already appear as Tally open rows without inventing item lines.
     if (!bundle?.lines?.length) return;
+
+    // Wrong Ref. No. (37 instead of 1371) must not invent a phantom invoice when
+    // a unique same-day same-amount sale already exists for this customer.
+    if (resolveMisnamedCreditNoteSale(bundle, source)) return;
 
     const invoiceDate = outstanding?.invoice_date || bundle.creditDate;
     if (!invoiceDate) return;

@@ -53,53 +53,68 @@ export function flattenDatewiseLines(days) {
   (Array.isArray(days) ? days : []).forEach((day) => {
     const date = day?.date || "";
     (Array.isArray(day?.invoices) ? day.invoices : []).forEach((invoice, index) => {
+      const voucher = String(invoice.voucher_number || "").trim();
       lines.push({
-        id: `${date}|invoice|${invoice.voucher_number || "—"}|${index}`,
+        id: `${date}|invoice|${voucher || "—"}|${index}`,
         date,
         kind: "Invoice",
-        voucher: invoice.voucher_number || "—",
+        voucher: voucher || "—",
         sales_excl_vat: Number(invoice.amount_excl_vat || 0),
         sales_incl_vat: Number(invoice.amount_incl_vat || 0),
         collected_amount: null,
         open_amount: Number(invoice.remaining || 0),
         detail: invoice.status || "",
+        vch_no: voucher,
+        can_delete_transaction: Boolean(voucher),
+        can_delete_receipt: false,
       });
     });
     (Array.isArray(day?.credit_notes) ? day.credit_notes : []).forEach((note, index) => {
+      const voucher = String(note.voucher_number || "").trim();
       lines.push({
-        id: `${date}|credit-note|${note.voucher_number || "—"}|${index}`,
+        id: `${date}|credit-note|${voucher || "—"}|${index}`,
         date,
         kind: note.kind || "Credit Note",
-        voucher: note.voucher_number || "—",
+        voucher: voucher || "—",
         sales_excl_vat: Number(note.amount_excl_vat || 0),
         sales_incl_vat: Number(note.amount_incl_vat || 0),
         collected_amount: null,
         open_amount: Number(note.remaining || 0),
         detail: note.status || note.reference || "",
+        vch_no: voucher,
+        can_delete_transaction: Boolean(voucher),
+        can_delete_receipt: false,
       });
     });
     (Array.isArray(day?.purchases) ? day.purchases : []).forEach((purchase, index) => {
+      const voucher = String(purchase.vch_no || "").trim();
       lines.push({
-        id: `${date}|purchase|${purchase.vch_no || "—"}|${index}`,
+        id: `${date}|purchase|${voucher || "—"}|${index}`,
         date,
         kind: "Purchase",
-        voucher: purchase.vch_no || "—",
+        voucher: voucher || "—",
         sales_excl_vat: null,
         sales_incl_vat: null,
         collected_amount: null,
         open_amount: null,
         purchase_amount: Number(purchase.amount || 0),
         detail: purchaseDetail(purchase),
+        receipt_date: purchase.receipt_date || date,
+        vch_no: voucher,
+        vch_type: String(purchase.vch_type || "Purchase").trim(),
+        can_delete_transaction: Boolean(voucher),
+        can_delete_receipt: Boolean(voucher),
       });
     });
     (Array.isArray(day?.receipts) ? day.receipts : []).forEach((receipt, index) => {
       const isPayment = receipt.kind === "payment" || Number(receipt.amount) < 0;
       const applications = Array.isArray(receipt.applications) ? receipt.applications : [];
+      const voucher = String(receipt.vch_no || "").trim();
       lines.push({
-        id: `${date}|${isPayment ? "payment" : "receipt"}|${receipt.vch_no || "—"}|${index}`,
+        id: `${date}|${isPayment ? "payment" : "receipt"}|${voucher || "—"}|${index}`,
         date,
         kind: isPayment ? "Payment" : "Receipt",
-        voucher: receipt.vch_no || "—",
+        voucher: voucher || "—",
         sales_excl_vat: null,
         sales_incl_vat: null,
         // Prefer ar_amount when present so cancelled void-cycle collections
@@ -112,9 +127,10 @@ export function flattenDatewiseLines(days) {
         detail: receiptDetail(receipt),
         unmatched_collection: applications.some((application) => application?.unmatched_collection),
         receipt_date: receipt.receipt_date || date,
-        vch_no: String(receipt.vch_no || "").trim(),
+        vch_no: voucher,
         vch_type: String(receipt.vch_type || "").trim(),
-        can_delete_receipt: true,
+        can_delete_transaction: Boolean(voucher),
+        can_delete_receipt: Boolean(voucher),
       });
     });
   });

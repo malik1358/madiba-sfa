@@ -218,15 +218,25 @@ export function canManageOrderInvoice(role) {
   return isInvoiceMakerRole(normalized) || isAdminRole(normalized) || normalized === "manager";
 }
 
-/** Admin/report-user, or invoice-maker Chaina (IV006) — Payment Settlement receipt delete. */
+/**
+ * Admin/report-user, or invoice-maker Chaina/China (IV006) —
+ * Payment Settlement delete for receipts, invoices, credit notes, purchases, payments.
+ */
 export const RECEIPT_DELETE_ALLOWED_SALESMAN_CODES = ["IV006"];
+export const SETTLEMENT_DELETE_ALLOWED_SALESMAN_CODES = RECEIPT_DELETE_ALLOWED_SALESMAN_CODES;
+const SETTLEMENT_DELETE_ALLOWED_NAMES = new Set(["chaina", "china"]);
 
-export function canDeleteReceiptRegisterEntry(context = {}) {
+export function canDeleteSettlementTransaction(context = {}) {
   if (isAdminRole(context.role)) return true;
   const code = String(context.salesmanCode || context.salesman_code || "").trim().toUpperCase();
-  if (RECEIPT_DELETE_ALLOWED_SALESMAN_CODES.includes(code)) return true;
+  if (SETTLEMENT_DELETE_ALLOWED_SALESMAN_CODES.includes(code)) return true;
   const name = String(context.salesmanName || context.salesman_name || "").trim().toLowerCase();
-  return name === "chaina";
+  return SETTLEMENT_DELETE_ALLOWED_NAMES.has(name);
+}
+
+/** @deprecated Prefer canDeleteSettlementTransaction — same gate. */
+export function canDeleteReceiptRegisterEntry(context = {}) {
+  return canDeleteSettlementTransaction(context);
 }
 
 export function shouldRequireTransactionGps(role) {

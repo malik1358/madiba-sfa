@@ -21,6 +21,7 @@ import {
   isEodStockOlderThanHours,
   isEodStockQtyOverAvailable,
   maxOrderQtyForEodStock,
+  shouldEnforceEodStockOrderQtyCap,
   mergeEodCityUploads,
   parseEodQtyCell,
   parseEodStockDate,
@@ -331,6 +332,11 @@ test("order qty stock hint keeps last upload and shows date when older than 24 h
   assert.equal(isEodStockQtyOverAvailable(31, 30), true);
   assert.equal(isEodStockQtyOverAvailable(30, 30), false);
   assert.equal(isEodStockQtyOverAvailable(40, null), false);
+  assert.equal(shouldEnforceEodStockOrderQtyCap("salesman"), true);
+  assert.equal(shouldEnforceEodStockOrderQtyCap("manager"), true);
+  assert.equal(shouldEnforceEodStockOrderQtyCap("admin"), false);
+  assert.equal(shouldEnforceEodStockOrderQtyCap("report-user"), false);
+  assert.equal(shouldEnforceEodStockOrderQtyCap("report_user"), false);
   assert.equal(maxOrderQtyForEodStock(availability, "A004426"), 36);
   assert.equal(maxOrderQtyForEodStock(null, "A004426"), null);
   assert.equal(clampOrderQtyToEodStock(40, availability, "A004426"), 36);

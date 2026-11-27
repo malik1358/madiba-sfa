@@ -137,7 +137,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 **Collections**
 
 - `/api/payment-collections`, `/api/payment-collections/report`, `/api/payment-collections/day-summary`
-- `/api/receipts` (GET/POST upload; DELETE one customer voucher for admin or Chaina), `/api/receipts-not-in-tally`
+- `/api/receipts` (GET/POST upload; DELETE one customer voucher for admin or Chaina), `/api/settlement-transactions` (DELETE invoice/credit-note/receipt/payment/purchase for admin or Chaina; GET deletion audit with upload+delete stamps), `/api/receipts-not-in-tally`
 - `/api/tally-statement` — stores and returns the parsed Tally ledger for one customer (`system_settings` key `tally_statement_v1:<code>`). Payment Settlement compares those lines with the live SFA ledger on each open. The PDF bytes are not stored.
 - `/api/cron/matched-receipt-email` — matches saved app receipts against the uploaded receipt register and sends one-time salesman notifications plus boss digests. Daily runs reconcile month-to-date once (`maxDuration` 300s), then filter salesman mail to yesterday while bosses see late Tally matches for the month.
 - `/api/cron/not-in-voucher-email` — daily digest of open `active_sales` vouchers tagged salesman `NOT IN VOUCHER` (08:30 KSA Sat–Thu). To `malik@pinasz.com`; CC Vinit Kulkarni and Badrish Thapliyal.
@@ -332,7 +332,7 @@ These are large or shared. Read them fully enough to see callers before editing:
 - `app/lib/outstanding.js`
 - `app/lib/workdayActivity.js`
 - `app/lib/moduleAccess.js`
-- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` / `customerLedgerPdf.js` (Arabic-then-English Noor Shukran balance-confirmation PDF via `pdfArabicText.js`; per-year tables + month gaps + Machine Open aging tied to closing; leftover non-voiding CNs kept on the ledger; reversed invoices excluded)
+- `app/management/customer-audit/page.js` — includes `CustomerLedgerExport` / `customerLedgerPdf.js` (Arabic-then-English Noor Shukran balance-confirmation PDF via `pdfArabicText.js`; letterhead includes street, Jeddah national address, and VAT like the Tally statement; per-year tables + month gaps + Machine Open aging tied to closing; leftover non-voiding CNs kept on the ledger; reversed invoices excluded)
 - `app/management/pending-orders/page.js`
 - `app/management/new-order/page.js`
 - `app/management/payment-collections/PaymentCollectionsView.jsx`

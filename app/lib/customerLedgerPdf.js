@@ -13,7 +13,27 @@ import { getKsaDateString } from "./workdayActivity.js";
 
 export const LEDGER_COMPANY_NAME = "Noor Shukran Trading Company";
 export const LEDGER_COMPANY_NAME_AR = "شركة نور شكران للتجارة";
+/** Letterhead lines matching the Tally company statement header (street → VAT). */
+export const LEDGER_COMPANY_ADDRESS_LINES = [
+  "ABU AMROU AL AWZAI",
+  "Building No.,City : 3301,Jeddah",
+  "District,Postal Code : AL NAKHIL DIST,23241",
+  "Region,Country : Jeddah,Saudi Arabia",
+  "VAT No. : 312618815600003",
+];
+export const LEDGER_COMPANY_ADDRESS_LINES_AR = [
+  "أبو عمرو العوزعي",
+  "رقم المبنى، المدينة : 3301,جدة",
+  "الحي، الرمز البريدي : حي النخيل، 23241",
+  "المنطقة، الدولة : جدة، المملكة العربية السعودية",
+  "الرقم الضريبي : 312618815600003",
+];
 export const LEDGER_PDF_LANGUAGES = ["ar", "en"];
+
+export function companyAddressLinesForLang(lang = "en") {
+  const source = lang === "ar" ? LEDGER_COMPANY_ADDRESS_LINES_AR : LEDGER_COMPANY_ADDRESS_LINES;
+  return source.map((line) => localizeLedgerDigits(line, lang));
+}
 
 const COLORS = {
   headerBg: [15, 76, 92],
@@ -455,6 +475,8 @@ export function buildCustomerLedgerPdfModel({
   return {
     companyName: LEDGER_COMPANY_NAME,
     companyNameAr: LEDGER_COMPANY_NAME_AR,
+    companyAddressLines: [...LEDGER_COMPANY_ADDRESS_LINES],
+    companyAddressLinesAr: [...LEDGER_COMPANY_ADDRESS_LINES_AR],
     title: COPY.en.title,
     subtitle: COPY.en.subtitle,
     customerCode: code,
@@ -624,7 +646,7 @@ function drawWrappedText(doc, text, x, y, {
     ? doc.splitTextToSize(source, maxWidth)
     : source.split(/\r?\n/);
   const list = (Array.isArray(lines) ? lines : [String(lines || "")]).map((line) => String(line ?? ""));
-  const opts = align === "right" ? { align: "right" } : undefined;
+  const opts = (align === "right" || align === "center") ? { align } : undefined;
   list.forEach((line, index) => {
     doc.text(line, x, y + index * lineHeight, opts);
   });
@@ -666,47 +688,77 @@ export function renderCustomerLedgerLanguageSection(doc, model, lang, {
   const companyName = lang === "ar"
     ? (model.companyNameAr || LEDGER_COMPANY_NAME_AR)
     : (model.companyName || LEDGER_COMPANY_NAME);
-  const companyLines = doc.splitTextToSize(companyName, contentWidth - 200);
-  const titleBlockHeight = 70 + Math.max(0, (companyLines.length - 1) * 14);
-  doc.setDrawColor(...COLORS.accent);
-  doc.setLineWidth(1.2);
-  doc.roundedRect(marginX, cursorRef.y, contentWidth, titleBlockHeight, 4, 4);
+  // Keep the Tally English letterhead (street / national address / VAT) on both
+  // language pages so RTL shaping cannot reverse building/VAT digits.
+  const addressLines = (model.companyAddressLines || LEDGER_COMPANY_ADDRESS_LINES)
+    .map((line) => String(line || ""));
+  const centerX = marginX + contentWidth / 2;
+  const companyNameLines = doc.splitTextToSize(companyName, contentWidth - 28);
+  const nameLineCount = Math.max(1, companyNameLines.length);
+  // Centered letterhead like the Tally company statement: name, street, national
+  // address lines, VAT — then document title / meta under the rule.
+  const nameLineHeight = 16;
+  const addressLineHeight = 11;
+  const titleLineHeight = 14;
+  const subtitleLineHeight = 12;
+  const metaLineHeight = 11;
+  const letterheadBottomPad = 10;
+  let lineY = cursorRef.y + 18;
+  const blockStartY = cursorRef.y;
+
   doc.setFont(undefined, "bold");
   doc.setFontSize(14);
   doc.setTextColor(...COLORS.accent);
-  drawBlockText(doc, companyLines.join("\n"), rtl ? marginX + contentWidth - 14 : marginX + 14, cursorRef.y + 22, {
-    align: textAlign,
+  drawWrappedText(doc, companyNameLines.join("\n"), centerX, lineY, {
+    align: "center",
+    lineHeight: nameLineHeight,
   });
-  const afterCompanyY = cursorRef.y + 22 + companyLines.length * 14;
-  doc.setFontSize(12);
-  doc.setTextColor(...COLORS.bodyText);
-  drawBlockText(doc, copy.title, rtl ? marginX + contentWidth - 14 : marginX + 14, afterCompanyY + 4, {
-    align: textAlign,
-  });
-  doc.setFontSize(10);
-  doc.setTextColor(...COLORS.mutedText);
-  drawBlockText(doc, copy.subtitle, rtl ? marginX + contentWidth - 14 : marginX + 14, afterCompanyY + 20, {
-    align: textAlign,
-  });
+  lineY += nameLineCount * nameLineHeight;
 
   doc.setFont(undefined, "normal");
   doc.setFontSize(9);
   doc.setTextColor(...COLORS.bodyText);
-  const metaX = rtl ? marginX + 14 : marginX + contentWidth - 14;
-  const metaAlign = rtl ? "left" : "right";
+  addressLines.forEach((line) => {
+    doc.text(String(line || ""), centerX, lineY, { align: "center" });
+    lineY += addressLineHeight;
+  });
+
+  lineY += 4;
+  doc.setDrawColor(...COLORS.accent);
+  doc.setLineWidth(0.6);
+  doc.line(marginX + 24, lineY, marginX + contentWidth - 24, lineY);
+  lineY += 14;
+
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...COLORS.bodyText);
+  doc.text(copy.title, centerX, lineY, { align: "center" });
+  lineY += titleLineHeight;
+  doc.setFont(undefined, "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...COLORS.mutedText);
+  doc.text(copy.subtitle, centerX, lineY, { align: "center" });
+  lineY += subtitleLineHeight;
+  doc.setTextColor(...COLORS.bodyText);
   doc.text(
     `${copy.statementDate}: ${formatDisplayDate(model.statementDate, lang)}`,
-    metaX,
-    cursorRef.y + 22,
-    { align: metaAlign },
+    centerX,
+    lineY,
+    { align: "center" },
   );
+  lineY += metaLineHeight;
   doc.text(
     `${copy.period}: ${formatDisplayDate(model.periodFrom, lang)} ${copy.periodTo} ${formatDisplayDate(model.periodTo, lang)}`,
-    metaX,
-    cursorRef.y + 38,
-    { align: metaAlign },
+    centerX,
+    lineY,
+    { align: "center" },
   );
-  cursorRef.y += titleBlockHeight + 16;
+
+  const titleBlockHeight = (lineY - blockStartY) + letterheadBottomPad;
+  doc.setDrawColor(...COLORS.accent);
+  doc.setLineWidth(1.2);
+  doc.roundedRect(marginX, blockStartY, contentWidth, titleBlockHeight, 4, 4);
+  cursorRef.y = blockStartY + titleBlockHeight + 16;
 
   doc.setFont(undefined, "bold");
   doc.setFontSize(10);

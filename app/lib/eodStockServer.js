@@ -12,6 +12,7 @@ import {
   parseEodStockSheets,
   readEodCityUploads,
   readEodStockDataset,
+  shouldEnforceEodStockOrderQtyCap,
   summarizeEodStock,
 } from "./eodStock.js";
 import { loadMasterUnitConvMap } from "./masterUnitQtyServer.js";
@@ -165,13 +166,18 @@ export async function repairEodStockDatasetFromCityFiles(admin, dataset) {
 /**
  * Load countrywide EOD availability (with master-unit conversion) and reject
  * order lines whose qty exceeds available. No snapshot → allow.
+ * Admin / report-user (`role`) skip the cap and may order any qty.
  */
 export async function assertOrderLinesWithinEodStockServer({
   admin,
   lines = [],
   language = "en",
+  role = null,
 } = {}) {
   if (!admin) {
+    return { ok: true, violations: [] };
+  }
+  if (!shouldEnforceEodStockOrderQtyCap(role)) {
     return { ok: true, violations: [] };
   }
 

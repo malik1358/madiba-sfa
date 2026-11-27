@@ -78,8 +78,17 @@ test("datewise lines stay one row per voucher on the same date", () => {
   assert.equal(lines.some((row) => row.kind === "Date"), false);
   const receiptLine = lines.find((row) => row.kind === "Receipt");
   assert.equal(receiptLine.can_delete_receipt, true);
+  assert.equal(receiptLine.can_delete_transaction, true);
   assert.equal(receiptLine.vch_no, "R1");
   assert.equal(receiptLine.receipt_date, "2025-10-02");
+  const invoiceLine = lines.find((row) => row.kind === "Invoice" && row.voucher === "S1");
+  assert.equal(invoiceLine.can_delete_transaction, true);
+  assert.equal(invoiceLine.vch_no, "S1");
+  const creditLine = lines.find((row) => row.kind === "Credit Note");
+  assert.equal(creditLine.can_delete_transaction, true);
+  const purchaseLine = lines.find((row) => row.kind === "Purchase");
+  assert.equal(purchaseLine.can_delete_transaction, true);
+  assert.equal(purchaseLine.can_delete_receipt, true);
 });
 
 test("datewise receipt detail names a reversed sale when collection only funded a void", () => {

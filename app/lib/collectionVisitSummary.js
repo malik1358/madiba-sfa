@@ -43,7 +43,7 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryProbability: "Payment probability",
   summarySalesman: "Salesman",
   summaryVisitDateTime: "Visit date/time",
-  workingHours: "Working hours",
+  workingHours: "Time on field",
   summaryOutcome: "Outcome",
   summaryAmountReceived: "Amount received",
   summaryReceiptMode: "Receipt mode",
@@ -203,7 +203,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   if (lastVisitLines.length > 0) {
     lines.push("", ...lastVisitLines);
   }
-  // Working hours sits above the day totals block at the end of the share.
+  // Time on field sits above the day totals block at the end of the share.
   appendWorkingHoursAndDayActivityLines(
     lines,
     formatWorkingHoursWhatsappLines(options.workingHours, {

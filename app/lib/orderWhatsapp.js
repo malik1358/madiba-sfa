@@ -43,7 +43,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     salesman: isAr ? "رجل البيع" : "Salesman",
     visitDateTime: isAr ? "تاريخ ووقت الزيارة" : "Visit date/time",
     validUntil: isAr ? "صالح حتى" : "Valid until",
-    workingHours: isAr ? "ساعات العمل" : "Working hours",
+    workingHours: isAr ? "الوقت في الميدان" : "Time on field",
     status: isAr ? "الحالة" : "Status",
     payment: isAr ? "الدفع" : "Payment",
     region: isAr ? "المنطقة" : "Region",
@@ -112,7 +112,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
   ];
 
-  // Working hours sits above the day totals block at the end of the share.
+  // Time on field sits above the day totals block at the end of the share.
   appendWorkingHoursAndDayActivityLines(
     lines,
     formatWorkingHoursWhatsappLines(

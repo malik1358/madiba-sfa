@@ -43,6 +43,13 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-27): duplicate credit notes on Outstanding Compare customers — kept the **latest** date only.
+
+- Customer `1140` (Hamsat Khayal Trading Company) credit note `50` / ref `1778` (−117.00 ex-VAT): removed earlier date **2026-02-11** (`sales_raw` id 574408); kept **2026-02-15** (id 428220). Customer was on Outstanding Compare differences (SFA 15,013.96 vs Tally 7,576.78). The CN duplicate is small versus that gap; Recalculate Outstanding Compare after this cleanup.
+- Customer `1427` (Shamoukh Al Jazeera Trading Establishment) credit note `158` / ref `NFD/440` (−4,437.06 ex-VAT / ~5,102.62 incl-VAT, 10 lines): removed earlier date **2026-04-16** (`sales_raw` ids 573955, 573956, 574488, 574683, 574690, 575051, 575088, 575136, 575706, 575722); kept **2026-04-18** (ids 434139–434148). Customer was on Outstanding Compare with Difference 0.12 and unmatched credit-note amount ~5,102.62 (one full CN).
+
+Also checked other same-customer / same-CN / same-amount duplicates against `outstanding_reconcile_dataset_v1` (built 2026-11-27T07:45:24Z): `1159` and `1295` are on the difference list but those duplicate CNs (`20` / `18`) are **not** in active batch 10 (only older archived batches). Left alone. Customers `1014`, `1088`, `1145`, `1242C`, `1413`, and `ALUJAINCOMPANY` had the same duplicate pattern but were **not** on Outstanding Compare differences — left alone. Cleared `customer_history_cache:1140%` and `customer_history_cache:1427%`. Re-importing those earlier dates from a file that still has the vouchers will restore them. No code or migration.
+
 One-off production delete (2026-11-25, Ahmedabad office): three invoices removed and one not found.
 
 - Customer `1708` (King Perfumes Trading Establishment) sales voucher `JNFD/021` (2026-11-18, JEDDAH W/S CREDIT, 53 lines, 27,060.47 ex-VAT / ~31,119.54 incl-VAT) removed from active batch 10 (`sales_raw` ids 507823–508065). Not in outstanding (open bill remains `JNFD/022`), `sales_transactions`, `invoices`, or receipt register.

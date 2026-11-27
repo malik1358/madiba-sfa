@@ -43,6 +43,8 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production delete (2026-11-27, Ahmedabad office follow-up #13): customer `1295` (WILAYAT AL-TAQNIA TRADING EST.) credit note `18` removed for requested `2026-01-26` (−6,890.00 ex-VAT, ref `2526`, id 432863) and identical twin `2026-01-20` (id 575925). `customer_history_cache:1295%` cleared.
+
 One-off production delete (2026-11-27, Ahmedabad office follow-up #12): customer `1159` — “invoices 2728 & 2729 dated 26-01-2026” were Settlement phantoms from CN refs (sales reissues `BR1/2773`/`BR1/2774` left in place). Removed CN `20` (26+27 Jan, ref `2728`, −522), CN `43` (26 Jan, ref `2729`, −1,250), and CN `21` (27 Jan, ref `2729`, −1,250). Requested CN `20` dated 27 Jan included. `customer_history_cache:1159%` cleared.
 
 One-off production batch (2026-11-27, Ahmedabad office follow-up #11):

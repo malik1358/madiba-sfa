@@ -34,7 +34,11 @@ import {
 } from "../../lib/customerBookOwner.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Full-year / multi-month Excel files (10k–20k+ rows) need longer than the
+// default 60s: chunked sales_raw inserts + merge_sales_batch_by_dates + customer
+// / item upserts. Without this the function is killed mid-request and the Upload
+// screen shows "Unable to reach the server" even when the merge already applied.
+export const maxDuration = 300;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

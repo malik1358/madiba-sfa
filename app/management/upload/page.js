@@ -7,8 +7,12 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { friendlyErrorMessage, REQUEST_TIMEOUT_MESSAGE } from "../../lib/abortError";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { invalidateCollectionQueuesForUser, invalidateCustomerHistoryCache, invalidateOutstandingCache } from "../../lib/mobileDataCache";
+
+/** Keep under route maxDuration (300s) so the client sees a clear timeout, not a dropped connection. */
+const SALES_UPLOAD_FETCH_MS = 280_000;
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
@@ -371,6 +375,7 @@ export default function UploadSalesPage() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: formData,
+        signal: AbortSignal.timeout(SALES_UPLOAD_FETCH_MS),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -396,7 +401,11 @@ export default function UploadSalesPage() {
       await invalidateCollectionQueuesForUser();
       await loadLastUploadInfo();
     } catch (err) {
-      setError(err.message);
+      const fallback =
+        String(err?.name || "") === "TimeoutError" || String(err?.message || "").toLowerCase().includes("timed out")
+          ? `${REQUEST_TIMEOUT_MESSAGE} Large year-to-date sales files can take a few minutes — wait, then try again.`
+          : "Sales data upload failed.";
+      setError(friendlyErrorMessage(err, fallback));
     } finally {
       setUploading(false);
     }

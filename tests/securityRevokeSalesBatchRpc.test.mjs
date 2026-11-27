@@ -76,6 +76,16 @@ test("import-sales calls both RPCs only through the service-role admin client", 
   assert.doesNotMatch(source, /getSupabaseClient\(\)[\s\S]{0,200}merge_sales_batch_by_dates/);
 });
 
+test("import-sales maxDuration allows large year-to-date Excel uploads", () => {
+  const source = readFileSync(importSalesPath, "utf8");
+  const match = source.match(/export const maxDuration\s*=\s*(\d+)/);
+  assert.ok(match, "import-sales must export maxDuration");
+  assert.ok(
+    Number(match[1]) >= 300,
+    `import-sales maxDuration must be >= 300 for 10k+ row files (got ${match[1]})`
+  );
+});
+
 test("production DB migration workflow does not auto-apply the remediation SQL", () => {
   const workflow = readFileSync(workflowPath, "utf8");
   const runner = readFileSync(path.join(repoRoot, "scripts", "productionDbMigrations.mjs"), "utf8");

@@ -3,10 +3,13 @@ import test from "node:test";
 import {
   buildBalanceConfirmationLedgerRows,
   buildCustomerLedgerPdfModel,
+  companyAddressLinesForLang,
   formatBalanceSide,
   formatLedgerMoney,
   ledgerLineDebitCredit,
   ledgerLineParticulars,
+  LEDGER_COMPANY_ADDRESS_LINES,
+  LEDGER_COMPANY_ADDRESS_LINES_AR,
   LEDGER_COMPANY_NAME,
   LEDGER_COMPANY_NAME_AR,
   LEDGER_PDF_LANGUAGES,
@@ -227,6 +230,12 @@ test("PDF model uses company name, excludes reversed, and includes outstanding b
   assert.equal(model.companyName, LEDGER_COMPANY_NAME);
   assert.equal(model.companyName, "Noor Shukran Trading Company");
   assert.equal(model.companyNameAr, LEDGER_COMPANY_NAME_AR);
+  assert.deepEqual(model.companyAddressLines, LEDGER_COMPANY_ADDRESS_LINES);
+  assert.deepEqual(model.companyAddressLinesAr, LEDGER_COMPANY_ADDRESS_LINES_AR);
+  assert.equal(model.companyAddressLines[0], "ABU AMROU AL AWZAI");
+  assert.match(model.companyAddressLines.at(-1), /VAT No\. : 312618815600003/);
+  assert.match(model.companyAddressLinesAr.at(-1), /الرقم الضريبي/);
+  assert.match(companyAddressLinesForLang("ar").at(-1), /٣١٢٦١٨٨١٥٦٠٠٠٠٣/);
   assert.deepEqual(model.languages, LEDGER_PDF_LANGUAGES);
   assert.deepEqual(model.languages, ["ar", "en"]);
   assert.equal(model.subtitle, "Balance Confirmation");

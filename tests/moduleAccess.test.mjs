@@ -9,6 +9,7 @@ import {
   canManageOrderInvoice,
   filterAccessibleModulesByQuery,
   canDeleteReceiptRegisterEntry,
+  canDeleteSettlementTransaction,
   isCollectionOnlyAccess,
   isSalesmanVisitPlanSalesmanAccessApproved,
   listAccessibleModules,
@@ -194,6 +195,20 @@ test("only admin and Chaina can delete receipt-register rows", () => {
   assert.equal(canDeleteReceiptRegisterEntry({ role: "salesman", salesmanCode: "SM001" }), false);
 });
 
+test("admin and Chaina/China can delete any settlement transaction", () => {
+  assert.equal(canDeleteSettlementTransaction({ role: "admin" }), true);
+  assert.equal(canDeleteSettlementTransaction({
+    role: "invoice-maker",
+    salesmanCode: "IV006",
+    salesmanName: "Chaina",
+  }), true);
+  assert.equal(canDeleteSettlementTransaction({
+    role: "invoice-maker",
+    salesmanName: "China",
+  }), true);
+  assert.equal(canDeleteSettlementTransaction({ role: "manager" }), false);
+});
+
 test("module access exposes salesman identity for receipt-delete gates", () => {
   const access = buildModuleAccess({
     role: "invoice-maker",
@@ -203,6 +218,7 @@ test("module access exposes salesman identity for receipt-delete gates", () => {
   assert.equal(access.salesmanCode, "IV006");
   assert.equal(access.salesmanName, "Chaina");
   assert.equal(canDeleteReceiptRegisterEntry(access), true);
+  assert.equal(canDeleteSettlementTransaction(access), true);
 });
 
 test("invoice-makers can access hierarchy upload, reports, and gps map", () => {

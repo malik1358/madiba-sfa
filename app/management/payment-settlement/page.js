@@ -32,7 +32,7 @@ import { groupStatementRowsByDate, statementDatesWithDifference, statementDayDif
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
-import { canDeleteReceiptRegisterEntry } from "../../lib/moduleAccess.js";
+import { canDeleteSettlementTransaction } from "../../lib/moduleAccess.js";
 
 const TEXT = {
   title: { en: "Payment Settlement", ar: "تسوية المدفوعات" },
@@ -116,6 +116,16 @@ const TEXT = {
   statementNone: {
     en: "No ledger lines found. Use a Tally ledger export with Date, Debit, and Credit columns.",
     ar: "لم يتم العثور على سطور دفتر. استخدم تصدير دفتر تالي بأعمدة التاريخ والمدين والدائن.",
+  },
+  deleteTransaction: { en: "Delete", ar: "حذف" },
+  deleteTransactionConfirm: {
+    en: "Delete {kind} {voucher} on {date}? Upload and delete times are kept in the audit log. Settlement will reload.",
+    ar: "حذف {kind} {voucher} بتاريخ {date}؟ يُحفظ وقت الرفع والحذف في سجل التدقيق. ستُعاد تحميل التسوية.",
+  },
+  deleteTransactionBusy: { en: "Deleting…", ar: "جاري الحذف…" },
+  deleteTransactionDone: {
+    en: "Transaction deleted. Settlement reloaded.",
+    ar: "تم حذف المعاملة. أُعيد تحميل التسوية.",
   },
   deleteReceipt: { en: "Delete", ar: "حذف" },
   deleteReceiptConfirm: {
@@ -307,7 +317,7 @@ export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const { access } = useModuleAccess();
-  const canDeleteReceipt = canDeleteReceiptRegisterEntry({
+  const canDeleteTransaction = canDeleteSettlementTransaction({
     role: access.role,
     salesmanCode: access.salesmanCode,
     salesmanName: access.salesmanName,
@@ -316,7 +326,7 @@ export default function PaymentSettlementPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   usePopupMessages({ error, message });
-  const [deletingReceiptKey, setDeletingReceiptKey] = useState("");
+  const [deletingTransactionKey, setDeletingTransactionKey] = useState("");
 
   const [matches, setMatches] = useState([]);
   const [matchQuery, setMatchQuery] = useState("");
@@ -451,49 +461,52 @@ export default function PaymentSettlementPage() {
     }
   }, [authHeaders]);
 
-  const deleteReceiptRow = useCallback(async (row) => {
-    if (!canDeleteReceipt || !selectedCustomer?.customer_code || !row?.vch_no) return;
-    const receiptDate = String(row.receipt_date || row.date || "").slice(0, 10);
-    const vchNo = String(row.vch_no || row.voucher || "").trim();
-    if (!receiptDate || !vchNo) return;
+  const deleteTransactionRow = useCallback(async (row) => {
+    if (!canDeleteTransaction || !selectedCustomer?.customer_code) return;
+    const voucher = String(row.vch_no || row.voucher || "").trim();
+    const transactionDate = String(row.receipt_date || row.date || "").slice(0, 10);
+    const kind = String(row.kind || "Transaction").trim() || "Transaction";
+    if (!voucher || !transactionDate) return;
 
-    const confirmText = String(t("deleteReceiptConfirm") || "")
-      .replace("{voucher}", vchNo)
-      .replace("{date}", receiptDate);
+    const confirmText = String(t("deleteTransactionConfirm") || t("deleteReceiptConfirm") || "")
+      .replace("{kind}", kind)
+      .replace("{voucher}", voucher)
+      .replace("{date}", transactionDate);
     if (typeof window !== "undefined" && !window.confirm(confirmText)) return;
 
-    const deleteKey = `${receiptDate}|${vchNo}`;
-    setDeletingReceiptKey(deleteKey);
+    const deleteKey = `${kind}|${transactionDate}|${voucher}`;
+    setDeletingTransactionKey(deleteKey);
     setError("");
     setMessage("");
     try {
       const headers = await authHeaders();
       if (!headers) return;
-      const response = await fetch("/api/receipts", {
+      const response = await fetch("/api/settlement-transactions", {
         method: "DELETE",
         headers: {
           ...headers,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          kind,
           customerCode: selectedCustomer.customer_code,
           customerName: selectedCustomer.customer_name || "",
-          receiptDate,
-          vchNo,
+          voucher,
+          transactionDate,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to delete receipt.");
+        throw new Error(payload.error || "Unable to delete transaction.");
       }
       await loadSettlement(selectedCustomer);
-      setMessage(payload.message || t("deleteReceiptDone"));
+      setMessage(payload.message || t("deleteTransactionDone") || t("deleteReceiptDone"));
     } catch (err) {
-      setError(err.message || "Unable to delete receipt.");
+      setError(err.message || "Unable to delete transaction.");
     } finally {
-      setDeletingReceiptKey("");
+      setDeletingTransactionKey("");
     }
-  }, [authHeaders, canDeleteReceipt, loadSettlement, selectedCustomer, t]);
+  }, [authHeaders, canDeleteTransaction, loadSettlement, selectedCustomer, t]);
 
   const searchCustomers = useCallback(async (query) => {
     const needle = String(query || "").trim();
@@ -1656,6 +1669,9 @@ export default function PaymentSettlementPage() {
                 </div>
                 <p className="moduleHint">
                   Each invoice, credit note, receipt, payment, and purchase is its own row — including invoices reversed the same day. Collected is sales cash only. A payment or purchase line names the bill it was adjusted against.
+                  {canDeleteTransaction
+                    ? " Admin and Chaina can Delete any row; upload and delete times are kept in the audit log."
+                    : ""}
                 </p>
                 <ExportableTable filename="payment-settlement-datewise" sheetName="Datewise" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
@@ -1686,16 +1702,16 @@ export default function PaymentSettlementPage() {
                               {row.kind === "Invoice" && row.detail
                                 ? <span className={statusClass(row.detail)}>{row.detail}</span>
                                 : (row.detail || "—")}
-                              {canDeleteReceipt && row.can_delete_receipt && row.vch_no ? (
+                              {canDeleteTransaction && row.can_delete_transaction && row.vch_no ? (
                                 <button
                                   type="button"
                                   className="moduleInlineButton moduleDangerButton paymentSettleDeleteReceipt"
-                                  disabled={Boolean(deletingReceiptKey)}
-                                  onClick={() => deleteReceiptRow(row)}
+                                  disabled={Boolean(deletingTransactionKey)}
+                                  onClick={() => deleteTransactionRow(row)}
                                 >
-                                  {deletingReceiptKey === `${String(row.receipt_date || row.date || "").slice(0, 10)}|${row.vch_no}`
-                                    ? t("deleteReceiptBusy")
-                                    : t("deleteReceipt")}
+                                  {deletingTransactionKey === `${row.kind}|${String(row.receipt_date || row.date || "").slice(0, 10)}|${row.vch_no}`
+                                    ? (t("deleteTransactionBusy") || t("deleteReceiptBusy"))
+                                    : (t("deleteTransaction") || t("deleteReceipt"))}
                                 </button>
                               ) : null}
                             </div>

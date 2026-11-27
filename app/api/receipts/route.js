@@ -17,6 +17,11 @@ import {
 } from "../../lib/receiptRegister.js";
 import { canDeleteReceiptRegisterEntry } from "../../lib/moduleAccess.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
+import {
+  SETTLEMENT_DELETION_LOG_KEY,
+  appendSettlementDeletionLog,
+  buildSettlementDeletionEntry,
+} from "../../lib/settlementTransactionDelete.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer.js";
@@ -448,6 +453,7 @@ export async function DELETE(request) {
     }
 
     const nowIso = new Date().toISOString();
+    const originalUploadedAt = String(existing.uploadedAt || existing.uploaded_at || "").trim() || null;
     const liveMatched = removal.rows.filter((row) => row.matched || row.customer_code).length;
     const payload = {
       ...existing,
@@ -466,6 +472,37 @@ export async function DELETE(request) {
       },
     };
 
+    const amount = removal.removed.reduce((total, row) => total + Number(row.amount || 0), 0);
+    const { data: auditRow } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", SETTLEMENT_DELETION_LOG_KEY)
+      .maybeSingle();
+    let auditParsed = {};
+    try {
+      const parsed = JSON.parse(auditRow?.setting_value || "null");
+      auditParsed = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      auditParsed = {};
+    }
+    const nextDeletionLog = appendSettlementDeletionLog(
+      auditParsed,
+      buildSettlementDeletionEntry({
+        deletedAt: nowIso,
+        deletedBy: profile,
+        source: "receipt_register",
+        kind: removal.removed[0]?.vch_type || "Receipt",
+        customerCode,
+        customerName,
+        voucher: vchNo,
+        transactionDate: receiptDate,
+        uploadedAt: originalUploadedAt,
+        removedCount: removal.removedCount,
+        amount,
+        summary: `Deleted receipt ${vchNo} on ${receiptDate} (${removal.removedCount} row(s))`,
+      }),
+    );
+
     const { error: upsertError } = await admin
       .from("system_settings")
       .upsert([
@@ -476,6 +513,10 @@ export async function DELETE(request) {
         {
           setting_key: RECEIPT_DATASET_STAMP_KEY,
           setting_value: nowIso,
+        },
+        {
+          setting_key: SETTLEMENT_DELETION_LOG_KEY,
+          setting_value: JSON.stringify(nextDeletionLog),
         },
       ], { onConflict: "setting_key" });
 

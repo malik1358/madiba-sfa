@@ -43,6 +43,15 @@ Helper functions in the baseline migration:
 | `active_sales` | View: `sales_raw` for the live batch. `import_batch_id` equals `active_sales_batch_id` only when that setting is all digits. A blank or non-numeric setting returns no rows. |
 | `active_sales_history_page(after_customer, after_date, after_id, page_limit)` | Keyset page of `active_sales` for Outstanding Compare rebuild. `20261023120000_active_sales_batch_bigint_join.sql` created it; `20261028120000_active_sales_history_page_import_batch_id.sql` adds `import_batch_id` to the return set. `service_role` only. |
 
+One-off production batch (2026-11-27, Ahmedabad office follow-up #11):
+
+- `1423` CN `166` (23 Apr): removed + twin 21 Apr (−20,144, ref `NFD/464`).
+- `1261C` “invoice 3128” (25 May): still no sales voucher; removed CN `192` (5 May, ref `3128`, −13,140) that synthesized the phantom.
+- `1140` outstanding `RNFD/0696` (24 Nov, pending 7,576.78): removed again after a later outstanding upload restored it; customer row dropped (sole open bill). No matching sales (`RNFD/774` remains).
+- `1571` CN `560` (14 Sep): removed + twin 9 Sep (−2,530, ref `RNFD/399`).
+
+History caches cleared for those codes.
+
 One-off production batch (2026-11-25, Ahmedabad office follow-up #10):
 
 - `1281` “invoice ABA122” (15 Nov): no sale; CN `824` mirrored `RNFD/740` with Ref `ABA122` — retargeted to `RNFD/740`.

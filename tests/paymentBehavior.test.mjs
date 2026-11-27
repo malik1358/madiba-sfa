@@ -14,6 +14,7 @@ import {
   pairRefundsForReversedSales,
   parseCreditNoteReferences,
   pickFullMissingReferencedSales,
+  resolveMisnamedCreditNoteSale,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 import { flattenLedgerLinesExcludingReversed } from "../app/lib/datewiseLines.js";
@@ -2633,6 +2634,59 @@ test("customer 1691 rebuilds missing JNFD/015 sale from CN 801 so the ledger sho
     ledgerLines.some((row) => row.kind === "Invoice" && row.voucher === "JNFD/015"),
     true,
   );
+});
+
+test("1114C CN Ref 37 does not invent a phantom when sale 1371 matches same day/amount", () => {
+  // Production: CN 25 Ref "37" (-2,347.50) on 2025-10-11 while sale 1371 is the
+  // real bill (2,347.50). Synthesizing Invoice 37 made Delete fail with
+  // "not found in sales or outstanding".
+  const rows = [
+    {
+      transaction_date: "2025-10-11",
+      voucher_number: "1371",
+      voucher_type: "Sales",
+      customer_code: "1114C",
+      customer_name: "DURRAT AL-YASMEEN STATIONERY",
+      sales_amount: 2347.5,
+    },
+    {
+      transaction_date: "2025-10-11",
+      voucher_number: "25",
+      voucher_type: "Credit Note",
+      reference: "37",
+      customer_code: "1114C",
+      customer_name: "DURRAT AL-YASMEEN STATIONERY",
+      sales_amount: -2347.5,
+    },
+  ];
+
+  assert.equal(
+    resolveMisnamedCreditNoteSale({
+      creditDate: "2025-10-11",
+      lines: [rows[1]],
+    }, rows),
+    "1371",
+  );
+
+  const augmented = augmentTransactionsWithMissingReferencedSales(rows);
+  assert.equal(
+    augmented.some((row) => String(row.voucher_number) === "37" && row.synthetic_missing_sale),
+    false,
+  );
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: rows,
+    receipts: [],
+    todayIso: "2025-10-20",
+  });
+  assert.equal(ledger.invoices.some((row) => String(row.voucher_number) === "37"), false);
+  // Same-day full CN voids 1371 into reversedInvoices (not open invoices).
+  assert.ok(
+    ledger.reversedInvoices.some((row) => String(row.voucher_number) === "1371")
+    || ledger.invoices.some((row) => String(row.voucher_number) === "1371"),
+  );
+  const lines = flattenLedgerLinesExcludingReversed(ledger.datewise || []);
+  assert.equal(lines.some((row) => row.kind === "Invoice" && row.voucher === "37"), false);
 });
 
 test("1258C NFD/107 uses full sales_raw voucher, not CN+outstanding residual", () => {

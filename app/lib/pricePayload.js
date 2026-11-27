@@ -40,6 +40,11 @@ function looksLikeItemName(value) {
   return text.length >= 3;
 }
 
+/**
+ * Local-product (LP*) item-code prefix. Catalogue / New Order visibility must not
+ * hide an LP code solely for this prefix — use {@link isBuildingMaterialItem}
+ * (category + name patterns). Expected Stocked Sales still drops LP* separately.
+ */
 export function isExcludedItemCode(value) {
   return normalizeCode(value).startsWith("LP");
 }
@@ -136,16 +141,17 @@ export function isBuildingMaterialItem(item) {
   if (item == null) return false;
   if (typeof item !== "object") {
     return !isPaperStationeryName(item)
-      && (isExcludedCategory(item) || isBuildingMaterialName(item) || isExcludedItemCode(item));
+      && (isExcludedCategory(item) || isBuildingMaterialName(item));
   }
 
   if (isPaperStationeryName(item.item_name) || isPaperStationeryName(item.name)) {
     return false;
   }
 
+  // LP* alone is not building material — a non-BM category (e.g. Sundry trolley
+  // LP00656) must stay on New Order / Product Catalogue when priced.
   return isExcludedCategory(item.category)
     || isMissingOrderCategory(item.category)
-    || isExcludedItemCode(item.item_code || item.code)
     || isBuildingMaterialName(item.item_name)
     || isBuildingMaterialName(item.name);
 }
@@ -400,6 +406,7 @@ function normalizeCatalogResult(
   quantityControls,
   eodStock,
   cbmPerCtnMap,
+  buildingMaterialCodes = null,
 ) {
   // Publish only codes that carry their own positive sheet rate. Do not copy
   // PRICE_CODE_ALIASES sibling rates into the catalogue maps (e.g. stock-out
@@ -415,9 +422,14 @@ function normalizeCatalogResult(
   const excludedCodes = new Set();
   const keptSheetItems = [];
 
+  (buildingMaterialCodes instanceof Set ? buildingMaterialCodes : []).forEach((code) => {
+    const normalized = normalizeCode(code);
+    if (normalized) excludedCodes.add(normalized);
+  });
+
   (Array.isArray(sheetItems) ? sheetItems : []).forEach((item) => {
     const code = normalizeCode(item?.item_code);
-    if (isBuildingMaterialItem(item) || isExcludedItemCode(code)) {
+    if (isBuildingMaterialItem(item)) {
       if (code) excludedCodes.add(code);
       return;
     }
@@ -428,7 +440,7 @@ function normalizeCatalogResult(
     const next = { ...(target || {}) };
     Object.keys(next).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
-      if (excludedCodes.has(code) || isExcludedItemCode(code)) {
+      if (excludedCodes.has(code)) {
         delete next[rawCode];
       }
     });
@@ -440,7 +452,7 @@ function normalizeCatalogResult(
     .forEach(([rawCode, rawCbm]) => {
       const code = normalizeCode(rawCode);
       const cbm = toNumber(rawCbm);
-      if (!code || !(cbm > 0) || excludedCodes.has(code) || isExcludedItemCode(code)) return;
+      if (!code || !(cbm > 0) || excludedCodes.has(code)) return;
       resolvedCbmPerCtnMap[code] = cbm;
     });
 
@@ -595,15 +607,23 @@ export function parsePricePayload(payload) {
   const cbmPerCtnMap = {};
   const sheetItems = [];
   const seen = new Set();
+  const buildingMaterialCodes = new Set();
+
+  function markBuildingMaterial(rawCode) {
+    const code = normalizeCode(rawCode);
+    if (code) buildingMaterialCodes.add(code);
+  }
 
   function upsertSheetItem(rawCode, rawName, rawCategory) {
     const code = normalizeCode(rawCode);
     if (!code) return;
-    if (isExcludedItemCode(code)) return;
 
     const name = normalizeText(rawName);
     const category = normalizeText(rawCategory);
-    if (isBuildingMaterialItem({ item_code: code, item_name: name, category })) return;
+    if (isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
+      markBuildingMaterial(code);
+      return;
+    }
     const key = `${code}::${name}::${category}`;
     if (seen.has(key)) return;
 
@@ -619,7 +639,6 @@ export function parsePricePayload(payload) {
   function addMappedRate(targetMap, rawCode, rawRate) {
     const code = normalizeCode(rawCode);
     if (!code) return;
-    if (isExcludedItemCode(code)) return;
 
     const nextRate = toNumber(rawRate);
     const hasCurrent = Object.prototype.hasOwnProperty.call(targetMap, code);
@@ -644,7 +663,6 @@ export function parsePricePayload(payload) {
   function addDiscount(targetMap, rawCode, rawDiscount) {
     const code = normalizeCode(rawCode);
     if (!code) return;
-    if (isExcludedItemCode(code)) return;
 
     const nextRate = parseDiscountRate(rawDiscount);
     if (nextRate > 0) {
@@ -654,14 +672,14 @@ export function parsePricePayload(payload) {
 
   function addCbmPerCtn(rawCode, rawCbm) {
     const code = normalizeCode(rawCode);
-    if (!code || isExcludedItemCode(code)) return;
+    if (!code) return;
     const cbm = toNumber(rawCbm);
     if (cbm > 0) cbmPerCtnMap[code] = cbm;
   }
 
   function addValueSlab(rawCode, threshold, rawDiscount) {
     const code = normalizeCode(rawCode);
-    if (!code || isExcludedItemCode(code)) return;
+    if (!code) return;
     const nextRate = parseDiscountRate(rawDiscount);
     if (!(nextRate > 0)) return;
     const current = valueDiscountMap[code] && typeof valueDiscountMap[code] === "object"
@@ -805,7 +823,10 @@ export function parsePricePayload(payload) {
 
           const itemName = rawName || code;
           const itemCategory = rawCategory || "Unclassified";
-          if (isBuildingMaterialItem({ item_code: code, item_name: itemName, category: itemCategory })) return;
+          if (isBuildingMaterialItem({ item_code: code, item_name: itemName, category: itemCategory })) {
+            markBuildingMaterial(code);
+            return;
+          }
 
           upsertSheetItem(code, itemName, itemCategory);
           addRate(code, riyadhRate || rawRate, "riyadh");
@@ -841,7 +862,9 @@ export function parsePricePayload(payload) {
       const value10000 = readAny(value, ["valueDiscount10000", "Sales Value > 10000 SAR", "Sales Value > 10000"]);
 
       if (code) {
-        if (!isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
+        if (isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
+          markBuildingMaterial(code);
+        } else {
           addRate(code, rate, "riyadh");
           addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
           addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
@@ -916,6 +939,7 @@ export function parsePricePayload(payload) {
       undefined,
       undefined,
       cbmPerCtnMap,
+      buildingMaterialCodes,
     );
   }
 
@@ -939,6 +963,7 @@ export function parsePricePayload(payload) {
       payload.quantityControls,
       payload.eodStock,
       cbmPerCtnMap,
+      buildingMaterialCodes,
     );
   }
 
@@ -953,6 +978,7 @@ export function parsePricePayload(payload) {
     undefined,
     undefined,
     cbmPerCtnMap,
+    buildingMaterialCodes,
   );
 }
 

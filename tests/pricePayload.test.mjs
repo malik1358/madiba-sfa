@@ -61,6 +61,16 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     category: 'Unclassified',
   }), true);
   assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00656',
+    item_name: '3PCS PP TROLLY-2242/2243-20-24-28',
+    category: 'Sundry',
+  }), false);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00318',
+    item_name: 'LP00318_Latex Gloves Crinkle Orange LGC Hi-Tex, 250 Pair/ Cartoon',
+    category: 'Building Material',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
     item_code: 'A004429',
     item_name: 'A004429_MADIBA LVL Board 38*225*4000mm Fushi Woods China',
     category: 'Missing Category',
@@ -90,6 +100,28 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     item_name: 'Unmapped hardware leftover',
     category: 'Missing Category',
   }), true);
+});
+
+test('parsePricePayload keeps non-building-material LP codes on the order catalog', () => {
+  const { priceMap, sheetItems } = parsePricePayload([
+    {
+      item_code: 'LP00656',
+      item_name: '3PCS PP TROLLY-2242/2243-20-24-28',
+      category: 'Sundry',
+      rate: 85,
+    },
+    {
+      item_code: 'LP00190',
+      item_name: 'Cement Board 1.22X2.44MtrX12MM',
+      category: 'Building Material',
+      rate: 40,
+    },
+  ]);
+
+  assert.equal(priceMap.LP00656, 85);
+  assert.equal(priceMap.LP00190, undefined);
+  assert.equal(sheetItems.some((item) => item.item_code === 'LP00656'), true);
+  assert.equal(sheetItems.some((item) => item.item_code === 'LP00190'), false);
 });
 
 test('parsePricePayload drops building material rows from the order catalog', () => {
@@ -322,7 +354,7 @@ test('parsePricePayload reads the three value slabs and the fixed city price col
 });
 
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {
-  const cacheKey = 'madiba.pricePayload.v4';
+  const cacheKey = 'madiba.pricePayload.v5';
   const storage = new Map();
   let cleared = false;
 
@@ -419,7 +451,13 @@ test('parsePricePayload keeps cbmPerCtnMap through object payloads and excludes 
   const parsed = parsePricePayload({
     priceMap: { A004821: 5, LP00190: 9 },
     cbmPerCtnMap: { a004821: '0.2', LP00190: 3, A004822: -1 },
+    sheetItems: [
+      { item_code: 'A004821', item_name: 'Office pens', category: 'Sundry' },
+      { item_code: 'LP00190', item_name: 'Cement Board 1.22X2.44MtrX12MM', category: 'Building Material' },
+    ],
   });
 
+  assert.equal(parsed.priceMap.A004821, 5);
+  assert.equal(parsed.priceMap.LP00190, undefined);
   assert.deepEqual(parsed.cbmPerCtnMap, { A004821: 0.2 });
 });

@@ -33,10 +33,12 @@ function doGet() {
   for (let rowIndex = header.rowIndex + 1; rowIndex < values.length; rowIndex += 1) {
     const row = values[rowIndex];
     const itemCode = String(row[col.code] || "").trim().toUpperCase();
-    if (!itemCode || itemCode.indexOf("LP") === 0) continue;
+    if (!itemCode) continue;
     if (!/^[A-Z][A-Z0-9/.-]{3,20}$/.test(itemCode)) continue;
     const itemName = String(row[col.name] || itemCode).trim();
     const category = String(row[col.category] || "").trim();
+    // Keep non-building-material LP* codes (e.g. LP00656 trolley). BM still drops.
+    if (isBuildingMaterialItem_(itemCode, itemName, category)) continue;
     const riyadh = toNumber_(row[col.riyadh]);
     const dammam = toNumber_(row[col.dammam]);
     const jeddah = toNumber_(row[col.jeddah]);
@@ -157,4 +159,45 @@ function letterIndex_(letter) {
 function toNumber_(value) {
   const parsed = Number(String(value || "").replace(/,/g, "").replace(/[^\d.-]/g, ""));
   return parsed > 0 ? parsed : 0;
+}
+
+function compactCategory_(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function isExcludedCategory_(value) {
+  const compact = compactCategory_(value);
+  return compact === "buildingmaterial"
+    || compact === "buildingmaterials"
+    || compact === "buidingmaterial"
+    || compact === "buidingmaterials";
+}
+
+function isMissingOrderCategory_(value) {
+  return compactCategory_(value) === "missingcategory";
+}
+
+function isPaperStationeryName_(value) {
+  return /photocopy|copy\s*paper|\bgsm\b|\breams?\b|(?:\ba4\b.{0,24}\bpaper\b)|(?:\bpaper\b.{0,24}\ba4\b)|\btissues?\b|\btoilet\s*papers?\b|\bkitchen\s*towels?\b|\bnapkins?\b|\bjumbo\s*(?:tissue|roll|papers?)\b|\bpaper\s*jumbo\b/i.test(String(value || ""));
+}
+
+function isBuildingMaterialName_(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (isPaperStationeryName_(text)) return false;
+  const compact = text.toLowerCase().replace(/[^a-z]/g, "");
+  if (compact.indexOf("buildingmaterial") >= 0 || compact.indexOf("buidingmaterial") >= 0) return true;
+  if (/(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|lvl|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|tie\s*rods?|welding\s*rods?|wing\s*nuts?|hessian|jute|curing|mesh)(?:[^a-z0-9]|$)/i.test(text)) return true;
+  if (/\bcement\b/i.test(text)) return true;
+  if (/(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i.test(text)) return true;
+  if (/\b1220\s*mm\b/i.test(text) && /\b2440\s*mm\b/i.test(text)) return true;
+  return /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i.test(text);
+}
+
+/** Match app/lib/pricePayload.js isBuildingMaterialItem — LP* alone is not BM. */
+function isBuildingMaterialItem_(itemCode, itemName, category) {
+  if (isPaperStationeryName_(itemName)) return false;
+  return isExcludedCategory_(category)
+    || isMissingOrderCategory_(category)
+    || isBuildingMaterialName_(itemName);
 }

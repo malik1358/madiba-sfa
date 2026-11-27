@@ -14,9 +14,12 @@ export function hasCataloguePrice(value) {
   return Number.isFinite(price) && price > 0;
 }
 
-/** Madiba catalogue codes are one letter plus digits, such as A003944. */
+/**
+ * Madiba catalogue codes are one letter plus digits (A003944) or local-product
+ * LP + digits (LP00656). Sheet totals and other series (ITEMCOUNT, NC00143) stay out.
+ */
 export function isCatalogueProductCode(value) {
-  return /^[A-Z]\d{4,8}$/.test(normalizeCatalogueCode(value));
+  return /^(?:[A-Z]|LP)\d{4,8}$/.test(normalizeCatalogueCode(value));
 }
 
 export function isVisibleCatalogueItem(item, price) {

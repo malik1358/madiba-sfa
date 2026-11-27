@@ -193,9 +193,11 @@ test("catalogue only displays finite positive regional prices while New Order ke
   for (const value of [0.01, 12, "25.50"]) assert.equal(hasCataloguePrice(value), true);
   assert.equal(isCatalogueProductCode("A003944"), true);
   assert.equal(isCatalogueProductCode("b000122"), true);
+  assert.equal(isCatalogueProductCode("LP00656"), true);
   assert.equal(isCatalogueProductCode("ITEMCOUNT"), false);
   assert.equal(isCatalogueProductCode("NC00143"), false);
   assert.equal(isVisibleCatalogueItem({ item_code: "A003944" }, 10), true);
+  assert.equal(isVisibleCatalogueItem({ item_code: "LP00656" }, 85), true);
   assert.equal(isVisibleCatalogueItem({ item_code: "A003944" }, 0), false);
   assert.equal(isVisibleCatalogueItem({ item_code: "NC00143" }, 55), false);
   const source = fs.readFileSync(new URL("../app/management/new-order/page.js", import.meta.url), "utf8");

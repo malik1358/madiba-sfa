@@ -87,7 +87,7 @@ test("finds stock available in one city and not the other", () => {
   assert.equal(storeToRiyadh[0].destinationQty, 0);
 });
 
-test("excludes building-material items by category, name, and LP code", () => {
+test("excludes building-material items by category or name, not LP prefix alone", () => {
   const { riyadhToDammam, dammamToRiyadh } = findInterCityStockImbalances(
     [
       {
@@ -109,7 +109,14 @@ test("excludes building-material items by category, name, and LP code", () => {
       {
         itemCode: "LP00318",
         itemName: "Latex gloves",
+        category: "Building Material",
         cities: { riyadh: { qty: 5 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
+      },
+      {
+        itemCode: "LP00656",
+        itemName: "3PCS PP TROLLY-2242/2243-20-24-28",
+        category: "Sundry",
+        cities: { riyadh: { qty: 12 }, dammam: { qty: 0 }, jeddah: { qty: 0 } },
       },
       {
         itemCode: "A004203",
@@ -120,7 +127,7 @@ test("excludes building-material items by category, name, and LP code", () => {
     { categoryByCode: new Map([["A004203", "Building Material"]]) },
   );
 
-  assert.deepEqual(riyadhToDammam.map((row) => row.itemCode), ["A004200"]);
+  assert.deepEqual(riyadhToDammam.map((row) => row.itemCode), ["A004200", "LP00656"]);
   assert.deepEqual(dammamToRiyadh.map((row) => row.itemCode), []);
 });
 

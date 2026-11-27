@@ -53,7 +53,7 @@ export function normalizeInterCityItemCode(value) {
 
 /**
  * Drop Tally section titles (e.g. NON FOOD DIVISION, RIYADH W/H 1), non-catalogue
- * codes, and building-material items (same rules as catalogue / Missing Catalogue Photos).
+ * codes, and building-material items (category/name — same as catalogue / Missing Photos).
  */
 export function isInterCityExcludedItem({
   itemCode = "",
@@ -126,7 +126,7 @@ export function stockQtyPositive(value) {
 /**
  * Items with stock in one place and none in the other:
  * Riyadh ↔ Dammam, Riyadh warehouse → Store (Dukan), and Store → Riyadh warehouse.
- * Building-material items (category, name pattern, or LP* codes) are omitted.
+ * Building-material items (category or name pattern) are omitted. LP* alone is not BM.
  * @returns {{ riyadhToDammam: object[], dammamToRiyadh: object[], riyadhToStore: object[], storeToRiyadh: object[] }}
  */
 export function findInterCityStockImbalances(stockRows = [], { categoryByCode = null } = {}) {

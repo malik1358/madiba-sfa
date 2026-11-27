@@ -270,7 +270,7 @@ function PhotoCarousel({ photos, name, language, onRemove, busy, syncing }) {
 
 export default function ProductCatalogue({
   items, categories, search, onSearch, category, onCategory, quantities,
-  onQty, onIncrease, onDecrease, eodStock = null, priceList, pricingRegion, language,
+  onQty, onIncrease, onDecrease, eodStock = null, enforceEodStockCap = true, priceList, pricingRegion, language,
   selectedCustomer, customerSearch, onCustomerSearch, customerSuggestions, onCustomer,
   orderTotal, selectedCount, orderLines,
   pricingType, onPricingType, allowedPricingRegions, onPricingRegion, retailAvailable,
@@ -945,6 +945,7 @@ export default function ProductCatalogue({
           const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
           const availableLabel = formatEodStockAvailableLabel(availableStock, language, qty, eodStock, item.item_code);
           const overStock = isEodStockQtyOverAvailable(qty, availableDisplay);
+          const stockCap = enforceEodStockCap ? availableDisplay : null;
           const unitOptions = buildOrderUnitOptions(eodStock?.masterUnits, item.item_code);
           const unit = pickOrderUnit(unitOptions, orderUnitChoice[item.item_code]);
           const perMaster = unit?.perMaster || 1;
@@ -1047,7 +1048,7 @@ export default function ProductCatalogue({
                   <input
                     type="number"
                     min="0"
-                    max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
+                    max={stockCap == null ? undefined : (unit ? orderQtyInUnit(stockCap, perMaster) : stockCap)}
                     step="1"
                     disabled={disabled}
                     aria-label={`${ar ? "الكمية" : "Quantity"} ${item.item_name}`}
@@ -1056,7 +1057,7 @@ export default function ProductCatalogue({
                   />
                   <button
                     type="button"
-                    disabled={disabled || (availableDisplay != null && qty >= availableDisplay)}
+                    disabled={disabled || (stockCap != null && qty >= stockCap)}
                     aria-label={`${ar ? "إضافة" : "Add"} ${item.item_name}`}
                     onClick={() => (unit ? onQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : onIncrease(item.item_code))}
                   >

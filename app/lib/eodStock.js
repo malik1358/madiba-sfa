@@ -4,6 +4,7 @@ import {
   lookupMasterUnitConv,
   resolveEodStockMasterDisplay,
 } from "./masterUnitQty.js";
+import { isAdminRole } from "./moduleAccess.js";
 
 export const EOD_STOCK_DATASET_KEY = "eod_stock_citywise_v1";
 export const EOD_STOCK_CITIES = ["riyadh", "dammam", "jeddah"];
@@ -1187,6 +1188,14 @@ export function isEodStockQtyOverAvailable(orderedQty, available) {
   if (available == null) return false;
   const qty = Number(orderedQty || 0);
   return Number.isFinite(qty) && qty > available;
+}
+
+/**
+ * Whether order qty must stay within countrywide EOD available.
+ * Admin / report-user may order beyond available stock; other roles stay capped.
+ */
+export function shouldEnforceEodStockOrderQtyCap(role) {
+  return !isAdminRole(role);
 }
 
 /**

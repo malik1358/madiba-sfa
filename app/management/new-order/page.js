@@ -978,6 +978,7 @@ export default function NewOrderPage() {
     deletingDraft,
     orderHistory,
     loadedOrderStatus,
+    enforceEodStockCap,
     updateQty,
     increaseQty,
     decreaseQty,
@@ -1902,6 +1903,7 @@ export default function NewOrderPage() {
             onIncrease={increaseQty}
             onDecrease={decreaseQty}
             eodStock={eodStock}
+            enforceEodStockCap={enforceEodStockCap}
             priceList={regionPriceList}
             pricingRegion={pricingRegion}
             pricingType={pricingType}
@@ -2182,6 +2184,8 @@ export default function NewOrderPage() {
                   valueDiscountMap={valueDiscountMap}
                   paymentType={paymentType}
                   schemeApplications={schemeApplications}
+                  eodStock={eodStock}
+                  enforceEodStockCap={enforceEodStockCap}
                 />
                 <QuickOrder
                   quickOrderSuggestions={quickOrderSuggestions}
@@ -2195,6 +2199,7 @@ export default function NewOrderPage() {
                   paymentType={paymentType}
                   schemeApplications={schemeApplications}
                   eodStock={eodStock}
+                  enforceEodStockCap={enforceEodStockCap}
                   pricingRegion={pricingRegion}
                   language={language}
                 />
@@ -2337,6 +2342,7 @@ export default function NewOrderPage() {
                               const unit = pickOrderUnit(unitOptions, orderUnitChoice[item.item_code]);
                               const perMaster = unit?.perMaster || 1;
                               const shownQty = unit ? orderQtyInUnit(qty, perMaster) : qty;
+                              const stockCap = enforceEodStockCap ? availableDisplay : null;
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
@@ -2359,14 +2365,14 @@ export default function NewOrderPage() {
                                       <input
                                         type="number"
                                         min="0"
-                                        max={availableDisplay == null ? undefined : (unit ? orderQtyInUnit(availableDisplay, perMaster) : availableDisplay)}
+                                        max={stockCap == null ? undefined : (unit ? orderQtyInUnit(stockCap, perMaster) : stockCap)}
                                         step="1"
                                         value={shownQty || ""}
                                         onChange={(event) => updateQty(item.item_code, unit ? orderQtyToMaster(event.target.value, perMaster) : event.target.value)}
                                       />
                                       <button
                                         type="button"
-                                        disabled={availableDisplay != null && qty >= availableDisplay}
+                                        disabled={stockCap != null && qty >= stockCap}
                                         onClick={() => (unit ? updateQty(item.item_code, stepOrderQtyInUnit(qty, perMaster, 1)) : increaseQty(item.item_code))}
                                       >
                                         +

@@ -21,6 +21,7 @@ export default function QuickOrder({
   paymentType = 'credit',
   schemeApplications = {},
   eodStock = null,
+  enforceEodStockCap = true,
   pricingRegion = 'riyadh',
   language = 'en',
 }) {
@@ -100,6 +101,7 @@ export default function QuickOrder({
                         const availableDisplay = countryEodStockDisplayQty(eodStock, item.item_code);
                         const availableLabel = formatEodStockAvailableLabel(availableStock, language, orderQty, eodStock, item.item_code);
                         const overStock = isEodStockQtyOverAvailable(orderQty, availableDisplay);
+                        const stockCap = enforceEodStockCap ? availableDisplay : null;
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
                             <td>
@@ -140,8 +142,8 @@ export default function QuickOrder({
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                <input type="number" min="0" max={availableDisplay == null ? undefined : availableDisplay} step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                <button type="button" className="auditQtyButton" disabled={availableDisplay != null && orderQty >= availableDisplay} onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                <input type="number" min="0" max={stockCap == null ? undefined : stockCap} step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                <button type="button" className="auditQtyButton" disabled={stockCap != null && orderQty >= stockCap} onClick={() => increaseOrderQty(item.item_code)}>+</button>
                               </div>
                               {availableLabel ? (
                                 <div className={`moduleCode moduleStockAvailable${overStock ? ' moduleStockAvailable--over' : ''}`}>

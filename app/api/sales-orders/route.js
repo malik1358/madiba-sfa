@@ -912,6 +912,7 @@ export async function POST(request) {
       const stockCheck = await assertOrderLinesWithinEodStockServer({
         admin,
         lines: pricedLines,
+        role: profile?.role,
       });
       if (!stockCheck.ok) {
         return NextResponse.json({
@@ -1223,6 +1224,7 @@ export async function POST(request) {
     const stockCheck = await assertOrderLinesWithinEodStockServer({
       admin,
       lines: pricedLines,
+      role: profile?.role,
     });
     if (!stockCheck.ok) {
       return NextResponse.json({

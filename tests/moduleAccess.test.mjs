@@ -403,6 +403,7 @@ test("invoice makers can view every management report without setup access", () 
       "businessDashboard",
       "returnsAboveSales",
       "expectedCollection",
+      "ledgerInvoices",
       "expectedStockedSales",
       "activeCustomers",
       "myPerformance",
@@ -520,6 +521,7 @@ test("reports nav group is subdivided into themed report groups", () => {
   ]);
   assert.deepEqual(groupModules.receivablesReports, [
     "expectedCollection",
+    "ledgerInvoices",
     "collectionStaleOverdue",
     "potentialBadDebts",
     "legalTransfers",
